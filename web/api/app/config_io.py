@@ -205,3 +205,47 @@ def append_only_warning(delta: ObserveDelta) -> str | None:
     return APPEND_ONLY_WARNING.format(
         n_paths=len(delta.removed_paths), n_patterns=len(delta.removed_patterns)
     )
+
+
+# ── RFC 0186: field-by-field edits from the settings form ────────────────────
+
+_MAX_KEY = 128
+
+
+def apply_changes(raw: str, changes: list[dict]) -> str:
+    """`raw` with each change applied: `{"path": ["llm", "provider"], "value": ...}` sets a key
+    (tables on the way are created), `value: None` removes it. Comments, order and keys the form
+    does not know are kept. A change that would replace a table with a value, or reach through a
+    value, is refused: the form edits settings, not structure."""
+    doc = parse(raw)
+    for change in changes:
+        path = change.get("path")
+        if (
+            not isinstance(path, list)
+            or len(path) < 2
+            or not all(isinstance(k, str) and 0 < len(k) <= _MAX_KEY for k in path)
+        ):
+            raise ConfigError("a setting is named by its section and key")
+        value = change.get("value")
+        table = doc
+        for key in path[:-1]:
+            if key not in table:
+                if value is None:
+                    table = None
+                    break
+                table[key] = tomlkit.table()
+            nxt = table[key]
+            if not isinstance(nxt, (dict, tomlkit.items.Table)):
+                raise ConfigError(f"{'.'.join(path)}: {key} is a value, not a section")
+            table = nxt
+        if table is None:
+            continue
+        last = path[-1]
+        if last in table and isinstance(table[last], (tomlkit.items.Table, tomlkit.items.AoT)):
+            raise ConfigError(f"{'.'.join(path)} is a section; edit its settings one by one")
+        if value is None:
+            if last in table:
+                del table[last]
+        else:
+            table[last] = value
+    return tomlkit.dumps(doc)

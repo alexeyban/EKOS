@@ -28,6 +28,18 @@ router = APIRouter(prefix="/workspaces", tags=["config"], dependencies=[Depends(
 class ConfigOut(BaseModel):
     raw: str
     observe: dict[str, list[str]]
+    # RFC 0186: the same content as plain values, for the settings form.
+    values: dict[str, Any] = {}
+
+
+class Change(BaseModel):
+    path: list[str]
+    value: Any = None
+
+
+class EditIn(BaseModel):
+    raw: str
+    changes: list[Change]
 
 
 class RawIn(BaseModel):
@@ -87,10 +99,28 @@ async def get_config(ws: models.Workspace = Depends(require_workspace)) -> Confi
         raw, observe = await asyncio.to_thread(config_io.read_config, ws.path)
     except config_io.ConfigError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    try:
+        values = config_io.parse(raw).unwrap()
+    except config_io.ConfigError:
+        values = {}
     return ConfigOut(
         raw=raw,
         observe={"paths": observe.paths, "ignore_patterns": observe.ignore_patterns},
+        values=values,
     )
+
+
+@router.post("/{workspace_id}/config/edit", responses={422: UNPROCESSABLE})
+async def edit_config(
+    body: EditIn, ws: models.Workspace = Depends(require_workspace)
+) -> dict[str, str]:
+    """`body.raw` with the form's changes applied. Nothing is written: the page shows the
+    difference and saves through `PUT`, which validates."""
+    try:
+        raw = config_io.apply_changes(body.raw, [c.model_dump() for c in body.changes])
+    except config_io.ConfigError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"raw": raw}
 
 
 @router.post("/{workspace_id}/config/validate", responses={502: BAD_GATEWAY})

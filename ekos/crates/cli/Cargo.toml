@@ -96,6 +96,7 @@ dotenvy.workspace = true
 sha2.workspace = true
 hex.workspace = true
 rand.workspace = true
+schemars.workspace = true
 reqwest.workspace = true
 
 [dev-dependencies]

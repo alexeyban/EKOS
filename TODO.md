@@ -6504,8 +6504,10 @@ LinkML; generation stays in LinkML.
       `package` job and `web-os` CI rows have never run; `install.ps1` not even parsed here — no
       pwsh); login services activated only by tests' fakes (systemd/launchd/schtasks never
       enabled for real); no code signing; the chat model step waits for RFC 0187
-- [ ] RFC 0186 — every setting and every command from the web (command catalogue from the
-      binary, structured config forms from a schema)
+- [x] RFC 0186 — every command from the web (`ekos commands --json`, classes, Commands tab,
+      validated argv) and every setting (`ekos config schema --json`, Settings form) (devlog_270)
+- [ ] RFC 0186 remainder: lists of tables (`[[sources]]`, `[migrate.connections.*]`) stay in the
+      text editor; extension-build commands are not in the catalogue
 - [ ] RFC 0187 — chat with a configured model using the EKOS MCP tools
 - [ ] RFC 0184 remainder: the console has not run on Windows or macOS yet (`web-os` CI job,
       informational until its first green run); the real keychain was only detected here, not

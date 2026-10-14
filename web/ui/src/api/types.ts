@@ -101,6 +101,8 @@ export interface QueryStats {
 export interface ConfigOut {
   raw: string;
   observe: { paths: string[]; ignore_patterns: string[] };
+  // RFC 0186: the same content as plain values, for the settings form.
+  values?: Record<string, unknown>;
 }
 
 export interface Finding {

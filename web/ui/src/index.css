@@ -1101,3 +1101,76 @@ table.settings td:first-child {
 .ok-msg {
   color: var(--accent-b);
 }
+
+/* RFC 0186: every command */
+.commands-page {
+  display: grid;
+  grid-template-columns: minmax(200px, 280px) 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .commands-page {
+    grid-template-columns: 1fr;
+  }
+}
+.commands-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.6rem;
+}
+.commands-list input {
+  width: 100%;
+  margin-bottom: 0.6rem;
+}
+.commands-list button.on {
+  font-weight: 700;
+}
+.commands-form .arg {
+  margin: 0.6rem 0;
+}
+.commands-form .arg label {
+  display: block;
+  font-weight: 600;
+}
+.commands-form .arg input:not([type="checkbox"]),
+.commands-form .arg select,
+.commands-form .arg textarea {
+  width: 100%;
+}
+pre.argv {
+  white-space: pre-wrap;
+  word-break: break-all;
+  padding: 0.5rem;
+  border: 1px solid var(--rule);
+}
+
+/* RFC 0186: ekos.toml settings form */
+details.cfg-section {
+  border-top: 1px solid var(--rule);
+  padding: 0.4rem 0;
+}
+details.cfg-section > summary,
+details.cfg-sub > summary {
+  cursor: pointer;
+}
+details.cfg-sub {
+  margin: 0.4rem 0 0.4rem 1rem;
+}
+.cfg-field {
+  margin: 0.5rem 0 0.5rem 1rem;
+}
+.cfg-field label {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.cfg-field input,
+.cfg-field select,
+.cfg-field textarea {
+  width: 100%;
+  max-width: 520px;
+}
+.chip.small {
+  font-size: 0.7rem;
+}

@@ -1,0 +1,1084 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "EkosConfig",
+    "type": "object",
+    "properties": {
+        "ai": {
+            "$ref": "#/$defs/AiConfig",
+            "default": {
+                "max-context-chars": null,
+                "max-matches": null,
+                "max-tokens": null,
+                "model": null,
+                "neighborhood-depth": null,
+                "reason-system-prompt": null,
+                "source-text-top-k": null,
+                "system-prompt": null
+            }
+        },
+        "architecture": {
+            "$ref": "#/$defs/ArchitectureConfig",
+            "default": {
+                "system-decomposition": {
+                    "overrides": []
+                }
+            }
+        },
+        "architecture-reasoning": {
+            "$ref": "#/$defs/ArchitectureReasoningConfig",
+            "default": {
+                "enabled": false
+            }
+        },
+        "binary-reconstruction": {
+            "$ref": "#/$defs/BinaryReconstructionConfig",
+            "default": {
+                "enabled": false,
+                "include-compiler-generated": false,
+                "max-slices": 50,
+                "min-confidence": 0.5
+            }
+        },
+        "clickhouse": {
+            "$ref": "#/$defs/ClickHouseConfig",
+            "default": {
+                "enable-mcp-query": false
+            }
+        },
+        "conflicts": {
+            "$ref": "#/$defs/ConflictsConfig",
+            "default": {
+                "enabled": true
+            }
+        },
+        "document-semantics": {
+            "$ref": "#/$defs/DocumentSemanticsConfig",
+            "default": {
+                "enabled": false,
+                "max-sections": null
+            }
+        },
+        "embeddings": {
+            "$ref": "#/$defs/EmbeddingsConfig",
+            "default": {
+                "api-key-env": null,
+                "cache": false,
+                "enabled": false,
+                "model": null,
+                "provider": null
+            }
+        },
+        "freshness": {
+            "$ref": "#/$defs/FreshnessConfig",
+            "default": {
+                "content-hash": false,
+                "enabled": true,
+                "ttl-seconds": 30
+            }
+        },
+        "llm": {
+            "$ref": "#/$defs/LlmConfig",
+            "default": {
+                "api-key-env": null,
+                "base-url": null,
+                "context-window": null,
+                "max-tokens": null,
+                "model": null,
+                "provider": null
+            }
+        },
+        "llm-description": {
+            "$ref": "#/$defs/LlmDescriptionConfig",
+            "default": {
+                "enabled": false,
+                "scope": "modules"
+            }
+        },
+        "marketing": {
+            "$ref": "#/$defs/MarketingConfig",
+            "default": {
+                "github": "https://github.com/alexeyban/EKOS",
+                "hashtags": [
+                    "Rust",
+                    "AI",
+                    "MCP"
+                ],
+                "twitter": {
+                    "dry-run": false,
+                    "enabled": false
+                }
+            }
+        },
+        "migrate": {
+            "$ref": "#/$defs/MigrateConfig",
+            "default": {
+                "chunk-rows": 100000,
+                "connections": {},
+                "default-environment": "sandbox",
+                "enabled": false,
+                "policy": "migrate.policy.toml",
+                "project": null,
+                "source-named-collection": "ekos_migrate_source"
+            }
+        },
+        "observe": {
+            "$ref": "#/$defs/ObserveConfig",
+            "default": {
+                "ignore-patterns": [
+                    ".ekos",
+                    ".git",
+                    "target",
+                    "node_modules"
+                ],
+                "paths": []
+            }
+        },
+        "recover": {
+            "$ref": "#/$defs/RecoverConfig",
+            "default": {
+                "sql": {
+                    "default-dialect": "generic",
+                    "dialect-rules": []
+                }
+            }
+        },
+        "retrieval": {
+            "$ref": "#/$defs/RetrievalConfig",
+            "default": {
+                "rerank": null,
+                "rerank-candidates": null
+            }
+        },
+        "security": {
+            "$ref": "#/$defs/SecurityConfig",
+            "default": {
+                "extra-excluded-globs": [],
+                "extra-patterns": []
+            }
+        },
+        "semantics": {
+            "$ref": "#/$defs/SemanticsConfig",
+            "default": {
+                "enabled": false,
+                "llm-definitions": false,
+                "llm-max-definitions": 50,
+                "max-enum-values": 12,
+                "min-sites": 2,
+                "ontology": null,
+                "rationale": true
+            }
+        },
+        "session-memory": {
+            "$ref": "#/$defs/SessionMemoryConfig",
+            "default": {
+                "capture-retention-days": 14,
+                "enabled": false,
+                "extraction": false,
+                "inbox-dir": null,
+                "max-bytes-per-session": 262144,
+                "max-entries-per-session": 200,
+                "max-note-chars": 2000
+            }
+        },
+        "sources": {
+            "description": "RFC 0178 Part 2: the project's named inputs (`[[sources]]`). Empty = one unnamed source,\nthe directories of `[observe] paths`.",
+            "type": "array",
+            "items": {
+                "$ref": "#/$defs/SourceConfig"
+            }
+        },
+        "storage": {
+            "$ref": "#/$defs/StorageConfig",
+            "default": {
+                "active-container": null,
+                "containers": [],
+                "distributed": {
+                    "coordinator": null,
+                    "query-workers": []
+                },
+                "partition": {
+                    "dimension": null,
+                    "segment-backend-url": null,
+                    "time-bucket": null,
+                    "time-bucket-overrides": []
+                }
+            }
+        },
+        "workspace": {
+            "$ref": "#/$defs/WorkspaceConfig",
+            "default": {
+                "log-format": "pretty",
+                "log-level": "info",
+                "root": "."
+            }
+        }
+    },
+    "additionalProperties": false,
+    "$defs": {
+        "AiConfig": {
+            "type": "object",
+            "properties": {
+                "max-context-chars": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "format": "uint32",
+                    "minimum": 0
+                },
+                "max-matches": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "format": "uint32",
+                    "minimum": 0
+                },
+                "max-tokens": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "format": "uint32",
+                    "minimum": 0
+                },
+                "model": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "neighborhood-depth": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "format": "uint32",
+                    "minimum": 0
+                },
+                "reason-system-prompt": {
+                    "description": "Overrides the REASON prompt (`ekos ask`'s default path). Separate from `system_prompt`,\nwhich only affects the pre-RFC-0123 `--classic` path (RFC 0139 \u00a74.1).",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "source-text-top-k": {
+                    "description": "RFC 0140 \u00a73 \u2014 how many distinct evidence-set entities get real, on-demand source text\nattached. Only takes effect when the caller also wires up an `ArtifactStore`\n(`AiRuntime::with_artifact_store`); has no effect otherwise.",
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "format": "uint32",
+                    "minimum": 0
+                },
+                "system-prompt": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            }
+        },
+        "ArchitectureConfig": {
+            "description": "RFC 0083 (System Decomposition, Phase 3): `[architecture.system-decomposition]` in\n`ekos.toml`. A convention-based path\u2192layer classifier ([`ekos_docs_gen::classify_path`]) needs\na real escape hatch for the workspaces it guesses wrong on \u2014 same shape and same\nfirst-match-wins precedence `[recover.sql.dialect-rules]` already established for the\nequivalent SQL-dialect problem (`SqlRecoverConfig`/`SqlDialectRuleConfig` above).",
+            "type": "object",
+            "properties": {
+                "system-decomposition": {
+                    "$ref": "#/$defs/SystemDecompositionConfig",
+                    "default": {
+                        "overrides": []
+                    }
+                }
+            }
+        },
+        "ArchitectureReasoningConfig": {
+            "description": "Gating for RFC 0065 Phase 2's `ArchitectureReasoningPass`. Opt-in, same reasoning as\n`DocumentSemanticsConfig`: one batched LLM call per `recover` run (all crates in one prompt,\nnot one call per crate \u2014 RFC 0065 \u00a742's cost discipline), but still a real network call a\nworkspace shouldn't pay for unless it asked to.",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": false
+                }
+            }
+        },
+        "BinaryReconstructionConfig": {
+            "description": "RFC 0148 stage 2: `[binary-reconstruction]` \u2014 the opt-in LLM reconstruction of business logic\nfrom compiled binaries. Same opt-in-table shape as `[llm-description]`: absent or\n`enabled = false` means no LLM is ever contacted about a binary, and `ekos recover`'s\ndeterministic structural facts are the whole output.\n\n`max-slices` is a declared cost ceiling rather than a tuning knob \u2014 one slice is one type and\none LLM call, and a real legacy estate has thousands of types.",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "include-compiler-generated": {
+                    "description": "Reconstruct compiler-generated types (lambda closures, async state machines) too.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "max-slices": {
+                    "type": "integer",
+                    "format": "uint",
+                    "default": 50,
+                    "minimum": 0
+                },
+                "min-confidence": {
+                    "type": "number",
+                    "format": "float",
+                    "default": 0.5
+                }
+            }
+        },
+        "ClickHouseConfig": {
+            "description": "RFC 0056: gating for the live ClickHouse NL-to-SQL query engine's MCP exposure. `[clickhouse]`\nin `ekos.toml`. Off by default \u2014 omitting the section (or `enable-mcp-query`) means `ekos mcp\nserve` never advertises the `ekos_clickhouse_query` tool, even though `ekos clickhouse ask`\nalways works from the CLI regardless of this flag. Every existing MCP tool reads only the\nlocal ledger; this one hits a live external system, so \u2014 unlike `[document-semantics]`'s\nLLM-cost gate \u2014 this flag exists purely to control blast radius to connected AI agents, not\ncost.",
+            "type": "object",
+            "properties": {
+                "enable-mcp-query": {
+                    "type": "boolean",
+                    "default": false
+                }
+            }
+        },
+        "ConflictsConfig": {
+            "description": "RFC 0172 \u2014 `[conflicts]`: when sources disagree about one fact (a table defined twice, a merge\nthat would drop a column type, two labels for one code), keep both claims as a\n`ConflictingEvidence` item instead of silently keeping one. On by default; deterministic, no LLM.",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "description": "`false` restores the old behaviour: the last definition wins without a trace.",
+                    "type": "boolean",
+                    "default": true
+                }
+            },
+            "additionalProperties": false
+        },
+        "DescriptionScope": {
+            "oneOf": [
+                {
+                    "description": "`Module`/`Rollup`/`Crate` objects only \u2014 the cheaper, default tier.",
+                    "type": "string",
+                    "const": "modules"
+                },
+                {
+                    "description": "`Symbol` objects only (function/method-level) \u2014 no module-level overviews.",
+                    "type": "string",
+                    "const": "symbols"
+                },
+                {
+                    "description": "Both modules and symbols \u2014 the full, most expensive tier.",
+                    "type": "string",
+                    "const": "all"
+                }
+            ]
+        },
+        "DocumentSemanticsConfig": {
+            "description": "Gating for RFC 0026's `DocumentSemanticsAnalyzerPass`. Opt-in because the\npass makes one LLM call per document section \u2014 thousands for a large corpus.",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "max-sections": {
+                    "description": "Safety valve for \"opted in, then ran against a huge corpus by accident\".",
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "format": "uint32",
+                    "minimum": 0
+                }
+            }
+        },
+        "EmbeddingsConfig": {
+            "description": "RFC 0125: `[embeddings]` \u2014 the opt-in vector-search arm. Same opt-in-table shape as\n`[llm-description]`; `enabled = false` by default, so a workspace with no `[embeddings]` table\nnever embeds anything and `retrieve` runs the pure BM25 + `ExactName` path.",
+            "type": "object",
+            "properties": {
+                "api-key-env": {
+                    "description": "Env var holding the API key for `provider = \"openai\"` (default `OPENAI_API_KEY`).",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "cache": {
+                    "description": "Wrap the provider in the `.ekos/embed-cache/` disk cache (default `true`).",
+                    "type": "boolean",
+                    "default": true
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "model": {
+                    "description": "Model override (else the provider default: `nomic-embed-text` / `text-embedding-3-small`).",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "provider": {
+                    "description": "`\"ollama\"` | `\"openai\"` | `\"mock\"`. Falls back to `[llm] provider` when unset.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                }
+            }
+        },
+        "FreshnessConfig": {
+            "description": "RFC 0171 \u2014 `[freshness]`: compare the source tree with what the ledger was compiled from.\nOn by default; reads file metadata only (size, mtime), never contents.",
+            "type": "object",
+            "properties": {
+                "content-hash": {
+                    "description": "Off by default. `true` makes `ekos build` also record a content hash per file, so a file\nwhose modification time moved but whose bytes did not (`touch`, a fresh checkout) stops\ncounting as changed. Build then reads every observed file once more; a check only reads\nthe files whose size is unchanged and whose time moved. Files RFC 0043 excludes are never\nhashed.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "enabled": {
+                    "description": "`false` turns off every check: `ekos status`/`doctor` lines, the `FRESH001` warning at\ncompile/commit, and the MCP note.",
+                    "type": "boolean",
+                    "default": true
+                },
+                "ttl-seconds": {
+                    "description": "How long the MCP server reuses one check before walking the tree again.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "default": 30,
+                    "minimum": 0
+                }
+            },
+            "additionalProperties": false
+        },
+        "LayerOverrideConfig": {
+            "type": "object",
+            "properties": {
+                "layer": {
+                    "type": "string"
+                },
+                "path-glob": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "path-glob",
+                "layer"
+            ]
+        },
+        "LlmConfig": {
+            "type": "object",
+            "properties": {
+                "api-key-env": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "base-url": {
+                    "description": "RFC 0145: `provider = \"openai\"` only \u2014 any OpenAI-compatible Chat Completions host, e.g.\n`https://opencode.ai/zen/v1`. Falls back to `OPENAI_BASE_URL`, then OpenAI itself.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "context-window": {
+                    "description": "RFC 0145: `provider = \"ollama\"` only \u2014 sent as `num_ctx`. Falls back to `OLLAMA_NUM_CTX`,\nthen 8192.",
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "format": "uint32",
+                    "default": null,
+                    "minimum": 0
+                },
+                "max-tokens": {
+                    "description": "RFC 0146 Phase 3: output-token ceiling for **compiler-pass** LLM calls (`SqlAnalyzerPass`'s\nsemantic naming, and any later pass that opts in). Distinct from `[ai] max-tokens`, which\ngoverns the read-side `ekos ask` runtime and never reached these passes \u2014 the confusion\nthat let `SqlAnalyzerPass` sit on a hardcoded 4096 while a workspace's `ekos.toml` plainly\nsaid `max-tokens = 8192`.\n\nLeave unset (the default) to let each pass size its own budget from the work in front of\nit; see `sql_analyzer::enrichment_token_budget`. Set it only to raise a ceiling a provider\nor a bill requires.",
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "format": "uint32",
+                    "default": null,
+                    "minimum": 0
+                },
+                "model": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "provider": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            }
+        },
+        "LlmDescriptionConfig": {
+            "description": "Gating for RFC 0088's `describe_objects` post-`commit` step. Opt-in, same reasoning as\n`ArchitectureReasoningConfig`: a real, potentially large LLM spend (~900 calls at the default\n`scope = \"modules\"` against a real mid-size codebase, ~5x that at `scope = \"all\"`) a workspace\nshouldn't pay for unless it asked to. `scope` defaults to the cheaper tier specifically so\nenabling this once doesn't silently commit a user to the larger `\"all\"` spend without a second,\nexplicit choice.",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "scope": {
+                    "$ref": "#/$defs/DescriptionScope",
+                    "default": "modules"
+                }
+            }
+        },
+        "MarketingConfig": {
+            "description": "RFC 0027: marketing-agent config. `[marketing]` in `ekos.toml`, replacing the source\ndesign doc's standalone `marketing/config.yaml` \u2014 this repo has exactly one config file\nand one format, and this follows the same opt-in-table pattern as `[document-semantics]`.",
+            "type": "object",
+            "properties": {
+                "github": {
+                    "description": "Project GitHub URL, always included in generated tweets.",
+                    "type": "string",
+                    "default": "https://github.com/alexeyban/EKOS"
+                },
+                "hashtags": {
+                    "description": "Hashtags offered to the tweet-generation prompt (at most 3 are used).",
+                    "type": "array",
+                    "default": [
+                        "Rust",
+                        "AI",
+                        "MCP"
+                    ],
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "twitter": {
+                    "$ref": "#/$defs/TwitterConfig",
+                    "default": {
+                        "dry-run": false,
+                        "enabled": false
+                    }
+                }
+            }
+        },
+        "MigrateConfig": {
+            "description": "RFC 0154 \u2014 `[migrate]`. Off by default; `ekos migrate` refuses to do anything until\n`enabled = true`.\n\nThe section exists from Phase 0 on purpose: `EkosConfig` is `deny_unknown_fields`, so an\n`ekos.toml` carrying `[migrate]` would fail to parse against a build that does not know the\nsection \u2014 the same reason RFC 0149 keeps `[binary-reconstruction]` public.",
+            "type": "object",
+            "properties": {
+                "chunk-rows": {
+                    "description": "Key-range width per load chunk. Shared by `review` and `load` so the two agree on the\nartifact set they are respectively approving and executing.",
+                    "type": "integer",
+                    "format": "int64",
+                    "default": 100000
+                },
+                "connections": {
+                    "description": "How a connection *alias* resolves to a host. The alias is what a `MigrationConnectionRef`\nstores and what a DSN names, so the ledger never holds a hostname-with-credentials and a\nworkspace can be pointed at a different environment by editing config, not facts.",
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/$defs/MigrateConnection"
+                    },
+                    "default": {}
+                },
+                "default-environment": {
+                    "description": "Which environment writes target by default. Never `production`: promoting to production is\nan explicit act with an approval behind it (RFC 0160/0161), not a config default somebody\nset once and forgot.",
+                    "type": "string",
+                    "default": "sandbox"
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "policy": {
+                    "description": "Path to the approval policy file, relative to the workspace root (RFC 0161).",
+                    "type": "string",
+                    "default": "migrate.policy.toml"
+                },
+                "project": {
+                    "description": "The active migration project's name. `ekos migrate init` writes it; every other verb reads\nit unless `--project` overrides.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "source-named-collection": {
+                    "description": "The ClickHouse **named collection** holding the source connection (RFC 0160).\n\nEKOS never emits a credential inside a statement \u2014 a generated statement is hashed, pinned\nto an approval, printed in a dry run and pasted into tickets. The collection is configured\nin ClickHouse's own server config by whoever administers it.",
+                    "type": "string",
+                    "default": "ekos_migrate_source"
+                }
+            }
+        },
+        "MigrateConnection": {
+            "description": "One connection alias. **No password field, deliberately** \u2014 `secret_env` names the environment\nvariable that holds it, and `ekos.toml` is a file people commit.",
+            "type": "object",
+            "properties": {
+                "host": {
+                    "type": "string"
+                },
+                "max-replica-lag-seconds": {
+                    "description": "Maximum replica lag tolerated before a run is refused (RFC 0157).",
+                    "type": "number",
+                    "format": "double",
+                    "default": 30.0
+                },
+                "port": {
+                    "type": "integer",
+                    "format": "uint16",
+                    "default": 5432,
+                    "maximum": 65535,
+                    "minimum": 0
+                },
+                "sandbox": {
+                    "description": "`true` marks a throwaway engine EKOS may **write** to (RFC 0164 V5 loads fixtures there).\nNever set it on a migration source: V5 refuses a connection without it, and that refusal\nis the only thing between a fixture and a real database.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "secret-env": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "user": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "host",
+                "user"
+            ]
+        },
+        "ObserveConfig": {
+            "type": "object",
+            "properties": {
+                "ignore-patterns": {
+                    "type": "array",
+                    "default": [
+                        ".ekos",
+                        ".git",
+                        "target",
+                        "node_modules"
+                    ],
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "paths": {
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "RecoverConfig": {
+            "description": "RFC 0031: pluggable SQL dialect selection. `[recover.sql]` in `ekos.toml`. Omitting the\nsection entirely preserves pre-RFC-0031 behavior exactly \u2014 every `.sql` file parsed with\nthe ANSI/`GenericDialect` baseline, no per-path rules.",
+            "type": "object",
+            "properties": {
+                "sql": {
+                    "$ref": "#/$defs/SqlRecoverConfig",
+                    "default": {
+                        "default-dialect": "generic",
+                        "dialect-rules": []
+                    }
+                }
+            }
+        },
+        "RetrievalConfig": {
+            "description": "RFC 0140 \u00a74: `[retrieval]` \u2014 the opt-in LLM-assisted rerank. Off by default: an ordinary\n`ekos ask`/`ekos eval` run is byte-identical to before this RFC, and RFC 0126's CI gate (which\nassumes reproducible ranking) never exercises this at all, since it tests `retrieve()`\ndirectly and never builds an `AiRuntime`. Same opt-in-table shape as `[embeddings]`.",
+            "type": "object",
+            "properties": {
+                "rerank": {
+                    "description": "`Some(\"llm\")` turns the rerank on; anything else (including absent) leaves it off. A\nstring rather than a bool leaves room for a future non-LLM reranker with no breaking\nconfig change, matching `[embeddings] provider`'s own shape.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "rerank-candidates": {
+                    "description": "How many of the top evidence items the rerank call considers \u2014 RFC 0140 \u00a74's own \"top\n*n*, bounded\" framing, since cost and latency scale with it. Falls back to\n`AiRuntimeConfig`'s own default when unset.",
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "format": "uint32",
+                    "default": null,
+                    "minimum": 0
+                }
+            }
+        },
+        "SecretPatternConfig": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "regex": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "label",
+                "regex"
+            ]
+        },
+        "SecurityConfig": {
+            "description": "RFC 0043: additive-only extension of the built-in secrets/PII redaction baseline\n(`ekos_common::redaction`). `[security]` in `ekos.toml`. Deliberately no `enabled` flag \u2014 the\nbuilt-in baseline (AWS/GitHub/Slack/... token shapes, PEM key blocks, `.env`/`*.pem`/... file\nexclusion) always runs; this section can only add patterns/exclusions on top of it, matching\nthe \"global limitation, not an opt-in feature\" requirement behind this RFC.",
+            "type": "object",
+            "properties": {
+                "extra-excluded-globs": {
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "extra-patterns": {
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "$ref": "#/$defs/SecretPatternConfig"
+                    }
+                }
+            }
+        },
+        "SemanticsConfig": {
+            "description": "RFC 0170 \u2014 `[semantics]`: business-semantics hypotheses (`BusinessConcept`, `EnumMeaning`,\n`ConstraintCandidate`, `SemanticGap`, `RationaleLink`) synthesized at `ekos commit` from the\npredicates, constraints, lookup seeds and comments recovery recorded. Off by default \u2014 an\nexperiment until its evaluation numbers exist. Deterministic, no LLM.",
+            "type": "object",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "llm-definitions": {
+                    "description": "Opt-in: one-or-two-sentence plain-language text for undocumented concepts, from the `[llm]`\nprovider. Every sentence must cite the concept's own evidence or it is dropped; the text\nnever changes a concept's status. A cloud provider makes this a metered call per concept.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "llm-max-definitions": {
+                    "description": "The most concepts described per commit.",
+                    "type": "integer",
+                    "format": "uint",
+                    "default": 50,
+                    "minimum": 0
+                },
+                "max-enum-values": {
+                    "description": "A column compared against more distinct literals than this is a lookup key, not a code.",
+                    "type": "integer",
+                    "format": "uint",
+                    "default": 12,
+                    "minimum": 0
+                },
+                "min-sites": {
+                    "description": "Distinct statements/views a filter must recur in to become a concept.",
+                    "type": "integer",
+                    "format": "uint",
+                    "default": 2,
+                    "minimum": 0
+                },
+                "ontology": {
+                    "description": "A vocabulary file (YAML/JSON: `terms: [{id, label, synonyms}]`, optional `prefixes`) to\nsuggest ontology mappings from \u2014 exact word matches only, always hypotheses. Relative to\nthe workspace root. Unset: no suggestions.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "rationale": {
+                    "description": "`git blame` each concept's and gap's evidence lines when the workspace is a git repository.",
+                    "type": "boolean",
+                    "default": true
+                }
+            },
+            "additionalProperties": false
+        },
+        "SessionMemoryConfig": {
+            "description": "RFC 0151: `[session-memory]` \u2014 the agent session inbox. Off by default; `ekos session note`\nrefuses to write anything until `enabled = true`. Caps bound both a single note and a whole\nsession so a runaway agent cannot flood the inbox.",
+            "type": "object",
+            "properties": {
+                "capture-retention-days": {
+                    "description": "Days redacted transcript slices are kept (`ekos session capture`); expired ones are\ndeleted on every capture and by `ekos session purge`.",
+                    "type": "integer",
+                    "format": "uint64",
+                    "default": 14,
+                    "minimum": 0
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "extraction": {
+                    "description": "Opt-in LLM extraction of claims from captured slices (`ekos session extract`). Output is\nalways an unconfirmed proposal; uses the `[llm]` provider, so a cloud provider means a\nmetered call \u2014 leave off unless that is intended.",
+                    "type": "boolean",
+                    "default": false
+                },
+                "inbox-dir": {
+                    "description": "Relative to the workspace root; defaults to `.ekos/session/inbox`.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "max-bytes-per-session": {
+                    "type": "integer",
+                    "format": "uint64",
+                    "default": 262144,
+                    "minimum": 0
+                },
+                "max-entries-per-session": {
+                    "type": "integer",
+                    "format": "uint",
+                    "default": 200,
+                    "minimum": 0
+                },
+                "max-note-chars": {
+                    "type": "integer",
+                    "format": "uint",
+                    "default": 2000,
+                    "minimum": 0
+                }
+            }
+        },
+        "SourceConfig": {
+            "description": "RFC 0178 Part 2: one named input of a project.",
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "$ref": "#/$defs/SourceKind",
+                    "default": "dir"
+                },
+                "name": {
+                    "description": "Unique in the project; `[a-z0-9][a-z0-9_-]{0,62}`. It keys the source's objects, so\nrenaming a source gives its objects new ids.",
+                    "type": "string"
+                },
+                "path": {
+                    "description": "Absolute, or relative to the workspace root.",
+                    "type": "string"
+                }
+            },
+            "additionalProperties": false,
+            "required": [
+                "name",
+                "path"
+            ]
+        },
+        "SourceKind": {
+            "description": "What a source is declared to be. Both kinds are local directories; `git` additionally states\nthat commit history is expected, so a missing `.git` can be reported instead of silently\nyielding no commits.",
+            "type": "string",
+            "enum": [
+                "dir",
+                "git"
+            ]
+        },
+        "SqlDialectRuleConfig": {
+            "type": "object",
+            "properties": {
+                "dialect": {
+                    "type": "string"
+                },
+                "path-glob": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "path-glob",
+                "dialect"
+            ]
+        },
+        "SqlRecoverConfig": {
+            "type": "object",
+            "properties": {
+                "default-dialect": {
+                    "description": "The ANSI-SQL baseline fallback \u2014 \"first, follow generic ANSI SQL rules.\" Used for any\n`.sql` file that no `dialect-rules` entry matches.",
+                    "type": "string",
+                    "default": "generic"
+                },
+                "dialect-rules": {
+                    "description": "Checked in order; the first `path-glob` match wins. A real workspace can mix dialects\nby folder (e.g. a `Destination MySQL/` vs. `Source MSSQL/` split) \u2014 a single global\ndialect setting can't express that.",
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "$ref": "#/$defs/SqlDialectRuleConfig"
+                    }
+                }
+            }
+        },
+        "StorageConfig": {
+            "description": "RFC 0111 groundwork (`[storage]` in `ekos.toml`): a config-driven mapping from a named\n\"storage container\" to an arbitrary local folder. Lets a workspace's whole `.ekos` tree be\nredirected to a configured folder instead of the default `<cwd>/.ekos` \u2014 the mechanism used to\nsimulate RFC 0111's distributed storage containers (S3/ADLS buckets, eventually) locally today:\npoint two `ekos.toml`s at two different container folders and each behaves as an independent\nstorage location, provable without any cloud dependency. Same shape as `[architecture.\nsystem-decomposition]`'s `overrides` list (`SystemDecompositionConfig`, above) \u2014 a Vec of named\nentries, first/only match by name wins, nothing fancier.",
+            "type": "object",
+            "properties": {
+                "active-container": {
+                    "description": "Name of the container this workspace's `.ekos` tree resolves into. `None` (the default)\nkeeps today's behavior \u2014 `<cwd>/.ekos` \u2014 completely unaffected; existing workspaces with\nno `[storage]` section see no change at all.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "containers": {
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "$ref": "#/$defs/StorageContainerConfig"
+                    }
+                },
+                "distributed": {
+                    "description": "RFC 0113 B4 \u2014 point this workspace's reads at a Distributed-mode cluster\n(`[storage.distributed]`). `coordinator` unset (the default) keeps every read local.",
+                    "$ref": "#/$defs/StorageDistributedConfig",
+                    "default": {
+                        "coordinator": null,
+                        "query-workers": []
+                    }
+                },
+                "partition": {
+                    "description": "RFC 0111 \u00a71 \u2014 the partition model (`[storage.partition]`). Defaults to \"no partitioning\"\n(`dimension` unset), which is today's single-`FactLedger` behavior, unaffected.",
+                    "$ref": "#/$defs/StoragePartitionConfig",
+                    "default": {
+                        "dimension": null,
+                        "segment-backend-url": null,
+                        "time-bucket": null,
+                        "time-bucket-overrides": []
+                    }
+                }
+            }
+        },
+        "StorageContainerConfig": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "name",
+                "path"
+            ]
+        },
+        "StorageDistributedConfig": {
+            "description": "RFC 0113 B4b's `[storage.distributed]` block. Strings only \u2014 `compiler-core` does not depend on\n`ekos-distributed`; the `cli` layer builds the `DistributedLedger` from these.",
+            "type": "object",
+            "properties": {
+                "coordinator": {
+                    "description": "`host:port` of the cluster coordinator. `None` = not distributed (default) \u2014 reads stay\nlocal against the SQLite / fact-engine / partitioned store.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "query-workers": {
+                    "description": "`host:port` of each query worker (Service B). At least one required when `coordinator` is\nset.",
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "StoragePartitionConfig": {
+            "description": "RFC 0111 \u00a71's `[storage.partition]` block. Held here as plain strings \u2014 `compiler-core` does\nnot depend on `ekos-ledger`, so `ekos_ledger::{PartitionDimension, TimeBucket}` translation is\nthe `cli` layer's job (the same split CLAUDE.md documents for `ArchitectureConfidence`). Time\nbucket has a global default plus per-scope glob overrides, reusing the first-match-wins\n`[[recover.sql.dialect-rules]]` shape rather than inventing a second override convention.",
+            "type": "object",
+            "properties": {
+                "dimension": {
+                    "description": "`\"source-scope\"` | `\"entity-kind\"` | `\"composite\"`. `None` = no partitioning (default).",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "segment-backend-url": {
+                    "description": "RFC 0113 B4 \u2014 object-storage URL each partition's **sealed segments** are published to /\nfetched from (`s3://bucket/prefix`, `az://\u2026`, `file://\u2026`). `None` (default) keeps every\npartition's segments on local disk. The small local working state (active segment, `HEAD`,\n`manifest.json`, `dict.bin`, `search/`) always stays under the partition's local root.\nNeeds an `ekos` built with `--features distributed`.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "time-bucket": {
+                    "description": "Global default time bucket: `\"daily\"` | `\"weekly\"` | `\"monthly\"`. `None` \u2192 `\"monthly\"`.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "default": null
+                },
+                "time-bucket-overrides": {
+                    "description": "Checked in order; first `scope-glob` match wins over `time_bucket` for that scope.",
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "$ref": "#/$defs/TimeBucketOverrideConfig"
+                    }
+                }
+            }
+        },
+        "SystemDecompositionConfig": {
+            "type": "object",
+            "properties": {
+                "overrides": {
+                    "description": "Checked in order; the first `path-glob` match wins over the built-in extension\nconvention. `layer` is one of `backend`/`frontend`/`database` (case-insensitive).",
+                    "type": "array",
+                    "default": [],
+                    "items": {
+                        "$ref": "#/$defs/LayerOverrideConfig"
+                    }
+                }
+            }
+        },
+        "TimeBucketOverrideConfig": {
+            "type": "object",
+            "properties": {
+                "scope-glob": {
+                    "type": "string"
+                },
+                "time-bucket": {
+                    "type": "string"
+                }
+            },
+            "required": [
+                "scope-glob",
+                "time-bucket"
+            ]
+        },
+        "TwitterConfig": {
+            "description": "Publishing is off by default \u2014 `ekos marketing publish` without `enabled = true` always\nbehaves as `--dry-run`, so opting in requires an explicit, visible config change.",
+            "type": "object",
+            "properties": {
+                "dry-run": {
+                    "type": "boolean",
+                    "default": false
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "default": false
+                }
+            }
+        },
+        "WorkspaceConfig": {
+            "type": "object",
+            "properties": {
+                "log-format": {
+                    "type": "string",
+                    "default": "pretty"
+                },
+                "log-level": {
+                    "type": "string",
+                    "default": "info"
+                },
+                "root": {
+                    "type": "string",
+                    "default": "."
+                }
+            }
+        }
+    }
+}

@@ -85,6 +85,8 @@ categories = ["development-tools", "command-line-utilities"]
 rust-version = "1.98"
 
 [workspace.dependencies]
+# RFC 0186: a JSON schema of ekos.toml for the console's settings forms.
+schemars = "1"
 # Internal crates. `version` alongside `path` is required to publish: cargo uses the path for
 # local builds and strips it on publish, leaving the registry version. Keeping every internal
 # version here — and nowhere else — means a release bumps this one block, not 40 manifests.

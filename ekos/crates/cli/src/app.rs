@@ -1,8 +1,13 @@
 use crate::extension::Extensions;
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use std::path::PathBuf;
+
+/// The whole command tree, for `ekos commands --json` (RFC 0186).
+pub fn cli_command() -> clap::Command {
+    Cli::command()
+}
 
 #[derive(Parser)]
 #[command(
@@ -90,6 +95,14 @@ enum Commands {
         /// Confirm --purge
         #[arg(long)]
         yes: bool,
+    },
+    /// Every command, its arguments and what kind of command it is, as JSON: what the web
+    /// console builds its run forms from (RFC 0186)
+    #[command(name = "commands")]
+    Catalogue {
+        /// Print JSON (the only format)
+        #[arg(long)]
+        json: bool,
     },
     /// The web console of this home: start, stop, open it (RFC 0185)
     Console {
@@ -1329,6 +1342,13 @@ enum ConfigCommands {
         #[arg(long, default_value_t = 200_000)]
         max_files: usize,
     },
+    /// The JSON schema of `ekos.toml`: every section and setting, its type, default and
+    /// description — what the web console builds its settings forms from (RFC 0186)
+    Schema {
+        /// Print JSON (the only format)
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1511,6 +1531,7 @@ fn emits_machine_output(command: &Commands) -> bool {
         Commands::Config { subcommand } => match subcommand {
             ConfigCommands::Validate { json, .. } => *json,
             ConfigCommands::PreviewScan { json, .. } => *json,
+            ConfigCommands::Schema { .. } => true,
         },
         Commands::Eval { subcommand } => match subcommand {
             EvalCommands::Run { json, .. } => *json,
@@ -1543,12 +1564,29 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
     );
     let tenant_flag = cli.tenant;
     let command = match cli.command {
+        Commands::Config {
+            subcommand: ConfigCommands::Schema { .. },
+        } => {
+            let schema = schemars::schema_for!(ekos_compiler_core::EkosConfig);
+            println!("{}", serde_json::to_string(&schema)?);
+            return Ok(());
+        }
         Commands::Project { subcommand } => {
             if cli.project.is_some() {
                 bail!("`ekos project` takes the project name as an argument, not --project");
             }
             crate::commands::init_logging(&ekos_compiler_core::EkosConfig::default());
             return dispatch_project(subcommand, &home_dir?, tenant_flag);
+        }
+        Commands::Catalogue { json: _ } => {
+            let mut root = cli_command();
+            root.build();
+            let out = serde_json::json!({
+                "version": env!("CARGO_PKG_VERSION"),
+                "commands": crate::commands::catalogue::catalogue(&root),
+            });
+            println!("{}", serde_json::to_string(&out)?);
+            return Ok(());
         }
         Commands::Setup {
             answers,
@@ -1724,6 +1762,7 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             ConfigCommands::PreviewScan { json, max_files } => {
                 crate::commands::config::preview_scan(&config, &cwd, max_files, json)
             }
+            ConfigCommands::Schema { .. } => unreachable!("handled before a config is loaded"),
         },
         Commands::Status { storage, json } => {
             crate::commands::ledger::status(&config, &cwd, storage, json)
@@ -1821,7 +1860,8 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         | Commands::Home { .. }
         | Commands::Console { .. }
         | Commands::Setup { .. }
-        | Commands::Uninstall { .. } => {
+        | Commands::Uninstall { .. }
+        | Commands::Catalogue { .. } => {
             unreachable!("handled before a config is loaded")
         }
     }

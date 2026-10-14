@@ -561,6 +561,21 @@ can write the home's control directory signs in with a one-time code. That perso
 owner. The installer of RFC 0185 sets it up; see
 [RFC 0184](ekos/docs/rfcs/0184-console-settings-local-mode-keychain.md).
 
+### Every command and every setting from the console (RFC 0186)
+
+A project's **Commands** tab lists every `ekos` command, read from the binary itself
+(`ekos commands --json`), with a form built from its arguments and the exact command line shown
+before it runs. Who may run what follows each command's class: reading needs a viewer, changing
+the project an operator, a review decision a signed-in reviewer (recorded under their name, never
+a token), and destructive commands or ones that reach a live system outside EKOS an admin who
+types the command to confirm. Servers, the installer and the console's own commands are not run
+from the web. The run's output lands in the run log like the pipeline's.
+
+The project's config page has a **Settings** form for every section of `ekos.toml`, built from
+the schema of the running binary (`ekos config schema --json`): types, defaults and the
+documentation of each setting. Changes are applied to the file's text with its comments kept,
+then validated and saved as before.
+
 ### Access inside a project (RFC 0181)
 
 A project is one ledger over several sources, so limits inside a project are applied when the

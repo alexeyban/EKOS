@@ -37,6 +37,7 @@ const TABS = [
   { to: "", label: "Dashboard", end: true },
   { to: "graph", label: "Graph" },
   { to: "run", label: "Run" },
+  { to: "commands", label: "Commands" },
   { to: "runs", label: "History" },
   { to: "evals", label: "Evals" },
   { to: "semantics", label: "Semantics" },

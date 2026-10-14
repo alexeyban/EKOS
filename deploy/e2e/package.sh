@@ -84,6 +84,13 @@ rc=0
   uv run --quiet python "$HERE/package_console.py") || rc=$?
 check "the console stage passed" '[ $rc -eq 0 ]'
 
+"$E" console open --no-browser > "$WORK/open2.txt"
+link2="$(grep -o 'http://[^ ]*code=[0-9a-f]*' "$WORK/open2.txt")"
+rc=0
+(cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link2" E2E_BASE="http://127.0.0.1:$PORT" \
+  uv run --quiet --with playwright python "$HERE/package_browser.py") || rc=$?
+check "the browser stage passed" '[ $rc -eq 0 ]'
+
 echo "== 4. the browser wizard"
 WPORT="$(free_port)"
 "$PKG/bin/ekos" --home "$WORK/home2" setup --no-browser --port "$WPORT" > "$WORK/wizard.txt" 2>&1 &

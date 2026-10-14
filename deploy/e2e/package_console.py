@@ -61,6 +61,42 @@ check(status == "succeeded", "the pipeline runs from the console", status)
 r = c.get(f"/api/workspaces/{wid}/search", params={"q": "PACKAGEMARKER customers"})
 check(r.status_code == 200 and "README" in r.text, "search finds the source", r.text[:200])
 
+# RFC 0186: a command outside the old allowlist, from the binary's own catalogue.
+listed = c.get(f"/api/workspaces/{wid}/cli").json()["commands"]
+names = {" ".join(e["path"]) for e in listed}
+check({"query find", "semantics confirm", "coverage"} <= names, "every command is listed", "")
+check("console start" not in names, "commands that are not run from the web are not listed")
+r = c.post(
+    f"/api/workspaces/{wid}/cli",
+    json={"command": ["query", "find"], "args": {"query": "PACKAGEMARKER"}},
+)
+check(r.status_code == 200, "a command outside the old list runs", r.text[:200])
+run_id = r.json().get("run_id", "")
+status = ""
+for _ in range(120):
+    status = c.get(f"/api/runs/{run_id}").json().get("status", "")
+    if status not in ("queued", "running"):
+        break
+    time.sleep(0.5)
+log = c.get(f"/api/runs/{run_id}/logs").text
+check(status == "succeeded" and "README" in log, "and finds the source", f"{status} {log[:200]}")
+r = c.post(f"/api/workspaces/{wid}/cli", json={"command": ["clean"], "args": {}})
+check(r.status_code == 409, "a destructive command needs its name typed", str(r.status_code))
+
+# RFC 0186: a setting changed through the settings form, saved through the validated write.
+schema = c.get("/api/config-schema").json()
+check("llm" in schema.get("properties", {}), "the config schema is served")
+cfg = c.get(f"/api/workspaces/{wid}/config").json()
+r = c.post(
+    f"/api/workspaces/{wid}/config/edit",
+    json={"raw": cfg["raw"], "changes": [{"path": ["semantics", "min-sites"], "value": 3}]},
+)
+check(r.status_code == 200, "the form's change is applied to the text", r.text[:200])
+saved = c.put(f"/api/workspaces/{wid}/config", json={"raw": r.json()["raw"]})
+check(saved.status_code == 200, "and saved after validation", saved.text[:300])
+after = c.get(f"/api/workspaces/{wid}/config").json()
+check(after["values"].get("semantics", {}).get("min-sites") == 3, "the file holds it")
+
 bad = [w for ok, w in results if not ok]
 print(f"\n{len(results) - len(bad)} passed, {len(bad)} failed")
 sys.exit(1 if bad else 0)

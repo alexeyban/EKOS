@@ -130,6 +130,27 @@ COMMAND_ALLOWLIST: list[Command] = [
 BY_NAME: dict[str, Command] = {c.name: c for c in COMMAND_ALLOWLIST}
 
 
+@dataclass(frozen=True)
+class CliCommand(Command):
+    """RFC 0186: any command of the binary's catalogue, as an argv `catalogue.build_argv` has
+    already validated. Deliberately not in `BY_NAME`: the named-command route cannot reach it,
+    only `routes/cli.py`, which builds the argv itself."""
+
+    def render_argv(self, params: dict) -> list[str]:
+        argv = params.get("argv")
+        if not isinstance(argv, list) or not argv or not all(isinstance(a, str) for a in argv):
+            raise ValueError("a command line is a non-empty list of strings")
+        return list(argv)
+
+
+CLI = CliCommand("cli", (), is_write=True, summary="any ekos command (RFC 0186)")
+
+
+def resolve(name: str) -> Command | None:
+    """The command a stored run names: an allowlisted one, or `cli`."""
+    return CLI if name == CLI.name else BY_NAME.get(name)
+
+
 def catalogue() -> list[dict]:
     """The UI-facing description of every allowlisted command."""
     return [

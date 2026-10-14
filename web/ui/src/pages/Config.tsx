@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, apiPost, apiPut } from "../api/client";
 import type { ConfigOut, PreviewScan, ValidateResult, WriteResult } from "../api/types";
+import { ConfigForm } from "./ConfigForm";
 
 export function Config() {
   const { id = "" } = useParams();
@@ -47,6 +48,19 @@ export function Config() {
   return (
     <>
       {current.isError && <p className="err">{String(current.error)}</p>}
+
+      {current.data && (
+        <ConfigForm
+          id={id}
+          raw={text}
+          values={current.data.values ?? {}}
+          onApplied={(raw) => {
+            setText(raw);
+            setDirty(true);
+            setValidated(null);
+          }}
+        />
+      )}
 
       <section className="card">
         <strong>ekos.toml</strong>

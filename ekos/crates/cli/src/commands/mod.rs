@@ -2,6 +2,7 @@ pub mod architecture;
 pub mod artifact;
 pub mod ask;
 pub mod branch;
+pub mod catalogue;
 pub mod build;
 pub mod clean;
 pub mod clickhouse;

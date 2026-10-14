@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct EkosConfig {
     #[serde(default)]
@@ -61,7 +61,7 @@ pub struct EkosConfig {
     pub read_scope: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct WorkspaceConfig {
     #[serde(default = "default_root")]
@@ -99,7 +99,7 @@ fn default_ignore_patterns() -> Vec<String> {
         .collect()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct ObserveConfig {
     #[serde(default)]
@@ -117,7 +117,7 @@ impl Default for ObserveConfig {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct LlmConfig {
     pub provider: Option<String>,
@@ -144,7 +144,7 @@ pub struct LlmConfig {
     pub max_tokens: Option<u32>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct AiConfig {
     pub model: Option<String>,
@@ -164,7 +164,7 @@ pub struct AiConfig {
 
 /// Gating for RFC 0026's `DocumentSemanticsAnalyzerPass`. Opt-in because the
 /// pass makes one LLM call per document section — thousands for a large corpus.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct DocumentSemanticsConfig {
     #[serde(default)]
@@ -177,7 +177,7 @@ pub struct DocumentSemanticsConfig {
 /// `DocumentSemanticsConfig`: one batched LLM call per `recover` run (all crates in one prompt,
 /// not one call per crate — RFC 0065 §42's cost discipline), but still a real network call a
 /// workspace shouldn't pay for unless it asked to.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct ArchitectureReasoningConfig {
     #[serde(default)]
@@ -190,7 +190,7 @@ pub struct ArchitectureReasoningConfig {
 /// shouldn't pay for unless it asked to. `scope` defaults to the cheaper tier specifically so
 /// enabling this once doesn't silently commit a user to the larger `"all"` spend without a second,
 /// explicit choice.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct LlmDescriptionConfig {
     #[serde(default)]
@@ -202,7 +202,7 @@ pub struct LlmDescriptionConfig {
 /// RFC 0151: `[session-memory]` — the agent session inbox. Off by default; `ekos session note`
 /// refuses to write anything until `enabled = true`. Caps bound both a single note and a whole
 /// session so a runaway agent cannot flood the inbox.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct SessionMemoryConfig {
     #[serde(default)]
@@ -231,7 +231,7 @@ pub struct SessionMemoryConfig {
 /// `ConstraintCandidate`, `SemanticGap`, `RationaleLink`) synthesized at `ekos commit` from the
 /// predicates, constraints, lookup seeds and comments recovery recorded. Off by default — an
 /// experiment until its evaluation numbers exist. Deterministic, no LLM.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SemanticsConfig {
     #[serde(default)]
@@ -288,7 +288,7 @@ impl Default for SemanticsConfig {
 
 /// RFC 0171 — `[freshness]`: compare the source tree with what the ledger was compiled from.
 /// On by default; reads file metadata only (size, mtime), never contents.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct FreshnessConfig {
     /// `false` turns off every check: `ekos status`/`doctor` lines, the `FRESH001` warning at
@@ -324,7 +324,7 @@ impl Default for FreshnessConfig {
 /// RFC 0172 — `[conflicts]`: when sources disagree about one fact (a table defined twice, a merge
 /// that would drop a column type, two labels for one code), keep both claims as a
 /// `ConflictingEvidence` item instead of silently keeping one. On by default; deterministic, no LLM.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ConflictsConfig {
     /// `false` restores the old behaviour: the last definition wins without a trace.
@@ -344,7 +344,7 @@ impl Default for ConflictsConfig {
 /// The section exists from Phase 0 on purpose: `EkosConfig` is `deny_unknown_fields`, so an
 /// `ekos.toml` carrying `[migrate]` would fail to parse against a build that does not know the
 /// section — the same reason RFC 0149 keeps `[binary-reconstruction]` public.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MigrateConfig {
     #[serde(default)]
@@ -381,7 +381,7 @@ pub struct MigrateConfig {
 
 /// One connection alias. **No password field, deliberately** — `secret_env` names the environment
 /// variable that holds it, and `ekos.toml` is a file people commit.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MigrateConnection {
     pub host: String,
@@ -473,7 +473,7 @@ impl Default for SessionMemoryConfig {
 ///
 /// `max-slices` is a declared cost ceiling rather than a tuning knob — one slice is one type and
 /// one LLM call, and a real legacy estate has thousands of types.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct BinaryReconstructionConfig {
     #[serde(default)]
@@ -509,7 +509,7 @@ impl Default for BinaryReconstructionConfig {
 /// RFC 0125: `[embeddings]` — the opt-in vector-search arm. Same opt-in-table shape as
 /// `[llm-description]`; `enabled = false` by default, so a workspace with no `[embeddings]` table
 /// never embeds anything and `retrieve` runs the pure BM25 + `ExactName` path.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct EmbeddingsConfig {
     #[serde(default)]
@@ -536,7 +536,7 @@ fn default_true() -> bool {
 /// `ekos ask`/`ekos eval` run is byte-identical to before this RFC, and RFC 0126's CI gate (which
 /// assumes reproducible ranking) never exercises this at all, since it tests `retrieve()`
 /// directly and never builds an `AiRuntime`. Same opt-in-table shape as `[embeddings]`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct RetrievalConfig {
     /// `Some("llm")` turns the rerank on; anything else (including absent) leaves it off. A
@@ -551,7 +551,9 @@ pub struct RetrievalConfig {
     pub rerank_candidates: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum DescriptionScope {
     /// `Module`/`Rollup`/`Crate` objects only — the cheaper, default tier.
@@ -566,7 +568,7 @@ pub enum DescriptionScope {
 /// RFC 0027: marketing-agent config. `[marketing]` in `ekos.toml`, replacing the source
 /// design doc's standalone `marketing/config.yaml` — this repo has exactly one config file
 /// and one format, and this follows the same opt-in-table pattern as `[document-semantics]`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct MarketingConfig {
     /// Project GitHub URL, always included in generated tweets.
@@ -603,7 +605,7 @@ impl Default for MarketingConfig {
 /// RFC 0031: pluggable SQL dialect selection. `[recover.sql]` in `ekos.toml`. Omitting the
 /// section entirely preserves pre-RFC-0031 behavior exactly — every `.sql` file parsed with
 /// the ANSI/`GenericDialect` baseline, no per-path rules.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct RecoverConfig {
     #[serde(default)]
@@ -614,7 +616,7 @@ fn default_sql_dialect() -> String {
     "generic".to_string()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct SqlRecoverConfig {
     /// The ANSI-SQL baseline fallback — "first, follow generic ANSI SQL rules." Used for any
@@ -637,7 +639,7 @@ impl Default for SqlRecoverConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct SqlDialectRuleConfig {
     pub path_glob: String,
@@ -649,7 +651,7 @@ pub struct SqlDialectRuleConfig {
 /// built-in baseline (AWS/GitHub/Slack/... token shapes, PEM key blocks, `.env`/`*.pem`/... file
 /// exclusion) always runs; this section can only add patterns/exclusions on top of it, matching
 /// the "global limitation, not an opt-in feature" requirement behind this RFC.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct SecurityConfig {
     #[serde(default)]
@@ -658,7 +660,7 @@ pub struct SecurityConfig {
     pub extra_excluded_globs: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct SecretPatternConfig {
     pub label: String,
@@ -667,7 +669,7 @@ pub struct SecretPatternConfig {
 
 /// Publishing is off by default — `ekos marketing publish` without `enabled = true` always
 /// behaves as `--dry-run`, so opting in requires an explicit, visible config change.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct TwitterConfig {
     #[serde(default)]
@@ -683,7 +685,7 @@ pub struct TwitterConfig {
 /// local ledger; this one hits a live external system, so — unlike `[document-semantics]`'s
 /// LLM-cost gate — this flag exists purely to control blast radius to connected AI agents, not
 /// cost.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct ClickHouseConfig {
     #[serde(default)]
@@ -695,14 +697,14 @@ pub struct ClickHouseConfig {
 /// a real escape hatch for the workspaces it guesses wrong on — same shape and same
 /// first-match-wins precedence `[recover.sql.dialect-rules]` already established for the
 /// equivalent SQL-dialect problem (`SqlRecoverConfig`/`SqlDialectRuleConfig` above).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct ArchitectureConfig {
     #[serde(default)]
     pub system_decomposition: SystemDecompositionConfig,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct SystemDecompositionConfig {
     /// Checked in order; the first `path-glob` match wins over the built-in extension
@@ -711,7 +713,7 @@ pub struct SystemDecompositionConfig {
     pub overrides: Vec<LayerOverrideConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct LayerOverrideConfig {
     pub path_glob: String,
@@ -726,7 +728,7 @@ pub struct LayerOverrideConfig {
 /// storage location, provable without any cloud dependency. Same shape as `[architecture.
 /// system-decomposition]`'s `overrides` list (`SystemDecompositionConfig`, above) — a Vec of named
 /// entries, first/only match by name wins, nothing fancier.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct StorageConfig {
     /// Name of the container this workspace's `.ekos` tree resolves into. `None` (the default)
@@ -748,7 +750,7 @@ pub struct StorageConfig {
 
 /// RFC 0113 B4b's `[storage.distributed]` block. Strings only — `compiler-core` does not depend on
 /// `ekos-distributed`; the `cli` layer builds the `DistributedLedger` from these.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct StorageDistributedConfig {
     /// `host:port` of the cluster coordinator. `None` = not distributed (default) — reads stay
@@ -768,7 +770,7 @@ impl StorageDistributedConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct StorageContainerConfig {
     pub name: String,
@@ -780,7 +782,7 @@ pub struct StorageContainerConfig {
 /// the `cli` layer's job (the same split CLAUDE.md documents for `ArchitectureConfidence`). Time
 /// bucket has a global default plus per-scope glob overrides, reusing the first-match-wins
 /// `[[recover.sql.dialect-rules]]` shape rather than inventing a second override convention.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct StoragePartitionConfig {
     /// `"source-scope"` | `"entity-kind"` | `"composite"`. `None` = no partitioning (default).
@@ -801,7 +803,7 @@ pub struct StoragePartitionConfig {
     pub segment_backend_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct TimeBucketOverrideConfig {
     pub scope_glob: String,
@@ -842,7 +844,7 @@ impl StorageConfig {
 }
 
 /// RFC 0178 Part 2: one named input of a project.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub struct SourceConfig {
     /// Unique in the project; `[a-z0-9][a-z0-9_-]{0,62}`. It keys the source's objects, so
@@ -857,7 +859,9 @@ pub struct SourceConfig {
 /// What a source is declared to be. Both kinds are local directories; `git` additionally states
 /// that commit history is expected, so a missing `.git` can be reported instead of silently
 /// yielding no commits.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum SourceKind {
     #[default]

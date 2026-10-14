@@ -33,6 +33,10 @@ PUBLIC = {
 DYNAMIC = {
     ("GET", "/api/commands"),  # a static catalogue
     ("POST", "/api/workspaces/{workspace_id}/commands/{name}"),
+    # RFC 0186: the action follows the class of the command chosen.
+    ("GET", "/api/workspaces/{workspace_id}/cli"),
+    ("GET", "/api/config-schema"),  # a static description, like /api/commands
+    ("POST", "/api/workspaces/{workspace_id}/cli"),
     ("GET", "/api/runs"),
     ("GET", "/api/runs/{run_id}"),
     ("POST", "/api/runs/{run_id}/cancel"),

@@ -19,7 +19,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from . import _afile, _proc, envs, home, models
-from .commands import BY_NAME, Command
+from .commands import Command, resolve
 from .models import Run
 from .settings import Settings
 
@@ -187,7 +187,9 @@ class JobRunner:
         run = models.get_run(run_id)
         if run is None:  # pragma: no cover
             return
-        command = BY_NAME[run.command]
+        command = resolve(run.command)
+        if command is None:  # pragma: no cover — written by `submit` from a known command
+            return
         log_path = Path(run.log_path)
         await _afile.mkdirs(log_path.parent)
         models.update_run(run_id, status="running", started_at=models._now())
