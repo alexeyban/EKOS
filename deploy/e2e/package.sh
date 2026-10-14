@@ -31,6 +31,8 @@ cleanup() {
   [ "${EKOS_E2E_KEEP:-}" = 1 ] && echo "kept $WORK" || rm -rf "$WORK"
 }
 trap cleanup EXIT
+# Every console and wizard in this check listens on this machine's loopback, over plain HTTP.
+LOCAL="http://127.0.0.1"  # NOSONAR(shell:S5332) loopback only, never a remote host
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
 
 echo "== 1. assemble"
@@ -83,16 +85,16 @@ check "the console runs" '"$E" console status | grep -q running'
 
 echo "== 3. the console"
 "$E" console open --no-browser > "$WORK/open.txt"
-link="$(grep -o 'http://[^ ]*code=[0-9a-f]*' "$WORK/open.txt")"
+link="$(grep -o "$LOCAL:[0-9]*/[^ ]*code=[0-9a-f]*" "$WORK/open.txt")"
 rc=0
-(cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link" E2E_BASE="http://127.0.0.1:$PORT" \
+(cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link" E2E_BASE="$LOCAL:$PORT" \
   uv run --quiet python "$HERE/package_console.py") || rc=$?
 check "the console stage passed" '[ $rc -eq 0 ]'
 
 "$E" console open --no-browser > "$WORK/open2.txt"
-link2="$(grep -o 'http://[^ ]*code=[0-9a-f]*' "$WORK/open2.txt")"
+link2="$(grep -o "$LOCAL:[0-9]*/[^ ]*code=[0-9a-f]*" "$WORK/open2.txt")"
 rc=0
-(cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link2" E2E_BASE="http://127.0.0.1:$PORT" \
+(cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link2" E2E_BASE="$LOCAL:$PORT" \
   PYTHONPATH="$HERE" uv run --quiet --with playwright python "$HERE/package_browser.py") || rc=$?
 check "the browser stage passed" '[ $rc -eq 0 ]'
 
@@ -100,8 +102,8 @@ echo "== 4. the browser wizard"
 WPORT="$(free_port)"
 "$PKG/bin/ekos" --home "$WORK/home2" setup --no-browser --port "$WPORT" > "$WORK/wizard.txt" 2>&1 &
 WIZARD_PID=$!
-for _ in $(seq 1 50); do grep -q 'http://' "$WORK/wizard.txt" && break; sleep 0.2; done
-wlink="$(grep -o 'http://[^ ]*' "$WORK/wizard.txt" | head -1)"
+for _ in $(seq 1 50); do grep -q "$LOCAL" "$WORK/wizard.txt" && break; sleep 0.2; done
+wlink="$(grep -o "$LOCAL[^ ]*" "$WORK/wizard.txt" | head -1)"
 P2="$(free_port)"
 rc=0
 (cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_WIZARD="$wlink" E2E_HOME2="$WORK/home2" \
@@ -114,15 +116,15 @@ wait "$WIZARD_PID" 2>/dev/null || true; WIZARD_PID=""
 
 echo "== 5. uninstall, from the console's Settings page (RFC 0188)"
 "$E" console open --no-browser > "$WORK/open3.txt"
-link3="$(grep -o 'http://[^ ]*code=[0-9a-f]*' "$WORK/open3.txt")"
+link3="$(grep -o "$LOCAL:[0-9]*/[^ ]*code=[0-9a-f]*" "$WORK/open3.txt")"
 rc=0
-(cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link3" E2E_BASE="http://127.0.0.1:$PORT" \
+(cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link3" E2E_BASE="$LOCAL:$PORT" \
   PYTHONPATH="$HERE" uv run --quiet --with playwright python "$HERE/package_uninstall.py") || rc=$?
 check "the uninstall stage passed" '[ $rc -eq 0 ]'
 check "the program is gone, the projects stay" '[ ! -e "$HOME/.ekos/bin" ] && [ ! -e "$HOME/.ekos/console" ] && [ -f "$HOME/.ekos/data/default/shop/ekos.toml" ]'
 check "the PATH line and agent entries are gone" \
   '! grep -q "added by ekos setup" "$HOME/.profile" && ! grep -q ekos-shop "$HOME/.config/Claude/claude_desktop_config.json"'
-check "the console stopped" '! curl -fs "http://127.0.0.1:$PORT/api/health" >/dev/null'
+check "the console stopped" '! curl -fs "$LOCAL:$PORT/api/health" >/dev/null'
 "$WORK/home2/bin/ekos" --home "$WORK/home2" uninstall --purge --yes >/dev/null
 check "--purge removes the second home" '[ ! -e "$WORK/home2" ]'
 

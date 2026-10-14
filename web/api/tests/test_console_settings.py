@@ -320,7 +320,8 @@ def test_without_a_home_the_secret_is_per_start(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("EKOS_CONSOLE_SESSION_SECRET", raising=False)
-    assert Settings().session_secret != Settings().session_secret
+    first, second = Settings(), Settings()
+    assert first.session_secret != second.session_secret
 
 
 def test_production_with_a_home_needs_no_set_session_secret(

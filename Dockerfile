@@ -50,7 +50,8 @@ FROM node:22-bookworm-slim AS ui
 
 WORKDIR /ui
 COPY web/ui/package.json web/ui/package-lock.json ./
-RUN npm ci
+# --ignore-scripts: no dependency runs install scripts in the build (CI builds the UI the same way).
+RUN npm ci --ignore-scripts
 COPY web/ui ./
 RUN npm run build
 

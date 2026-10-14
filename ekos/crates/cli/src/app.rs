@@ -1926,8 +1926,9 @@ async fn run_setup(
         let wizard = setup_server::Wizard::new(setup_server::new_token(), machine, home);
         return setup_server::serve(wizard, port, !no_browser).await;
     };
-    let text =
-        std::fs::read_to_string(&file).with_context(|| format!("reading {}", file.display()))?;
+    let text = tokio::fs::read_to_string(&file)
+        .await
+        .with_context(|| format!("reading {}", file.display()))?;
     let mut a: setup::Answers =
         toml::from_str(&text).with_context(|| format!("reading {}", file.display()))?;
     if a.home.trim().is_empty() {

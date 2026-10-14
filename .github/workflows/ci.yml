@@ -128,10 +128,9 @@ jobs:
 
       - name: Sync API deps
         working-directory: web/api
-        # No --no-build here: this sync installs the project's own editable package (app/), which
-        # requires a local build step that isn't a supply-chain concern — it's our own source, not
-        # a third-party sdist. --frozen already pins every dependency to the reviewed lockfile.
-        run: uv sync --frozen
+        # Wheels only (--no-build): nothing is built from a source distribution, not even this
+        # project, which pytest imports from the source tree instead (pyproject `pythonpath`).
+        run: uv sync --frozen --no-build --no-install-project
 
       - name: Ruff (lint + format)
         working-directory: web/api
@@ -211,7 +210,7 @@ jobs:
 
       - name: Sync API deps
         working-directory: web/api
-        run: uv sync --frozen
+        run: uv sync --frozen --no-build --no-install-project
 
       - name: Pytest
         working-directory: web/api

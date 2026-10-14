@@ -38,7 +38,7 @@ chmod 755 "$stage/bin/$exe"
 asset="cpython-${pyver}+${release}-${target}-install_only.tar.gz"
 mkdir -p "$cache/python"
 if [ ! -f "$cache/python/$asset" ]; then
-  curl -fsSL -o "$cache/python/$asset.part" \
+  curl -fsSL --proto '=https' --tlsv1.2 -o "$cache/python/$asset.part" \
     "https://github.com/astral-sh/python-build-standalone/releases/download/${release}/${asset//+/%2B}"
   mv "$cache/python/$asset.part" "$cache/python/$asset"
 fi

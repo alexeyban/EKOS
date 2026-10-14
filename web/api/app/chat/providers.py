@@ -244,13 +244,17 @@ class OpenAI(_Base):
         )
 
 
+# Ollama serves plain HTTP on this machine's loopback; a remote host is the owner's choice.
+OLLAMA_DEFAULT = "http://127.0.0.1:11434"  # NOSONAR(python:S5332) loopback only
+
+
 class Ollama(_Base):
     name = "ollama"
 
     def request(self, system, messages, tools):
-        url = self.base_url or os.environ.get("OLLAMA_HOST") or "http://127.0.0.1:11434"
+        url = self.base_url or os.environ.get("OLLAMA_HOST") or OLLAMA_DEFAULT
         if not url.startswith("http"):
-            url = "http://" + url
+            url = "http://" + url  # NOSONAR(python:S5332) OLLAMA_HOST may be given as host:port
         body = {
             "model": self.model,
             "stream": False,
