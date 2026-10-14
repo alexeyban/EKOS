@@ -73,6 +73,8 @@ console image as `ghcr.io/alexeyban/ekos`. Programs are checksummed, not code-si
 - **Evals:** `ekos eval run --evidence-only` measures retrieval without calling a model. A run with an errored scenario fails. Refusals are counted apart from uncited answers. Recall@10 counts an expected name as found when any object bearing it is ranked.
 
 **Fixes**
+- Console: a project's MCP server no longer takes a port another program already listens on. Two consoles on one machine both counted up from 7400, and the second's server "never became ready".
+- Console on Windows (found by the first Windows CI run): reloading a project page answered 404 and an unknown `/api/...` path got the app (paths arrive with `\`); a run log showed an empty line after every line (`\r\n`); a project's sources were stored as `\\?\C:\...` and then refused as outside the allowed root.
 - Web console: rows in the Semantics and Conflicts lists can be opened from the keyboard. Applying an edited LinkML schema no longer blocks other requests while the file is written.
 - `ekos resolve` no longer stops on same-name groups across the database and code namespaces (LedgerSMB 16 → 0 conflicts).
 - Compile output is now deterministic when two files define the same object: artifacts are read in source order, not timestamp-hashed id order.

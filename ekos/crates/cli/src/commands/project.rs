@@ -56,8 +56,7 @@ pub fn add(
     }
     let mut dirs = Vec::new();
     for (name, path) in sources {
-        let dir = path
-            .canonicalize()
+        let dir = crate::home::canonical_dir(path)
             .with_context(|| format!("--source {}", path.display()))?;
         if !dir.is_dir() {
             bail!("--source {} is not a directory", dir.display());

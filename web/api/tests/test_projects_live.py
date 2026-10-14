@@ -152,7 +152,11 @@ def test_a_project_is_listed_again_after_a_restart_with_an_empty_registry(
     with TestClient(create_app()) as c:
         assert _create(c, sources).status_code == 201
 
-    # The registry is lost; the project in the home is not.
+    # The registry is lost; the project in the home is not. The first app's engine still holds
+    # the file open, which Windows does not allow deleting.
+    from app import models
+
+    models._engine.dispose()
     (env / "control" / "console.db").unlink()
     import app.settings as settings_mod
 

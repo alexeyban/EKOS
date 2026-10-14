@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import secrets
+import socket
 import tempfile
 import time
 from dataclasses import dataclass
@@ -61,6 +62,15 @@ class ServerHandle:
             "retries": self.retries,
             "detail": self.detail,
         }
+
+
+def _port_is_free(port: int) -> bool:
+    with socket.socket() as s:
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+        return True
 
 
 class McpSupervisor:
@@ -189,9 +199,14 @@ class McpSupervisor:
     # ── internals ────────────────────────────────────────────────────────────
 
     def _alloc_port(self) -> int:
-        port = self._next_port
-        self._next_port += 1
-        return port
+        """The next port from `mcp_port_base` that nothing listens on: another console on the
+        same machine counts up from the same base, and its server would answer this one's probe."""
+        for _ in range(1000):
+            port = self._next_port
+            self._next_port += 1
+            if _port_is_free(port):
+                return port
+        raise RuntimeError(f"no free port for an MCP server from {self._settings.mcp_port_base}")
 
     async def _spawn(self, ws: Workspace) -> ServerHandle:
         port = self._alloc_port()

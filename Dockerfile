@@ -46,7 +46,7 @@ RUN cd ekos \
     && cp target/release/ekos /ekos-bin
 
 # ── 2. The console UI ─────────────────────────────────────────────────────────
-FROM node:20-bookworm-slim AS ui
+FROM node:22-bookworm-slim AS ui
 
 WORKDIR /ui
 COPY web/ui/package.json web/ui/package-lock.json ./

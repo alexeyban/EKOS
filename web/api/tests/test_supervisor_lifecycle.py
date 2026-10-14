@@ -104,3 +104,21 @@ async def test_using_a_server_keeps_it_from_the_reaper(tmp_path: Path) -> None:
     assert sup.handle("a").last_used >= first
     assert await sup.reap_idle() == []
     await sup.aclose()
+
+
+def test_a_port_in_use_is_skipped(tmp_path: Path) -> None:
+    """Another console on the machine (or any program) may already listen on the next port:
+    its MCP server answered the probe and the project's server "never became ready"."""
+    import socket
+
+    taken = socket.socket()
+    taken.bind(("127.0.0.1", 0))
+    taken.listen()
+    base = taken.getsockname()[1]
+    try:
+        sup, _ = supervisor(tmp_path, mcp_port_base=base)
+        first = sup._alloc_port()
+        assert first != base
+        assert sup._alloc_port() > first
+    finally:
+        taken.close()

@@ -178,8 +178,37 @@ fn subdirs(dir: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
+/// `canonicalize` without Windows' verbatim prefix. On Windows `canonicalize` returns
+/// `\\?\C:\src`, which no other program writes: a source stored that way never matches the root the
+/// console allows (`C:\src`), and the path is shown back to people in that form.
+pub fn canonical_dir(path: &Path) -> std::io::Result<PathBuf> {
+    path.canonicalize()
+        .map(|p| PathBuf::from(plain(&p.to_string_lossy())))
+}
+
+/// `\\?\C:\x` → `C:\x`, `\\?\UNC\srv\share` → `\\srv\share`; anything else unchanged.
+fn plain(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    match path.strip_prefix(r"\\?\") {
+        Some(rest) if rest.as_bytes().get(1) == Some(&b':') => rest.to_string(),
+        _ => path.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn verbatim_windows_paths_become_plain() {
+        assert_eq!(super::plain(r"\\?\C:\Users\me\src"), r"C:\Users\me\src");
+        assert_eq!(super::plain(r"\\?\UNC\srv\share\x"), r"\\srv\share\x");
+        // A verbatim path with no drive letter (a volume GUID) has no plain form: kept.
+        let volume = r"\\?\Volume{0b5c}\x";
+        assert_eq!(super::plain(volume), volume);
+        assert_eq!(super::plain("/home/me/src"), "/home/me/src");
+    }
+
     use super::*;
 
     fn p(s: &str) -> Option<PathBuf> {

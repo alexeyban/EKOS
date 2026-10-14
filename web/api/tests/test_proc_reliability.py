@@ -154,3 +154,25 @@ async def test_the_event_loop_keeps_running_while_a_chatty_process_streams(tmp_p
     assert code == 0
     assert len(log.read_text().splitlines()) == 2000
     assert ticks > 10, f"the event loop only got {ticks} slices while the run streamed"
+
+
+async def test_windows_line_endings_are_one_line_each(tmp_path):
+    """A Windows program ends lines with CRLF; the log keeps one line per line, with no `\\r`
+    (found by the first Windows CI run: 2000 lines came out as 4000)."""
+    log = tmp_path / "run.log"
+    seen: list[str] = []
+
+    async def on_line(line: str) -> None:
+        seen.append(line)
+
+    code = await _proc.run_streaming(
+        _python("import sys\nfor i in range(3): sys.stdout.buffer.write(b'line %d\\r\\n' % i)"),
+        cwd=str(tmp_path),
+        log_path=log,
+        register=lambda p: None,
+        on_line=on_line,
+        timeout_s=30,
+    )
+    assert code == 0
+    assert seen == ["line 0", "line 1", "line 2"]
+    assert log.read_text().splitlines() == seen

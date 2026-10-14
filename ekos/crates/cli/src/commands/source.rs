@@ -116,9 +116,7 @@ pub fn add(
              ekos project add <name> --source <source>=<dir> [--source <source>=<dir> …]"
         );
     }
-    let dir = cwd
-        .join(path)
-        .canonicalize()
+    let dir = crate::home::canonical_dir(&cwd.join(path))
         .with_context(|| format!("source path {}", path.display()))?;
     if !dir.is_dir() {
         bail!("{} is not a directory", dir.display());

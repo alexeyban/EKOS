@@ -87,7 +87,8 @@ class _SpaFiles(StaticFiles):
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
-            first, _, rest = path.partition("/")
+            # Starlette builds `path` with the OS separator: `w\acme.shop` on Windows.
+            first, _, rest = path.replace("\\", "/").partition("/")
             is_file = first == "assets" or (not rest and "." in first)
             if exc.status_code != 404 or first in ("api", "mcp") or is_file:
                 raise

@@ -52,3 +52,18 @@ def test_a_missing_file_or_api_path_is_404(ui: TestClient, path: str) -> None:
 def test_files_that_exist_are_served(ui: TestClient) -> None:
     assert ui.get("/assets/main.js").text == "js"
     assert ui.get("/logo.png").text == "png"
+
+
+@pytest.mark.parametrize(
+    ("path", "status"), [("/w/acme.shop", 200), ("/w/acme.shop/graph", 200), ("/api/nope", 404)]
+)
+def test_windows_separators_route_the_same(
+    ui: TestClient, monkeypatch: pytest.MonkeyPatch, path: str, status: int
+) -> None:
+    """On Windows Starlette hands over `w\\acme.shop`; read with `/` only, a project page was a
+    404 and an unknown API path got the app (found by the first Windows CI run)."""
+    original = _SpaFiles.get_path
+    monkeypatch.setattr(
+        _SpaFiles, "get_path", lambda self, scope: original(self, scope).replace("/", "\\")
+    )
+    assert ui.get(path).status_code == status

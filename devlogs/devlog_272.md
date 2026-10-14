@@ -103,6 +103,18 @@ broken by an empty build argument, and no Intel-macOS wheels for `cryptography`.
   POSIX permission bits, fake `ekos` scripts run by their `#!` line, `/sources/...` absolute
   paths, a case-insensitive file system. Those tests are skipped on Windows with the reason;
   a path comparison became a `Path` comparison.
+- **Real Windows bugs the first finished Windows run found** (fixed, each with a test that runs
+  on Linux): Starlette hands `StaticFiles.get_response` a path built with `os.path.join`, so
+  `w\acme.shop` on Windows — the SPA fallback split on `/` and broke both ways; a Windows child
+  prints `\r\n` and the log pump stripped only `\n`, so text-mode writing produced `\r\r\n`;
+  Rust's `canonicalize` returns `\\?\C:\…` on Windows (`home::canonical_dir` strips it).
+- **MCP ports were allocated without checking them.** Two consoles on one machine (the person's
+  own and a test's) both counted up from 7400; the second project's server lost the bind and the
+  readiness probe reached the other console's server ("0 bytes read"). `_alloc_port` now skips a
+  port something listens on. This was the "flaky" gateway test and the first package-check
+  failure of this session.
+- `test_runner_live::test_cancel_a_running_pipeline_terminates_it` failed once in a full run and
+  passed alone twice: a cancel landing between stages. Not investigated further.
 - `cryptography` dropped x86_64 macOS wheels at 50.0; any `--only-binary` bundle for Intel Macs
   needs an older pin or a source build.
 

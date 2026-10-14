@@ -109,7 +109,9 @@ async def run_streaming(
                     continue
                 if not raw:
                     return
-                line = strip_ansi(raw.decode(errors="replace").rstrip("\n"))
+                # `\r\n` from a Windows program: keep neither, or the log (written in text mode)
+                # gets `\r\r\n` and shows an empty line after every line.
+                line = strip_ansi(raw.decode(errors="replace").rstrip("\r\n"))
                 await _afile.write_line(fh, line + "\n")
                 if on_line is not None:
                     await on_line(line)

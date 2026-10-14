@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import stat
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -18,6 +19,12 @@ from app.auth import Principal
 from app.main import create_app
 from app.readproc import ReadProcError, _check_allowed
 from app.semantics_write import ReviewError, bulk_argv, review_argv, reviewer_for
+
+
+# Windows cannot run this test's assumption (see the reason); the job on Windows is informational.
+def _not_on_windows(reason: str) -> pytest.MarkDecorator:
+    return pytest.mark.skipif(sys.platform == "win32", reason=reason)
+
 
 R = {"Authorization": "Bearer r"}
 W = {"Authorization": "Bearer w"}
@@ -133,6 +140,7 @@ def test_token_mode_records_a_marked_claim_and_oidc_an_identity() -> None:
 # ── routes ───────────────────────────────────────────────────────────────────────────────────
 
 
+@_not_on_windows("the fake ekos is a script run by its #! line")
 def test_reads_need_only_the_read_role(setup) -> None:
     c, log = setup
     r = c.get("/api/workspaces/w/semantics/items?kind=concept&status=hypothesis", headers=R)
@@ -157,6 +165,7 @@ def test_reads_need_only_the_read_role(setup) -> None:
     ]
 
 
+@_not_on_windows("the fake ekos is a script run by its #! line")
 def test_a_decision_needs_the_write_role_and_records_who(setup) -> None:
     c, log = setup
     url = f"/api/workspaces/w/semantics/items/{ID}/review"
@@ -171,6 +180,7 @@ def test_a_decision_needs_the_write_role_and_records_who(setup) -> None:
     assert bad.status_code == 400 and "note" in bad.json()["detail"]
 
 
+@_not_on_windows("the fake ekos is a script run by its #! line")
 def test_a_busy_ledger_is_a_conflict(setup, monkeypatch: pytest.MonkeyPatch) -> None:
     c, _ = setup
     monkeypatch.setenv("FAKE_LOCKED", "1")
@@ -182,6 +192,7 @@ def test_a_busy_ledger_is_a_conflict(setup, monkeypatch: pytest.MonkeyPatch) -> 
     assert r.status_code == 409
 
 
+@_not_on_windows("the fake ekos is a script run by its #! line")
 def test_linkml_validate_is_a_read_and_import_is_a_write(setup) -> None:
     c, log = setup
     v = c.post(
@@ -237,6 +248,7 @@ def test_bulk_argv_is_one_all_or_nothing_cli_call() -> None:
             bad()
 
 
+@_not_on_windows("the fake ekos is a script run by its #! line")
 def test_bulk_review_route(setup) -> None:
     c, log = setup
     url = "/api/workspaces/w/semantics/review-bulk"
