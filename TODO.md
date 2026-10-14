@@ -6500,10 +6500,12 @@ LinkML; generation stays in LinkML.
 - [x] RFC 0185 — installer: `ekos setup` browser wizard and `--answers`, `ekos console`
       launcher, `ekos uninstall`, full packages with a bundled Python, `install.ps1`, release
       `package` job (devlog_269)
-- [ ] RFC 0185 remainder: Windows 11 and macOS packages not run on those systems (the release
-      `package` job and `web-os` CI rows have never run; `install.ps1` not even parsed here — no
-      pwsh); login services activated only by tests' fakes (systemd/launchd/schtasks never
-      enabled for real); no code signing
+- [x] v1.1.0 released 2026-10-14 (tag on 89faa70): full packages for Linux x86_64/aarch64,
+      macOS arm64, Windows; the release `package` job and the `web-os` CI rows green (devlog_273)
+- [ ] RFC 0185 remainder: the packages built and the console's tests pass on Windows and macOS
+      runners, but no person has installed one there; `install.ps1` never run (no pwsh here);
+      login services activated only by tests' fakes (systemd/launchd/schtasks never enabled for
+      real); no code signing
 - [x] RFC 0186 — every command from the web (`ekos commands --json`, classes, Commands tab,
       validated argv) and every setting (`ekos config schema --json`, Settings form) (devlog_270)
 - [ ] RFC 0186 remainder: lists of tables (`[[sources]]`, `[migrate.connections.*]`) stay in the
@@ -6524,14 +6526,16 @@ LinkML; generation stays in LinkML.
       or wait, while runs are active, and say which.
 - [ ] `install.ps1` moving a locked `bin\`/`console\` aside (and refusing when EKOS runs) has
       not been run on Windows.
+- [x] Chained runs' stages get `run_stage_timeout_seconds` (6 h) instead of 30 min; `install.sh`
+      replaces a running binary (devlog_273)
 - [ ] Intel macOS full package: `cryptography` 50+ has no x86_64 macOS wheels, so the release
       builds the command only for Intel Macs. Revisit if wheels return, or pin per platform
 - [ ] RFC 0187 remainder: answers arrive whole per step (no token streaming); Anthropic and
       OpenAI providers checked only against recorded request/response shapes — no paid call was
       made; per-tenant chat models
-- [ ] RFC 0184 remainder: the console has not run on Windows or macOS yet (`web-os` CI job,
-      informational until its first green run); the real keychain was only detected here, not
-      written to
+- [ ] RFC 0184 remainder: the console's test suite passes on Windows and macOS runners
+      (`web-os`, green since 89faa70; still `continue-on-error` — make it gating); the real
+      keychain was only detected here, not written to
 - [ ] Install package remainder: aarch64 Linux and macOS packages (the script builds on Linux
       x86_64 only); the image is not in the package
 - [ ] RFC 0179 remainder: `ekos eval run` writes reports under the source root (fails on a
