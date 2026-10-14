@@ -65,7 +65,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.3"
+version = "1.1.0"
 edition = "2024"
 authors = ["alexeyban"]
 license = "MIT"
@@ -90,59 +90,59 @@ schemars = "1"
 # Internal crates. `version` alongside `path` is required to publish: cargo uses the path for
 # local builds and strips it on publish, leaving the registry version. Keeping every internal
 # version here — and nowhere else — means a release bumps this one block, not 40 manifests.
-ekos-common                        = { path = "crates/common", version = "1.0.3" }
-ekos                               = { path = "crates/cli", version = "1.0.3" }
-ekos-artifact                      = { path = "crates/artifact", version = "1.0.3" }
-ekos-clickhouse-query              = { path = "crates/clickhouse-query", version = "1.0.3" }
-ekos-cluster                       = { path = "crates/cluster", version = "1.0.3" }
-ekos-compiler-core                 = { path = "crates/compiler-core", version = "1.0.3" }
-ekos-dbt-gen                       = { path = "crates/dbt-gen", version = "1.0.3" }
-ekos-distributed                   = { path = "crates/distributed", version = "1.0.3" }
-ekos-docs-gen                      = { path = "crates/docs-gen", version = "1.0.3" }
-ekos-ekl                           = { path = "crates/ekl", version = "1.0.3" }
-ekos-evals                         = { path = "crates/evals", version = "1.0.3" }
-ekos-identity                      = { path = "crates/identity", version = "1.0.3" }
-ekos-kir                           = { path = "crates/kir", version = "1.0.3" }
-ekos-ledger                        = { path = "crates/ledger", version = "1.0.3" }
-ekos-marketing                     = { path = "crates/marketing", version = "1.0.3" }
-ekos-observation-sdk               = { path = "crates/observation-sdk", version = "1.0.3" }
-ekos-plugin-clickhouse             = { path = "plugins/clickhouse", version = "1.0.3" }
-ekos-plugin-confluence             = { path = "plugins/confluence", version = "1.0.3" }
-ekos-plugin-crypto                 = { path = "plugins/crypto", version = "1.0.3" }
-ekos-plugin-elixir                 = { path = "plugins/elixir", version = "1.0.3" }
-ekos-plugin-file                   = { path = "plugins/file", version = "1.0.3" }
-ekos-plugin-git                    = { path = "plugins/git", version = "1.0.3" }
-ekos-plugin-github                 = { path = "plugins/github", version = "1.0.3" }
-ekos-plugin-governance             = { path = "plugins/governance", version = "1.0.3" }
-ekos-plugin-javascript             = { path = "plugins/javascript", version = "1.0.3" }
-ekos-plugin-localdocs              = { path = "plugins/localdocs", version = "1.0.3" }
-ekos-plugin-pentaho                = { path = "plugins/pentaho", version = "1.0.3" }
-ekos-plugin-perl                   = { path = "plugins/perl", version = "1.0.3" }
-ekos-plugin-python                 = { path = "plugins/python", version = "1.0.3" }
-ekos-plugin-rust                   = { path = "plugins/rust", version = "1.0.3" }
-ekos-plugin-sql-dialect-clickhouse = { path = "plugins/sql-dialect-clickhouse", version = "1.0.3" }
-ekos-plugin-sql-dialect-databricks = { path = "plugins/sql-dialect-databricks", version = "1.0.3" }
-ekos-plugin-sql-dialect-mssql      = { path = "plugins/sql-dialect-mssql", version = "1.0.3" }
-ekos-plugin-sql-dialect-mysql      = { path = "plugins/sql-dialect-mysql", version = "1.0.3" }
-ekos-plugin-sql-dialect-postgres   = { path = "plugins/sql-dialect-postgres", version = "1.0.3" }
-ekos-plugin-sql-dialect-snowflake  = { path = "plugins/sql-dialect-snowflake", version = "1.0.3" }
-ekos-plugin-treasury               = { path = "plugins/treasury", version = "1.0.3" }
-ekos-recovery                      = { path = "crates/recovery", version = "1.0.3" }
-ekos-runtime                       = { path = "crates/runtime", version = "1.0.3" }
-ekos-segment-backend               = { path = "crates/segment-backend", version = "1.0.3" }
-ekos-semantic                      = { path = "crates/semantic", version = "1.0.3" }
-ekos-session                       = { path = "crates/session", version = "1.0.3" }
-ekos-migrate                       = { path = "crates/migrate", version = "1.0.3" }
-ekos-migrate-validate              = { path = "crates/migrate-validate", version = "1.0.3" }
-ekos-pg-live                       = { path = "crates/pg-live", version = "1.0.3" }
-ekos-migrate-dq                    = { path = "crates/migrate-dq", version = "1.0.3" }
-ekos-migrate-logic                 = { path = "crates/migrate-logic", version = "1.0.3" }
-ekos-migrate-target-clickhouse     = { path = "crates/migrate-target-clickhouse", version = "1.0.3" }
-ekos-migrate-approval              = { path = "crates/migrate-approval", version = "1.0.3" }
-ekos-migrate-report                = { path = "crates/migrate-report", version = "1.0.3" }
-ekos-plpgsql                       = { path = "crates/plpgsql", version = "1.0.3" }
-ekos-simulation                    = { path = "crates/simulation", version = "1.0.3" }
-ekos-sql-dialect-sdk               = { path = "crates/sql-dialect-sdk", version = "1.0.3" }
+ekos-common                        = { path = "crates/common", version = "1.1.0" }
+ekos                               = { path = "crates/cli", version = "1.1.0" }
+ekos-artifact                      = { path = "crates/artifact", version = "1.1.0" }
+ekos-clickhouse-query              = { path = "crates/clickhouse-query", version = "1.1.0" }
+ekos-cluster                       = { path = "crates/cluster", version = "1.1.0" }
+ekos-compiler-core                 = { path = "crates/compiler-core", version = "1.1.0" }
+ekos-dbt-gen                       = { path = "crates/dbt-gen", version = "1.1.0" }
+ekos-distributed                   = { path = "crates/distributed", version = "1.1.0" }
+ekos-docs-gen                      = { path = "crates/docs-gen", version = "1.1.0" }
+ekos-ekl                           = { path = "crates/ekl", version = "1.1.0" }
+ekos-evals                         = { path = "crates/evals", version = "1.1.0" }
+ekos-identity                      = { path = "crates/identity", version = "1.1.0" }
+ekos-kir                           = { path = "crates/kir", version = "1.1.0" }
+ekos-ledger                        = { path = "crates/ledger", version = "1.1.0" }
+ekos-marketing                     = { path = "crates/marketing", version = "1.1.0" }
+ekos-observation-sdk               = { path = "crates/observation-sdk", version = "1.1.0" }
+ekos-plugin-clickhouse             = { path = "plugins/clickhouse", version = "1.1.0" }
+ekos-plugin-confluence             = { path = "plugins/confluence", version = "1.1.0" }
+ekos-plugin-crypto                 = { path = "plugins/crypto", version = "1.1.0" }
+ekos-plugin-elixir                 = { path = "plugins/elixir", version = "1.1.0" }
+ekos-plugin-file                   = { path = "plugins/file", version = "1.1.0" }
+ekos-plugin-git                    = { path = "plugins/git", version = "1.1.0" }
+ekos-plugin-github                 = { path = "plugins/github", version = "1.1.0" }
+ekos-plugin-governance             = { path = "plugins/governance", version = "1.1.0" }
+ekos-plugin-javascript             = { path = "plugins/javascript", version = "1.1.0" }
+ekos-plugin-localdocs              = { path = "plugins/localdocs", version = "1.1.0" }
+ekos-plugin-pentaho                = { path = "plugins/pentaho", version = "1.1.0" }
+ekos-plugin-perl                   = { path = "plugins/perl", version = "1.1.0" }
+ekos-plugin-python                 = { path = "plugins/python", version = "1.1.0" }
+ekos-plugin-rust                   = { path = "plugins/rust", version = "1.1.0" }
+ekos-plugin-sql-dialect-clickhouse = { path = "plugins/sql-dialect-clickhouse", version = "1.1.0" }
+ekos-plugin-sql-dialect-databricks = { path = "plugins/sql-dialect-databricks", version = "1.1.0" }
+ekos-plugin-sql-dialect-mssql      = { path = "plugins/sql-dialect-mssql", version = "1.1.0" }
+ekos-plugin-sql-dialect-mysql      = { path = "plugins/sql-dialect-mysql", version = "1.1.0" }
+ekos-plugin-sql-dialect-postgres   = { path = "plugins/sql-dialect-postgres", version = "1.1.0" }
+ekos-plugin-sql-dialect-snowflake  = { path = "plugins/sql-dialect-snowflake", version = "1.1.0" }
+ekos-plugin-treasury               = { path = "plugins/treasury", version = "1.1.0" }
+ekos-recovery                      = { path = "crates/recovery", version = "1.1.0" }
+ekos-runtime                       = { path = "crates/runtime", version = "1.1.0" }
+ekos-segment-backend               = { path = "crates/segment-backend", version = "1.1.0" }
+ekos-semantic                      = { path = "crates/semantic", version = "1.1.0" }
+ekos-session                       = { path = "crates/session", version = "1.1.0" }
+ekos-migrate                       = { path = "crates/migrate", version = "1.1.0" }
+ekos-migrate-validate              = { path = "crates/migrate-validate", version = "1.1.0" }
+ekos-pg-live                       = { path = "crates/pg-live", version = "1.1.0" }
+ekos-migrate-dq                    = { path = "crates/migrate-dq", version = "1.1.0" }
+ekos-migrate-logic                 = { path = "crates/migrate-logic", version = "1.1.0" }
+ekos-migrate-target-clickhouse     = { path = "crates/migrate-target-clickhouse", version = "1.1.0" }
+ekos-migrate-approval              = { path = "crates/migrate-approval", version = "1.1.0" }
+ekos-migrate-report                = { path = "crates/migrate-report", version = "1.1.0" }
+ekos-plpgsql                       = { path = "crates/plpgsql", version = "1.1.0" }
+ekos-simulation                    = { path = "crates/simulation", version = "1.1.0" }
+ekos-sql-dialect-sdk               = { path = "crates/sql-dialect-sdk", version = "1.1.0" }
 
 # Async
 tokio      = { version = "1", features = ["full"] }
