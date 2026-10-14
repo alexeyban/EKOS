@@ -45,3 +45,6 @@ web/api/.coverage
 
 # scripts/cogc — local cognitive-complexity checker (devlog_256)
 scripts/cogc/target/
+
+# Offline install packages (scripts/package-release.sh)
+/dist/

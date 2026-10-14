@@ -247,6 +247,30 @@ binary is unsigned.
 one was not — no Windows machine was available — so treat it as carefully written rather than
 proven, and please open an issue if it misbehaves.)
 
+### Offline, from an install package
+
+For a machine without internet access, or a build of a commit that is not released yet, build a
+package on a Linux x86_64 machine with a checkout:
+
+```bash
+scripts/package-release.sh          # → dist/ekos-<version>-release.tar.gz
+```
+
+It builds `ekos` from the committed tree (uncommitted changes are left out) for glibc on the
+host and fully static for musl in the pinned Rust image (needs Docker; `--no-musl` skips it),
+packs both the way a release does with one `SHA256SUMS`, `install.sh` and an `INSTALL.md`, and
+checks that the package installs. `<version>` is the tag on a tagged commit, otherwise
+`<crate version>-dev.<commit>`. Copy that one file to the target machine, then:
+
+```bash
+tar xzf ekos-<version>-release.tar.gz && cd ekos-<version>-release
+EKOS_VERSION=v<version> EKOS_BASE_URL="file://$PWD" sh install.sh
+```
+
+The installer verifies the archive and installs into `~/.ekos/bin` exactly as it does from a
+release. `INSTALL.md` in the package covers installing by hand, the first run, agents, upgrading
+and removing.
+
 ### First run
 
 However you installed it:
@@ -353,7 +377,7 @@ check.
 
 ### Upgrading and removing
 
-Re-running the install command replaces the binary in place with the latest release; there is no
+Re-running the install command (or installing a newer package) replaces the binary in place with the latest release; there is no
 package database and nothing else to update. To remove it, delete the binary
 (`rm ~/.ekos/bin/ekos`, or `~/.local/bin/ekos` for an install made before RFC 0179). EKOS keeps
 files in two places only: the `.ekos/` directory inside each workspace you compiled in place,

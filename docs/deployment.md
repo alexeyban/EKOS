@@ -48,6 +48,30 @@ docker compose -f deploy/docker-compose.yml up -d --build
 Tagged releases publish `ghcr.io/alexeyban/ekos:<version>`; until the next tag, `--build` builds
 the image from your checkout. The build compiles the binary and takes several minutes.
 
+### A server without internet access
+
+Build the image on a machine that has access, save it, and load it on the server:
+
+```bash
+# on the connected machine, in the checkout
+docker compose -f deploy/docker-compose.yml build          # tags ghcr.io/alexeyban/ekos:latest
+docker save ghcr.io/alexeyban/ekos:latest | gzip > ekos-image.tar.gz
+tar czf ekos-deploy.tar.gz deploy/docker-compose.yml deploy/.env.example docs/deployment.md
+
+# on the server
+docker load < ekos-image.tar.gz
+tar xzf ekos-deploy.tar.gz && cp deploy/.env.example deploy/.env    # then edit it as above
+docker compose -f deploy/docker-compose.yml up -d                   # no --build
+```
+
+Compose uses the loaded image because one with that name exists locally; it pulls only when
+none does. The identity provider must still be reachable from the server.
+
+People who want the `ekos` command on their own machine (for a project of their own, or for
+`ekos mcp serve` beside an editor) do not need the image: `scripts/package-release.sh` builds an
+offline install package for Linux x86_64 with the installer and an `INSTALL.md`; see the
+README's [Installation](../README.md#offline-from-an-install-package) section.
+
 `EKOS_CONSOLE_PRODUCTION=true` makes the console refuse to start without OIDC, an owner and a
 session secret, turns the two development tokens off, and gives nobody access except through a
 granted role. Without it the console is a development setup: static tokens work, and every
@@ -270,4 +294,5 @@ docker compose -f deploy/docker-compose.yml up -d --build
 | Backups | `/var/lib/ekos/backups/` |
 | Settings | `deploy/.env`; every one is described in `deploy/.env.example` |
 | Design | RFCs 0178–0183 in `ekos/docs/rfcs/` |
+| An offline install package of the CLI | `scripts/package-release.sh` → `dist/ekos-<version>-release.tar.gz` |
 | A check of a whole deployment | `deploy/e2e/run.sh`: the image, a test identity provider, two tenants, a group from a claim, an MCP client, the pages in a browser, backup and restore |
