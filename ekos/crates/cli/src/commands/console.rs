@@ -867,4 +867,167 @@ mod tests {
         assert_eq!(url(&conf("::1")), "http://[::1]:8000");
         assert_eq!(url(&conf("localhost")), "http://localhost:8000");
     }
+
+    /// A stand-in for a running console: answers `/api/health` with 200 while `up` is set,
+    /// 503 otherwise. Returns its port.
+    fn fake_console(up: std::sync::Arc<std::sync::atomic::AtomicBool>) -> u16 {
+        use std::sync::atomic::Ordering;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf);
+                let status = if up.load(Ordering::SeqCst) {
+                    "200 OK"
+                } else {
+                    "503 Service Unavailable"
+                };
+                let _ = stream.write_all(
+                    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\n\r\n").as_bytes(),
+                );
+            }
+        });
+        port
+    }
+
+    fn home_running_at(port: u16, mode: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(control(dir.path())).unwrap();
+        std::fs::write(
+            control(dir.path()).join("console.toml"),
+            format!("mode = \"{mode}\"\nhost = \"127.0.0.1\"\nport = {port}\n"),
+        )
+        .unwrap();
+        write_pid(
+            dir.path(),
+            &PidFile {
+                // Never reached: the tests remove the pid file before `stop` would end anything.
+                supervisor: u32::MAX - 1,
+                console: None,
+                host: "127.0.0.1".into(),
+                port,
+                started: "2026-10-14T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn with_nothing_running_status_stop_and_logs_say_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        std::fs::create_dir_all(control(home)).unwrap();
+        status(home).unwrap();
+        // A pid file left by a console that is gone is removed by stop.
+        write_pid(
+            home,
+            &PidFile {
+                supervisor: u32::MAX - 1,
+                console: None,
+                host: "127.0.0.1".into(),
+                port: 1,
+                started: String::new(),
+            },
+        )
+        .unwrap();
+        status(home).unwrap();
+        stop(home).unwrap();
+        assert!(read_pid(home).is_none());
+        assert!(
+            logs(home, 10).is_err(),
+            "no log yet is an error that says where"
+        );
+        std::fs::write(control(home).join(LOG_FILE), "one\ntwo\nthree\n").unwrap();
+        logs(home, 2).unwrap();
+        // A port nothing listens on: the default (8000) may be a real console on this machine.
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = free.local_addr().unwrap().port();
+        drop(free);
+        std::fs::write(
+            control(home).join("console.toml"),
+            format!("port = {port}\n"),
+        )
+        .unwrap();
+        assert!(open(home, true).is_err(), "open needs a running console");
+    }
+
+    #[test]
+    fn a_running_console_is_reported_and_opened_with_a_code() {
+        use std::sync::atomic::AtomicBool;
+        let up = std::sync::Arc::new(AtomicBool::new(true));
+        let port = fake_console(up.clone());
+        let local = home_running_at(port, "local");
+        status(local.path()).unwrap();
+        open(local.path(), true).unwrap();
+        let codes = std::fs::read_dir(control(local.path()).join(SIGNIN_DIR)).unwrap();
+        assert_eq!(codes.count(), 1, "local mode signs in with one stored code");
+
+        let team = home_running_at(port, "team");
+        open(team.path(), true).unwrap();
+        assert!(
+            !control(team.path()).join(SIGNIN_DIR).exists(),
+            "team mode issues no code"
+        );
+
+        // Running but not answering.
+        up.store(false, std::sync::atomic::Ordering::SeqCst);
+        status(team.path()).unwrap();
+    }
+
+    #[test]
+    fn stop_asks_by_marker_and_returns_once_the_pid_file_is_gone() {
+        use std::sync::atomic::AtomicBool;
+        let port = fake_console(std::sync::Arc::new(AtomicBool::new(true)));
+        let dir = home_running_at(port, "team");
+        let home = dir.path().to_path_buf();
+        let watcher = {
+            let home = home.clone();
+            std::thread::spawn(move || {
+                // The supervisor's part: see the marker, remove the pid file.
+                while !control(&home).join(STOP).exists() {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                std::fs::remove_file(control(&home).join(PID_FILE)).unwrap();
+            })
+        };
+        stop(&home).unwrap();
+        watcher.join().unwrap();
+        assert!(read_pid(&home).is_none());
+    }
+
+    #[test]
+    fn restart_asks_by_marker_and_waits_for_down_then_up() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let up = std::sync::Arc::new(AtomicBool::new(true));
+        let port = fake_console(up.clone());
+        let dir = home_running_at(port, "team");
+        let home = dir.path().to_path_buf();
+        let supervisor = {
+            let (home, up) = (home.clone(), up.clone());
+            std::thread::spawn(move || {
+                while !control(&home).join(RESTART).exists() {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                up.store(false, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(400));
+                up.store(true, Ordering::SeqCst);
+            })
+        };
+        restart(&home).unwrap();
+        supervisor.join().unwrap();
+        assert!(healthy("127.0.0.1", port));
+    }
+
+    #[test]
+    fn markers_decide_and_are_cleared() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(control(dir.path())).unwrap();
+        std::fs::write(control(dir.path()).join(RESTART), "").unwrap();
+        assert_eq!(after_exit(&control(dir.path()), false), Next::Restart);
+        remove_markers(dir.path());
+        assert_eq!(after_exit(&control(dir.path()), false), Next::Crashed);
+    }
 }

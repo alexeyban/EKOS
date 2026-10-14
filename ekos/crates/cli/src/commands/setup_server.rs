@@ -657,4 +657,195 @@ mod tests {
         assert_eq!(v["writable"], true);
         assert!(v["free_bytes"].as_u64().unwrap() > 0);
     }
+
+    async fn json_of(w: &Wizard, req: Request<Body>) -> (u16, serde_json::Value) {
+        let resp = router(w.clone()).oneshot(req).await.unwrap();
+        let status = resp.status().as_u16();
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or_default())
+    }
+
+    fn post_json(uri: &str, body: serde_json::Value) -> Request<Body> {
+        Request::post(uri)
+            .header("x-setup-token", "tok")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    }
+
+    /// A local stand-in for an outside service: `routes` answer with fixed JSON.
+    async fn fake_service(app: Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        base
+    }
+
+    #[tokio::test]
+    async fn the_state_lists_what_is_installed_and_the_projects() {
+        let dir = tempfile::tempdir().unwrap();
+        let w = wizard(dir.path());
+        let home = dir.path().join("home");
+        let project = home.join("data/default/shop");
+        std::fs::create_dir_all(project.join("state")).unwrap();
+        std::fs::write(project.join("ekos.toml"), "[workspace]\nroot = \"/src\"\n").unwrap();
+        std::fs::create_dir_all(home.join("control")).unwrap();
+        std::fs::write(home.join("control/console.toml"), "mode = \"local\"\n").unwrap();
+        let req = Request::get("/api/state")
+            .header("x-setup-token", "tok")
+            .body(Body::empty())
+            .unwrap();
+        let (status, v) = json_of(&w, req).await;
+        assert_eq!(status, 200, "{v}");
+        assert_eq!(v["installed"], true);
+        assert_eq!(v["answers"]["console"]["mode"], "local");
+        assert_eq!(v["projects"], serde_json::json!(["shop"]));
+        assert!(v["agents"]["claude_code"].is_boolean());
+        assert!(v["paths"]["claude_desktop"].is_string());
+    }
+
+    #[tokio::test]
+    async fn a_path_is_checked_for_existence_and_writability() {
+        let dir = tempfile::tempdir().unwrap();
+        let w = wizard(dir.path());
+        let target = dir.path().join("new/home");
+        let (status, v) = json_of(
+            &w,
+            post_json(
+                "/api/check-path",
+                serde_json::json!({"path": format!("  {}  ", target.display())}),
+            ),
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(v["exists"], false);
+        assert_eq!(v["writable"], true);
+        assert_eq!(v["absolute"], true);
+    }
+
+    #[tokio::test]
+    async fn the_issuer_check_reads_the_discovery_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let w = wizard(dir.path());
+        let base = fake_service(Router::new().route(
+            "/realms/main/.well-known/openid-configuration",
+            get(|| async { Json(serde_json::json!({"issuer": "https://id.example/realms/main"})) }),
+        ))
+        .await;
+        let (_, v) = json_of(
+            &w,
+            post_json(
+                "/api/check-issuer",
+                serde_json::json!({"url": format!("{base}/realms/main/")}),
+            ),
+        )
+        .await;
+        assert_eq!(v["ok"], true, "{v}");
+        assert!(
+            v["message"]
+                .as_str()
+                .unwrap()
+                .contains("https://id.example/realms/main")
+        );
+        let (_, v) = json_of(
+            &w,
+            post_json(
+                "/api/check-issuer",
+                serde_json::json!({"url": format!("{base}/nowhere")}),
+            ),
+        )
+        .await;
+        assert_eq!(v["ok"], false);
+        assert!(
+            v["message"]
+                .as_str()
+                .unwrap()
+                .contains("openid-configuration")
+        );
+    }
+
+    #[tokio::test]
+    async fn the_model_check_reads_each_providers_model_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let w = wizard(dir.path());
+        // OpenAI-compatible: `data[].id`, a Bearer key when given.
+        let openai = fake_service(Router::new().route(
+            "/v1/models",
+            get(|headers: HeaderMap| async move {
+                assert_eq!(headers["authorization"], "Bearer k1");
+                Json(serde_json::json!({"data": [{"id": "gpt-x"}]}))
+            }),
+        ))
+        .await;
+        let (_, v) = json_of(
+            &w,
+            post_json(
+                "/api/check-model",
+                serde_json::json!({"provider": "openai", "model": "gpt-x",
+                    "base_url": format!("{openai}/v1"), "api_key": "k1"}),
+            ),
+        )
+        .await;
+        assert_eq!(v["ok"], true, "{v}");
+        // Anthropic: `/v1/models` with its key and version headers.
+        let anthropic = fake_service(Router::new().route(
+            "/v1/models",
+            get(|headers: HeaderMap| async move {
+                assert_eq!(headers["x-api-key"], "k2");
+                assert_eq!(headers["anthropic-version"], "2023-06-01");
+                Json(serde_json::json!({"data": [{"id": "claude-a"}]}))
+            }),
+        ))
+        .await;
+        let check = |model: &'static str| ModelCheckInput {
+            provider: "anthropic",
+            model,
+            base_url: &anthropic,
+            api_key: "k2",
+        };
+        let (ok, msg) = model_check(&check("claude-a")).await;
+        assert!(ok, "{msg}");
+        let (ok, msg) = model_check(&check("claude-b")).await;
+        assert!(!ok && msg.contains("claude-a"), "{msg}");
+        // A service that does not answer is a failed check, not a crash.
+        let (ok, _) = model_check(&ModelCheckInput {
+            provider: "openai",
+            model: "m",
+            base_url: "http://127.0.0.1:9",
+            api_key: "",
+        })
+        .await;
+        assert!(!ok);
+    }
+
+    #[test]
+    fn the_ollama_address_is_completed() {
+        assert_eq!(ollama_base("localhost:11434/"), "http://localhost:11434");
+        assert_eq!(
+            ollama_base("https://ollama.example"),
+            "https://ollama.example"
+        );
+    }
+
+    #[tokio::test]
+    async fn finish_stops_the_wizard_and_needs_the_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let w = wizard(dir.path());
+        let no_token = Request::post("/api/finish").body(Body::empty()).unwrap();
+        assert_eq!(status(&w, no_token).await, 403);
+        let done = w.done.clone();
+        let waiter = tokio::spawn(async move { done.notified().await });
+        tokio::task::yield_now().await;
+        let req = Request::post("/api/finish")
+            .header("x-setup-token", "tok")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(status(&w, req).await, 200);
+        tokio::time::timeout(Duration::from_secs(2), waiter)
+            .await
+            .expect("finish wakes the server")
+            .unwrap();
+    }
 }
