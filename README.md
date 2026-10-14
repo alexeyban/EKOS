@@ -7,7 +7,8 @@
 
 EKOS is the open-source knowledge layer for AI agents: a compiler that turns source code, SQL,
 documentation and Git history into evidence-backed knowledge that agents query over MCP. Project
-site and documentation: **[ekos.dev](https://ekos.dev)**.
+site and documentation: **[ekos.dev](https://ekos.dev)**. Install: **[ekos.dev/docs/getting-started/installation](https://ekos.dev/docs/getting-started/installation.html)**
+(a setup wizard in your browser on Linux, Windows 11 and macOS — see [Installation](#installation)).
 
 Unlike traditional enterprise systems that manage data, documents or metadata independently, EKOS treats the entire enterprise as a living knowledge system — a permanently evolving semantic model that can be trusted by both humans and AI.
 

@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Local work lands with `[skip ci]`; this runs the whole matrix (web-os included) on demand.
+  workflow_dispatch: {}
 
 env:
   CARGO_TERM_COLOR: always
