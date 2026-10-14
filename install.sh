@@ -168,6 +168,15 @@ Refusing to install. Report this at https://github.com/$REPO/issues"
     chmod 755 "$binary"
 }
 
+# Put a new binary in place by renaming a copy over it: a running program (an agent's MCP server,
+# a pipeline run) cannot be overwritten ("Text file busy"), but it can be replaced by a rename,
+# and keeps running from the old file.
+place_binary() {
+    cp "$1" "$2.new.$$"
+    chmod 755 "$2.new.$$"
+    mv -f "$2.new.$$" "$2"
+}
+
 # ── The full package (RFC 0185) ───────────────────────────────────────────────
 full="ekos-${bare}-${target}-full"
 if [ "${EKOS_CLI_ONLY:-}" != 1 ] && [ -z "${EKOS_INSTALL_DIR:-}" ] \
@@ -191,8 +200,7 @@ if [ "${EKOS_CLI_ONLY:-}" != 1 ] && [ -z "${EKOS_INSTALL_DIR:-}" ] \
         rm -rf "$EKOS_HOME_DIR/console"
         mkdir -p "$EKOS_HOME_DIR/bin"
         cp -R "$tmp/$full/console" "$EKOS_HOME_DIR/console"
-        cp "$tmp/$full/bin/ekos" "$EKOS_HOME_DIR/bin/ekos"
-        chmod 755 "$EKOS_HOME_DIR/bin/ekos"
+        place_binary "$tmp/$full/bin/ekos" "$EKOS_HOME_DIR/bin/ekos"
         printf '\nInstalled EKOS %s with its web console to %s\n' "$version" "$EKOS_HOME_DIR"
         if [ "${EKOS_NO_SETUP:-}" = 1 ]; then
             printf 'Next: %s/bin/ekos setup\n' "$EKOS_HOME_DIR"
@@ -228,8 +236,7 @@ fi
 # ── Install ──────────────────────────────────────────────────────────────────
 mkdir -p "$INSTALL_DIR"
 # `cp` then `chmod`, not `install`: BusyBox and some minimal images lack `install(1)`.
-cp "$binary" "$INSTALL_DIR/ekos"
-chmod 755 "$INSTALL_DIR/ekos"
+place_binary "$binary" "$INSTALL_DIR/ekos"
 
 # The home's data directory, so `ekos project add` has somewhere to put a project and the
 # layout is visible before the first one exists.

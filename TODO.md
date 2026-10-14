@@ -6518,6 +6518,12 @@ LinkML; generation stays in LinkML.
       arguments as data on the command (devlog_272)
 - [ ] RFC 0188 remainder: the Windows path (delayed removal of `bin\` while the page runs) and
       the macOS launchd path not run on those systems; no uninstall from a team server's console
+- [ ] `ekos console stop` ends a pipeline run in progress: it waits 20 s, then force-ends the
+      console, and the run's `ekos` stage carries on orphaned while the console records the run as
+      lost (hit upgrading a real install to v1.1.0 during an Init & compile). It should refuse,
+      or wait, while runs are active, and say which.
+- [ ] `install.ps1` moving a locked `bin\`/`console\` aside (and refusing when EKOS runs) has
+      not been run on Windows.
 - [ ] Intel macOS full package: `cryptography` 50+ has no x86_64 macOS wheels, so the release
       builds the command only for Intel Macs. Revisit if wheels return, or pin per platform
 - [ ] RFC 0187 remainder: answers arrive whole per step (no token streaming); Anthropic and

@@ -65,10 +65,29 @@ try {
 
     # Replace the program, never the data: only bin\ and console\ are touched.
     New-Item -ItemType Directory -Force -Path (Join-Path $Home_ 'data') | Out-Null
+    # Move the old program aside first. A running ekos.exe or console (an agent's MCP server, a
+    # pipeline run) locks its directory: then nothing is changed and the message says why,
+    # instead of a half-deleted program directory.
+    $stamp = Get-Date -Format 'yyyyMMddHHmmss'
+    $moved = @()
     foreach ($part in 'bin', 'console') {
         $dest = Join-Path $Home_ $part
-        if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-        Copy-Item -Recurse -LiteralPath (Join-Path $pkg $part) -Destination $dest
+        if (-not (Test-Path $dest)) { continue }
+        try {
+            Rename-Item -LiteralPath $dest -NewName "$part.old-$stamp"
+            $moved += $part
+        } catch {
+            foreach ($back in $moved) {
+                Rename-Item -LiteralPath (Join-Path $Home_ "$back.old-$stamp") -NewName $back
+            }
+            throw "EKOS is running from $Home_ (the console, a pipeline run or an agent's MCP server). Stop it - ekos console stop, and close the agents - then run this again. Nothing was changed."
+        }
+    }
+    foreach ($part in 'bin', 'console') {
+        Copy-Item -Recurse -LiteralPath (Join-Path $pkg $part) -Destination (Join-Path $Home_ $part)
+    }
+    foreach ($part in $moved) {
+        Remove-Item -Recurse -Force (Join-Path $Home_ "$part.old-$stamp") -ErrorAction SilentlyContinue
     }
     $ekos = Join-Path $Home_ 'bin\ekos.exe'
     & $ekos --version | Out-Null

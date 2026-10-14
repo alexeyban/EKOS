@@ -136,6 +136,18 @@ env -i PATH="$PATH" HOME="$home9" EKOS_VERSION="$version" EKOS_BASE_URL="file://
 [ -x "$home9/.ekos/bin/ekos" ] && [ ! -e "$home9/.ekos/console" ] \
     || fail "EKOS_CLI_ONLY=1 still installed the console"
 
+# 10. Reinstalling while the installed program runs (an MCP server, a pipeline stage) must work:
+#     overwriting a running binary fails with "Text file busy" (found upgrading a real install).
+#     A copy of sleep(1) stands in for a running ekos.
+home10="$work/h10"; mkdir -p "$home10/.ekos/bin"
+cp "$(command -v sleep)" "$home10/.ekos/bin/ekos"
+"$home10/.ekos/bin/ekos" 30 &
+running=$!
+run_install "$home10" || fail "install over a running binary exited non-zero: $(cat "$work/out.log")"
+"$home10/.ekos/bin/ekos" --version 2>/dev/null | grep -q "ekos 9.9.9" \
+    || fail "install over a running binary left the old one in place"
+kill "$running" 2>/dev/null || true
+
 if [ "$failures" -ne 0 ]; then
     printf '%s check(s) failed\n' "$failures" >&2
     exit 1
