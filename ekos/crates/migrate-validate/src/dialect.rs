@@ -16,10 +16,9 @@ pub enum Dialect {
     Postgres,
     ClickHouse,
     /// RFC 0190: Trino reading Iceberg tables (EKOS Lakehouse, source ↔ bronze reconciliation).
-    /// The expressions follow Trino's documented semantics and are pinned by the SQL snapshot.
-    /// Agreement with the golden hashes on a live Trino is proven in the `ekos-lakehouse`
-    /// repository, which has the Trino client (`EKOS_LAKEHOUSE_LIVE=1`); until that suite has
-    /// run, treat these as reviewed, not verified.
+    /// Pinned by the SQL snapshot here. Agreement with the golden canonical forms, the Rust
+    /// hashes and bucket checksums is proven live in the `ekos-lakehouse` repository, which has
+    /// the Trino client (`EKOS_LAKEHOUSE_LIVE=1`; 31/31 on Trino 483, 2026-10-16).
     Trino,
 }
 

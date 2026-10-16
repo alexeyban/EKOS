@@ -6603,17 +6603,22 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
 - [x] `plugins/sql-dialect-trino`; the dbt analyzer falls back to it (devlog_274)
 - [x] `Dialect::Trino` in `migrate-validate`, SQL snapshot pinned (devlog_274)
 - [x] `classify_with` (statement classifier under another grammar); serde on drift shapes
-- [ ] Live three-engine agreement (PostgreSQL / Trino / Rust) against the golden hashes — in
-      the Lakehouse repo, which has the Trino client. Until it runs, the Trino expressions are
-      reviewed, not verified
-- [ ] Lakehouse repo bootstrap: workspace, `ekos-lakehouse` binary, `lakehouse doctor`
-- [ ] `docker-compose.lakehouse.yml`: PostgreSQL, Trino, Polaris, MinIO, Dagster
-- [ ] Trino client + `TrinoReader`; guarded executor
-- [ ] Throughput of the Trino `postgresql` → `iceberg` load path, measured
-- [ ] Exit: a planted one-row defect between PostgreSQL and Iceberg caught by V3
+- [x] Live three-engine agreement (PostgreSQL / Trino / Rust): 31/31 canonical forms, hashes,
+      prefixes and bucket checksums on Trino 483 (ekos-lakehouse devlog_2)
+- [x] Lakehouse repo bootstrap: workspace, `ekos-lakehouse` binary, `lakehouse doctor`
+- [x] `deploy/docker-compose.lakehouse.yml`: PostgreSQL, Trino, Polaris, **SeaweedFS** (MinIO's
+      community edition is unmaintained and ships no images), Dagster
+- [x] Trino client + read-only `TrinoReader` (every statement classified before sending)
+- [x] Throughput measured: 10 M rows at 0.46–0.57 M rows/s single statement, 0.79–0.91 M with 4
+      key ranges — Trino stays the load path
+- [x] Exit: a planted one-row defect between PostgreSQL and Iceberg caught by V3 (V1 unchanged)
+- [ ] Not yet: the Lakehouse repo on GitHub (public) and EKOS `main` pushed, so it builds without
+      a sibling checkout; the guarded executor for writes (M1)
 
 ### M1–M5
 - [ ] M1 bronze · M2 silver · M3 schema-change loop · M4 gold from descriptions ·
       M5 monitoring and self-serve (see RFC 0190 "Milestones")
 - [ ] `Target::Iceberg` (migrate-dq) and any engine variant in `migrate::connection` — added
       with the M1 type map, when there are rules for them
+- [ ] M1 type map: an unconstrained PostgreSQL `numeric` arrives in Trino as `number`, which
+      Iceberg rejects — every one needs an explicit decision (found in M0)
