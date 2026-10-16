@@ -96,6 +96,14 @@ impl Family {
             (Self::Date, Dialect::ClickHouse) => "Nullable(Date32)".into(),
             (Self::Timestamp, Dialect::Postgres) => "timestamp".into(),
             (Self::Timestamp, Dialect::ClickHouse) => "Nullable(DateTime64(6))".into(),
+            // Never run (`run` refuses an engine pair other than PostgreSQL → ClickHouse); the
+            // types are Trino's plain equivalents so the table stays total.
+            (Self::Int, Dialect::Trino) => "bigint".into(),
+            (Self::Decimal, Dialect::Trino) => format!("decimal(30,{DECIMAL_SCALE})"),
+            (Self::Text, Dialect::Trino) => "varchar".into(),
+            (Self::Bool, Dialect::Trino) => "boolean".into(),
+            (Self::Date, Dialect::Trino) => "date".into(),
+            (Self::Timestamp, Dialect::Trino) => "timestamp(6)".into(),
         }
     }
 
@@ -581,7 +589,7 @@ impl Plan {
                 .map(|(c, f)| format!("{} {}", ident(c), f.column_type(d)))
                 .collect();
             let engine = match d {
-                Dialect::Postgres => "",
+                Dialect::Postgres | Dialect::Trino => "",
                 Dialect::ClickHouse => " ENGINE = Memory",
             };
             out.push(format!(
@@ -607,7 +615,8 @@ impl Plan {
         }
         out.push(match d {
             Dialect::Postgres => self.source_view.clone(),
-            Dialect::ClickHouse => self.lowered_view.clone(),
+            // There is no lowering to Trino; `run` refuses it before setting anything up.
+            Dialect::ClickHouse | Dialect::Trino => self.lowered_view.clone(),
         });
         out
     }
@@ -761,6 +770,14 @@ pub fn run(plan: &Plan, source: &dyn Sandbox, target: &dyn Sandbox) -> V5Outcome
         engine: s.label().to_string(),
         message,
     };
+    // A lowering exists only from PostgreSQL to ClickHouse (RFC 0164).
+    if source.dialect() != Dialect::Postgres || target.dialect() != Dialect::ClickHouse {
+        return not_run(format!(
+            "V5 compares a PostgreSQL view with its ClickHouse lowering; {} → {} has no lowering",
+            source.label(),
+            target.label()
+        ));
+    }
     let source_setup = plan.setup(source.dialect());
     // What the view returns is asked of the source engine, not assumed.
     let (encoding, described) = match source.run(
@@ -1061,6 +1078,7 @@ mod tests {
             match self.dialect {
                 Dialect::Postgres => "fake:postgres",
                 Dialect::ClickHouse => "fake:clickhouse",
+                Dialect::Trino => "fake:trino",
             }
         }
         fn run(
@@ -1092,6 +1110,22 @@ mod tests {
                     }
                 })
                 .collect())
+        }
+    }
+
+    /// RFC 0190 added Trino to the dialects; there is no lowering to it, so V5 does not run.
+    #[test]
+    fn an_engine_pair_without_a_lowering_is_not_run() {
+        let rows: &[&[&str]] = &[&["1", "open"]];
+        for (s, t) in [
+            (Dialect::Postgres, Dialect::Trino),
+            (Dialect::Trino, Dialect::ClickHouse),
+        ] {
+            let out = run(&planned(), &Fake::new(s, rows), &Fake::new(t, rows));
+            assert!(
+                matches!(&out, V5Outcome::NotRun { why } if why.contains("no lowering")),
+                "{s:?} → {t:?}: {out:?}"
+            );
         }
     }
 

@@ -298,6 +298,43 @@ prefixes constantly",
         structurally_keyed: true,
         note: "(method locator, rule index) — RFC 0148 stage 2; one reconstructed rule per slot",
     },
+    // RFC 0190 — EKOS Lakehouse, an extension in its own repository: as with `Binary*`
+    // (RFC 0149), the rows live here so identity resolution never merges these objects.
+    CustomKind {
+        name: "LakehousePipeline",
+        structurally_keyed: true,
+        note: "(project, pipeline name) — RFC 0190; one per generated pipeline repository (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "LakehouseTable",
+        structurally_keyed: true,
+        note: "(pipeline, layer, table) — RFC 0190; `orders` exists once per layer (bronze, silver) and in every source schema (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "LakehouseRun",
+        structurally_keyed: true,
+        note: "(pipeline, orchestrator run id, asset) — RFC 0190; runs of one asset share every name (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "LakehouseChange",
+        structurally_keyed: true,
+        note: "(pipeline, source snapshot, change index) — RFC 0190; the same column change recurs across snapshots (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "LakehouseMetric",
+        structurally_keyed: true,
+        note: "(table, metric, run) — RFC 0190; one value per metric per run, all with the same metric name (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "LakehouseMart",
+        structurally_keyed: true,
+        note: "(pipeline, mart description path) — RFC 0190; two marts may share a title (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "LakehouseApproval",
+        structurally_keyed: true,
+        note: "(change or mart, evidence hash, approver) — RFC 0190; approvals of one item differ only by evidence (written by the ekos-lakehouse extension)",
+    },
     CustomKind {
         name: "ProjectSummary",
         structurally_keyed: true,

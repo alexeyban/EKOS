@@ -241,10 +241,21 @@ fn walk_factor(
     }
 }
 
-/// Parse and classify every statement in `sql`.
+/// Parse and classify every statement in `sql`, as ClickHouse SQL.
 pub fn classify(sql: &str) -> Result<Vec<Classified>, ClassifyError> {
-    let dialect = sqlparser::dialect::ClickHouseDialect {};
-    let statements = sqlparser::parser::Parser::parse_sql(&dialect, sql).map_err(|e| {
+    classify_with(sql, &sqlparser::dialect::ClickHouseDialect {})
+}
+
+/// [`classify`] with another engine's grammar (RFC 0190: Trino, for EKOS Lakehouse).
+///
+/// The text is parsed as given. A caller must not run a dialect's recovery `preprocess` first:
+/// that blanks statements no grammar reads (Trino's `ALTER TABLE … EXECUTE`), and a statement
+/// the classifier never sees could not be refused.
+pub fn classify_with(
+    sql: &str,
+    dialect: &dyn sqlparser::dialect::Dialect,
+) -> Result<Vec<Classified>, ClassifyError> {
+    let statements = sqlparser::parser::Parser::parse_sql(dialect, sql).map_err(|e| {
         ClassifyError::Unparseable {
             sql: sql.trim().to_string(),
             message: e.to_string(),
@@ -452,5 +463,21 @@ mod tests {
         assert!(C::Read < C::DdlCreate);
         assert!(!C::Read.writes());
         assert!(C::DmlInsert.writes());
+    }
+
+    /// RFC 0190: the same rules under another grammar; what it cannot parse is refused.
+    #[test]
+    fn classify_with_uses_the_given_grammar() {
+        let generic = sqlparser::dialect::GenericDialect {};
+        let ok = classify_with(
+            "INSERT INTO iceberg.bronze.t SELECT * FROM postgresql.public.t",
+            &generic,
+        )
+        .unwrap();
+        assert_eq!(ok[0].class, StatementClass::DmlInsert);
+        assert!(matches!(
+            classify_with("ALTER TABLE iceberg.bronze.t EXECUTE optimize", &generic),
+            Err(ClassifyError::Unparseable { .. })
+        ));
     }
 }

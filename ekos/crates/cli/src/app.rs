@@ -1,7 +1,8 @@
 use crate::extension::Extensions;
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 /// The whole command tree, for `ekos commands --json` (RFC 0186).
@@ -46,6 +47,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// RFC 0191: a command an extension added. Never produced by the derive; `parse_cli` builds
+    /// it from the matches.
+    #[command(skip)]
+    Extension {
+        name: String,
+        matches: clap::ArgMatches,
+    },
     /// Initialize .ekos/ workspace directory
     Init {
         /// Scan the workspace and write an ekos.toml that reflects what is actually in it —
@@ -1555,12 +1563,48 @@ fn emits_machine_output(command: &Commands) -> bool {
     }
 }
 
+/// Parses the arguments against the built-in commands plus every extension's (RFC 0191). On a
+/// usage error or `--help` it prints and exits, as `Cli::parse` does.
+fn parse_cli<I, T>(extensions: &Extensions, args: I) -> Result<Cli>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let root = extensions.extend_cli(cli_command())?;
+    let matches = root.get_matches_from(args);
+    if let Some((name, sub)) = matches.subcommand()
+        && extensions.command_owner(name).is_some()
+    {
+        return Ok(Cli {
+            config: matches.get_one::<PathBuf>("config").cloned(),
+            home: matches.get_one::<PathBuf>("home").cloned(),
+            project: matches.get_one::<String>("project").cloned(),
+            tenant: matches.get_one::<String>("tenant").cloned(),
+            read_scope: matches.get_one::<PathBuf>("read_scope").cloned(),
+            command: Commands::Extension {
+                name: name.to_string(),
+                matches: sub.clone(),
+            },
+        });
+    }
+    Ok(Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit()))
+}
+
 /// The whole `ekos` CLI: parses arguments and dispatches every command. The public binary calls
 /// it with [`Extensions::none`]; an RFC 0149 build passes its own extensions, which then take
 /// part in `build`/`recover`/`commit`, the MCP server, `architecture investigate` and the
 /// cluster compile worker.
 pub async fn main_with(extensions: Extensions) -> Result<()> {
-    let cli = Cli::parse();
+    main_with_args(extensions, std::env::args_os()).await
+}
+
+/// [`main_with`] with explicit arguments (the first is the program name), for tests.
+pub async fn main_with_args<I, T>(extensions: Extensions, args: I) -> Result<()>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let cli = parse_cli(&extensions, args)?;
 
     let env_workspace = std::env::var_os("EKOS_WORKSPACE").map(PathBuf::from);
     let mcp_workspace_flag: Option<PathBuf> = match &cli.command {
@@ -1592,11 +1636,14 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
             return dispatch_project(subcommand, &home_dir?, tenant_flag);
         }
         Commands::Catalogue { json: _ } => {
-            let mut root = cli_command();
+            let mut root = extensions.extend_cli(cli_command())?;
             root.build();
             let out = serde_json::json!({
                 "version": env!("CARGO_PKG_VERSION"),
-                "commands": crate::commands::catalogue::catalogue(&root),
+                "commands": crate::commands::catalogue::catalogue_with(
+                    &root,
+                    &extensions.command_classes(),
+                ),
             });
             println!("{}", serde_json::to_string(&out)?);
             return Ok(());
@@ -1890,6 +1937,18 @@ pub async fn main_with(extensions: Extensions) -> Result<()> {
         Commands::Migrate { subcommand } => dispatch_migrate(subcommand, &config, &cwd).await,
         Commands::Session { subcommand } => dispatch_session(subcommand, &config, &cwd),
         Commands::Eval { subcommand } => dispatch_eval(subcommand, &config, &cwd).await,
+        Commands::Extension { name, matches } => {
+            let owner = extensions
+                .command_owner(&name)
+                .context("an extension command without its extension")?;
+            let ctx = crate::extension::CommandContext {
+                config: &config,
+                cwd: &cwd,
+                config_path: &config_path,
+                invoked_from: &invoked_from,
+            };
+            owner.run_command(&name, &matches, &ctx).await
+        }
         Commands::Project { .. }
         | Commands::Home { .. }
         | Commands::Console { .. }

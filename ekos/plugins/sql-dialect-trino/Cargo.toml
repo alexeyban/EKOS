@@ -1,0 +1,13 @@
+[package]
+name = "ekos-plugin-sql-dialect-trino"
+description = "Trino SqlDialectParser plugin (RFC 0190/0191)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ekos-sql-dialect-sdk.workspace = true
+sqlparser.workspace = true

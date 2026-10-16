@@ -1725,6 +1725,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-sql-dialect-trino"
+version = "1.1.0"
+dependencies = [
+ "ekos-sql-dialect-sdk",
+ "sqlparser",
+]
+
+[[package]]
 name = "ekos-plugin-treasury"
 version = "1.1.0"
 dependencies = [
@@ -1759,6 +1767,7 @@ dependencies = [
  "ekos-plugin-sql-dialect-mysql",
  "ekos-plugin-sql-dialect-postgres",
  "ekos-plugin-sql-dialect-snowflake",
+ "ekos-plugin-sql-dialect-trino",
  "ekos-semantic",
  "ekos-sql-dialect-sdk",
  "glob",

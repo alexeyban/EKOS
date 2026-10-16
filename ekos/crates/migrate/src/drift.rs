@@ -22,7 +22,7 @@
 use serde::{Deserialize, Serialize};
 
 /// A table name, normalized for comparison.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TableRef {
     pub schema: Option<String>,
     pub name: String,
@@ -62,7 +62,7 @@ pub struct ColumnRef {
 }
 
 /// A table with its columns, from either side.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TableShape {
     pub table: TableRef,
     pub columns: Vec<ColumnRef>,

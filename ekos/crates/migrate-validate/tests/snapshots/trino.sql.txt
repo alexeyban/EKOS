@@ -1,0 +1,28 @@
+Text
+  (CASE WHEN "txt" IS NULL THEN '\N' ELSE replace(replace(CAST("txt" AS varchar), '\', '\\'), chr(31), '\x1f') END)
+Char
+  (CASE WHEN "ch" IS NULL THEN '\N' ELSE replace(replace(CAST("ch" AS varchar), '\', '\\'), chr(31), '\x1f') END)
+Bool
+  (CASE WHEN "flag" IS NULL THEN '\N' ELSE (CASE WHEN "flag" THEN 't' ELSE 'f' END) END)
+Int
+  (CASE WHEN "n" IS NULL THEN '\N' ELSE CAST("n" AS varchar) END)
+Decimal(2)
+  (CASE WHEN "amt" IS NULL THEN '\N' ELSE CAST(CAST("amt" AS decimal(38, 2)) AS varchar) END)
+TimestampUtc
+  (CASE WHEN "ts" IS NULL THEN '\N' ELSE to_iso8601(CAST("ts" AT TIME ZONE 'UTC' AS timestamp(6))) END)
+TimestampNaive
+  (CASE WHEN "ts_naive" IS NULL THEN '\N' ELSE to_iso8601(CAST("ts_naive" AS timestamp(6))) END)
+Date
+  (CASE WHEN "d" IS NULL THEN '\N' ELSE CAST("d" AS varchar) END)
+Time
+  (CASE WHEN "t" IS NULL THEN '\N' ELSE CAST(CAST("t" AS time(6)) AS varchar) END)
+Uuid
+  (CASE WHEN "u" IS NULL THEN '\N' ELSE lower(CAST("u" AS varchar)) END)
+Bytes
+  (CASE WHEN "b" IS NULL THEN '\N' ELSE lower(to_hex("b")) END)
+Inet
+  (CASE WHEN "ip" IS NULL THEN '\N' ELSE replace(replace(CAST("ip" AS varchar), '\', '\\'), chr(31), '\x1f') END)
+ROW_HASH
+  lower(to_hex(sha256(to_utf8((CASE WHEN "txt" IS NULL THEN '\N' ELSE replace(replace(CAST("txt" AS varchar), '\', '\\'), chr(31), '\x1f') END) || chr(31) || (CASE WHEN "ch" IS NULL THEN '\N' ELSE replace(replace(CAST("ch" AS varchar), '\', '\\'), chr(31), '\x1f') END)))))
+BUCKET_QUERY
+  SELECT from_base(substr(lower(to_hex(sha256(to_utf8((CASE WHEN "id" IS NULL THEN '\N' ELSE CAST("id" AS varchar) END))))), 1, 15), 16) % 4096 AS bucket, count(*) AS row_count, sum(CAST(from_base(substr(lower(to_hex(sha256(to_utf8((CASE WHEN "txt" IS NULL THEN '\N' ELSE replace(replace(CAST("txt" AS varchar), '\', '\\'), chr(31), '\x1f') END) || chr(31) || (CASE WHEN "ch" IS NULL THEN '\N' ELSE replace(replace(CAST("ch" AS varchar), '\', '\\'), chr(31), '\x1f') END))))), 1, 15), 16) AS decimal(38, 0))) AS hash_sum FROM s.orders GROUP BY 1 ORDER BY 1

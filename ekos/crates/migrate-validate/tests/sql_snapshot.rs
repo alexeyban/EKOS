@@ -87,6 +87,11 @@ fn clickhouse_sql_is_pinned() {
     check("clickhouse.sql.txt", &render(Dialect::ClickHouse));
 }
 
+#[test]
+fn trino_sql_is_pinned() {
+    check("trino.sql.txt", &render(Dialect::Trino));
+}
+
 /// Every `ColumnRule` variant appears above. A new rule with no pinned SQL would otherwise ship
 /// unreviewed.
 #[test]

@@ -20,6 +20,8 @@ use tempfile::TempDir;
 
 const CONNECTOR: &str = "fake-ext";
 const TOOL: &str = "fake_ext_echo";
+/// Reads only through the store it is handed, so it says it is scoped (RFC 0191).
+const SCOPED_TOOL: &str = "fake_ext_scoped";
 
 #[derive(Default)]
 struct Probe {
@@ -114,20 +116,42 @@ impl EkosExtension for FakeExtension {
     }
 
     fn mcp_tools(&self, _config: &EkosConfig) -> Vec<Value> {
-        vec![json!({
-            "name": TOOL,
-            "description": "Echoes its `text` argument (RFC 0149 test extension).",
-            "inputSchema": { "type": "object", "properties": { "text": { "type": "string" } } }
-        })]
+        vec![
+            json!({
+                "name": TOOL,
+                "description": "Echoes its `text` argument (RFC 0149 test extension).",
+                "inputSchema": { "type": "object", "properties": { "text": { "type": "string" } } }
+            }),
+            json!({
+                "name": SCOPED_TOOL,
+                "description": "Counts objects through the store it is handed (RFC 0191).",
+                "inputSchema": { "type": "object" }
+            }),
+        ]
     }
 
     fn call_mcp_tool(
         &self,
         name: &str,
         args: &Value,
-        _ledger: &dyn KnowledgeStore,
+        ledger: &dyn KnowledgeStore,
     ) -> Option<anyhow::Result<Value>> {
-        (name == TOOL).then(|| Ok(json!({ "echo": args["text"] })))
+        match name {
+            TOOL => Some(Ok(json!({ "echo": args["text"] }))),
+            SCOPED_TOOL => Some(
+                ledger
+                    .all_objects()
+                    .map(|o| json!({ "objects": o.len() }))
+                    .map_err(Into::into),
+            ),
+            _ => None,
+        }
+    }
+
+    fn mcp_tool_is_scoped(&self, name: &str) -> bool {
+        // Claims a built-in too, which must make no difference: built-ins are decided by
+        // `SCOPED_TOOLS` / `SCOPE_REFUSED_TOOLS` alone.
+        name == SCOPED_TOOL || name == "ekos_status"
     }
 }
 
@@ -232,6 +256,52 @@ async fn an_extension_takes_part_in_every_stage_it_hooks() {
             .unwrap()
             .contains("unknown tool")
     );
+
+    // RFC 0191: a restricted reader gets the tool its extension marks scoped, and only that.
+    let restricted = json!({ "ekos/readScope": {"default": "deny", "rules": [
+        {"effect": "allow", "source": "nothing-matches-this"}
+    ]}});
+    let call_restricted = |cache: &mut ekos::commands::mcp::StoreCache, tool: &str| {
+        rpc(
+            &config,
+            dir,
+            &ext,
+            cache,
+            "tools/call",
+            json!({ "name": tool, "arguments": {}, "_meta": restricted.clone() }),
+        )
+    };
+    let scoped = call_restricted(&mut cache, SCOPED_TOOL);
+    assert_eq!(scoped["result"]["isError"], false, "{scoped}");
+    let body: Value =
+        serde_json::from_str(scoped["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        body["objects"], 0,
+        "the scope must filter the store the tool reads: {body}"
+    );
+    for refused in [TOOL, "ekos_status"] {
+        let resp = call_restricted(&mut cache, refused);
+        assert_eq!(resp["result"]["isError"], true, "{refused}: {resp}");
+        assert!(
+            resp["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("restricted access"),
+            "{refused}: {resp}"
+        );
+    }
+    // Unrestricted, the scoped tool sees the whole ledger.
+    let open = rpc(
+        &config,
+        dir,
+        &ext,
+        &mut cache,
+        "tools/call",
+        json!({ "name": SCOPED_TOOL, "arguments": {} }),
+    );
+    let body: Value =
+        serde_json::from_str(open["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(body["objects"].as_u64().unwrap() > 0, "{body}");
 
     // Without the extension the same server neither lists nor dispatches it.
     let listed = rpc(

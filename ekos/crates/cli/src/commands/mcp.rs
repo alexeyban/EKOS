@@ -1559,7 +1559,12 @@ fn tools_call(
     if let Err(e) = cache.set_request_scope(request_scope) {
         return tool_err(&e);
     }
-    if restricted && !SCOPED_TOOLS.contains(&name) {
+    // RFC 0191: an extension may say its own tool reads only through the (scoped) store. A
+    // built-in tool is always decided by the two lists above, whatever an extension says.
+    let extension_scoped = !SCOPED_TOOLS.contains(&name)
+        && !SCOPE_REFUSED_TOOLS.iter().any(|(t, _)| *t == name)
+        && ext.mcp_tool_is_scoped(name);
+    if restricted && !SCOPED_TOOLS.contains(&name) && !extension_scoped {
         return tool_err(&anyhow::anyhow!(
             "{name} is not available to a reader with restricted access to this project"
         ));

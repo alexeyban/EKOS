@@ -6589,3 +6589,31 @@ LinkML; generation stays in LinkML.
       looks for text, script errors and failed requests, not layout
 - [ ] Moving an in-place `./.ekos` workspace into the home is a manual copy; no command does it
 - [ ] The cluster compile worker ships a config between processes and loses `location`
+
+## EKOS Lakehouse (RFC 0190) — PostgreSQL → Iceberg pipelines, separate public repo
+
+Plan of 2026-10-16. The product lives in `alexeyban/ekos-lakehouse` (public, MIT) as an
+extension; this repo gets only what reads and understands (RFC 0190 "Where each part lives").
+
+### M0 — stack and dialect
+- [x] RFC 0190 (the design) and RFC 0191 (extension seam v2) (devlog_274)
+- [x] Seam v2: extension commands with catalogue classes, `main_with_args`, scoped extension
+      MCP tools; refuses a taken name or an unclassified leaf (devlog_274)
+- [x] `Lakehouse*` rows in `custom_kinds::REGISTRY` (devlog_274)
+- [x] `plugins/sql-dialect-trino`; the dbt analyzer falls back to it (devlog_274)
+- [x] `Dialect::Trino` in `migrate-validate`, SQL snapshot pinned (devlog_274)
+- [x] `classify_with` (statement classifier under another grammar); serde on drift shapes
+- [ ] Live three-engine agreement (PostgreSQL / Trino / Rust) against the golden hashes — in
+      the Lakehouse repo, which has the Trino client. Until it runs, the Trino expressions are
+      reviewed, not verified
+- [ ] Lakehouse repo bootstrap: workspace, `ekos-lakehouse` binary, `lakehouse doctor`
+- [ ] `docker-compose.lakehouse.yml`: PostgreSQL, Trino, Polaris, MinIO, Dagster
+- [ ] Trino client + `TrinoReader`; guarded executor
+- [ ] Throughput of the Trino `postgresql` → `iceberg` load path, measured
+- [ ] Exit: a planted one-row defect between PostgreSQL and Iceberg caught by V3
+
+### M1–M5
+- [ ] M1 bronze · M2 silver · M3 schema-change loop · M4 gold from descriptions ·
+      M5 monitoring and self-serve (see RFC 0190 "Milestones")
+- [ ] `Target::Iceberg` (migrate-dq) and any engine variant in `migrate::connection` — added
+      with the M1 type map, when there are rules for them

@@ -242,7 +242,11 @@ pub fn leaves(root: &clap::Command) -> Vec<(Vec<String>, clap::Command)> {
 }
 
 fn class_of(path: &str) -> Option<(Class, bool)> {
-    CLASSES
+    class_in(CLASSES, path)
+}
+
+fn class_in(table: &[(&str, Class, bool)], path: &str) -> Option<(Class, bool)> {
+    table
         .iter()
         .find(|(p, _, _)| *p == path)
         .map(|(_, c, m)| (*c, *m))
@@ -250,10 +254,17 @@ fn class_of(path: &str) -> Option<(Class, bool)> {
 
 /// The catalogue. A command without a row is left out (and fails the guard test).
 pub fn catalogue(root: &clap::Command) -> Vec<Entry> {
+    catalogue_with(root, &[])
+}
+
+/// The catalogue with extra rows for commands an extension added (RFC 0191). The built-in table
+/// is consulted first, so an extension cannot reclassify a built-in command.
+pub fn catalogue_with(root: &clap::Command, extra: &[(&str, Class, bool)]) -> Vec<Entry> {
     leaves(root)
         .into_iter()
         .filter_map(|(path, cmd)| {
-            let (class, metered) = class_of(&path.join(" "))?;
+            let key = path.join(" ");
+            let (class, metered) = class_of(&key).or_else(|| class_in(extra, &key))?;
             let args = cmd
                 .get_arguments()
                 .filter(|a| !a.is_global_set() && !CONSOLE_MANAGED.contains(&a.get_id().as_str()))

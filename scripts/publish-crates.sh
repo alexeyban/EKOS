@@ -50,6 +50,7 @@ ekos-plugin-sql-dialect-mssql
 ekos-plugin-sql-dialect-mysql
 ekos-plugin-sql-dialect-postgres
 ekos-plugin-sql-dialect-snowflake
+ekos-plugin-sql-dialect-trino
 ekos-identity
 ekos-semantic
 ekos-recovery

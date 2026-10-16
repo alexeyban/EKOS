@@ -4,10 +4,14 @@
 //! `ekos recover`, a post-`commit` step and MCP tools, then builds its own binary with
 //! [`crate::app::main_with`]. The public `ekos` binary runs with [`Extensions::none`].
 //!
+//! RFC 0191 adds commands of its own (each leaf with its catalogue class) and lets an extension
+//! say which of its MCP tools a read scope can filter.
+//!
 //! A private crate cannot be an optional dependency of a public one (Cargo resolves every git
 //! dependency, optional or not, when it writes `Cargo.lock`), so the dependency points outward:
 //! the extension depends on these public crates, never the other way round.
 
+use crate::commands::catalogue::Class;
 use async_trait::async_trait;
 use ekos_artifact::{ArtifactId, ArtifactStore};
 use ekos_compiler_core::{EkosConfig, pass::CompilerPass};
@@ -67,6 +71,50 @@ pub trait EkosExtension: Send + Sync {
     ) -> Option<anyhow::Result<Value>> {
         None
     }
+
+    /// RFC 0191: true when MCP tool `name` reads knowledge only through the store
+    /// [`EkosExtension::call_mcp_tool`] is handed. A read scope filters that store, so a reader
+    /// with restricted access may call the tool. Default: refused to such a reader.
+    fn mcp_tool_is_scoped(&self, _name: &str) -> bool {
+        false
+    }
+
+    /// RFC 0191: top-level subcommands this extension adds, e.g. `lakehouse` with subcommands of
+    /// its own. A name that is already a command stops the binary at start-up.
+    fn commands(&self) -> Vec<clap::Command> {
+        Vec::new()
+    }
+
+    /// RFC 0191: the catalogue class (RFC 0186) of every leaf command [`EkosExtension::commands`]
+    /// adds, by its path ("lakehouse status"), and whether it may call the configured model. A
+    /// leaf without a row stops the binary at start-up.
+    fn command_classes(&self) -> Vec<(&'static str, Class, bool)> {
+        Vec::new()
+    }
+
+    /// RFC 0191: runs the command `name`, one of [`EkosExtension::commands`]. `matches` are that
+    /// command's own matches; the global flags have already been applied to `ctx`.
+    async fn run_command(
+        &self,
+        name: &str,
+        _matches: &clap::ArgMatches,
+        _ctx: &CommandContext<'_>,
+    ) -> anyhow::Result<()> {
+        anyhow::bail!("extension {} has no command {name}", self.name())
+    }
+}
+
+/// What an extension command gets: the same setup a built-in command has once `main_with` has
+/// applied `--config`, `--project` and `--tenant` (RFC 0178).
+pub struct CommandContext<'a> {
+    pub config: &'a EkosConfig,
+    /// The workspace: the project's sources for a home project, else the current directory.
+    pub cwd: &'a Path,
+    /// The `ekos.toml` the config came from (it may not exist).
+    pub config_path: &'a Path,
+    /// Where the command was typed. A path argument is relative to this, even after a project
+    /// moved the process into its sources.
+    pub invoked_from: &'a Path,
 }
 
 /// What `ekos recover` hands an extension when it asks for passes.
@@ -148,6 +196,54 @@ impl Extensions {
         self.0
             .iter()
             .find_map(|e| e.call_mcp_tool(name, args, ledger))
+    }
+
+    /// RFC 0191: whether an extension says its MCP tool `name` may be served to a restricted
+    /// reader.
+    pub fn mcp_tool_is_scoped(&self, name: &str) -> bool {
+        self.0.iter().any(|e| e.mcp_tool_is_scoped(name))
+    }
+
+    /// The extension that added top-level command `name`.
+    pub fn command_owner(&self, name: &str) -> Option<&Arc<dyn EkosExtension>> {
+        self.0
+            .iter()
+            .find(|e| e.commands().iter().any(|c| c.get_name() == name))
+    }
+
+    /// Every extension's command classes, for the catalogue.
+    pub fn command_classes(&self) -> Vec<(&'static str, Class, bool)> {
+        self.0.iter().flat_map(|e| e.command_classes()).collect()
+    }
+
+    /// `root` plus every extension's commands. Fails when a name is taken or an extension leaf
+    /// has no class: either would be a broken build, so it stops before anything runs.
+    pub fn extend_cli(&self, mut root: clap::Command) -> anyhow::Result<clap::Command> {
+        for e in self.0.iter() {
+            let classes = e.command_classes();
+            for c in e.commands() {
+                let name = c.get_name().to_string();
+                if root.find_subcommand(&name).is_some() {
+                    anyhow::bail!(
+                        "extension {} adds a command `{name}`, which already exists",
+                        e.name()
+                    );
+                }
+                let wrapped = clap::Command::new("root").subcommand(c.clone());
+                for (path, _) in crate::commands::catalogue::leaves(&wrapped) {
+                    let path = path.join(" ");
+                    if !classes.iter().any(|(p, _, _)| *p == path) {
+                        anyhow::bail!(
+                            "extension {} adds `{path}` without a class in command_classes() \
+                             (decide who may run it from the web, RFC 0186)",
+                            e.name()
+                        );
+                    }
+                }
+                root = root.subcommand(c);
+            }
+        }
+        Ok(root)
     }
 }
 

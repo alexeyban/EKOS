@@ -50,6 +50,11 @@ pub struct EkosConfig {
     /// the directories of `[observe] paths`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<SourceConfig>,
+    /// RFC 0191: settings of out-of-tree extensions, one table each (`[extensions.lakehouse]`).
+    /// Core keeps them as given and never reads them; an extension reads its own with
+    /// [`EkosConfig::extension_settings`]. Every other unknown section is still an error.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub extensions: std::collections::BTreeMap<String, serde_json::Value>,
     /// RFC 0178: set when the command selected a project in the EKOS home (`--project`). Never
     /// read from or written to a file.
     #[serde(skip)]
@@ -958,6 +963,7 @@ impl Default for EkosConfig {
             freshness: FreshnessConfig::default(),
             conflicts: ConflictsConfig::default(),
             sources: Vec::new(),
+            extensions: std::collections::BTreeMap::new(),
             location: None,
             read_scope: None,
         }
@@ -965,6 +971,22 @@ impl Default for EkosConfig {
 }
 
 impl EkosConfig {
+    /// RFC 0191: the `[extensions.<name>]` table, parsed as the extension's own settings type.
+    /// `None` when the project has no such table; an error names the table when it does not
+    /// match `T`.
+    pub fn extension_settings<T: serde::de::DeserializeOwned>(
+        &self,
+        name: &str,
+    ) -> anyhow::Result<Option<T>> {
+        self.extensions
+            .get(name)
+            .map(|v| {
+                serde_json::from_value(v.clone())
+                    .map_err(|e| anyhow::anyhow!("[extensions.{name}] in ekos.toml: {e}"))
+            })
+            .transpose()
+    }
+
     pub fn from_file(path: &Path) -> anyhow::Result<Self> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("cannot read {}: {}", path.display(), e))?;
@@ -1541,5 +1563,36 @@ time-bucket = "daily"
         assert_eq!(p.time_bucket_overrides.len(), 1);
         assert_eq!(p.time_bucket_overrides[0].scope_glob, "discord:*");
         assert_eq!(p.time_bucket_overrides[0].time_bucket, "daily");
+    }
+
+    /// RFC 0191: an extension's table is kept and read by the extension; any other unknown
+    /// section is still refused.
+    #[test]
+    fn extension_tables_are_kept_and_other_unknown_sections_refused() {
+        #[derive(serde::Deserialize, Debug, PartialEq)]
+        #[serde(rename_all = "kebab-case", deny_unknown_fields)]
+        struct Lake {
+            trino_url: String,
+            buckets: u32,
+        }
+        let c: EkosConfig = toml::from_str(
+            "[extensions.lakehouse]\ntrino-url = \"http://127.0.0.1:8080\"\nbuckets = 16\n",
+        )
+        .unwrap();
+        assert_eq!(
+            c.extension_settings::<Lake>("lakehouse").unwrap(),
+            Some(Lake {
+                trino_url: "http://127.0.0.1:8080".into(),
+                buckets: 16
+            })
+        );
+        assert_eq!(c.extension_settings::<Lake>("other").unwrap(), None);
+        let bad: EkosConfig = toml::from_str("[extensions.lakehouse]\nbuckets = 'x'\n").unwrap();
+        let err = bad.extension_settings::<Lake>("lakehouse").unwrap_err();
+        assert!(err.to_string().contains("[extensions.lakehouse]"), "{err}");
+        assert!(toml::from_str::<EkosConfig>("[lakehouse]\nx = 1\n").is_err());
+        // A config without extensions serializes as before.
+        let out = toml::to_string(&EkosConfig::default()).unwrap();
+        assert!(!out.contains("extensions"), "{out}");
     }
 }

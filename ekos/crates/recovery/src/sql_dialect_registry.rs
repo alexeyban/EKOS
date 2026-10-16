@@ -14,6 +14,7 @@ use ekos_plugin_sql_dialect_mssql::MsSqlDialectParser;
 use ekos_plugin_sql_dialect_mysql::MySqlDialectParser;
 use ekos_plugin_sql_dialect_postgres::PostgresDialectParser;
 use ekos_plugin_sql_dialect_snowflake::SnowflakeDialectParser;
+use ekos_plugin_sql_dialect_trino::TrinoDialectParser;
 use ekos_sql_dialect_sdk::SqlDialectParser;
 use sqlparser::dialect::{Dialect, GenericDialect};
 
@@ -60,6 +61,8 @@ pub fn build_dialect_registry() -> HashMap<String, Box<dyn SqlDialectParser>> {
     // `.sql` recovery against ClickHouse), but Stage 2's live query gate constructs
     // `ClickHouseDialectParser` directly rather than looking it up here.
     registry.insert("clickhouse".to_string(), Box::new(ClickHouseDialectParser));
+    // RFC 0190: the SQL dbt-trino models and EKOS Lakehouse pipelines are written in.
+    registry.insert("trino".to_string(), Box::new(TrinoDialectParser));
     // Same alias set `sql_transform_analyzer.rs`'s old private `dialect_for` recognized —
     // preserved exactly so unifying both passes on this registry doesn't regress existing
     // `dialect = "mssql"`/`"tsql"`/`"synapse"` workspace configs.
@@ -126,6 +129,12 @@ mod tests {
     /// RFC 0039: mssql/tsql/synapse must be real registry entries, not only reachable via
     /// `sql_transform_analyzer.rs`'s formerly-private `dialect_for` — regression guard for the
     /// exact alias set that pass used to recognize.
+    #[test]
+    fn registry_contains_trino() {
+        let registry = build_dialect_registry();
+        assert_eq!(registry.get("trino").unwrap().name(), "trino");
+    }
+
     #[test]
     fn registry_contains_mssql_aliases() {
         let registry = build_dialect_registry();

@@ -15,6 +15,12 @@ use crate::canon::UNIT_SEPARATOR;
 pub enum Dialect {
     Postgres,
     ClickHouse,
+    /// RFC 0190: Trino reading Iceberg tables (EKOS Lakehouse, source ↔ bronze reconciliation).
+    /// The expressions follow Trino's documented semantics and are pinned by the SQL snapshot.
+    /// Agreement with the golden hashes on a live Trino is proven in the `ekos-lakehouse`
+    /// repository, which has the Trino client (`EKOS_LAKEHOUSE_LIVE=1`); until that suite has
+    /// run, treat these as reviewed, not verified.
+    Trino,
 }
 
 /// The source column type an expression is generated for. Deliberately coarse: it names the
@@ -48,13 +54,15 @@ pub enum ColumnRule {
 /// because nothing else depended on it.
 fn null_literal(d: Dialect) -> &'static str {
     match d {
-        Dialect::Postgres => "'\\N'",
+        // Trino string literals have no backslash escapes, as PostgreSQL's with
+        // `standard_conforming_strings`.
+        Dialect::Postgres | Dialect::Trino => "'\\N'",
         Dialect::ClickHouse => "'\\\\N'",
     }
 }
 
 fn quote_ident(d: Dialect, name: &str) -> String {
-    // Both engines use double quotes and both escape an embedded quote by doubling it. Identifiers
+    // Every engine uses double quotes and escapes an embedded quote by doubling it. Identifiers
     // are never concatenated raw: RFC 0160's rule, applied here too.
     let escaped = name.replace('"', "\"\"");
     let _ = d;
@@ -66,7 +74,9 @@ fn quote_ident(d: Dialect, name: &str) -> String {
 fn escape_sql(d: Dialect, inner: &str) -> String {
     let us = format!("chr({})", UNIT_SEPARATOR as u32);
     match d {
-        Dialect::Postgres => format!(
+        // Trino's `replace(s, search, replacement)` and `chr(n)` match PostgreSQL's, and its
+        // literals take a backslash literally, so the text is the same.
+        Dialect::Postgres | Dialect::Trino => format!(
             "replace(replace({inner}, '\\', '\\\\'), {us}, '\\x1f')",
             us = us
         ),
@@ -95,6 +105,29 @@ pub fn canon_expr_of(d: Dialect, expr: &str, rule: ColumnRule) -> String {
         (Dialect::ClickHouse, ColumnRule::Text | ColumnRule::Char | ColumnRule::Inet) => {
             escape_sql(d, &format!("toString({c})"))
         }
+        (Dialect::Trino, ColumnRule::Text | ColumnRule::Char | ColumnRule::Inet) => {
+            escape_sql(d, &format!("CAST({c} AS varchar)"))
+        }
+        (Dialect::Trino, ColumnRule::Bool) => format!("(CASE WHEN {c} THEN 't' ELSE 'f' END)"),
+        (Dialect::Trino, ColumnRule::Int) => format!("CAST({c} AS varchar)"),
+        // A Trino decimal renders at its own scale, with a leading `0` and no exponent
+        // (`0.05`, `1.50`), so rescaling to the approved scale first gives the fixed-scale form.
+        (Dialect::Trino, ColumnRule::Decimal(s)) => {
+            format!("CAST(CAST({c} AS decimal(38, {s})) AS varchar)")
+        }
+        // `format_datetime` is Joda-based and stops at milliseconds; `to_iso8601` of a
+        // `timestamp(6)` prints all six fraction digits and, for a value without a zone, no
+        // offset. Iceberg `timestamptz` reads as `timestamp(6) with time zone`.
+        (Dialect::Trino, ColumnRule::TimestampUtc) => {
+            format!("to_iso8601(CAST({c} AT TIME ZONE 'UTC' AS timestamp(6)))")
+        }
+        (Dialect::Trino, ColumnRule::TimestampNaive) => {
+            format!("to_iso8601(CAST({c} AS timestamp(6)))")
+        }
+        (Dialect::Trino, ColumnRule::Date) => format!("CAST({c} AS varchar)"),
+        (Dialect::Trino, ColumnRule::Time) => format!("CAST(CAST({c} AS time(6)) AS varchar)"),
+        (Dialect::Trino, ColumnRule::Uuid) => format!("lower(CAST({c} AS varchar))"),
+        (Dialect::Trino, ColumnRule::Bytes) => format!("lower(to_hex({c}))"),
         (Dialect::Postgres, ColumnRule::Bool) => format!("(case when {c} then 't' else 'f' end)"),
         (Dialect::ClickHouse, ColumnRule::Bool) => format!("if({c}, 't', 'f')"),
         (Dialect::Postgres, ColumnRule::Int) => format!("{c}::text"),
@@ -143,13 +176,14 @@ pub fn canon_expr_of(d: Dialect, expr: &str, rule: ColumnRule) -> String {
     match d {
         Dialect::Postgres => format!("(case when {c} is null then {null} else {body} end)"),
         Dialect::ClickHouse => format!("if(isNull({c}), {null}, {body})"),
+        Dialect::Trino => format!("(CASE WHEN {c} IS NULL THEN {null} ELSE {body} END)"),
     }
 }
 
 /// The row-hash expression over a row's column expressions.
 pub fn row_hash_expr(d: Dialect, column_exprs: &[String]) -> String {
     let sep = match d {
-        Dialect::Postgres => format!("chr({})", UNIT_SEPARATOR as u32),
+        Dialect::Postgres | Dialect::Trino => format!("chr({})", UNIT_SEPARATOR as u32),
         Dialect::ClickHouse => "char(31)".to_string(),
     };
     hash_hex_expr(d, &column_exprs.join(&format!(" || {sep} || ")))
@@ -163,6 +197,8 @@ pub fn hash_hex_expr(d: Dialect, text_expr: &str) -> String {
     match d {
         Dialect::Postgres => format!("encode(sha256(convert_to({text_expr}, 'UTF8')), 'hex')"),
         Dialect::ClickHouse => format!("lower(hex(SHA256({text_expr})))"),
+        // `sha256` takes `varbinary`; `to_utf8` gives the text's UTF-8 bytes.
+        Dialect::Trino => format!("lower(to_hex(sha256(to_utf8({text_expr}))))"),
     }
 }
 
@@ -185,6 +221,26 @@ pub fn prefix60_expr(d: Dialect, hash_expr: &str) -> String {
         Dialect::ClickHouse => format!(
             "reinterpretAsUInt64(reverse(unhex(concat('0', substring({hash_expr}, 1, 15)))))"
         ),
+        // `from_base` reads the digits as a human does, big-endian; 15 hex digits fit a bigint.
+        Dialect::Trino => format!("from_base(substr({hash_expr}, 1, 15), 16)"),
+    }
+}
+
+/// The exact sum of 60-bit prefixes. Trino's `sum(bigint)` fails on overflow rather than
+/// wrapping, which would turn a large bucket into an error, so it sums a `decimal(38, 0)`.
+fn exact_sum(d: Dialect, prefix: &str) -> String {
+    match d {
+        Dialect::Postgres => format!("sum(({prefix})::numeric)"),
+        Dialect::ClickHouse => format!("sum(toDecimal128({prefix}, 0))"),
+        Dialect::Trino => format!("sum(CAST({prefix} AS decimal(38, 0)))"),
+    }
+}
+
+/// Trino cannot `GROUP BY` an output alias; the position means the same.
+fn group_and_order(d: Dialect) -> &'static str {
+    match d {
+        Dialect::Trino => "GROUP BY 1 ORDER BY 1",
+        Dialect::Postgres | Dialect::ClickHouse => "GROUP BY bucket ORDER BY bucket",
     }
 }
 
@@ -203,13 +259,11 @@ pub fn bucket_checksum_query(
     let row = row_hash_expr(d, column_exprs);
     let pk_hash = hash_hex_expr(d, pk_expr);
     let bucket = format!("{} % {buckets}", prefix60_expr(d, &pk_hash));
-    let sum = match d {
-        Dialect::Postgres => format!("sum(({})::numeric)", prefix60_expr(d, &row)),
-        Dialect::ClickHouse => format!("sum(toDecimal128({}, 0))", prefix60_expr(d, &row)),
-    };
+    let sum = exact_sum(d, &prefix60_expr(d, &row));
+    let group = group_and_order(d);
     format!(
         "SELECT {bucket} AS bucket, count(*) AS row_count, {sum} AS hash_sum \
-         FROM {table} GROUP BY bucket ORDER BY bucket"
+         FROM {table} {group}"
     )
 }
 
@@ -235,13 +289,11 @@ pub fn sub_bucket_checksum_query(
     let row = row_hash_expr(d, column_exprs);
     let coarse = bucket_expr(d, pk_expr, coarse_buckets);
     let fine = bucket_expr(d, pk_expr, fine_buckets);
-    let sum = match d {
-        Dialect::Postgres => format!("sum(({})::numeric)", prefix60_expr(d, &row)),
-        Dialect::ClickHouse => format!("sum(toDecimal128({}, 0))", prefix60_expr(d, &row)),
-    };
+    let sum = exact_sum(d, &prefix60_expr(d, &row));
+    let group = group_and_order(d);
     format!(
         "SELECT {fine} AS bucket, count(*) AS row_count, {sum} AS hash_sum \
-         FROM {table} WHERE {coarse} = {coarse_bucket} GROUP BY bucket ORDER BY bucket"
+         FROM {table} WHERE {coarse} = {coarse_bucket} {group}"
     )
 }
 
@@ -279,10 +331,7 @@ pub fn count_query(d: Dialect, table: &str) -> String {
 /// a rendering difference. `min`/`max` over canonical text also side-steps collation: the canonical
 /// form is binary-comparable by construction.
 pub fn aggregate_query(d: Dialect, table: &str, column_exprs: &[String]) -> String {
-    let null = match d {
-        Dialect::Postgres => "'\\N'",
-        Dialect::ClickHouse => "'\\\\N'",
-    };
+    let null = null_literal(d);
     let mut parts = Vec::new();
     for (i, e) in column_exprs.iter().enumerate() {
         parts.push(format!(
@@ -296,13 +345,18 @@ pub fn aggregate_query(d: Dialect, table: &str, column_exprs: &[String]) -> Stri
         let len = match d {
             Dialect::Postgres => format!("octet_length({e})"),
             Dialect::ClickHouse => format!("length({e})"),
+            // Trino's `length` counts characters, as PostgreSQL's does.
+            Dialect::Trino => format!("length(to_utf8({e}))"),
         };
         parts.push(format!("sum({len}) AS len_{i}"));
     }
     // ClickHouse has no `case when` shorthand difference here, but `sum(case when …)` is valid in
     // both, so one form serves both dialects and there is one less place to diverge.
     match d {
-        Dialect::Postgres => format!("SELECT {} FROM {table}", parts.join(", ")),
+        // Trino answers NULL over an empty table, as PostgreSQL does.
+        Dialect::Postgres | Dialect::Trino => {
+            format!("SELECT {} FROM {table}", parts.join(", "))
+        }
         // Over an empty table PostgreSQL's min/max/sum are NULL and ClickHouse's are type defaults
         // ('' / 0), so every empty table failed V2 on nulls, min and max. This setting makes
         // ClickHouse answer NULL, as PostgreSQL does.
@@ -361,7 +415,7 @@ mod tests {
 
     #[test]
     fn aggregates_are_taken_over_the_canonical_form() {
-        for d in [Dialect::Postgres, Dialect::ClickHouse] {
+        for d in [Dialect::Postgres, Dialect::ClickHouse, Dialect::Trino] {
             let e = canon_expr(d, "c", ColumnRule::Text);
             let q = aggregate_query(d, "t", std::slice::from_ref(&e));
             assert!(
@@ -376,7 +430,7 @@ mod tests {
 
     #[test]
     fn null_handling_wraps_every_rule() {
-        for d in [Dialect::Postgres, Dialect::ClickHouse] {
+        for d in [Dialect::Postgres, Dialect::ClickHouse, Dialect::Trino] {
             for rule in [
                 ColumnRule::Text,
                 ColumnRule::Int,
@@ -439,11 +493,35 @@ mod tests {
         );
     }
 
+    /// Trino rejects `GROUP BY <alias>`, and `sum(bigint)` errors on overflow.
+    #[test]
+    fn trino_groups_by_position_and_sums_exactly() {
+        let q = bucket_checksum_query(Dialect::Trino, "t", "pk", &["a".into()], 16);
+        assert!(q.ends_with("GROUP BY 1 ORDER BY 1"), "{q}");
+        assert!(q.contains("sum(CAST(from_base("), "{q}");
+        assert!(q.contains("AS decimal(38, 0)))"), "{q}");
+        let q = sub_bucket_checksum_query(Dialect::Trino, "t", "pk", &["a".into()], 16, 3, 256);
+        assert!(q.ends_with("GROUP BY 1 ORDER BY 1"), "{q}");
+    }
+
+    #[test]
+    fn trino_measures_bytes_and_keeps_microseconds() {
+        let q = aggregate_query(Dialect::Trino, "t", &["x".into()]);
+        assert!(q.contains("sum(length(to_utf8(x)))"), "{q}");
+        let ts = canon_expr(Dialect::Trino, "ts", ColumnRule::TimestampUtc);
+        assert!(ts.contains("to_iso8601(CAST("), "{ts}");
+        assert!(ts.contains("AS timestamp(6)"), "{ts}");
+        assert!(
+            !ts.contains("format_datetime"),
+            "millisecond precision only: {ts}"
+        );
+    }
+
     #[test]
     fn both_dialects_produce_a_grouped_bucket_query() {
-        for d in [Dialect::Postgres, Dialect::ClickHouse] {
+        for d in [Dialect::Postgres, Dialect::ClickHouse, Dialect::Trino] {
             let q = bucket_checksum_query(d, "t", "pk", &["a".into(), "b".into()], 16);
-            assert!(q.contains("GROUP BY bucket"), "{d:?}: {q}");
+            assert!(q.contains("GROUP BY "), "{d:?}: {q}");
             assert!(q.contains("count(*)"), "{d:?}: {q}");
         }
     }

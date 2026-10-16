@@ -403,6 +403,7 @@ fn render_expr(
 
 /// The rendered model, parsed with the first dialect that accepts it.
 fn parse_model(rendered: &str) -> Option<Vec<sqlparser::ast::Statement>> {
+    use ekos_sql_dialect_sdk::SqlDialectParser;
     use sqlparser::dialect::{ClickHouseDialect, Dialect, GenericDialect, PostgreSqlDialect};
     let dialects: [&dyn Dialect; 3] = [
         &PostgreSqlDialect {},
@@ -412,6 +413,16 @@ fn parse_model(rendered: &str) -> Option<Vec<sqlparser::ast::Statement>> {
     dialects
         .into_iter()
         .find_map(|d| sqlparser::parser::Parser::parse_sql(d, rendered).ok())
+        .or_else(|| {
+            // RFC 0190: a dbt-trino model (time travel, `TABLESAMPLE`) parses once the Trino
+            // dialect has blanked what no `sqlparser` dialect reads.
+            let trino = ekos_plugin_sql_dialect_trino::TrinoDialectParser;
+            sqlparser::parser::Parser::parse_sql(
+                &*trino.sqlparser_dialect(),
+                &trino.preprocess(rendered),
+            )
+            .ok()
+        })
 }
 
 /// The predicates of a model's rendered SQL.
@@ -653,11 +664,12 @@ impl CompilerPass for DbtAnalyzerPass {
         &self.pass_id
     }
 
-    /// `v3` = RFC 0170: a model carries its own filters (`predicates`). `v2` = documented columns
-    /// carry description, type and dbt tests.
+    /// `v5` = RFC 0190: a dbt-trino model that only the Trino dialect parses keeps its
+    /// predicates and lineage. `v3` = RFC 0170: a model carries its own filters (`predicates`).
+    /// `v2` = documented columns carry description, type and dbt tests.
     fn version(&self) -> &str {
         // Includes `PREDICATES_VERSION`: a model carries `predicates`.
-        "v4+predicates/3"
+        "v5+predicates/3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -882,6 +894,25 @@ where o.oe_class_id = 1 and a.account_number = '{{ var(\"acc_ar\") }}'\n  and o.
             ],
             "the unknown var's comparison is dropped"
         );
+    }
+
+    /// RFC 0190: a dbt-trino model that reads an Iceberg snapshot (time travel) parses only
+    /// through the Trino dialect, and keeps its predicates and lineage.
+    #[test]
+    fn a_dbt_trino_model_with_time_travel_keeps_predicates_and_lineage() {
+        let rendered = "select o.id, o.status\nfrom orders o for version as of 42\n\
+where o.status = 'open'";
+        let lineage = model_lineage(rendered);
+        assert_eq!(
+            lineage.get("status"),
+            Some(&("orders".to_string(), "status".to_string())),
+            "{lineage:?}"
+        );
+        let c: Vec<String> = model_predicates(rendered)
+            .iter()
+            .map(|p| p.canonical())
+            .collect();
+        assert_eq!(c, vec!["orders.status IN ('open')".to_string()]);
     }
 
     /// RFC 0170 Phase 3: dbt tests are column facts — a declared domain, keys, references.
