@@ -6615,10 +6615,21 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
 - [ ] Not yet: the Lakehouse repo on GitHub (public) and EKOS `main` pushed, so it builds without
       a sibling checkout; the guarded executor for writes (M1)
 
-### M1–M5
-- [ ] M1 bronze · M2 silver · M3 schema-change loop · M4 gold from descriptions ·
-      M5 monitoring and self-serve (see RFC 0190 "Milestones")
+### M1 — bronze (RFC 0192) · **done 2026-10-16** (ekos-lakehouse devlog_3)
+- [x] Type map from PostgreSQL's catalog, checked against the connector (which silently drops
+      columns under default settings); lossiness classes; a refused column refuses its table
+- [x] Load mode from facts: full, or incremental only when a declared watermark is proven by a
+      BEFORE UPDATE trigger; key-set diff tombstones
+- [x] Generated SQL + `lakehouse.lock.json` + Dagster project; Iceberg maintenance scheduled
+- [x] `lakehouse reconcile` (V1–V3 + planted control) and `run-report` as ledger facts
+- [x] Exit: Pagila on a 5-minute schedule, 16/16 green, control firing, twice in a row
+- [ ] `lakehouse doctor` checks the source catalog's two connector settings
+- [ ] Bronze partitioning from profile facts
+
+### M2–M5
+- [ ] M2 silver · M3 schema-change loop · M4 gold from descriptions · M5 monitoring and
+      self-serve (see RFC 0190 "Milestones")
 - [ ] `Target::Iceberg` (migrate-dq) and any engine variant in `migrate::connection` — added
       with the M1 type map, when there are rules for them
-- [ ] M1 type map: an unconstrained PostgreSQL `numeric` arrives in Trino as `number`, which
-      Iceberg rejects — every one needs an explicit decision (found in M0)
+- [x] M1 type map: an unconstrained PostgreSQL `numeric` arrives in Trino as `number`, which
+      Iceberg rejects — measured precision/scale gives `decimal(38,s)`, otherwise refused
