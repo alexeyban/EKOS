@@ -6647,8 +6647,19 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
 - [ ] GitHub pull requests (`git-remote` + `gh`): built, not exercised — needs a real repository
 - [ ] Dagster code-location reload after a new table is added; V5 for routine changes
 
-### M4–M5
-- [ ] M4 gold from descriptions · M5 monitoring and self-serve (see RFC 0190 "Milestones")
+### M4 — gold from descriptions (RFC 0195) · **done 2026-10-17** (ekos-lakehouse devlog_6)
+- [x] Description format (Markdown + YAML header); terms resolve against silver or are asked back
+- [x] Compiled where the header says enough (many-to-one joins only); prose drafted by local
+      Ollama with a reflect-and-retry loop; anti-invention (`check_candidate_with`, new in
+      `migrate-logic`) plus `EXPLAIN` on Trino for every draft
+- [x] Grain and reconciliation tests; proposal branches; approval by merge
+- [x] Exit: three LedgerSMB marts — one asked back (`region`) then resolved, two with model
+      drafts; 0 invented atoms; dbt build 12/12; lint clean
+- [ ] Confirmed RFC 0170 concepts as a resolution source (none are confirmed in the sandbox);
+      Confluence intake; metered providers (with consent)
+
+### M5
+- [ ] M5 monitoring and self-serve (see RFC 0190 "Milestones")
 - [ ] `Target::Iceberg` (migrate-dq) and any engine variant in `migrate::connection` — added
       with the M1 type map, when there are rules for them
 - [x] M1 type map: an unconstrained PostgreSQL `numeric` arrives in Trino as `number`, which

@@ -372,7 +372,17 @@ impl InventionReport {
 
 /// Check a ClickHouse candidate against its source's atoms.
 pub fn check_candidate(source: &BTreeSet<Atom>, candidate_sql: &str) -> InventionReport {
-    match atoms_with(&ClickHouseDialect {}, candidate_sql) {
+    check_candidate_with(source, candidate_sql, &ClickHouseDialect {})
+}
+
+/// [`check_candidate`] with another engine's grammar (RFC 0190: EKOS Lakehouse checks a gold
+/// mart's Trino SQL against the atoms of the terms its author's description resolved to).
+pub fn check_candidate_with(
+    source: &BTreeSet<Atom>,
+    candidate_sql: &str,
+    dialect: &dyn Dialect,
+) -> InventionReport {
+    match atoms_with(dialect, candidate_sql) {
         Err(e) => InventionReport {
             unmapped: Vec::new(),
             parse_error: Some(e),
@@ -399,6 +409,27 @@ mod tests {
         let report = check_candidate(&sql_atoms(SOURCE).unwrap(), candidate);
         assert!(report.parse_error.is_none(), "{report:?}");
         report.unmapped.into_iter().map(|a| a.text).collect()
+    }
+
+    /// RFC 0190: the same check under another grammar.
+    #[test]
+    fn check_candidate_with_uses_the_given_grammar() {
+        let source = sql_atoms("SELECT sum(amount) FROM ar WHERE approved = true").unwrap();
+        let generic = sqlparser::dialect::GenericDialect {};
+        assert!(
+            check_candidate_with(
+                &source,
+                "SELECT sum(\"amount\") FROM ar WHERE approved = true",
+                &generic
+            )
+            .accepted()
+        );
+        let invented = check_candidate_with(
+            &source,
+            "SELECT sum(amount) FROM ar WHERE amount > 0",
+            &generic,
+        );
+        assert!(!invented.accepted(), "{invented:?}");
     }
 
     #[test]
