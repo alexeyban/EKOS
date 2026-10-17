@@ -36,6 +36,7 @@ DYNAMIC = {
     # RFC 0186: the action follows the class of the command chosen.
     ("GET", "/api/workspaces/{workspace_id}/cli"),
     ("GET", "/api/config-schema"),  # a static description, like /api/commands
+    ("GET", "/api/extensions"),  # RFC 0198: the pages the binary declares; no workspace data
     ("GET", "/api/chat/model"),  # which chat model is set; no workspace
     ("POST", "/api/workspaces/{workspace_id}/cli"),
     ("GET", "/api/runs"),

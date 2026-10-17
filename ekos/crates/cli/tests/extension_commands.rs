@@ -6,7 +6,9 @@
 
 use async_trait::async_trait;
 use ekos::commands::catalogue::{Class, catalogue, catalogue_with, leaves};
-use ekos::extension::{CommandContext, EkosExtension, Extensions};
+use ekos::extension::{
+    Action, Column, CommandContext, ConsolePage, EkosExtension, Extensions, Panel, View,
+};
 use std::sync::{Arc, Mutex};
 use tempfile::TempDir;
 
@@ -22,6 +24,8 @@ struct Lake {
     seen: Arc<Seen>,
     classes: Vec<(&'static str, Class, bool)>,
     name: &'static str,
+    /// The leaf the console page's panel runs (RFC 0198).
+    panel_leaf: &'static str,
 }
 
 impl Lake {
@@ -33,6 +37,7 @@ impl Lake {
                 ("lake apply", Class::Write, false),
             ],
             name: "lake",
+            panel_leaf: "status",
         }
     }
 }
@@ -62,6 +67,31 @@ impl EkosExtension for Lake {
 
     fn command_classes(&self) -> Vec<(&'static str, Class, bool)> {
         self.classes.clone()
+    }
+
+    fn console_pages(&self) -> Vec<ConsolePage> {
+        vec![ConsolePage {
+            id: "lake",
+            title: "Lake",
+            description: "Test page (RFC 0198)",
+            panels: vec![Panel {
+                id: "status",
+                title: "Status",
+                command: vec![self.name, self.panel_leaf],
+                view: View::Table {
+                    rows: "/rows",
+                    columns: vec![
+                        Column::new("/name", "Name"),
+                        Column::badge("/state", "State"),
+                    ],
+                },
+                empty: "Nothing yet.",
+            }],
+            actions: vec![Action {
+                label: "Apply",
+                command: vec![self.name, "apply"],
+            }],
+        }]
     }
 
     async fn run_command(
@@ -208,4 +238,34 @@ fn an_extension_cannot_reclassify_a_built_in() {
         .find(|e| e.path == ["migrate", "approve"])
         .unwrap();
     assert_eq!(approve.class, Class::Review);
+}
+
+/// RFC 0198: an extension's console page is described with the catalogue it checks against; a
+/// panel that would run a write command is refused before the console ever sees it.
+#[test]
+fn console_pages_are_checked_against_the_catalogue() {
+    let lake = Lake::new(Arc::default());
+    let ext = Extensions::new(vec![Arc::new(lake)]);
+    let mut root = ext.extend_cli(ekos::app::cli_command()).unwrap();
+    root.build();
+    let cat = catalogue_with(&root, &ext.command_classes());
+    let v = ekos::commands::extension_pages::describe(&ext, &cat).unwrap();
+    let page = &v["extensions"][0]["pages"][0];
+    assert_eq!(page["id"], "lake");
+    assert_eq!(
+        page["panels"][0]["command"],
+        serde_json::json!(["lake", "status"])
+    );
+    assert_eq!(page["panels"][0]["view"]["kind"], "table");
+    assert_eq!(page["panels"][0]["view"]["columns"][1]["badge"], true);
+    assert_eq!(
+        page["actions"][0]["command"],
+        serde_json::json!(["lake", "apply"])
+    );
+
+    let mut writer = Lake::new(Arc::default());
+    writer.panel_leaf = "apply";
+    let ext = Extensions::new(vec![Arc::new(writer)]);
+    let err = ekos::commands::extension_pages::describe(&ext, &cat).unwrap_err();
+    assert!(err.to_string().contains("only runs read commands"), "{err}");
 }

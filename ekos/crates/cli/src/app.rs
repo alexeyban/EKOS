@@ -125,6 +125,13 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Every extension's console pages as JSON, checked against the command catalogue: what the
+    /// web console draws extension tabs from (RFC 0198)
+    Extensions {
+        /// Accepted for symmetry with other commands; the output is always JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// The web console of this home: start, stop, open it (RFC 0185)
     Console {
         #[command(subcommand)]
@@ -1673,6 +1680,15 @@ where
             crate::commands::init_logging(&ekos_compiler_core::EkosConfig::default());
             return dispatch_project(subcommand, &home_dir?, tenant_flag);
         }
+        Commands::Extensions { json: _ } => {
+            let mut root = extensions.extend_cli(cli_command())?;
+            root.build();
+            let cat =
+                crate::commands::catalogue::catalogue_with(&root, &extensions.command_classes());
+            let out = crate::commands::extension_pages::describe(&extensions, &cat)?;
+            println!("{}", serde_json::to_string(&out)?);
+            return Ok(());
+        }
         Commands::Catalogue { json: _ } => {
             let mut root = extensions.extend_cli(cli_command())?;
             root.build();
@@ -2001,7 +2017,8 @@ where
         | Commands::Console { .. }
         | Commands::Setup { .. }
         | Commands::Uninstall { .. }
-        | Commands::Catalogue { .. } => {
+        | Commands::Catalogue { .. }
+        | Commands::Extensions { .. } => {
             unreachable!("handled before a config is loaded")
         }
     }

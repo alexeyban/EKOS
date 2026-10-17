@@ -21,6 +21,7 @@ pub mod doctor;
 pub mod ekl;
 pub mod eval;
 pub mod export;
+pub mod extension_pages;
 pub mod freshness;
 pub mod graph;
 pub mod home_backup;

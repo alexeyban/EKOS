@@ -5,7 +5,8 @@
 //! [`crate::app::main_with`]. The public `ekos` binary runs with [`Extensions::none`].
 //!
 //! RFC 0191 adds commands of its own (each leaf with its catalogue class) and lets an extension
-//! say which of its MCP tools a read scope can filter.
+//! say which of its MCP tools a read scope can filter. RFC 0198 adds console pages: data that the
+//! web console renders, built from the extension's own read commands.
 //!
 //! A private crate cannot be an optional dependency of a public one (Cargo resolves every git
 //! dependency, optional or not, when it writes `Cargo.lock`), so the dependency points outward:
@@ -102,6 +103,87 @@ pub trait EkosExtension: Send + Sync {
     ) -> anyhow::Result<()> {
         anyhow::bail!("extension {} has no command {name}", self.name())
     }
+
+    /// RFC 0198: workspace pages for the web console. Each panel shows the JSON one of this
+    /// binary's **read** commands prints; each action runs a catalogue command. Checked against
+    /// the catalogue by `ekos extensions --json`.
+    fn console_pages(&self) -> Vec<ConsolePage> {
+        Vec::new()
+    }
+}
+
+/// RFC 0198: one workspace tab in the web console.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct ConsolePage {
+    /// URL segment and key; lowercase letters, digits and `-`.
+    pub id: &'static str,
+    pub title: &'static str,
+    pub description: &'static str,
+    pub panels: Vec<Panel>,
+    pub actions: Vec<Action>,
+}
+
+/// The JSON a read command prints, laid out by `view`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Panel {
+    pub id: &'static str,
+    pub title: &'static str,
+    /// The full argv after the binary, e.g. `["lakehouse", "status", "--json"]`: a catalogue
+    /// command of class read and its flags. No values come from the page or the person.
+    pub command: Vec<&'static str>,
+    pub view: View,
+    /// Shown when the view has nothing to show (no rows, a missing field).
+    pub empty: &'static str,
+}
+
+/// How a panel lays out its command's JSON. Pointers are RFC 6901 JSON pointers.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum View {
+    /// `rows` points at an array; each column points into one element.
+    Table {
+        rows: &'static str,
+        columns: Vec<Column>,
+    },
+    /// One object: label → pointer.
+    Fields { fields: Vec<Column> },
+    /// A string, shown preformatted.
+    Text { pointer: &'static str },
+}
+
+/// A table column, or one of `Fields`' fields.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Column {
+    pub key: &'static str,
+    pub label: &'static str,
+    /// Show the value as a status badge (its tone comes from the value, RFC 0198 §1).
+    pub badge: bool,
+}
+
+impl Column {
+    pub fn new(key: &'static str, label: &'static str) -> Self {
+        Self {
+            key,
+            label,
+            badge: false,
+        }
+    }
+
+    pub fn badge(key: &'static str, label: &'static str) -> Self {
+        Self {
+            key,
+            label,
+            badge: true,
+        }
+    }
+}
+
+/// A button that runs a catalogue command as a job, with no arguments of its own.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct Action {
+    pub label: &'static str,
+    /// The command's catalogue path, e.g. `["lakehouse", "sync"]`.
+    pub command: Vec<&'static str>,
 }
 
 /// What an extension command gets: the same setup a built-in command has once `main_with` has

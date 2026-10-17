@@ -1228,3 +1228,12 @@ details.cfg-sub {
   flex: 1;
   min-height: 3rem;
 }
+
+/* RFC 0198: extension pages */
+.ext-page { display: grid; gap: 1rem; }
+.ext-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.6rem; }
+.ext-confirm { display: inline-flex; gap: 0.4rem; align-items: center; }
+.ext-panel-head { display: flex; justify-content: space-between; align-items: baseline; }
+.ext-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0.6rem 1rem; margin: 0.5rem 0 0; }
+.ext-fields dd { margin: 0; overflow-wrap: anywhere; }
+.ext-text { white-space: pre-wrap; font-size: 0.8rem; margin: 0.5rem 0 0; }

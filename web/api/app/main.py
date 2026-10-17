@@ -28,6 +28,7 @@ from .routes import (
     config,
     conflicts,
     evals,
+    extensions,
     graph,
     mcp_gateway,
     meta,
@@ -63,6 +64,7 @@ ROUTERS = (
     platform,
     cli,
     chat,
+    extensions,
 )
 API_PREFIX = "/api"
 # Every mount of routers. The MCP gateway (RFC 0182) is at `/mcp`, outside the API prefix,

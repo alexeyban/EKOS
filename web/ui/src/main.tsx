@@ -87,6 +87,12 @@ const router = createBrowserRouter([
             path: "commands",
             lazy: () => import("./pages/Commands").then((m) => ({ Component: m.Commands })),
           },
+          {
+            // RFC 0198: pages declared by the binary's extensions.
+            path: "x/:ext/:page",
+            lazy: () =>
+              import("./pages/ExtensionPage").then((m) => ({ Component: m.ExtensionPage })),
+          },
         ],
       },
     ],

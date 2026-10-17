@@ -39,6 +39,7 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("setup", Class::Local, false),
     ("uninstall", Class::Local, false),
     ("commands", Class::Local, false),
+    ("extensions", Class::Local, false),
     ("console run", Class::Local, false),
     ("console start", Class::Local, false),
     ("console stop", Class::Local, false),

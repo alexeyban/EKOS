@@ -111,7 +111,19 @@ async def read_json(
     shapes; the caller has already confirmed `workspace_path` is a registered workspace root.
     """
     _check_allowed(argv)
+    return await _run_json(ekos_bin, workspace_path, argv, max_output=max_output)
 
+
+async def read_checked_json(
+    ekos_bin: str, workspace_path: str, argv: list[str], *, max_output: int = _MAX_OUTPUT
+) -> Any:
+    """[`read_json`] for an argv the caller has checked another way: an extension panel's
+    command, which `extensions.panel_argv` accepts only when the catalogue says it is a read
+    command with fixed flags (RFC 0198). Never call it with anything a request supplied."""
+    return await _run_json(ekos_bin, workspace_path, argv, max_output=max_output)
+
+
+async def _run_json(ekos_bin: str, workspace_path: str, argv: list[str], *, max_output: int) -> Any:
     root = Path(workspace_path).resolve()
     if not root.is_dir():
         raise ReadProcError(f"workspace path is not a directory: {root}")

@@ -34,7 +34,12 @@ export const mayReview = (me: Me) => me.canReview ?? me.role === "write";
 // refuses them (statistics, conflicts) instead of making them and drawing nothing.
 export const seesAll = (me: Me | undefined) => me?.restricted !== true;
 
-const TABS = [
+// RFC 0198: extension pages come after the built-in tabs; a restricted reader sees none (their
+// commands read the whole workspace).
+export const extensionTabs = (pages?: { extension: string; id: string; title: string }[]) =>
+  (pages ?? []).map((p) => ({ to: `x/${p.extension}/${p.id}`, label: p.title, end: false }));
+
+const TABS: { to: string; label: string; end?: boolean }[] = [
   { to: "", label: "Dashboard", end: true },
   { to: "graph", label: "Graph" },
   { to: "chat", label: "Chat" },
@@ -58,6 +63,12 @@ export function WorkspaceShell() {
   const name = current?.name ?? id;
   const roles = current?.roles;
   const restricted = current?.restricted === true;
+  // RFC 0198: one tab per page the console's binary declares (none for the public `ekos`).
+  const extPages = useQuery({
+    queryKey: ["extension-pages"],
+    queryFn: () => api<{ pages: { extension: string; id: string; title: string }[] }>("/extensions"),
+    staleTime: Infinity,
+  });
   const { pathname } = useLocation();
   const onScopedPage = pathname.replace(/\/$/, "").endsWith("/graph");
   const scoped: Me = roles
@@ -77,7 +88,9 @@ export function WorkspaceShell() {
         </NavLink>
         <span className="ws-nav-name">{name}</span>
         <span className="ws-nav-tabs">
-          {TABS.filter((t) => !restricted || RESTRICTED_TABS.has(t.to)).map((t) => (
+          {[...TABS, ...(restricted ? [] : extensionTabs(extPages.data?.pages))]
+            .filter((t) => !restricted || RESTRICTED_TABS.has(t.to))
+            .map((t) => (
             <NavLink
               key={t.to}
               to={t.to ? `/w/${id}/${t.to}` : `/w/${id}`}
