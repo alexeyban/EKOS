@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import JSONResponse
 
-from . import home, lifecycle, models
+from . import home_projects, lifecycle, models
 from .routes import (
     auth,
     chat,
@@ -151,37 +151,12 @@ def _seed_registry_if_empty() -> None:
             log.warning("seed workspace %r skipped: %s has no ekos.toml", seed.id, root)
 
 
-def _register_home_projects() -> None:
-    """Register every project of a known tenant that the registry does not hold (RFC 0179
-    §2): a project exists because its directory does, so one created with the CLI in the same
-    home appears here, and an emptied registry is rebuilt."""
-    root = home.configured_home()
-    if root is None:
-        return
-    known = {ws.path for ws in models.list_workspaces()}
-    # Only tenants the console has a row for: a directory under data/ is not a tenant until a
-    # platform owner creates it (RFC 0180).
-    for tenant in models.list_tenants():
-        for project in home.projects_in(root, tenant.id):
-            if str(project.dir) in known:
-                continue
-            workspace_id = workspaces.workspace_id_for(tenant.id, project.name)
-            if models.get_workspace(workspace_id) is not None:
-                log.warning("project %r not registered: the id is taken", workspace_id)
-                continue
-            models.add_workspace(
-                models.Workspace(
-                    id=workspace_id, name=project.name, path=str(project.dir), tenant_id=tenant.id
-                )
-            )
-
-
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     settings = get_settings()
     models.init_engine(settings.console_db)
     _seed_registry_if_empty()
-    _register_home_projects()
+    home_projects.register_new()
 
     app.state.supervisor = McpSupervisor(settings)
     # RFC 0182: no server is started here. Each starts when a page or a gateway call first needs

@@ -269,3 +269,28 @@ fn console_pages_are_checked_against_the_catalogue() {
     let err = ekos::commands::extension_pages::describe(&ext, &cat).unwrap_err();
     assert!(err.to_string().contains("only runs read commands"), "{err}");
 }
+
+/// RFC 0199: an extension's binary reports its own name and version, and the EKOS it is built on.
+#[test]
+fn an_extension_binary_has_its_own_name_and_version() {
+    struct Named;
+    #[async_trait(?Send)]
+    impl EkosExtension for Named {
+        fn name(&self) -> &'static str {
+            "named"
+        }
+        fn binary(&self) -> Option<(&'static str, &'static str)> {
+            Some(("ekos-named", "0.3.1"))
+        }
+    }
+    let ext = Extensions::new(vec![Arc::new(Named)]);
+    let mut root = ext.extend_cli(ekos::app::cli_command()).unwrap();
+    root.build();
+    assert_eq!(root.get_name(), "ekos-named");
+    let v = root.render_version();
+    assert!(v.starts_with("ekos-named 0.3.1 (EKOS "), "{v}");
+    let plain = Extensions::none()
+        .extend_cli(ekos::app::cli_command())
+        .unwrap();
+    assert_eq!(plain.get_name(), "ekos");
+}

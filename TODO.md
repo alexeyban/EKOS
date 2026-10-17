@@ -6696,9 +6696,10 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
       extension binary, `ConnectionRef::secret_file`
 - [x] Lakehouse: the tab, `lakehouse tables|proposals`, `install.sh` + `lakehouse install`,
       docs; verified from a package in a scratch home (sample and an external database)
-- [ ] Publish: push EKOS, switch ekos-lakehouse back to EKOS `main` by git, tag a Lakehouse
-      release with the full package (`scripts/release.sh`) — needs the maintainer's go-ahead
-- [ ] One Dagster serves one project: several projects on one schedule (a Dagster workspace)
-- [ ] Console: a project created after the console started appears only after a restart
+- [x] Published: EKOS pushed, ekos-lakehouse on EKOS `main` by git, release v0.1.0 (2026-10-17)
+- [x] One Dagster for every project: a Dagster workspace, one code location per project, asset
+      keys prefixed by project (ekos-lakehouse devlog_10)
+- [x] Console: a home project created while it runs appears on the next project list
+- [x] `ekos-lakehouse --version` names itself (`EkosExtension::binary`)
 - [ ] macOS/Windows packages for Lakehouse (the stack is only tested on Linux)
 

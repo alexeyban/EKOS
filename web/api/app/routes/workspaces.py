@@ -7,7 +7,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from .. import _proc, authz, envs, home, models, roots
+from .. import _proc, authz, envs, home, home_projects, models, roots
 from ..auth import Principal
 from ..deps import get_supervisor
 from ..schemas import ServerStatus, WorkspaceCreate, WorkspaceOut
@@ -21,9 +21,7 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 _MANAGE_TIMEOUT = 120.0
 
 
-def workspace_id_for(tenant_id: str, name: str) -> str:
-    """A name cannot contain a dot, so `<tenant>.<name>` never collides with a `default` id."""
-    return name if tenant_id == models.DEFAULT_TENANT else f"{tenant_id}.{name}"
+workspace_id_for = home_projects.workspace_id_for
 
 
 def _out(ws: models.Workspace, supervisor: McpSupervisor, principal: Principal) -> WorkspaceOut:
@@ -117,6 +115,8 @@ async def list_workspaces(
     supervisor: McpSupervisor = Depends(get_supervisor),
     principal: Principal = Depends(authz.authenticated),
 ) -> list[WorkspaceOut]:
+    # RFC 0199: a project created in the home since start-up (the CLI, an installer) appears now.
+    home_projects.register_new()
     return [
         _out(ws, supervisor, principal)
         for ws in models.list_workspaces()

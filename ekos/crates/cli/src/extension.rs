@@ -110,6 +110,12 @@ pub trait EkosExtension: Send + Sync {
     fn console_pages(&self) -> Vec<ConsolePage> {
         Vec::new()
     }
+
+    /// RFC 0199: the binary this extension ships as — its name and version, shown by `--version`
+    /// and `--help` as `<name> <version> (EKOS <ekos version>)`. `None`: the binary is `ekos`.
+    fn binary(&self) -> Option<(&'static str, &'static str)> {
+        None
+    }
 }
 
 /// RFC 0198: one workspace tab in the web console.
@@ -301,6 +307,13 @@ impl Extensions {
     /// `root` plus every extension's commands. Fails when a name is taken or an extension leaf
     /// has no class: either would be a broken build, so it stops before anything runs.
     pub fn extend_cli(&self, mut root: clap::Command) -> anyhow::Result<clap::Command> {
+        if let Some((name, version)) = self.0.iter().find_map(|e| e.binary()) {
+            // Built once per process; clap keeps borrowed strings.
+            let full: &'static str = Box::leak(
+                format!("{version} (EKOS {})", env!("CARGO_PKG_VERSION")).into_boxed_str(),
+            );
+            root = root.name(name).bin_name(name).version(full);
+        }
         for e in self.0.iter() {
             let classes = e.command_classes();
             for c in e.commands() {
