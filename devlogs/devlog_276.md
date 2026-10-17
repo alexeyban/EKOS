@@ -13,7 +13,7 @@ Every LLM call in EKOS went to the one `[llm]` model. Now each call site names i
 `[llm.tasks.<task>]` can route it to its own model, with fallbacks; `provider = "zen"` reaches
 every OpenCode Zen model on its own wire format; every call that reaches a host is priced and
 logged, a budget refuses calls that could cross it, and data-collecting models are refused. A
-$0.73 bake-off (of $2 approved) measured the candidates on the real passes: Claude Haiku 5.5
+$1.08 bake-off (of $2 approved) measured the candidates on the real passes: Claude Haiku 5.5
 answers 98/101 eval scenarios for $0.10 a run, and the previous default model parsed **4 of 33**
 document sections — the run also found two bugs in the document pass.
 
@@ -66,11 +66,13 @@ RFCs for `doc-semantics`. Results are tabled in RFC 0197.
 
 | | Result |
 |---|---|
-| `ask` | Haiku 5.5 98/101 (94.2%) $0.096; GPT-6 Luna 91/101 $0.056; DeepSeek V4.1 Flash 97/101 (Oct 12) |
+| `ask` | MiniMax M3 99/101 (95.8%) $0.169; Haiku 5.5 98/101 (94.2%) $0.096; DeepSeek V4.1 Flash 97/101 (Oct 12); GLM-5.3 Flash 95; Qwen3.8 Flash 92; GPT-6 Luna 91; GPT-5.4 Nano 87 (5% hallucination) |
 | `doc-semantics` @4096 | Luna, Haiku, GLM-5.3 Flash (effort low), MiniMax M3, GPT-5.4 Nano: 40/40; Qwen3.8 Flash 28/40; DeepSeek V4.1 Flash 16/40 |
 
-The `ask` run was stopped by the host's low-memory guard during the third model; it was not
-restarted (the remaining models are in TODO).
+The first `ask` run was stopped by the host's low-memory guard during the third model; the rest
+ran one at a time afterwards. The OpenCode key then expired on OpenCode's side mid-run (401
+`api_key_expired`); after the maintainer replaced it, the 49 failed calls were rerun (the disk
+cache kept every answer already given). Total spend $1.08 of $2.
 
 ---
 
@@ -89,6 +91,8 @@ restarted (the remaining models are in TODO).
   stored, so a changed document was extracted twice (33 → 40 sections). Newest per path now.
 - **Zen caches GPT prompts by itself** and bills them as cache writes: Luna showed 3 input and
   1,600–3,300 cache-write tokens per `ask` call.
+- **A key can expire mid-run**: Zen answers `401 api_key_expired` and every call fails fast and
+  free; failed calls are never cached, so a rerun pays only for them.
 - **The first 20 eval scenarios are 18 adversarial refusals** — `--limit 20` measures nothing.
 - Haiku 5.5 is verbose (~1,400 output tokens per section); size caps per model, not per pass.
 - Running full evals while the machine is near its memory limit gets them killed; run them one

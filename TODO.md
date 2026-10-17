@@ -6680,8 +6680,8 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
       temperature retry, usage log, prices, `budget-usd`, data policy, `ekos llm routes|usage|probe`
 - [x] Bake-off ($0.73): `ask` Haiku 5.5 98/101; `doc-semantics` Luna / Haiku / GLM-5.3 Flash 40/40
 - [x] Doc-semantics: route `max-tokens` + `DOCSEM006`; newest artifact per document only
-- [ ] `ask` for `gpt-5.4-nano`, `glm-5.3-flash`, `minimax-m3`, `qwen3.8-flash`, and a same-day
-      DeepSeek baseline (stopped by the host's memory guard; ~$0.5)
+- [x] `ask` for the rest (2026-10-17): MiniMax M3 99/101 ($0.17), GLM-5.3 Flash 95, Qwen3.8 Flash
+      92 (19 s median), GPT-5.4 Nano 87 (5% hallucination); total bake-off spend $1.08
 - [ ] Measure `description` (the ~6,000-call regeneration) on a sample before switching it
 - [ ] `ekos llm bench` (replay a task's real prompts) — the bake-off ran the passes by hand
 - [ ] `ekos.zen.toml` names `deepseek-v4-flash`, now disabled on the key; move it to the measured routes

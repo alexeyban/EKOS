@@ -158,7 +158,7 @@ defaults: EKOS keeps working with only `[llm]`.
 `ekos llm bench` was not built: the bake-off ran the real passes under routes instead —
 `ekos eval run` for `ask`, `ekos recover` with `[document-semantics]` for `doc-semantics`, each
 model in its own workspace or config, every call logged by `llm-usage.jsonl`. Total metered
-spend: **$0.73** of the approved $2.
+spend: **$1.08** of the approved $2.
 
 ### `doc-semantics` — three public RFCs, the same 40 sections for every model
 
@@ -179,23 +179,33 @@ silently dropped 88% of sections.
 
 ### `ask` — RFC 0138's 101 scenarios on this repository's ledger
 
-| Model | Passed | Answer correctness | Hallucination | Cost per run |
-|---|---|---|---|---|
-| `claude-haiku-5-5` | **98 / 101** | 94.2% | 0 | $0.096 |
-| `deepseek-v4.1-flash` (2026-10-12 run, earlier ledger) | 97 / 101 | 93.1% | 0 | ≈ $0.23 (estimated) |
-| `gpt-6-luna` | 91 / 101 | 85.7% | 1% | $0.056 |
+| Model | Passed | Answer correctness | Hallucination | Cost per run | Median latency |
+|---|---|---|---|---|---|
+| `minimax-m3` | **99 / 101** | 95.8% | 0 | $0.169 | 4.2 s |
+| `claude-haiku-5-5` | 98 / 101 | 94.2% | 0 | $0.096 | 5.2 s |
+| `deepseek-v4.1-flash` (2026-10-12 run, earlier ledger) | 97 / 101 | 93.1% | 0 | ≈ $0.23 (estimated) | — |
+| `glm-5.3-flash` | 95 / 101 | 94.2% | 2% | $0.107 | 6.4 s |
+| `qwen3.8-flash` | 92 / 101 | 87.8% | 1% | $0.139 | 19.2 s |
+| `gpt-6-luna` | 91 / 101 | 85.7% | 1% | $0.056 | 3.6 s |
+| `gpt-5.4-nano` | 87 / 101 | 88.9% | 5% | $0.089 | 2.6 s |
 
-`qwen3.8-flash`, `gpt-5.4-nano`, `glm-5.3-flash`, `minimax-m3` and a same-day DeepSeek baseline
-were not measured: the run was stopped by the host's low-memory guard during `qwen3.8-flash`
-(79 of 101 calls, $0.12, p50 latency 32 s — slow enough to rule out for `ask`).
+`code-004` fails on every model (a fact the ledger does not record). MiniMax's other miss is
+`lin-011`; Haiku's are `arch-015` and `lin-004`, which DeepSeek misses too. The API key expired on
+OpenCode's side mid-run (`401 api_key_expired` from 16:57 UTC); the 49 affected calls were rerun
+on the same configuration after the key was replaced — answers already given came from the disk
+cache, so no scenario was answered twice.
 
 ### Starting configuration these support
 
 ```toml
 [llm]
 provider = "zen"
-model = "claude-haiku-5-5"      # ask, and every task without a route
+model = "claude-haiku-5-5"      # every task without a route: 98/101 at $0.10 a run
 api-key-env = "OPENCODE_API_KEY"
+
+[llm.tasks.ask]                 # highest score (99/101), 1.8x Haiku's cost; or leave on Haiku
+model = "minimax-m3"
+fallback = ["claude-haiku-5-5"]
 
 [llm.tasks.doc-semantics]       # bulk extraction: cheapest that parsed everything
 model = "gpt-6-luna"
