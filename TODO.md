@@ -6638,9 +6638,17 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
 - [ ] M2b: inferred keys (RFC 0158), RFC 0158 DQ rules as tests, confirmed RFC 0170 concepts
       as docs, a passthrough read for ±infinity columns instead of refusing the table
 
-### M3–M5
-- [ ] M3 schema-change loop · M4 gold from descriptions · M5 monitoring and self-serve
-      (see RFC 0190 "Milestones")
+### M3 — source schema changes (RFC 0194) · **done 2026-10-17** (ekos-lakehouse devlog_5)
+- [x] Live-vs-deployed diff by OID / attnum; nine classes; policy per class
+- [x] Safe classes committed (incremental tables get idempotent `schema.sql`); others proposed
+      on EKOS-owned branches with impact from the compiled ledger; paused / pending state
+- [x] Exit: all nine classes driven by real DDL on the sandbox, each with its action; every
+      proposal merged, rebuilt proposals merge cleanly, loads reconciled green
+- [ ] GitHub pull requests (`git-remote` + `gh`): built, not exercised — needs a real repository
+- [ ] Dagster code-location reload after a new table is added; V5 for routine changes
+
+### M4–M5
+- [ ] M4 gold from descriptions · M5 monitoring and self-serve (see RFC 0190 "Milestones")
 - [ ] `Target::Iceberg` (migrate-dq) and any engine variant in `migrate::connection` — added
       with the M1 type map, when there are rules for them
 - [x] M1 type map: an unconstrained PostgreSQL `numeric` arrives in Trino as `number`, which
