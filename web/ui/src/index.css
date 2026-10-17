@@ -1237,3 +1237,4 @@ details.cfg-sub {
 .ext-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: 0.6rem 1rem; margin: 0.5rem 0 0; }
 .ext-fields dd { margin: 0; overflow-wrap: anywhere; }
 .ext-text { white-space: pre-wrap; font-size: 0.8rem; margin: 0.5rem 0 0; }
+.ext-page .lm-table .chip { white-space: nowrap; }

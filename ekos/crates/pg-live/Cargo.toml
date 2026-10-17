@@ -20,5 +20,6 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+tempfile = "3"
 ekos-migrate-validate.workspace = true
 ekos-migrate-dq.workspace = true

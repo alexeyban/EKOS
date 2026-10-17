@@ -6688,3 +6688,17 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
 - [ ] Lakehouse gold drafter adopts the router (its own repository)
 - [ ] Mistral Large 4: refuses `reasoning_effort` and `temperature` silently; per-model request quirks
 
+## RFC 0198 / 0199 — console extension pages, Lakehouse tab and installer (2026-10-17, devlog_277)
+
+- [x] RFC 0198: `EkosExtension::console_pages`, `ekos extensions --json` (checked against the
+      catalogue), console `GET /api/extensions` + panel route, generic `ExtensionPage`
+- [x] RFC 0199 (core part): `setup` under the running binary's name, `package-full.sh` for an
+      extension binary, `ConnectionRef::secret_file`
+- [x] Lakehouse: the tab, `lakehouse tables|proposals`, `install.sh` + `lakehouse install`,
+      docs; verified from a package in a scratch home (sample and an external database)
+- [ ] Publish: push EKOS, switch ekos-lakehouse back to EKOS `main` by git, tag a Lakehouse
+      release with the full package (`scripts/release.sh`) — needs the maintainer's go-ahead
+- [ ] One Dagster serves one project: several projects on one schedule (a Dagster workspace)
+- [ ] Console: a project created after the console started appears only after a restart
+- [ ] macOS/Windows packages for Lakehouse (the stack is only tested on Linux)
+

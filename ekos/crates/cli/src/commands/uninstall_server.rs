@@ -227,6 +227,7 @@ mod tests {
             user_home: home.parent().unwrap().join("user"),
             appdata: None,
             package: home.join("package"),
+            program: "ekos".into(),
             shell: None,
         };
         UninstallPage::new(

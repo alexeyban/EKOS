@@ -534,6 +534,7 @@ mod tests {
             user_home: dir.join("user"),
             appdata: None,
             package: dir.join("package"),
+            program: "ekos".into(),
             shell: None,
         };
         Wizard::new("tok".into(), m, dir.join("home"))

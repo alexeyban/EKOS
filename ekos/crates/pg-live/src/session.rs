@@ -288,14 +288,45 @@ fn guard_setting_value(value: &str) -> Result<(), PgError> {
 ///
 /// The variable's name is a ledger fact; its value never is, and never passes through a connection
 /// string either (RFC 0154 refuses a DSN carrying credentials outright).
-fn resolve_secret(conn: &ConnectionRef) -> Result<Option<String>, PgError> {
+pub(crate) fn resolve_secret(conn: &ConnectionRef) -> Result<Option<String>, PgError> {
+    if let Some(var) = &conn.secret_env
+        && let Ok(v) = std::env::var(var)
+    {
+        return Ok(Some(v));
+    }
+    // RFC 0199: a file, for processes without the shell's variables.
+    if let Some(path) = &conn.secret_file {
+        return read_secret_file(path).map(Some);
+    }
     match &conn.secret_env {
         None => Ok(None),
-        Some(var) => match std::env::var(var) {
-            Ok(v) => Ok(Some(v)),
-            Err(_) => Err(PgError::MissingSecret(var.clone())),
-        },
+        Some(var) => Err(PgError::MissingSecret(var.clone())),
     }
+}
+
+/// The first line of `path`, refused when anyone but its owner may read it.
+fn read_secret_file(path: &std::path::Path) -> Result<String, PgError> {
+    let err = |m: String| PgError::SecretFile(path.display().to_string(), m);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(path)
+            .map_err(|e| err(e.to_string()))?
+            .permissions()
+            .mode();
+        if mode & 0o077 != 0 {
+            return Err(err(format!(
+                "readable by others (mode {:o}); `chmod 600` it",
+                mode & 0o777
+            )));
+        }
+    }
+    let text = std::fs::read_to_string(path).map_err(|e| err(e.to_string()))?;
+    let line = text.lines().next().unwrap_or("").to_string();
+    if line.is_empty() {
+        return Err(err("is empty".into()));
+    }
+    Ok(line)
 }
 
 impl ekos_migrate_validate::EngineReader for PgSource {
@@ -337,6 +368,27 @@ mod tests {
             resolve_secret(&conn),
             Err(PgError::MissingSecret(_))
         ));
+    }
+
+    /// RFC 0199: an unset variable falls back to the file; a file others can read is refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_password_file_is_read_only_when_its_owner_alone_can_read_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("pw");
+        std::fs::write(&f, "s3cret\n").unwrap();
+        let conn = ConnectionRef::parse("postgres://h/db")
+            .unwrap()
+            .with_secret_env(Some("EKOS_TEST_DEFINITELY_UNSET_VAR".into()))
+            .with_secret_file(Some(f.clone()));
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(matches!(
+            resolve_secret(&conn),
+            Err(PgError::SecretFile(_, _))
+        ));
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(resolve_secret(&conn).unwrap().as_deref(), Some("s3cret"));
     }
 
     #[test]

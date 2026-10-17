@@ -34,8 +34,7 @@ impl PgSandbox {
             .user(user)
             .dbname(&conn.database)
             .application_name(&format!("ekos-migrate-v5/{run_id}"));
-        if let Some(var) = &conn.secret_env {
-            let pw = std::env::var(var).map_err(|_| PgError::MissingSecret(var.clone()))?;
+        if let Some(pw) = crate::session::resolve_secret(conn)? {
             cfg.password(&pw);
         }
         let client = cfg

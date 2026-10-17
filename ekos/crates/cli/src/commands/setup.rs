@@ -141,11 +141,12 @@ impl Os {
             Os::Linux
         }
     }
-    fn exe(self) -> &'static str {
+    /// `program` as an executable file name on this OS.
+    fn exe_for(self, program: &str) -> String {
         if self == Os::Windows {
-            "ekos.exe"
+            format!("{program}.exe")
         } else {
-            "ekos"
+            program.to_string()
         }
     }
 }
@@ -160,6 +161,9 @@ pub struct Machine {
     /// The package this setup runs from: the directory holding `bin/` (and `console/`).
     pub package: PathBuf,
     pub shell: Option<String>,
+    /// RFC 0199: the binary's name without extension — `ekos`, or an extension's own binary
+    /// (`ekos-lakehouse`), which installs and starts the console under its own name.
+    pub program: String,
 }
 
 impl Machine {
@@ -176,7 +180,18 @@ impl Machine {
             appdata: std::env::var_os("APPDATA").map(PathBuf::from),
             package,
             shell: std::env::var("SHELL").ok(),
+            program: exe
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .filter(|n| !n.is_empty())
+                .unwrap_or("ekos")
+                .to_string(),
         })
+    }
+
+    /// The binary's file name on this machine (`ekos`, `ekos.exe`, `ekos-lakehouse`).
+    pub fn exe_name(&self) -> String {
+        self.os.exe_for(&self.program)
     }
 
     pub fn default_home(&self) -> PathBuf {
@@ -323,19 +338,25 @@ impl Action {
 pub struct Layout {
     pub program_dir: PathBuf,
     pub home: PathBuf,
+    /// The binary's name without extension (RFC 0199: an extension's binary keeps its own).
+    pub program: String,
 }
 
 impl Layout {
     pub fn of(answers: &Answers, m: &Machine) -> Self {
         let home = non_empty(&answers.home).unwrap_or_else(|| m.default_home());
         let program_dir = non_empty(&answers.program_dir).unwrap_or_else(|| home.clone());
-        Self { program_dir, home }
+        Self {
+            program_dir,
+            home,
+            program: m.program.clone(),
+        }
     }
     pub fn bin_dir(&self) -> PathBuf {
         self.program_dir.join("bin")
     }
     pub fn exe(&self, os: Os) -> PathBuf {
-        self.bin_dir().join(os.exe())
+        self.bin_dir().join(os.exe_for(&self.program))
     }
 }
 
@@ -533,7 +554,7 @@ pub fn plan(answers: &Answers, m: &Machine) -> Result<Vec<Action>> {
     let os = m.os;
     let mut actions = Vec::new();
 
-    if m.package != layout.program_dir && m.package.join("bin").join(os.exe()).is_file() {
+    if m.package != layout.program_dir && m.package.join("bin").join(m.exe_name()).is_file() {
         actions.push(Action::CopyPackage {
             from: m.package.clone(),
             to: layout.program_dir.clone(),
@@ -1079,7 +1100,7 @@ fn setup_exe(layout: &Layout, m: &Machine) -> PathBuf {
     if installed.is_file() {
         installed
     } else {
-        m.package.join("bin").join(m.os.exe())
+        m.package.join("bin").join(m.exe_name())
     }
 }
 

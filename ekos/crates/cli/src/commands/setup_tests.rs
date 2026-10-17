@@ -63,6 +63,7 @@ fn machine(root: &Path, os: Os) -> Machine {
         user_home: user_home.clone(),
         appdata: Some(user_home.join("AppData").join("Roaming")),
         package,
+        program: "ekos".into(),
         shell: Some("/bin/bash".into()),
     }
 }
@@ -540,4 +541,20 @@ fn the_chat_model_is_set_and_its_key_goes_to_the_keychain() {
     assert!(check(&bad).is_err());
     bad.chat.provider = "gemini".into();
     assert!(check(&bad).unwrap_err().to_string().contains("anthropic"));
+}
+
+/// RFC 0199: an extension's binary (`ekos-lakehouse`) installs and starts the console under its
+/// own name, so a machine never holds two different `ekos` binaries.
+#[test]
+fn an_extension_binary_installs_under_its_own_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = machine(dir.path(), Os::Linux);
+    m.program = "ekos-lakehouse".into();
+    std::fs::write(m.package.join("bin").join("ekos-lakehouse"), "bin").unwrap();
+    let layout = Layout::of(&local_answers(), &m);
+    assert!(layout.exe(Os::Linux).ends_with("bin/ekos-lakehouse"));
+    assert!(layout.exe(Os::Windows).ends_with("bin/ekos-lakehouse.exe"));
+    let (_, unit) = service_file(Os::Linux, &m, &layout);
+    assert!(unit.contains("bin/ekos-lakehouse"), "{unit}");
+    assert!(!unit.contains("bin/ekos "), "{unit}");
 }

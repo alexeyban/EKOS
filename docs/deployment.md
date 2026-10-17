@@ -228,6 +228,17 @@ A project's MCP server starts on first use and stops after 15 idle minutes; at m
 once (`EKOS_CONSOLE_MCP_IDLE_SECONDS`, `EKOS_CONSOLE_MCP_MAX_SERVERS`). Each holds its project's
 index in memory, so size the cap to the machine.
 
+### Extension pages
+
+A console started by an extension's binary (`ekos-lakehouse console start`, or `EKOS_BIN`
+pointing at it) shows that extension's pages as extra workspace tabs (RFC 0198). A page is data
+the binary declares: panels from its read commands, buttons that run its catalogue commands with
+their usual class, role and confirmation. A restricted reader does not see these tabs. A job a
+button starts has its tenant's environment, like every other job: a secret it needs (a source
+database's password) is granted to the tenant below, or kept in an owner-only file the project
+names — EKOS Lakehouse's installer does the latter
+([its docs](https://github.com/alexeyban/ekos-lakehouse/blob/main/docs/console.md)).
+
 ## 7. Model credentials
 
 Some pipeline passes call a language model. A project's `ekos.toml` names the environment

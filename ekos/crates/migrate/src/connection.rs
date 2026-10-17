@@ -119,6 +119,12 @@ pub struct ConnectionRef {
     /// The name of the environment variable holding the secret, e.g. `EKOS_MIGRATE_PG_PASSWORD`.
     /// The value is never read here and never persisted.
     pub secret_env: Option<String>,
+    /// RFC 0199: a file holding the secret, read when `secret_env` is unset or not in the
+    /// environment — for processes that do not inherit an interactive shell's variables (a
+    /// console job, an orchestrator container). Only its path is stored; it must be readable by
+    /// its owner alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_file: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -163,11 +169,18 @@ impl ConnectionRef {
             alias: alias.to_string(),
             database: database.to_string(),
             secret_env: None,
+            secret_file: None,
         })
     }
 
     pub fn with_secret_env(mut self, var: Option<String>) -> Self {
         self.secret_env = var;
+        self
+    }
+
+    /// RFC 0199: see [`ConnectionRef::secret_file`].
+    pub fn with_secret_file(mut self, path: Option<std::path::PathBuf>) -> Self {
+        self.secret_file = path;
         self
     }
 

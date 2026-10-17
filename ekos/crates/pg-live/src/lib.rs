@@ -47,6 +47,9 @@ pub enum PgError {
          stores the variable's name, never its value — export it before connecting."
     )]
     MissingSecret(String),
+    /// RFC 0199.
+    #[error("the password file {0}: {1}")]
+    SecretFile(String, String),
     #[error("refusing to build a SET statement from an unsafe value: {0:?}")]
     UnsafeSetting(String),
     #[error(

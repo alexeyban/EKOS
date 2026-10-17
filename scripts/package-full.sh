@@ -11,6 +11,10 @@
 # committed tree.
 #
 # → <out dir>/ekos-<version>-<target>-full.tar.gz (.zip for Windows), and its directory.
+#
+# RFC 0199: an extension's binary packages the same way under its own name —
+# EKOS_PACKAGE_PROGRAM=ekos-lakehouse (the binary, the archive and the starters use it) and
+# EKOS_PACKAGE_INSTALL_MD=<its own INSTALL.md>. Unset, the package is EKOS's, as before.
 set -euo pipefail
 
 target="$1"; bin="$2"; out="$3"; version="$4"; ui="${5:-}"
@@ -26,9 +30,10 @@ sha="$(awk -v t="$target" '$1==t{print $2}' "$lock")"
 
 windows=0
 case "$target" in *windows*) windows=1 ;; esac
-exe=ekos; [ "$windows" = 1 ] && exe=ekos.exe
+program="${EKOS_PACKAGE_PROGRAM:-ekos}"
+exe="$program"; [ "$windows" = 1 ] && exe="$program.exe"
 
-name="ekos-${version}-${target}-full"
+name="${program}-${version}-${target}-full"
 stage="$out/$name"
 rm -rf "$stage"; mkdir -p "$stage/bin" "$stage/console"
 cp "$bin" "$stage/bin/$exe"
@@ -100,9 +105,17 @@ EOF
       chmod 755 "$stage/setup.command" ;;
   esac
 fi
+# The starters run this package's own binary.
+if [ "$program" != ekos ]; then
+  for f in "$stage/setup.cmd" "$stage/setup.sh" "$stage/setup.command"; do
+    [ -f "$f" ] && sed -i.bak -e "s#bin/ekos #bin/$program #g" -e "s#bin\\\\ekos.exe#bin\\\\$program.exe#g" \
+      -e "s#bin/ekos\$#bin/$program#" -e "s#EKOS setup wizard#$program setup wizard#" "$f" && rm -f "$f.bak"
+  done
+fi
 commit="$(git -C "$repo" rev-parse --short HEAD)"
+install_md="${EKOS_PACKAGE_INSTALL_MD:-$repo/deploy/package/INSTALL-full.md}"
 sed -e "s/@VERSION@/$version/g" -e "s/@COMMIT@/$commit/g" -e "s/@TARGET@/$target/g" \
-  "$repo/deploy/package/INSTALL-full.md" > "$stage/INSTALL.md"
+  "$install_md" > "$stage/INSTALL.md"
 cp "$repo/LICENSE" "$stage/"
 
 # ── a check on this machine when it can run the target ───────────────────────
@@ -110,7 +123,7 @@ host="$(uname -m)-$(uname -s)"
 if [ "$target" = "x86_64-unknown-linux-gnu" ] && [ "$host" = "x86_64-Linux" ]; then
   PYTHONPATH="$stage/console:$stage/console/site-packages" PYTHONNOUSERSITE=1 \
     "$stage/console/python/bin/python3" -c "import app.main, keyring, uvicorn; print('console imports')"
-  "$stage/bin/ekos" --version >/dev/null
+  "$stage/bin/$exe" --version >/dev/null
 fi
 
 # ── archive ──────────────────────────────────────────────────────────────────
