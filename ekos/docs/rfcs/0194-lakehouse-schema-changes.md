@@ -81,6 +81,16 @@ active. Every decision is a `LakehouseChange` fact.
   list it; impact also reports a model's same-named column when the model reads the table.
 - A table added by a safe change gets its Dagster asset when the code location reloads;
   everything else (SQL, schema, pause) is read from disk at run time.
+- **The GitHub path, exercised on a real repository** (2026-10-17, a private sandbox pipeline
+  repo): the first `gh pr create` pointed `--body-file` at the proposal in the main checkout,
+  where it does not exist (it is on the branch); and a request that failed to open was never
+  retried, because the branch then counted as current. `sync` now makes sure every proposal
+  has an open request on every run, reading the body from the branch. Approval on the remote
+  was never seen either: `sync` now fast-forwards the base branch from `git-remote` first, pushes
+  safe-change commits, and deletes a proposal branch on the remote when it deletes it locally
+  (which closes a request whose change the source no longer has). Verified: rename → PR #1 →
+  merged on GitHub → next `sync` resumed the table; a new nullable column was applied and
+  pushed with no request.
 
 ## Out of scope
 
