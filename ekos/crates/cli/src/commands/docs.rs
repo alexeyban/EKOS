@@ -384,7 +384,12 @@ fn select_llm_provider_for_prose(
     config: &EkosConfig,
     artifact_dir: &Path,
 ) -> Result<std::sync::Arc<dyn ekos_recovery::LlmProvider>> {
-    super::recover::build_llm_provider_strict(config, artifact_dir).map_err(|err| {
+    super::recover::build_llm_provider_strict_for(
+        config,
+        ekos_recovery::Task::DocsProse,
+        artifact_dir,
+    )
+    .map_err(|err| {
         anyhow::anyhow!(
             "{err} and no [llm] provider = \"ollama\" configured in ekos.toml — \
              an LLM is required for --prose"

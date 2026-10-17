@@ -1322,6 +1322,7 @@ mod tests {
                 model: "recording-mock".to_string(),
                 input_tokens: 0,
                 output_tokens: 0,
+                ..Default::default()
             })
         }
     }
@@ -1638,6 +1639,7 @@ mod tests {
                 model: "prompt-mock".to_string(),
                 input_tokens: 0,
                 output_tokens: 0,
+                ..Default::default()
             })
         }
     }

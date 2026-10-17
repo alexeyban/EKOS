@@ -171,7 +171,8 @@ async fn run_targeted_reasoning(
         ekos_artifact::PackArtifactStore::open(&artifact_dir)
             .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?,
     );
-    let llm = recover::build_llm_provider(config, &artifact_dir);
+    let llm =
+        recover::build_llm_provider_for(config, ekos_recovery::Task::Architecture, &artifact_dir);
 
     // Same deterministic derivation `recover::run` uses for every pass's workspace-name argument
     // — the two must agree for this pass to find the artifact iteration 1's crate-topology pass

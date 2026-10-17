@@ -1,4 +1,3 @@
-use super::recover::build_llm_provider;
 use super::store::open_store_read_only;
 use anyhow::Result;
 use ekos_artifact::PackArtifactStore;
@@ -86,7 +85,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path, question: &str, opts: AskOpts<
 
     let ai_config = ai_config(config);
     let artifact_dir = config.artifact_dir(cwd);
-    let llm = build_llm_provider(config, &artifact_dir);
+    let llm =
+        super::recover::build_llm_provider_for(config, ekos_recovery::Task::Ask, &artifact_dir);
 
     let ledger = open_store_read_only(config, cwd)?;
     let runtime = Runtime::over(&*ledger);
@@ -278,7 +278,7 @@ mod tests {
             ..Default::default()
         };
         let artifact_dir = config.artifact_dir(dir.path());
-        let provider = build_llm_provider(&config, &artifact_dir);
+        let provider = super::super::recover::build_llm_provider(&config, &artifact_dir);
         assert_eq!(provider.model_name(), "llama3.1:8b");
     }
 

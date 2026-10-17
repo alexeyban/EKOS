@@ -35,12 +35,95 @@ pub struct LlmRequest<'a> {
 }
 
 /// Successful LLM completion result.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LlmResponse {
     pub content: String,
     pub model: String,
+    /// Input tokens billed at the full input price (cached ones excluded where the host reports
+    /// them apart).
     pub input_tokens: u32,
     pub output_tokens: u32,
+    /// RFC 0197: input tokens served from the host's prompt cache.
+    #[serde(default)]
+    pub cache_read_tokens: u32,
+    /// RFC 0197: input tokens written to the host's prompt cache.
+    #[serde(default)]
+    pub cache_write_tokens: u32,
+}
+
+/// RFC 0197: what an LLM call is for. Each call site names its task, and `[llm.tasks.<name>]`
+/// may route it to its own model; a task without a route uses `[llm]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Task {
+    /// Whatever has no task of its own.
+    Default,
+    /// `SqlAnalyzerPass`: semantic naming per schema file.
+    SqlNaming,
+    /// `DocumentSemanticsAnalyzerPass`: one call per document section.
+    DocSemantics,
+    /// `llm_description`: one call per module, rollup or symbol.
+    Description,
+    /// `semantics_llm`: cite-or-drop concept text.
+    Semantics,
+    /// `session` capture: strict-JSON extraction from a transcript slice.
+    SessionCapture,
+    /// `ekos ask` and the eval harness.
+    Ask,
+    /// `ArchitectureReasoningPass` and `ekos architecture`.
+    Architecture,
+    /// `ekos migrate reconstruct`.
+    Reconstruct,
+    /// The ClickHouse NL-to-SQL bridge.
+    NlSql,
+    /// `docs generate --prose` and its findings memo.
+    DocsProse,
+    /// `marketing publish`.
+    Marketing,
+}
+
+impl Task {
+    pub const ALL: [Task; 12] = [
+        Task::Default,
+        Task::SqlNaming,
+        Task::DocSemantics,
+        Task::Description,
+        Task::Semantics,
+        Task::SessionCapture,
+        Task::Ask,
+        Task::Architecture,
+        Task::Reconstruct,
+        Task::NlSql,
+        Task::DocsProse,
+        Task::Marketing,
+    ];
+
+    /// The name used in `[llm.tasks.<name>]` and the usage log.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Task::Default => "default",
+            Task::SqlNaming => "sql-naming",
+            Task::DocSemantics => "doc-semantics",
+            Task::Description => "description",
+            Task::Semantics => "semantics",
+            Task::SessionCapture => "session-capture",
+            Task::Ask => "ask",
+            Task::Architecture => "architecture",
+            Task::Reconstruct => "reconstruct",
+            Task::NlSql => "nl-sql",
+            Task::DocsProse => "docs-prose",
+            Task::Marketing => "marketing",
+        }
+    }
+
+    pub fn parse(name: &str) -> Option<Task> {
+        Task::ALL.into_iter().find(|t| t.as_str() == name)
+    }
+}
+
+impl std::fmt::Display for Task {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 /// Error returned by any `LlmProvider` implementation.
@@ -56,6 +139,13 @@ pub enum LlmError {
     Io(#[from] std::io::Error),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
+    /// RFC 0197: the call could take spend past `[llm] budget-usd`, or its price is unknown
+    /// while a budget is set. Never retried.
+    #[error("llm budget: {0}")]
+    Budget(String),
+    /// RFC 0197 §5: the model's provider may keep or train on what it receives.
+    #[error("llm data policy: {0}")]
+    Policy(String),
     #[error("{0}")]
     Other(String),
 }
@@ -64,12 +154,29 @@ impl LlmError {
     pub fn other(msg: impl Into<String>) -> Self {
         Self::Other(msg.into())
     }
+
+    /// RFC 0197: worth trying a route's next model — rate limits, server errors and transport
+    /// failures; never a request the next model would refuse alike, a budget or a policy.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            LlmError::Http(_) => true,
+            LlmError::Api { status, body } => {
+                *status == 429
+                    || *status >= 500
+                    // Zen reports a disabled or unavailable model as an upstream failure.
+                    || body.contains("Model access is disabled")
+                    || body.contains("Endpoint is unavailable")
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Provider-agnostic interface for LLM completions.
 ///
 /// # Contract (RFC 0008)
-/// - Every implementation MUST send `temperature: 0`.
+/// - Every implementation MUST send `temperature: 0` where the model accepts one (RFC 0197:
+///   current Claude and reasoning models refuse it, and the request then goes without).
 /// - Every implementation MUST include the model name in the cache key.
 /// - Structured (JSON) output is expected; callers reject free-text responses.
 #[async_trait]
@@ -182,8 +289,7 @@ impl LlmProvider for MockLlmProvider {
         Ok(LlmResponse {
             content: self.response.clone(),
             model: self.model.clone(),
-            input_tokens: 0,
-            output_tokens: 0,
+            ..Default::default()
         })
     }
 }

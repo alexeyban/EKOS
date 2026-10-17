@@ -179,6 +179,7 @@ mod tests {
                 model: "counting-mock".into(),
                 input_tokens: 0,
                 output_tokens: 0,
+                ..Default::default()
             })
         }
     }
@@ -215,6 +216,7 @@ mod tests {
             model: "m".into(),
             input_tokens: 0,
             output_tokens: out,
+            ..Default::default()
         };
         let entry = |limit: Option<u32>| match limit {
             Some(l) => serde_json::json!({ MAX_TOKENS_FIELD: l }),
@@ -247,6 +249,7 @@ mod tests {
                     model: "capped".into(),
                     input_tokens: 1,
                     output_tokens: req.max_tokens,
+                    ..Default::default()
                 })
             }
         }

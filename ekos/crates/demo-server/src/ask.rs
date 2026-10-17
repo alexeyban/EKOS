@@ -5,7 +5,7 @@
 
 use anyhow::{Context, Result};
 use ekos::commands::ask::ai_config;
-use ekos::commands::recover::build_llm_provider;
+use ekos::commands::recover::build_llm_provider_for;
 use ekos::commands::store::open_store;
 use ekos_runtime::{AiRuntime, Runtime};
 use serde::Serialize;
@@ -36,7 +36,7 @@ pub async fn answer_question(repo: &RepoEntry, question: &str) -> Result<AskResp
     let config = repo.load_config();
     let ai_cfg = ai_config(&config);
     let artifact_dir = config.artifact_dir(&repo.workspace_dir);
-    let llm = build_llm_provider(&config, &artifact_dir);
+    let llm = build_llm_provider_for(&config, ekos_recovery::Task::Ask, &artifact_dir);
 
     let ledger = open_store(&config, &repo.workspace_dir)
         .with_context(|| format!("opening ledger for repo '{}'", repo.slug))?;

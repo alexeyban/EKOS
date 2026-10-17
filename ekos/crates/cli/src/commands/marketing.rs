@@ -132,7 +132,12 @@ pub async fn publish(
 /// mode for drafting a tweet: a mock response would just surface later as a confusing
 /// "missing field `tweet`" JSON error instead of a clear "no API key" one.
 fn select_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Result<Arc<dyn LlmProvider>> {
-    super::recover::build_llm_provider_strict(config, artifact_dir).map_err(|err| {
+    super::recover::build_llm_provider_strict_for(
+        config,
+        ekos_recovery::Task::Marketing,
+        artifact_dir,
+    )
+    .map_err(|err| {
         anyhow!(
             "{err} and no [llm] provider = \"ollama\" configured in ekos.toml — \
              an LLM is required to draft a tweet"

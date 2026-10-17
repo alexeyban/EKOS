@@ -18,6 +18,10 @@ const DEFAULT_KEY_ENV: &str = "OPENAI_API_KEY";
 pub struct OpenAiProvider {
     model: String,
     api_key: String,
+    /// RFC 0197: sent as `reasoning_effort` when set.
+    reasoning_effort: Option<String>,
+    /// RFC 0197: set once the model refused `temperature`.
+    no_temperature: std::sync::atomic::AtomicBool,
     /// RFC 0145: without a trailing `/`; requests go to `{base_url}/chat/completions`.
     base_url: String,
     client: reqwest::Client,
@@ -57,8 +61,64 @@ impl OpenAiProvider {
         Self {
             model: model.into(),
             api_key: api_key.into(),
+            reasoning_effort: None,
+            no_temperature: std::sync::atomic::AtomicBool::new(false),
             base_url: DEFAULT_BASE_URL.to_string(),
             client: reqwest::Client::new(),
+        }
+    }
+
+    /// RFC 0197: `minimal`/`low`/`medium`/`high`, for hosts and models that take it.
+    pub fn with_reasoning_effort(mut self, effort: Option<String>) -> Self {
+        self.reasoning_effort = effort;
+        self
+    }
+
+    fn body<'a>(&'a self, req: &LlmRequest<'a>, stream: bool) -> ApiRequest<'a> {
+        let no_temp = self
+            .no_temperature
+            .load(std::sync::atomic::Ordering::Relaxed);
+        ApiRequest {
+            model: &self.model,
+            max_tokens: req.max_tokens,
+            temperature: (!no_temp).then_some(0.0),
+            reasoning_effort: self.reasoning_effort.as_deref(),
+            messages: build_messages(req),
+            stream,
+            stream_options: stream.then_some(StreamOptions {
+                include_usage: true,
+            }),
+        }
+    }
+
+    /// POST, retrying once without `temperature` when the model refuses it (RFC 0197).
+    async fn send(
+        &self,
+        req: &LlmRequest<'_>,
+        stream: bool,
+    ) -> Result<reqwest::Response, LlmError> {
+        loop {
+            let http_resp = self
+                .client
+                .post(self.endpoint())
+                .bearer_auth(&self.api_key)
+                .json(&self.body(req, stream))
+                .send()
+                .await?;
+            if http_resp.status().is_success() {
+                return Ok(http_resp);
+            }
+            let status = http_resp.status().as_u16();
+            let body = http_resp.text().await.unwrap_or_default();
+            let had_temp = !self
+                .no_temperature
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if status == 400 && had_temp && crate::anthropic::refuses_temperature(&body) {
+                self.no_temperature
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                continue;
+            }
+            return Err(LlmError::Api { status, body });
         }
     }
 
@@ -79,7 +139,10 @@ impl OpenAiProvider {
 struct ApiRequest<'a> {
     model: &'a str,
     max_tokens: u32,
-    temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'a str>,
     messages: Vec<ApiMessage<'a>>,
     stream: bool,
     /// Only set (and only meaningful) for streaming requests — asks the API
@@ -125,7 +188,7 @@ fn build_messages<'a>(req: &LlmRequest<'a>) -> Vec<ApiMessage<'a>> {
 struct ApiResponse {
     choices: Vec<ApiChoice>,
     model: String,
-    usage: ApiUsage,
+    usage: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -138,10 +201,20 @@ struct ApiResponseMessage {
     content: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct ApiUsage {
-    prompt_tokens: u32,
-    completion_tokens: u32,
+/// `(input billed at the full price, output, cache read)` from a Chat Completions `usage`
+/// object. Hosts report cached prompt tokens as `prompt_tokens_details.cached_tokens` (OpenAI)
+/// or a top-level `cache_read_input_tokens` (DeepSeek on Zen); either way they are part of
+/// `prompt_tokens`, so they are taken out of the input count (RFC 0197).
+pub(crate) fn chat_usage(usage: &serde_json::Value) -> (u32, u32, u32) {
+    let n =
+        |v: Option<&serde_json::Value>| v.and_then(serde_json::Value::as_u64).unwrap_or(0) as u32;
+    let prompt = n(usage.get("prompt_tokens"));
+    let output = n(usage.get("completion_tokens"));
+    let cached = n(usage
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens")))
+    .max(n(usage.get("cache_read_input_tokens")));
+    (prompt.saturating_sub(cached), output, cached.min(prompt))
 }
 
 #[async_trait]
@@ -156,33 +229,10 @@ impl LlmProvider for OpenAiProvider {
     }
 
     async fn complete(&self, req: &LlmRequest<'_>) -> Result<LlmResponse, LlmError> {
-        let body = ApiRequest {
-            model: &self.model,
-            max_tokens: req.max_tokens,
-            temperature: 0.0,
-            messages: build_messages(req),
-            stream: false,
-            stream_options: None,
-        };
-
-        let http_resp = self
-            .client
-            .post(self.endpoint())
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .await?;
-
-        let status = http_resp.status().as_u16();
-        if !http_resp.status().is_success() {
-            let body_text = http_resp.text().await.unwrap_or_default();
-            return Err(LlmError::Api {
-                status,
-                body: body_text,
-            });
-        }
+        let http_resp = self.send(req, false).await?;
 
         let api_resp: ApiResponse = http_resp.json().await?;
+        let (input_tokens, output_tokens, cache_read_tokens) = chat_usage(&api_resp.usage);
         let content = api_resp
             .choices
             .into_iter()
@@ -193,8 +243,10 @@ impl LlmProvider for OpenAiProvider {
         Ok(LlmResponse {
             content,
             model: api_resp.model,
-            input_tokens: api_resp.usage.prompt_tokens,
-            output_tokens: api_resp.usage.completion_tokens,
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            ..Default::default()
         })
     }
 
@@ -210,33 +262,7 @@ impl LlmProvider for OpenAiProvider {
         req: &LlmRequest<'_>,
         on_chunk: &mut (dyn FnMut(String) + Send),
     ) -> Result<LlmResponse, LlmError> {
-        let body = ApiRequest {
-            model: &self.model,
-            max_tokens: req.max_tokens,
-            temperature: 0.0,
-            messages: build_messages(req),
-            stream: true,
-            stream_options: Some(StreamOptions {
-                include_usage: true,
-            }),
-        };
-
-        let http_resp = self
-            .client
-            .post(self.endpoint())
-            .bearer_auth(&self.api_key)
-            .json(&body)
-            .send()
-            .await?;
-
-        let status = http_resp.status().as_u16();
-        if !http_resp.status().is_success() {
-            let body_text = http_resp.text().await.unwrap_or_default();
-            return Err(LlmError::Api {
-                status,
-                body: body_text,
-            });
-        }
+        let http_resp = self.send(req, true).await?;
 
         let mut acc = StreamAccumulator {
             model: self.model.clone(),
@@ -252,6 +278,8 @@ impl LlmProvider for OpenAiProvider {
             model: acc.model,
             input_tokens: acc.input_tokens,
             output_tokens: acc.output_tokens,
+            cache_read_tokens: acc.cache_read_tokens,
+            ..Default::default()
         })
     }
 }
@@ -266,6 +294,7 @@ struct StreamAccumulator {
     model: String,
     input_tokens: u32,
     output_tokens: u32,
+    cache_read_tokens: u32,
 }
 
 /// Applies one Chat-Completions SSE line to `acc`, forwarding any new
@@ -296,19 +325,11 @@ fn apply_stream_line(acc: &mut StreamAccumulator, line: &str, on_chunk: &mut dyn
         acc.content.push_str(text);
         on_chunk(text.to_string());
     }
-    if let Some(usage) = event.get("usage") {
-        if let Some(t) = usage
-            .get("prompt_tokens")
-            .and_then(serde_json::Value::as_u64)
-        {
-            acc.input_tokens = t as u32;
-        }
-        if let Some(t) = usage
-            .get("completion_tokens")
-            .and_then(serde_json::Value::as_u64)
-        {
-            acc.output_tokens = t as u32;
-        }
+    if let Some(usage) = event.get("usage").filter(|u| u.is_object()) {
+        let (i, o, c) = chat_usage(usage);
+        acc.input_tokens = i;
+        acc.output_tokens = o;
+        acc.cache_read_tokens = c;
     }
 }
 
@@ -428,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn request_body_always_sets_temperature_zero() {
+    fn request_body_sets_temperature_zero_until_the_model_refuses_it() {
         let req = LlmRequest {
             system: "sys",
             user: "usr",
@@ -436,18 +457,34 @@ mod tests {
             max_tokens: 100,
             history: &[],
         };
-        let body = ApiRequest {
-            model: "gpt-4o-mini",
-            max_tokens: req.max_tokens,
-            temperature: 0.0,
-            messages: build_messages(&req),
-            stream: false,
-            stream_options: None,
-        };
-        let json = serde_json::to_value(&body).unwrap();
+        let p = OpenAiProvider::new("gpt-4o-mini", "k");
+        let json = serde_json::to_value(p.body(&req, false)).unwrap();
         assert_eq!(json["temperature"], 0.0);
+        assert!(json.get("reasoning_effort").is_none());
+        assert!(json.get("stream_options").is_none());
         assert_eq!(json["messages"][0]["role"], "system");
         assert_eq!(json["messages"][1]["role"], "user");
+        // RFC 0197: after a refusal the request goes without, and an effort is passed through.
+        let p = p.with_reasoning_effort(Some("low".into()));
+        p.no_temperature
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let json = serde_json::to_value(p.body(&req, true)).unwrap();
+        assert!(json.get("temperature").is_none());
+        assert_eq!(json["reasoning_effort"], "low");
+        assert_eq!(json["stream_options"]["include_usage"], true);
+    }
+
+    #[test]
+    fn cached_prompt_tokens_are_read_from_either_usage_shape() {
+        // OpenAI's shape.
+        let openai = serde_json::json!({"prompt_tokens": 100, "completion_tokens": 5,
+            "prompt_tokens_details": {"cached_tokens": 64}});
+        assert_eq!(chat_usage(&openai), (36, 5, 64));
+        // DeepSeek on Zen (recorded 2026-10-17, RFC 0197).
+        let deepseek = serde_json::json!({"prompt_tokens": 33, "completion_tokens": 25,
+            "total_tokens": 58, "cache_read_input_tokens": 0});
+        assert_eq!(chat_usage(&deepseek), (33, 25, 0));
+        assert_eq!(chat_usage(&serde_json::json!({})), (0, 0, 0));
     }
 
     // ── RFC 0098: streaming SSE line parsing ────────────────────────────

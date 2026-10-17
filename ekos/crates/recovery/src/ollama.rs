@@ -206,6 +206,7 @@ impl LlmProvider for OllamaProvider {
             model: api_resp.model,
             input_tokens: api_resp.prompt_eval_count,
             output_tokens: api_resp.eval_count,
+            ..Default::default()
         })
     }
 
@@ -253,6 +254,7 @@ impl LlmProvider for OllamaProvider {
             model: acc.model,
             input_tokens: acc.input_tokens,
             output_tokens: acc.output_tokens,
+            ..Default::default()
         })
     }
 }

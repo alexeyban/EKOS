@@ -4,7 +4,6 @@
 //! (`commands/mcp.rs`), which is a materially different risk surface (any connected AI agent,
 //! not a human operator explicitly invoking a command).
 
-use super::recover::build_llm_provider;
 use super::store::open_store;
 use anyhow::Result;
 use ekos_clickhouse_query::{ClickHouseAnswer, ClickHouseHttpQueryClient, ask_clickhouse};
@@ -40,7 +39,8 @@ pub(crate) async fn run_query(
     let password = std::env::var(CLICKHOUSE_PASSWORD_ENV).unwrap_or_default();
 
     let artifact_dir = config.artifact_dir(cwd);
-    let llm = build_llm_provider(config, &artifact_dir);
+    let llm =
+        super::recover::build_llm_provider_for(config, ekos_recovery::Task::NlSql, &artifact_dir);
     let query_client = Arc::new(ClickHouseHttpQueryClient::new(url, user, password));
     let redaction_config = config.redaction_config();
 

@@ -820,6 +820,7 @@ mod tests {
                 model: self.model_name().to_string(),
                 input_tokens: 0,
                 output_tokens: 0,
+                ..Default::default()
             })
         }
     }

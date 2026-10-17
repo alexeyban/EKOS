@@ -3,7 +3,7 @@
 //! building the `LlmProvider`, exactly like `ask.rs` — `ekos-evals` itself never touches
 //! configuration or credentials.
 
-use super::recover::{build_llm_provider, resolved_key_env};
+use super::recover::resolved_key_env;
 use super::store::open_store_read_only;
 use anyhow::Result;
 use ekos_artifact::PackArtifactStore;
@@ -118,7 +118,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: EvalRunOpts<'_>) -> Resu
         // Never asked: the runner skips the model call.
         Arc::new(ekos_recovery::llm::MockLlmProvider::new(String::new()))
     } else {
-        let llm = build_llm_provider(&run_config, &artifact_dir);
+        let llm = super::recover::build_llm_provider_for(
+            &run_config,
+            ekos_recovery::Task::Ask,
+            &artifact_dir,
+        );
         check_not_mock(
             llm.as_ref(),
             &agent_label(&run_config),

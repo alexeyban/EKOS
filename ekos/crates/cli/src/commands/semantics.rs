@@ -162,8 +162,10 @@ async fn describe_with_llm(
             return Ok(());
         }
     }
-    let provider = super::commit::select_llm_provider_for_description(
+    // RFC 0197: its own route, `[llm.tasks.semantics]`.
+    let provider = super::recover::build_llm_provider_strict_for(
         config,
+        ekos_recovery::Task::Semantics,
         &config.ekos_dir(cwd).join("artifacts"),
     )?;
     let evidence: HashMap<KirId, ekos_kir::KirEvidence> =

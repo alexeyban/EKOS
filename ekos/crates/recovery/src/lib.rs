@@ -30,14 +30,17 @@ pub mod llm_json;
 pub mod local_docs_analyzer;
 pub mod ollama;
 pub mod openai;
+pub mod openai_responses;
 pub mod package_json_analyzer;
 pub mod pentaho_analyzer;
 pub mod perl_analyzer;
 pub mod perl_sql;
 pub mod plpgsql_analyzer;
 pub mod plpgsql_footprint;
+pub mod pricing;
 pub mod python_analyzer;
 pub mod requirements_analyzer;
+pub mod route;
 pub mod rust_analyzer;
 pub mod semantics_llm;
 mod source_evidence;
@@ -50,6 +53,7 @@ pub mod sql_transform_analyzer;
 mod statement_repair;
 pub mod treasury_analyzer;
 pub mod trigger_analyzer;
+pub mod usage;
 pub mod view_analyzer;
 
 pub use anthropic::AnthropicProvider;
@@ -81,7 +85,9 @@ pub use git_analyzer::GitAnalyzerPass;
 pub use github_analyzer::GitHubAnalyzerPass;
 pub use governance_analyzer::GovernanceAnalyzerPass;
 pub use javascript_analyzer::{JavaScriptAnalyzerPass, JavaScriptStats};
-pub use llm::{LlmError, LlmProvider, LlmRequest, LlmResponse, MOCK_MODEL_NAME, MockLlmProvider};
+pub use llm::{
+    LlmError, LlmProvider, LlmRequest, LlmResponse, MOCK_MODEL_NAME, MockLlmProvider, Task,
+};
 pub use llm_description::{
     DescriptionProgress, DescriptionScope, DescriptionStats, describe_objects,
     describe_objects_with_progress, describe_project, estimate_call_counts,
@@ -90,12 +96,14 @@ pub use llm_json::strip_json_fences;
 pub use local_docs_analyzer::LocalDocAnalyzerPass;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAiProvider;
+pub use openai_responses::OpenAiResponsesProvider;
 pub use package_json_analyzer::PackageJsonAnalyzerPass;
 pub use pentaho_analyzer::{PentahoAnalyzerPass, PentahoStats};
 pub use perl_analyzer::{PerlAnalyzerPass, PerlStats};
 pub use plpgsql_analyzer::{PlPgSqlAnalyzerPass, PlPgSqlStats};
 pub use python_analyzer::{PythonAnalyzerPass, PythonStats};
 pub use requirements_analyzer::RequirementsAnalyzerPass;
+pub use route::{LlmRouter, RouteInfo, Wire};
 pub use rust_analyzer::{RustAnalyzerPass, RustStats};
 pub use sql_analyzer::{SqlAnalyzerPass, parse_ddl_structural};
 pub use sql_dialect_registry::{

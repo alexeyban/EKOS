@@ -183,6 +183,11 @@ enum Commands {
         #[arg(long)]
         all: bool,
     },
+    /// LLM routes per task, recorded usage and cost, and which models a key reaches (RFC 0197)
+    Llm {
+        #[command(subcommand)]
+        subcommand: LlmCommands,
+    },
     /// Which source files changed since the ledger was committed, and which compiled objects
     /// cite them (RFC 0171)
     Freshness {
@@ -1297,6 +1302,34 @@ enum BranchCommands {
 }
 
 #[derive(Subcommand)]
+enum LlmCommands {
+    /// Each task's provider, models (fallbacks after the first), wire format and price
+    Routes {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Calls that reached a model (not disk-cache hits): tokens and cost by task and model
+    Usage {
+        /// Only calls at or after this time (RFC 3339 or YYYY-MM-DD)
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Send one tiny request per model (a few tokens each, uncached) and report which answer
+    Probe {
+        /// The task whose route (provider, host, key) to probe through; default `[llm]`
+        #[arg(long)]
+        task: Option<String>,
+        /// Models to try, comma-separated; default every model any route names
+        #[arg(long, value_delimiter = ',')]
+        models: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum LedgerCommands {
     /// Show ledger entry count and object count
     Status {
@@ -1540,6 +1573,11 @@ fn emits_machine_output(command: &Commands) -> bool {
         | Commands::Ekl { json, .. }
         | Commands::Coverage { json, .. }
         | Commands::Freshness { json, .. } => *json,
+        Commands::Llm { subcommand } => match subcommand {
+            LlmCommands::Routes { json }
+            | LlmCommands::Usage { json, .. }
+            | LlmCommands::Probe { json, .. } => *json,
+        },
         Commands::Graph {
             subcommand: GraphCommands::Export { .. },
         } => true,
@@ -1809,6 +1847,15 @@ where
         Commands::Freshness { json, limit } => {
             crate::commands::freshness::run(&config, &cwd, json, limit)
         }
+        Commands::Llm { subcommand } => match subcommand {
+            LlmCommands::Routes { json } => crate::commands::llm::routes(&config, &cwd, json),
+            LlmCommands::Usage { since, json } => {
+                crate::commands::llm::usage(&config, &cwd, since.as_deref(), json)
+            }
+            LlmCommands::Probe { task, models, json } => {
+                crate::commands::llm::probe(&config, &cwd, task.as_deref(), &models, json).await
+            }
+        },
         Commands::Build { source } => {
             crate::commands::build::run_selected(&config, &cwd, &extensions, source.as_deref())
                 .await

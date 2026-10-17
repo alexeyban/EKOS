@@ -1019,7 +1019,11 @@ pub async fn run_reconstruct(
         ),
         Ok(()) => {
             model_call_allowed(config, allow_metered)?;
-            let llm = super::recover::build_llm_provider_strict(config, &config.artifact_dir(cwd))?;
+            let llm = super::recover::build_llm_provider_strict_for(
+                config,
+                ekos_recovery::Task::Reconstruct,
+                &config.artifact_dir(cwd),
+            )?;
             let (outcome, hash) =
                 reconstruct_one(llm.as_ref(), &def, config.llm.max_tokens.unwrap_or(4096)).await?;
             (outcome, hash, Some(llm.model_name().to_string()))

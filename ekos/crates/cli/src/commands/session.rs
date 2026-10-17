@@ -397,7 +397,11 @@ pub fn extract(config: &EkosConfig, cwd: &Path, session: &str) -> Result<()> {
     }
     let (inbox, slices) = inbox_and_slices(config, cwd)?;
     let artifact_dir = config.artifact_dir(cwd);
-    let llm = super::recover::build_llm_provider(config, &artifact_dir);
+    let llm = super::recover::build_llm_provider_for(
+        config,
+        ekos_recovery::Task::SessionCapture,
+        &artifact_dir,
+    );
     let redactor = config.redaction_config();
     let mut accepted = 0;
     let (mut unsupported, mut invalid) = (0, 0);

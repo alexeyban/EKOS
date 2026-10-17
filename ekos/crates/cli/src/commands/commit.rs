@@ -892,59 +892,13 @@ pub fn select_llm_provider_for_description(
     config: &EkosConfig,
     artifact_dir: &Path,
 ) -> Result<std::sync::Arc<dyn ekos_recovery::LlmProvider>> {
-    use ekos_recovery::{AnthropicProvider, CachedLlmProvider, OllamaProvider, OpenAiProvider};
-
-    let cache_dir = artifact_dir
-        .parent()
-        .unwrap_or(artifact_dir)
-        .join("llm-cache");
-    std::fs::create_dir_all(&cache_dir).ok();
-
-    if config.llm.provider.as_deref() == Some("ollama") {
-        // `from_env_with_model`, not `from_env` — found live (this session's own local-Ollama
-        // verification run): `from_env` silently ignores `[llm].model` and always uses the
-        // built-in `llama3.1:8b` default, the same real, pre-existing gap `recover.rs` already
-        // fixed for its own Ollama call site but `docs.rs`/`marketing.rs` still have.
-        return Ok(std::sync::Arc::new(CachedLlmProvider::new(
-            OllamaProvider::from_env_with_model(config.llm.model.as_deref())
-                .with_context_window(config.llm.context_window),
-            cache_dir,
-        )));
-    }
-
-    let key_env = config
-        .llm
-        .api_key_env
-        .as_deref()
-        .unwrap_or("ANTHROPIC_API_KEY");
-
-    // Mirror `recover.rs::build_llm_provider` — `[llm] provider = "openai"` must route here too,
-    // not silently fall through to Anthropic (which then 401s on an OpenAI key).
-    if config.llm.provider.as_deref() == Some("openai") {
-        let provider = OpenAiProvider::from_config(
-            key_env,
-            config.llm.model.as_deref(),
-            config.llm.base_url.as_deref(),
-        )
-        .map_err(|_| {
-            anyhow::anyhow!(
-                "{key_env} not set — [llm] provider = \"openai\" needs it for [llm-description]"
-            )
-        })?;
-        return Ok(std::sync::Arc::new(CachedLlmProvider::new(
-            provider, cache_dir,
-        )));
-    }
-
-    let provider = AnthropicProvider::from_env_var(key_env).map_err(|_| {
-        anyhow::anyhow!(
-            "{key_env} not set and no [llm] provider = \"ollama\"/\"openai\" configured in \
-             ekos.toml — an LLM is required for [llm-description]"
-        )
-    })?;
-    Ok(std::sync::Arc::new(CachedLlmProvider::new(
-        provider, cache_dir,
-    )))
+    // RFC 0197: the `description` route, through the one selector (this file had its own copy).
+    super::recover::build_llm_provider_strict_for(
+        config,
+        ekos_recovery::Task::Description,
+        artifact_dir,
+    )
+    .map_err(|e| anyhow::anyhow!("{e} — an LLM is required for [llm-description]"))
 }
 
 fn open_ledger(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {

@@ -11,13 +11,13 @@ use ekos_recovery::{
     ClickHouseAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass, CryptoAnalyzerPass,
     DbtAnalyzerPass, DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass,
     DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass,
-    GovernanceAnalyzerPass, JavaScriptAnalyzerPass, JavaScriptStats, LocalDocAnalyzerPass,
-    MockLlmProvider, OllamaProvider, OpenAiProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass,
+    GovernanceAnalyzerPass, JavaScriptAnalyzerPass, JavaScriptStats, LlmRouter,
+    LocalDocAnalyzerPass, MockLlmProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass,
     PentahoStats, PerlAnalyzerPass, PerlStats, PlPgSqlAnalyzerPass, PlPgSqlStats,
     PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats,
-    SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats, TreasuryAnalyzerPass,
-    TriggerAnalyzerPass, TriggerStats, ViewAnalyzerPass, ViewStats, anthropic::AnthropicProvider,
-    build_dialect_registry, cache::CachedLlmProvider, llm::LlmProvider, resolve_dialect_name,
+    SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats, Task, TreasuryAnalyzerPass,
+    TriggerAnalyzerPass, TriggerStats, ViewAnalyzerPass, ViewStats, build_dialect_registry,
+    llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -351,7 +351,7 @@ async fn register_sql_passes(
     cwd: &Path,
     ignore: &[String],
     redaction_config: &ekos_common::redaction::RedactionConfig,
-    llm: &Arc<dyn LlmProvider>,
+    llm: &TaskLlm<'_>,
     pass_manager: &mut ekos_compiler_core::pass::PassManager,
     sql_count: &mut usize,
     sql_transform_stats_handles: &mut Vec<Arc<std::sync::Mutex<SqlTransformStats>>>,
@@ -423,8 +423,13 @@ async fn register_sql_passes(
                 }
             };
 
-            let pass = SqlAnalyzerPass::new(&rel_str, sql.clone(), llm.clone(), dialect_parser)
-                .with_max_tokens(config.llm.max_tokens);
+            let pass = SqlAnalyzerPass::new(
+                &rel_str,
+                sql.clone(),
+                llm.get(Task::SqlNaming),
+                dialect_parser,
+            )
+            .with_max_tokens(config.llm.max_tokens);
             pass_manager.register(Box::new(pass));
 
             // ── Transformation IR extraction (RFC 0027 Phase 2) ───────────
@@ -895,7 +900,7 @@ fn register_extension_passes(
 fn register_localdocs(
     config: &EkosConfig,
     cwd: &Path,
-    llm: &Arc<dyn LlmProvider>,
+    llm: &TaskLlm<'_>,
     localdocs_artifact_ids: Vec<ArtifactId>,
     pass_manager: &mut ekos_compiler_core::pass::PassManager,
 ) -> Option<Arc<std::sync::Mutex<DocumentSemanticsStats>>> {
@@ -914,10 +919,11 @@ fn register_localdocs(
 
     // ── LLM document-semantics extraction (RFC 0026) ─────────────────
     // Opt-in: one LLM call per document section, so it stays off unless
-    // asked for. Reuses the provider already selected above.
+    // asked for. RFC 0197: its own task route (`[llm.tasks.doc-semantics]`).
     if should_register_document_semantics(config, localdocs_count) {
-        let docsem_pass = DocumentSemanticsAnalyzerPass::new(localdocs_pass.name(), llm.clone())
-            .with_max_sections(config.document_semantics.max_sections);
+        let docsem_pass =
+            DocumentSemanticsAnalyzerPass::new(localdocs_pass.name(), llm.get(Task::DocSemantics))
+                .with_max_sections(config.document_semantics.max_sections);
         docsem_stats = Some(docsem_pass.stats_handle());
         pass_manager.register(Box::new(docsem_pass));
     }
@@ -931,7 +937,7 @@ fn register_localdocs(
 fn register_crate_topology(
     config: &EkosConfig,
     cwd: &Path,
-    llm: &Arc<dyn LlmProvider>,
+    llm: &TaskLlm<'_>,
     cargo_manifests: Vec<(String, String, String)>,
     pass_manager: &mut ekos_compiler_core::pass::PassManager,
 ) -> Option<Arc<std::sync::Mutex<ArchitectureReasoningStats>>> {
@@ -953,10 +959,10 @@ fn register_crate_topology(
 
     // ── LLM architecture reasoning (RFC 0065 Phase 2) ─────────────────
     // Opt-in: one batched LLM call per `recover` run, so it stays off unless asked for.
-    // Reuses the provider already selected above.
+    // RFC 0197: its own task route (`[llm.tasks.architecture]`).
     if should_register_architecture_reasoning(config, crate_count) {
         let archreasoning_pass =
-            ArchitectureReasoningPass::new(crate_topology_pass.name(), llm.clone());
+            ArchitectureReasoningPass::new(crate_topology_pass.name(), llm.get(Task::Architecture));
         archreasoning_stats = Some(archreasoning_pass.stats_handle());
         pass_manager.register(Box::new(archreasoning_pass));
     }
@@ -979,8 +985,9 @@ pub async fn run_with(
             .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?,
     );
 
-    // ── LLM provider selection ────────────────────────────────────────────
-    let llm: Arc<dyn LlmProvider> = build_llm_provider(config, &artifact_dir);
+    // ── LLM provider selection (RFC 0197: one router, one provider per task, built on use) ──
+    let router = llm_router(config, &artifact_dir);
+    let llm = TaskLlm::new(&router);
 
     // ── Build PassContext ─────────────────────────────────────────────────
     let mut pass_manager = ekos_compiler_core::pass::PassManager::new();
@@ -1582,10 +1589,7 @@ fn should_register_architecture_reasoning(config: &EkosConfig, crate_count: usiz
 /// `MockLlmProvider` — `OpenAiProvider::from_env_var("ANTHROPIC_API_KEY")` checked the wrong
 /// variable — and warned about the wrong key ever being missing.
 pub(crate) fn default_key_env(provider: Option<&str>) -> &'static str {
-    match provider {
-        Some("openai") => "OPENAI_API_KEY",
-        _ => "ANTHROPIC_API_KEY",
-    }
+    ekos_recovery::route::default_key_env(provider)
 }
 
 /// The API-key environment variable name `build_llm_provider` will actually check for this
@@ -1613,15 +1617,78 @@ pub fn resolved_key_env(config: &EkosConfig) -> &str {
 /// `pub` (not `pub(crate)`) because RFC 0045's demo server reuses this exact
 /// selection logic as a library dependency rather than duplicating it — see
 /// `ekos/crates/demo-server`.
+/// RFC 0197: each task's provider, built the first time a pass asks for it — so a disabled pass
+/// never builds one, and a missing key warns once per task, not per file.
+pub(crate) struct TaskLlm<'a> {
+    router: &'a LlmRouter,
+    built: std::sync::Mutex<HashMap<Task, Arc<dyn LlmProvider>>>,
+}
+
+impl<'a> TaskLlm<'a> {
+    pub(crate) fn new(router: &'a LlmRouter) -> Self {
+        Self {
+            router,
+            built: Default::default(),
+        }
+    }
+
+    pub(crate) fn get(&self, task: Task) -> Arc<dyn LlmProvider> {
+        self.built
+            .lock()
+            .expect("task llm lock")
+            .entry(task)
+            .or_insert_with(|| provider_or_mock(self.router, task))
+            .clone()
+    }
+}
+
 pub fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn LlmProvider> {
-    match build_llm_provider_strict(config, artifact_dir) {
-        Ok(provider) => provider,
+    build_llm_provider_for(config, Task::Default, artifact_dir)
+}
+
+/// RFC 0197: [`build_llm_provider`] for one task's route (`[llm.tasks.<task>]` over `[llm]`).
+pub fn build_llm_provider_for(
+    config: &EkosConfig,
+    task: Task,
+    artifact_dir: &Path,
+) -> Arc<dyn LlmProvider> {
+    provider_or_mock(&llm_router(config, artifact_dir), task)
+}
+
+/// RFC 0197: the router for one command — every task it serves shares `[llm] budget-usd`.
+/// State (`llm-cache/`, `llm-usage.jsonl`) lives beside the artifact directory.
+pub fn llm_router(config: &EkosConfig, artifact_dir: &Path) -> LlmRouter {
+    LlmRouter::new(&config.llm, artifact_dir.parent().unwrap_or(artifact_dir))
+}
+
+/// `router`'s provider for `task`, or the structural-only mock when it cannot be built.
+pub fn provider_or_mock(router: &LlmRouter, task: Task) -> Arc<dyn LlmProvider> {
+    match router.provider(task) {
+        Ok(provider) => {
+            tracing::info!(
+                "LLM route {task}: {} via {}",
+                router.route(task).models.join(" → "),
+                router.route(task).provider
+            );
+            provider
+        }
         Err(err) => {
+            let err = anyhow::anyhow!("{} not set", key_name(&err, router, task));
             tracing::warn!("{err} — using structural analysis only (LLM enrichment skipped)");
             Arc::new(MockLlmProvider::new(
                 r#"{"entities":[],"relationships":[]}"#,
             ))
         }
+    }
+}
+
+fn key_name(err: &ekos_recovery::LlmError, router: &LlmRouter, task: Task) -> String {
+    match err {
+        ekos_recovery::LlmError::NoApiKey(k) => k.clone(),
+        _ => router
+            .route(task)
+            .key_env
+            .unwrap_or_else(|| err.to_string()),
     }
 }
 
@@ -1633,43 +1700,25 @@ pub fn build_llm_provider(config: &EkosConfig, artifact_dir: &Path) -> Arc<dyn L
 /// copies only knew `ollama` and Anthropic: with `[llm] provider = "openai"` they built an
 /// `AnthropicProvider` from the OpenAI-compatible key and failed on the first request. One
 /// selection, called from every site, is what keeps a new provider from reaching only some of
-/// them.
+/// them (RFC 0197: `commit.rs`'s own copy went the same way).
 pub fn build_llm_provider_strict(
     config: &EkosConfig,
     artifact_dir: &Path,
 ) -> Result<Arc<dyn LlmProvider>> {
-    let cache_dir = artifact_dir
-        .parent()
-        .unwrap_or(artifact_dir)
-        .join("llm-cache");
-    std::fs::create_dir_all(&cache_dir).ok();
+    build_llm_provider_strict_for(config, Task::Default, artifact_dir)
+}
 
-    if config.llm.provider.as_deref() == Some("ollama") {
-        tracing::info!("using local Ollama provider with disk cache");
-        return Ok(Arc::new(CachedLlmProvider::new(
-            OllamaProvider::from_env_with_model(config.llm.model.as_deref())
-                .with_context_window(config.llm.context_window),
-            cache_dir,
-        )));
-    }
-
-    let key_env = resolved_key_env(config);
-    let not_set = |_| anyhow::anyhow!("{key_env} not set");
-
-    if config.llm.provider.as_deref() == Some("openai") {
-        let provider = OpenAiProvider::from_config(
-            key_env,
-            config.llm.model.as_deref(),
-            config.llm.base_url.as_deref(),
-        )
-        .map_err(not_set)?;
-        tracing::info!("using OpenAI provider with disk cache");
-        return Ok(Arc::new(CachedLlmProvider::new(provider, cache_dir)));
-    }
-
-    let provider = AnthropicProvider::from_env_var(key_env).map_err(not_set)?;
-    tracing::info!("using Anthropic provider with disk cache");
-    Ok(Arc::new(CachedLlmProvider::new(provider, cache_dir)))
+/// RFC 0197: [`build_llm_provider_strict`] for one task's route.
+pub fn build_llm_provider_strict_for(
+    config: &EkosConfig,
+    task: Task,
+    artifact_dir: &Path,
+) -> Result<Arc<dyn LlmProvider>> {
+    let router = llm_router(config, artifact_dir);
+    router.provider(task).map_err(|err| match err {
+        ekos_recovery::LlmError::NoApiKey(k) => anyhow::anyhow!("{k} not set"),
+        other => anyhow::anyhow!("{other}"),
+    })
 }
 
 #[cfg(test)]

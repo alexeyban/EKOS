@@ -28,6 +28,7 @@ pub mod identity;
 pub mod import;
 pub mod init;
 pub mod ledger;
+pub mod llm;
 pub mod marketing;
 pub mod mcp;
 pub mod migrate;

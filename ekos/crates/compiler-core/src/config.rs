@@ -147,6 +147,95 @@ pub struct LlmConfig {
     /// or a bill requires.
     #[serde(default)]
     pub max_tokens: Option<u32>,
+    /// RFC 0197: models tried in order when this route's model answers 429 or 5xx.
+    #[serde(default)]
+    pub fallback: Vec<String>,
+    /// RFC 0197: sent as the Responses API's `reasoning.effort` and Chat Completions'
+    /// `reasoning_effort` (`minimal`/`low`/`medium`/`high`); unset sends nothing.
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    /// RFC 0197: mark the system prompt cacheable on the Messages API (a cache write costs more
+    /// than plain input, so only for a task that resends one system prompt many times).
+    #[serde(default)]
+    pub prompt_cache: Option<bool>,
+    /// RFC 0197: refuse a metered call that could take this process's spend past this many US
+    /// dollars (worst case: estimated input + `max_tokens` output). A metered model with no
+    /// known price is refused whenever a budget is set.
+    #[serde(default)]
+    pub budget_usd: Option<f64>,
+    /// RFC 0197 §5: allow models whose provider may keep or train on what it receives.
+    #[serde(default)]
+    pub allow_data_collection: bool,
+    /// RFC 0197: per-task routes — `[llm.tasks.<task>]`, each field inherited from `[llm]`
+    /// when omitted. Task names: `ekos_recovery::llm::Task`.
+    #[serde(default)]
+    pub tasks: std::collections::BTreeMap<String, LlmRoute>,
+    /// RFC 0197: prices per million tokens, overriding the built-in table (`[llm.prices."<model>"]`).
+    #[serde(default)]
+    pub prices: std::collections::BTreeMap<String, LlmPrice>,
+}
+
+/// RFC 0197: one task's route. Every field left unset is taken from `[llm]`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct LlmRoute {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    pub api_key_env: Option<String>,
+    pub max_tokens: Option<u32>,
+    pub context_window: Option<u32>,
+    pub fallback: Option<Vec<String>>,
+    pub reasoning_effort: Option<String>,
+    pub prompt_cache: Option<bool>,
+}
+
+/// RFC 0197: US dollars per million tokens.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct LlmPrice {
+    pub input: f64,
+    pub output: f64,
+    #[serde(default)]
+    pub cache_read: Option<f64>,
+    #[serde(default)]
+    pub cache_write: Option<f64>,
+}
+
+impl LlmConfig {
+    /// RFC 0197: `[llm]` with `[llm.tasks.<task>]` laid over it. The result has no tasks of its
+    /// own; prices, budget and the data policy are the workspace's, whatever the task.
+    pub fn for_task(&self, task: &str) -> LlmConfig {
+        let mut out = LlmConfig {
+            tasks: Default::default(),
+            ..self.clone()
+        };
+        let Some(r) = self.tasks.get(task) else {
+            return out;
+        };
+        if r.provider.is_some() {
+            out.provider = r.provider.clone();
+            // A different provider does not inherit the default route's host or key.
+            out.base_url = None;
+            out.api_key_env = None;
+        }
+        macro_rules! over {
+            ($($f:ident),*) => { $( if r.$f.is_some() { out.$f = r.$f.clone(); } )* };
+        }
+        over!(
+            model,
+            base_url,
+            api_key_env,
+            max_tokens,
+            context_window,
+            reasoning_effort,
+            prompt_cache
+        );
+        if let Some(f) = &r.fallback {
+            out.fallback = f.clone();
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
