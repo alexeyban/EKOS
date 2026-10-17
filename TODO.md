@@ -6658,8 +6658,16 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
 - [ ] Confirmed RFC 0170 concepts as a resolution source (none are confirmed in the sandbox);
       Confluence intake; metered providers (with consent)
 
-### M5
-- [ ] M5 monitoring and self-serve (see RFC 0190 "Milestones")
+### M5 — monitoring and self-serve (RFC 0196) · **done 2026-10-17** (ekos-lakehouse devlog_7)
+- [x] Health per table and layer from ledger facts (schema state and dbt results now recorded)
+- [x] `status`, `alert` (webhook, transitions once), `metrics` (OTLP → collector → Prometheus)
+- [x] MCP `ekos_pipeline_status` / `ekos_table_health` (scoped, read-only)
+- [x] Deep `doctor`: connector exposes every column, read-only role, Iceberg, gold model
+- [x] Quickstart, runbook, troubleshooting; the quickstart executed verbatim by
+      `deploy/e2e/quickstart.sh` — fresh database to 4/4 healthy (**RFC 0190 v1 exit**)
+- [ ] Console Lakehouse tab (needs console extension pages in core — its own RFC)
+- [ ] Before a public release: GitHub repo + PR path exercised, EKOS `main` pushed and pinned by
+      tag, a release binary instead of "build from source" in the quickstart
 - [ ] `Target::Iceberg` (migrate-dq) and any engine variant in `migrate::connection` — added
       with the M1 type map, when there are rules for them
 - [x] M1 type map: an unconstrained PostgreSQL `numeric` arrives in Trino as `number`, which
