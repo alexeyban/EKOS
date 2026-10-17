@@ -6684,7 +6684,7 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
       92 (19 s median), GPT-5.4 Nano 87 (5% hallucination); total bake-off spend $1.08
 - [ ] Measure `description` (the ~6,000-call regeneration) on a sample before switching it
 - [ ] `ekos llm bench` (replay a task's real prompts) — the bake-off ran the passes by hand
-- [ ] `ekos.zen.toml` names `deepseek-v4-flash`, now disabled on the key; move it to the measured routes
+- [x] `ekos.toml` + `ekos.zen.toml` on the measured routes: Haiku 5.5 default, MiniMax M3 for `ask`, GPT-6 Luna for `doc-semantics` (4096)
 - [ ] Lakehouse gold drafter adopts the router (its own repository)
 - [ ] Mistral Large 4: refuses `reasoning_effort` and `temperature` silently; per-model request quirks
 

@@ -83,10 +83,23 @@ ignore-patterns = [
 ]
 
 [llm]
-provider = "openai"
-base-url = "https://opencode.ai/zen/v1"
-model = "deepseek-v4-flash"
+# RFC 0197 routes, measured 2026-10-17 (tables in ekos/docs/rfcs/0197-llm-task-routing.md).
+# Every task without its own route: Claude Haiku 5.5 — ask 98/101 at $0.10 a full eval run.
+provider = "zen"
+model = "claude-haiku-5-5"
 api-key-env = "OPENCODE_API_KEY"
+
+[llm.tasks.ask]
+# Highest score: 99/101, no hallucination, about $0.17 a full eval run.
+model = "minimax-m3"
+fallback = ["claude-haiku-5-5"]
+
+[llm.tasks.doc-semantics]
+# Bulk extraction: 40/40 sections parsed for about $0.03; 4096 because answers run ~1,400 tokens
+# and reasoning models fill a 2048 cap before the JSON ends.
+model = "gpt-6-luna"
+max-tokens = 4096
+fallback = ["claude-haiku-5-5"]
 
 [llm-description]
 # Temporarily disabled for the RFC 0139/0140/0141 measurement rebuild (2026-09-14) and the RFC
@@ -113,4 +126,4 @@ enabled = false
 dry-run = false
 
 [ai]
-max-tokens = 8192  # deepseek-v4-flash reasons; hidden reasoning tokens count against this
+max-tokens = 8192  # MiniMax M3 reasons; hidden reasoning tokens count against this
