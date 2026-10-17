@@ -1043,6 +1043,31 @@ api-key-env = "OPENCODE_API_KEY"
 max-tokens = 8192            # reasoning models spend hidden tokens; 1024/2048 truncate or empty answers
 ```
 
+**A model per task (RFC 0197).** `provider = "zen"` reaches every OpenCode Zen model on its own wire
+format (Claude and Qwen Flash on Messages, GPT/Grok on Responses, the rest on Chat Completions), and
+`[llm.tasks.<task>]` routes one kind of call to its own model — tasks: `ask`, `doc-semantics`,
+`description`, `semantics`, `sql-naming`, `session-capture`, `architecture`, `reconstruct`,
+`nl-sql`, `docs-prose`, `marketing`. Measured on this repository (RFC 0197's tables):
+
+```toml
+[llm]
+provider = "zen"
+model = "claude-haiku-5-5"   # ask: 98/101 for $0.10 a full eval run
+api-key-env = "OPENCODE_API_KEY"
+budget-usd = 1.00            # refuse a call whose worst case could cross this, per command
+
+[llm.tasks.doc-semantics]
+model = "gpt-6-luna"         # 40/40 sections parsed; deepseek-v4.1-flash parsed 4/33 at the old cap
+max-tokens = 4096
+fallback = ["claude-haiku-5-5"]
+```
+
+Every call that reaches a host is priced and logged (metadata only) to `.ekos/llm-usage.jsonl`:
+`ekos llm usage` totals it, `ekos llm routes` shows each task's model and price, `ekos llm probe`
+sends a few-token request per model to show which ones a key can reach (access is per account on
+Zen). Models whose provider may keep requests are refused unless `[llm] allow-data-collection = true`;
+Zen's free models are not reachable outside OpenCode.
+
 For local Ollama, `[llm] context-window = 8192` (the default; also `OLLAMA_NUM_CTX`) is sent as `num_ctx` —
 without it Ollama silently truncated long prompts — and EKOS warns when a prompt fills the window.
 `ekos doctor` shows the effective window or custom endpoint. Hosted models bill per token; a full

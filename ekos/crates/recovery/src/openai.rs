@@ -97,6 +97,7 @@ impl OpenAiProvider {
         req: &LlmRequest<'_>,
         stream: bool,
     ) -> Result<reqwest::Response, LlmError> {
+        let mut dropped_temperature = false;
         loop {
             let http_resp = self
                 .client
@@ -113,10 +114,18 @@ impl OpenAiProvider {
             let had_temp = !self
                 .no_temperature
                 .load(std::sync::atomic::Ordering::Relaxed);
-            if status == 400 && had_temp && crate::anthropic::refuses_temperature(&body) {
+            // RFC 0197: some models refuse `temperature`, and not all say so (Mistral Large 4
+            // on Zen answers a bare `{"object":"error"}`). Retry once without it; keep going
+            // without only when that retry gets past the 400.
+            if status == 400 && had_temp {
                 self.no_temperature
                     .store(true, std::sync::atomic::Ordering::Relaxed);
+                dropped_temperature = true;
                 continue;
+            }
+            if dropped_temperature && status == 400 {
+                self.no_temperature
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
             }
             return Err(LlmError::Api { status, body });
         }
@@ -198,7 +207,21 @@ struct ApiChoice {
 
 #[derive(Deserialize)]
 struct ApiResponseMessage {
-    content: Option<String>,
+    content: Option<serde_json::Value>,
+}
+
+/// A message's text: a string, or (Mistral on Zen, RFC 0197) an array of blocks where only
+/// `type: "text"` blocks are the answer and `thinking` blocks are skipped.
+pub(crate) fn content_text(content: &serde_json::Value) -> String {
+    match content {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(blocks) => blocks
+            .iter()
+            .filter(|b| b["type"] == "text")
+            .filter_map(|b| b["text"].as_str())
+            .collect(),
+        _ => String::new(),
+    }
 }
 
 /// `(input billed at the full price, output, cache read)` from a Chat Completions `usage`
@@ -238,6 +261,7 @@ impl LlmProvider for OpenAiProvider {
             .into_iter()
             .next()
             .and_then(|c| c.message.content)
+            .map(|c| content_text(&c))
             .unwrap_or_default();
 
         Ok(LlmResponse {
@@ -320,10 +344,11 @@ fn apply_stream_line(acc: &mut StreamAccumulator, line: &str, on_chunk: &mut dyn
         .and_then(|c| c.get(0))
         .and_then(|c| c.get("delta"))
         .and_then(|d| d.get("content"))
-        .and_then(|t| t.as_str())
+        .map(content_text)
+        .filter(|t| !t.is_empty())
     {
-        acc.content.push_str(text);
-        on_chunk(text.to_string());
+        acc.content.push_str(&text);
+        on_chunk(text);
     }
     if let Some(usage) = event.get("usage").filter(|u| u.is_object()) {
         let (i, o, c) = chat_usage(usage);
@@ -472,6 +497,18 @@ mod tests {
         assert!(json.get("temperature").is_none());
         assert_eq!(json["reasoning_effort"], "low");
         assert_eq!(json["stream_options"]["include_usage"], true);
+    }
+
+    #[test]
+    fn content_blocks_keep_only_the_text_blocks() {
+        // Mistral Large 4 on Zen, 2026-10-17 (shortened).
+        let v = serde_json::json!([
+            {"type": "thinking", "thinking": [{"type": "text", "text": "The user said"}]},
+            {"type": "text", "text": "OK"}
+        ]);
+        assert_eq!(content_text(&v), "OK");
+        assert_eq!(content_text(&serde_json::json!("plain")), "plain");
+        assert_eq!(content_text(&serde_json::Value::Null), "");
     }
 
     #[test]

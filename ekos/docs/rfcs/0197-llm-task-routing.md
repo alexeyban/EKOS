@@ -153,6 +153,77 @@ defaults: EKOS keeps working with only `[llm]`.
 - **Phase 2** — `ekos llm probe`, `ekos llm bench` and the bake-off: local Ollama ($0) and the
   paid models the key reaches, within a **$2 total** the maintainer approved (2026-10-17).
 
+## Bake-off results (2026-10-17, Phase 2 run by hand)
+
+`ekos llm bench` was not built: the bake-off ran the real passes under routes instead —
+`ekos eval run` for `ask`, `ekos recover` with `[document-semantics]` for `doc-semantics`, each
+model in its own workspace or config, every call logged by `llm-usage.jsonl`. Total metered
+spend: **$0.73** of the approved $2.
+
+### `doc-semantics` — three public RFCs, the same 40 sections for every model
+
+| Model | Sections parsed, cap 2048 | Sections parsed, cap 4096 | Cost (both rounds) |
+|---|---|---|---|
+| `gpt-6-luna` | 28 / 33 | **40 / 40** | $0.029 |
+| `claude-haiku-5-5` | 26 / 33 | **40 / 40** | $0.032 |
+| `glm-5.3-flash` (effort low at 4096) | 15 / 33 | **40 / 40** | $0.034 |
+| `minimax-m3` | 32 / 33 | **40 / 40** | $0.050 |
+| `gpt-5.4-nano` | 29 / 33 | **40 / 40** | $0.067 |
+| `qwen3.8-flash` (effort low at 4096) | 10 / 33 | 28 / 40 | $0.056 |
+| `deepseek-v4.1-flash` (effort low at 4096) | **4 / 33** | 16 / 40 | $0.159 |
+| `mistral-large-4` | 0 (400) | 0 (400) | — |
+
+Every parse failure in both rounds was an answer cut off at the cap (`output_tokens >= max_tokens`):
+reasoning models spend it on hidden reasoning. With this repository's default model the pass
+silently dropped 88% of sections.
+
+### `ask` — RFC 0138's 101 scenarios on this repository's ledger
+
+| Model | Passed | Answer correctness | Hallucination | Cost per run |
+|---|---|---|---|---|
+| `claude-haiku-5-5` | **98 / 101** | 94.2% | 0 | $0.096 |
+| `deepseek-v4.1-flash` (2026-10-12 run, earlier ledger) | 97 / 101 | 93.1% | 0 | ≈ $0.23 (estimated) |
+| `gpt-6-luna` | 91 / 101 | 85.7% | 1% | $0.056 |
+
+`qwen3.8-flash`, `gpt-5.4-nano`, `glm-5.3-flash`, `minimax-m3` and a same-day DeepSeek baseline
+were not measured: the run was stopped by the host's low-memory guard during `qwen3.8-flash`
+(79 of 101 calls, $0.12, p50 latency 32 s — slow enough to rule out for `ask`).
+
+### Starting configuration these support
+
+```toml
+[llm]
+provider = "zen"
+model = "claude-haiku-5-5"      # ask, and every task without a route
+api-key-env = "OPENCODE_API_KEY"
+
+[llm.tasks.doc-semantics]       # bulk extraction: cheapest that parsed everything
+model = "gpt-6-luna"
+max-tokens = 4096
+fallback = ["claude-haiku-5-5"]
+```
+
+`description` (≈ 6,000 calls per regeneration of this repository) has the same shape as
+`doc-semantics` and is the largest saving: at list prices about $2 on Haiku 5.5 or Luna against
+about $6 on `deepseek-v4.1-flash`, before its truncation losses. Not measured.
+
+### Found while benchmarking
+
+- **The document-semantics pass reprocessed old artifacts.** It read every local-docs artifact the
+  store ever held, so a document whose artifact changed between two `recover` runs was extracted
+  from both (33 sections became 40, half of them paid twice, the old text kept). Per document path,
+  only the newest artifact's sections count now.
+- **The pass had a fixed 2048-token cap.** It takes the route's `max-tokens` now, and a cut-off
+  answer is `DOCSEM006` ("raise `[llm.tasks.doc-semantics] max-tokens`"), not a parse failure.
+- **Not every model says it refuses `temperature`**: Mistral Large 4 on Zen answers a bare
+  `{"object":"error"}`. Every provider now retries a 400 once without `temperature`, and keeps
+  going without only if that retry gets past the 400. Mistral also refuses `reasoning_effort`, so
+  it stays unreachable; and it returns `content` as blocks (`thinking`, `text`), which Chat
+  Completions parsing now accepts.
+- **Zen writes GPT prompts to its cache by itself** and bills them at the cache-write price
+  (`gpt-6-luna`: 3 input tokens and ~1,600–3,300 cache-write tokens per `ask` call).
+- **A 20-scenario screen is useless**: the first 20 scenarios are 18 adversarial refusals.
+
 ## Decided against
 
 - **Routing by prompt version** inside one provider: invisible in config and breaks when a

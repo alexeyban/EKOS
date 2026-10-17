@@ -923,7 +923,8 @@ fn register_localdocs(
     if should_register_document_semantics(config, localdocs_count) {
         let docsem_pass =
             DocumentSemanticsAnalyzerPass::new(localdocs_pass.name(), llm.get(Task::DocSemantics))
-                .with_max_sections(config.document_semantics.max_sections);
+                .with_max_sections(config.document_semantics.max_sections)
+                .with_max_tokens(config.llm.for_task(Task::DocSemantics.as_str()).max_tokens);
         docsem_stats = Some(docsem_pass.stats_handle());
         pass_manager.register(Box::new(docsem_pass));
     }

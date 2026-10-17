@@ -106,6 +106,7 @@ impl AnthropicProvider {
         req: &LlmRequest<'_>,
         stream: bool,
     ) -> Result<reqwest::Response, LlmError> {
+        let mut dropped_temperature = false;
         loop {
             let http_resp = self
                 .client
@@ -123,22 +124,22 @@ impl AnthropicProvider {
             let had_temp = !self
                 .no_temperature
                 .load(std::sync::atomic::Ordering::Relaxed);
-            if status == 400 && had_temp && refuses_temperature(&body) {
+            // RFC 0197: some models refuse `temperature`, and not all say so (Mistral Large 4
+            // on Zen answers a bare `{"object":"error"}`). Retry once without it; keep going
+            // without only when that retry gets past the 400.
+            if status == 400 && had_temp {
                 self.no_temperature
                     .store(true, std::sync::atomic::Ordering::Relaxed);
+                dropped_temperature = true;
                 continue;
+            }
+            if dropped_temperature && status == 400 {
+                self.no_temperature
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
             }
             return Err(LlmError::Api { status, body });
         }
     }
-}
-
-/// A 400 that names `temperature` as unsupported or deprecated (RFC 0197: Claude 5.5 on Zen
-/// answers "`temperature` is deprecated for this model").
-pub(crate) fn refuses_temperature(body: &str) -> bool {
-    let b = body.to_ascii_lowercase();
-    b.contains("temperature")
-        && (b.contains("deprecated") || b.contains("not supported") || b.contains("unsupported"))
 }
 
 // ── Wire types for the Anthropic Messages API ───────────────────────────────
@@ -369,12 +370,6 @@ mod tests {
 
     #[test]
     fn rfc0197_temperature_is_dropped_after_a_refusal_and_the_system_can_be_cached() {
-        assert!(refuses_temperature(
-            r#"{"error":{"message":"Upstream request failed: [invalid_request_error] `temperature` is deprecated for this model."}}"#
-        ));
-        assert!(!refuses_temperature(
-            r#"{"error":{"message":"max_tokens too large"}}"#
-        ));
         let p = AnthropicProvider::new("claude-haiku-5-5", "k");
         let r = req();
         let v = serde_json::to_value(p.body(&r, false)).unwrap();

@@ -120,8 +120,13 @@ pub struct DocumentSemanticsAnalyzerPass {
     deps: Vec<&'static str>,
     llm: Arc<dyn LlmProvider>,
     max_sections: Option<u32>,
+    /// Output-token cap per section (RFC 0197: `[llm.tasks.doc-semantics] max-tokens`).
+    max_tokens: u32,
     stats: Arc<Mutex<DocumentSemanticsStats>>,
 }
+
+/// The per-section output cap when the route sets none.
+pub const DEFAULT_MAX_TOKENS: u32 = 2048;
 
 impl DocumentSemanticsAnalyzerPass {
     pub fn new(local_docs_pass_id: impl Into<String>, llm: Arc<dyn LlmProvider>) -> Self {
@@ -133,8 +138,16 @@ impl DocumentSemanticsAnalyzerPass {
             deps: vec![dep],
             llm,
             max_sections: None,
+            max_tokens: DEFAULT_MAX_TOKENS,
             stats: Arc::new(Mutex::new(DocumentSemanticsStats::default())),
         }
+    }
+
+    /// RFC 0197: a route's `max-tokens`; `None` keeps [`DEFAULT_MAX_TOKENS`]. A verbose model
+    /// (Claude Haiku 5.5 wrote ~1,400 tokens a section) cut off at the cap yields no JSON at all.
+    pub fn with_max_tokens(mut self, max_tokens: Option<u32>) -> Self {
+        self.max_tokens = max_tokens.unwrap_or(DEFAULT_MAX_TOKENS);
+        self
     }
 
     pub fn with_max_sections(mut self, max_sections: Option<u32>) -> Self {
@@ -165,7 +178,13 @@ impl DocumentSemanticsAnalyzerPass {
             }
         };
 
-        let mut sections = Vec::new();
+        // RFC 0197 (found benchmarking): the store keeps every local-docs artifact a recover ever
+        // wrote, so a document whose artifact changed (an edit, a new build) had its old sections
+        // extracted again beside the new ones — paid for twice, stale text included. Per document
+        // path, only the newest artifact's sections count (the rule `collect_artifact_ids_for_
+        // connector` applies to observations).
+        let mut newest: HashMap<String, (chrono::DateTime<chrono::Utc>, Vec<SectionInput>)> =
+            HashMap::new();
         for id in ids {
             let Ok(Some(json)) = ctx.artifact_store.read(&id) else {
                 continue;
@@ -182,8 +201,29 @@ impl DocumentSemanticsAnalyzerPass {
                 );
                 continue;
             };
-            sections.extend(sections_from_graph(&artifact.content.kir));
+            // Parsed, not compared as text: the fractional digits vary in length.
+            let created_at = json["meta"]["created_at"]
+                .as_str()
+                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                .map(|t| t.with_timezone(&chrono::Utc))
+                .unwrap_or(chrono::DateTime::<chrono::Utc>::MIN_UTC);
+            let mut by_path: HashMap<String, Vec<SectionInput>> = HashMap::new();
+            for section in sections_from_graph(&artifact.content.kir) {
+                by_path
+                    .entry(section.path.clone())
+                    .or_default()
+                    .push(section);
+            }
+            for (path, found) in by_path {
+                match newest.get(&path) {
+                    Some((at, _)) if *at >= created_at => {}
+                    _ => {
+                        newest.insert(path, (created_at, found));
+                    }
+                }
+            }
         }
+        let mut sections: Vec<SectionInput> = newest.into_values().flat_map(|(_, s)| s).collect();
         // Content-addressed ids come back in arbitrary order; the pass must be
         // deterministic, including which sections `max_sections` truncates.
         sections.sort_by(|a, b| (&a.path, a.index).cmp(&(&b.path, b.index)));
@@ -266,7 +306,7 @@ impl CompilerPass for DocumentSemanticsAnalyzerPass {
                 system: SYSTEM_PROMPT,
                 user: &section.excerpt,
                 prompt_version: PROMPT_VERSION,
-                max_tokens: 2048,
+                max_tokens: self.max_tokens,
                 history: &[],
             };
 
@@ -286,6 +326,17 @@ impl CompilerPass for DocumentSemanticsAnalyzerPass {
 
             let output: LlmOutput = match serde_json::from_str(strip_json_fences(&resp.content)) {
                 Ok(o) => o,
+                Err(_) if resp.output_tokens >= self.max_tokens => {
+                    ctx.diagnostics.lock().unwrap().warning(
+                        "DOCSEM006",
+                        format!(
+                            "LLM answer for {} section {} was cut off at {} output tokens (skipped): \
+                             raise [llm.tasks.doc-semantics] max-tokens",
+                            section.path, section.index, self.max_tokens
+                        ),
+                    );
+                    continue;
+                }
                 Err(e) => {
                     ctx.diagnostics.lock().unwrap().warning(
                         "DOCSEM004",
@@ -579,6 +630,95 @@ mod tests {
         );
         assert_eq!(stats.lock().unwrap().concepts, 0);
         assert!(read_output(&c, &pass_id).is_none());
+    }
+
+    /// RFC 0197: a document seen by two recover runs (its text changed in between) is extracted
+    /// from its newest artifact only — the old one is neither paid for again nor kept.
+    #[tokio::test]
+    async fn only_the_newest_artifact_of_a_document_is_extracted() {
+        struct Recording(std::sync::Mutex<Vec<String>>);
+        #[async_trait::async_trait]
+        impl LlmProvider for Recording {
+            fn model_name(&self) -> &str {
+                "recording"
+            }
+            async fn complete(
+                &self,
+                req: &LlmRequest<'_>,
+            ) -> Result<crate::llm::LlmResponse, crate::llm::LlmError> {
+                self.0.lock().unwrap().push(req.user.to_string());
+                Ok(crate::llm::LlmResponse {
+                    content: r#"{"concepts": [], "relationships": []}"#.into(),
+                    ..Default::default()
+                })
+            }
+        }
+        let (c, _dir) = ctx();
+        seed_sections(
+            &c,
+            "spec.pdf",
+            serde_json::json!([{ "index": 0, "page": 1, "text": "old prose" }]),
+        )
+        .await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        seed_sections(
+            &c,
+            "spec.pdf",
+            serde_json::json!([{ "index": 0, "page": 1, "text": "new prose" }]),
+        )
+        .await;
+        let llm = Arc::new(Recording(Default::default()));
+        let mut pass = DocumentSemanticsAnalyzerPass::new(LOCAL_DOCS_PASS_ID, llm.clone());
+        let mut c2 = c.clone();
+        pass.run(&mut c2).await.unwrap();
+        let seen = llm.0.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        assert!(seen[0].contains("new prose"), "{seen:?}");
+    }
+
+    /// RFC 0197: an answer cut off at the cap is named as such, and the route's cap is sent.
+    #[tokio::test]
+    async fn a_cut_off_answer_is_reported_as_truncation_with_the_routes_cap() {
+        struct CutOff(std::sync::Mutex<Vec<u32>>);
+        #[async_trait::async_trait]
+        impl LlmProvider for CutOff {
+            fn model_name(&self) -> &str {
+                "verbose"
+            }
+            async fn complete(
+                &self,
+                req: &LlmRequest<'_>,
+            ) -> Result<crate::llm::LlmResponse, crate::llm::LlmError> {
+                self.0.lock().unwrap().push(req.max_tokens);
+                Ok(crate::llm::LlmResponse {
+                    content: r#"{"concepts": [{"name": "cut"#.into(),
+                    output_tokens: req.max_tokens,
+                    ..Default::default()
+                })
+            }
+        }
+        let (c, _dir) = ctx();
+        seed_sections(
+            &c,
+            "spec.pdf",
+            serde_json::json!([{ "index": 0, "page": 1, "text": "some prose" }]),
+        )
+        .await;
+        let llm = Arc::new(CutOff(Default::default()));
+        let mut pass = DocumentSemanticsAnalyzerPass::new(LOCAL_DOCS_PASS_ID, llm.clone())
+            .with_max_tokens(Some(4096));
+        let mut c2 = c.clone();
+        pass.run(&mut c2).await.unwrap();
+        assert_eq!(*llm.0.lock().unwrap(), vec![4096]);
+        let codes: Vec<String> = c
+            .diagnostics
+            .lock()
+            .unwrap()
+            .diagnostics()
+            .iter()
+            .map(|d| d.code.clone())
+            .collect();
+        assert_eq!(codes, vec!["DOCSEM006".to_string()]);
     }
 
     #[tokio::test]
