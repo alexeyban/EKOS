@@ -6626,9 +6626,21 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
 - [ ] `lakehouse doctor` checks the source catalog's two connector settings
 - [ ] Bronze partitioning from profile facts
 
-### M2–M5
-- [ ] M2 silver · M3 schema-change loop · M4 gold from descriptions · M5 monitoring and
-      self-serve (see RFC 0190 "Milestones")
+### M2 — silver (RFC 0193) · **done 2026-10-17** (ekos-lakehouse devlog_4)
+- [x] dbt-trino silver generated from source facts: dedup to bronze's current state, approved
+      masks only, tests from keys / NOT NULL / foreign keys / enum labels, docs from comments,
+      YAML snapshots for declared history
+- [x] `lakehouse check`: lineage through the compiled ledger, test and doc coverage, drift
+      (generation manifest), sqlfluff lint — each a ledger fact
+- [x] Dagster: silver assets after bronze, dbt tests as asset checks
+- [x] Exit: Pagila (131/131, lineage 107/107) and LedgerSMB (167 models, lineage 1193/1193,
+      lint 169/169) green
+- [ ] M2b: inferred keys (RFC 0158), RFC 0158 DQ rules as tests, confirmed RFC 0170 concepts
+      as docs, a passthrough read for ±infinity columns instead of refusing the table
+
+### M3–M5
+- [ ] M3 schema-change loop · M4 gold from descriptions · M5 monitoring and self-serve
+      (see RFC 0190 "Milestones")
 - [ ] `Target::Iceberg` (migrate-dq) and any engine variant in `migrate::connection` — added
       with the M1 type map, when there are rules for them
 - [x] M1 type map: an unconstrained PostgreSQL `numeric` arrives in Trino as `number`, which
