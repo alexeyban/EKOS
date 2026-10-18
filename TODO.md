@@ -6703,3 +6703,18 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
 - [x] `ekos-lakehouse --version` names itself (`EkosExtension::binary`)
 - [ ] macOS/Windows packages for Lakehouse (the stack is only tested on Linux)
 
+
+## RFC 0200–0205, 0207 — Pentaho packages to lakehouse dbt; console pages v3 (2026-10-18, devlog_279)
+
+- [x] RFC 0200 seams: `Pentaho*` registry rows, `Task::Translate`, `JavaDecompiler` extension hook
+- [x] Redaction: Kettle `Encrypted <hex>` passwords and XML password elements (pipeline logic v4)
+- [x] RFC 0201–0205 (in ekos-lakehouse): deep Kettle model, typed expressions + relational IR,
+      code steps (JavaScript / Java class, symbolic execution), medallion split + dbt output,
+      model drafts with anti-invention checks
+- [x] RFC 0207: console page selections, code / graph / markdown views, bound actions; metered
+      `/cli` runs need the tenant's permission; the lakehouse Pentaho tab
+- [ ] RFC 0204 §M6: differential run of the original transformation in PDI vs the dbt result
+      (migrate-validate V1–V3, planted defects)
+- [ ] RFC 0206 (private ekos-binary): JVM statement recovery behind `JavaDecompiler`
+- [ ] Normaliser / Denormaliser, Data validator, Combination lookup, Delete; job entries beyond TRANS
+- [ ] Push EKOS + lakehouse; switch the lakehouse `[patch]` back to git `main` and re-lock
