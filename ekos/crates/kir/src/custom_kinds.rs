@@ -335,6 +335,42 @@ prefixes constantly",
         structurally_keyed: true,
         note: "(change or mart, evidence hash, approver) — RFC 0190; approvals of one item differ only by evidence (written by the ekos-lakehouse extension)",
     },
+    // RFC 0200 — Pentaho → lakehouse dbt, written by the ekos-lakehouse extension.
+    CustomKind {
+        name: "PentahoPackage",
+        structurally_keyed: true,
+        note: "(project, package root) — RFC 0200; one per Kettle package a lakehouse project translates (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "PentahoJob",
+        structurally_keyed: true,
+        note: "(package, .kjb path) — RFC 0200; job names repeat across packages and folders (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "PentahoTransformation",
+        structurally_keyed: true,
+        note: "(package, .ktr path) — RFC 0200; transformation names repeat across packages and folders (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "PentahoStep",
+        structurally_keyed: true,
+        note: "(transformation, step name) — RFC 0200; `Table input`, `Select values` recur in every transformation (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "PentahoJobEntry",
+        structurally_keyed: true,
+        note: "(job, entry name, copy) — RFC 0200; `START`, `Success` recur in every job (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "PentahoConnection",
+        structurally_keyed: true,
+        note: "(package, connection name) — RFC 0200; the same connection name is redefined in every file and package (written by the ekos-lakehouse extension)",
+    },
+    CustomKind {
+        name: "PentahoTranslation",
+        structurally_keyed: true,
+        note: "(package, step or model, translation run) — RFC 0200; one per translated item per run (written by the ekos-lakehouse extension)",
+    },
     CustomKind {
         name: "ProjectSummary",
         structurally_keyed: true,

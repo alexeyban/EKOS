@@ -6,7 +6,8 @@
 //!
 //! RFC 0191 adds commands of its own (each leaf with its catalogue class) and lets an extension
 //! say which of its MCP tools a read scope can filter. RFC 0198 adds console pages: data that the
-//! web console renders, built from the extension's own read commands.
+//! web console renders, built from the extension's own read commands. RFC 0200 lets one
+//! extension offer a [`JavaDecompiler`] that another extension's command or pass can use.
 //!
 //! A private crate cannot be an optional dependency of a public one (Cargo resolves every git
 //! dependency, optional or not, when it writes `Cargo.lock`), so the dependency points outward:
@@ -116,6 +117,59 @@ pub trait EkosExtension: Send + Sync {
     fn binary(&self) -> Option<(&'static str, &'static str)> {
         None
     }
+
+    /// RFC 0200: a decompiler for compiled JVM classes this extension offers to the others (the
+    /// private `ekos-binary` build). `None`: it offers none.
+    fn java_decompiler(&self) -> Option<Arc<dyn JavaDecompiler>> {
+        None
+    }
+}
+
+/// RFC 0200: turns a compiled JVM class into Java-like source, one method at a time. The public
+/// build has no implementation; a caller treats `None` from [`Extensions::java_decompiler`] as
+/// "compiled code stays a gap".
+pub trait JavaDecompiler: Send + Sync {
+    /// Stable identifier, recorded with every translation that used it.
+    fn name(&self) -> &'static str;
+
+    /// Decompiles `class` (binary name, `org/example/MyStep`) from `archive`, the bytes of a jar
+    /// or of one class file. Nothing is executed.
+    fn decompile(&self, archive: &[u8], class: &str) -> anyhow::Result<DecompiledClass>;
+}
+
+/// One class a [`JavaDecompiler`] recovered.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DecompiledClass {
+    /// Binary name, `org/example/MyStep`.
+    pub class: String,
+    pub super_class: Option<String>,
+    pub interfaces: Vec<String>,
+    pub methods: Vec<DecompiledMethod>,
+    /// What the decompiler could not read, in words.
+    pub diagnostics: Vec<String>,
+}
+
+/// One method of a [`DecompiledClass`].
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DecompiledMethod {
+    pub name: String,
+    /// JVM descriptor, `(Ljava/lang/Object;)Z`.
+    pub descriptor: String,
+    pub fidelity: DecompiledFidelity,
+    /// Java-like source of the body: statements when `fidelity` is `Statements`, otherwise the
+    /// signature and whatever structure was recovered.
+    pub source: String,
+    /// Parts of the body that were not recovered, each with its bytecode offset range in words.
+    pub gaps: Vec<String>,
+}
+
+/// How much of a method body a [`JavaDecompiler`] recovered (RFC 0150's labels).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecompiledFidelity {
+    Structural,
+    ControlFlow,
+    Statements,
 }
 
 /// RFC 0198: one workspace tab in the web console.
@@ -203,6 +257,8 @@ pub struct CommandContext<'a> {
     /// Where the command was typed. A path argument is relative to this, even after a project
     /// moved the process into its sources.
     pub invoked_from: &'a Path,
+    /// Every extension of this binary (RFC 0200), e.g. to ask for a [`JavaDecompiler`].
+    pub extensions: &'a Extensions,
 }
 
 /// What `ekos recover` hands an extension when it asks for passes.
@@ -213,6 +269,8 @@ pub struct RecoverContext<'a> {
     /// constructed with.
     pub project: String,
     pub artifact_store: &'a dyn ArtifactStore,
+    /// Every extension of this binary (RFC 0200), e.g. to ask for a [`JavaDecompiler`].
+    pub extensions: &'a Extensions,
 }
 
 impl RecoverContext<'_> {
@@ -290,6 +348,11 @@ impl Extensions {
     /// reader.
     pub fn mcp_tool_is_scoped(&self, name: &str) -> bool {
         self.0.iter().any(|e| e.mcp_tool_is_scoped(name))
+    }
+
+    /// RFC 0200: the first [`JavaDecompiler`] an extension offers.
+    pub fn java_decompiler(&self) -> Option<Arc<dyn JavaDecompiler>> {
+        self.0.iter().find_map(|e| e.java_decompiler())
     }
 
     /// The extension that added top-level command `name`.

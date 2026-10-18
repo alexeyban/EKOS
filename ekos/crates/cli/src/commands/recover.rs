@@ -885,6 +885,7 @@ fn register_extension_passes(
             .to_string_lossy()
             .into_owned(),
         artifact_store,
+        extensions: ext,
     };
     for e in ext.iter() {
         for contribution in e.recovery_passes(&ext_ctx) {

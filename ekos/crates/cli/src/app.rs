@@ -2009,6 +2009,7 @@ where
                 cwd: &cwd,
                 config_path: &config_path,
                 invoked_from: &invoked_from,
+                extensions: &extensions,
             };
             owner.run_command(&name, &matches, &ctx).await
         }

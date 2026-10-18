@@ -5,7 +5,8 @@
 
 use async_trait::async_trait;
 use ekos::extension::{
-    CommitContext, EkosExtension, Extensions, RecoverContext, RecoveryContribution,
+    CommitContext, DecompiledClass, DecompiledFidelity, DecompiledMethod, EkosExtension,
+    Extensions, JavaDecompiler, RecoverContext, RecoveryContribution,
 };
 use ekos_artifact::{ArtifactId, ObservationArtifact};
 use ekos_compiler_core::EkosConfig;
@@ -321,4 +322,70 @@ fn no_extensions_leave_the_build_fingerprint_version_unchanged() {
     let probe = Arc::new(Probe::default());
     let one = Extensions::new(vec![Arc::new(FakeExtension(probe))]);
     assert_ne!(one.logic_version(), 0);
+}
+
+struct Bare;
+
+#[async_trait(?Send)]
+impl EkosExtension for Bare {
+    fn name(&self) -> &'static str {
+        "bare"
+    }
+}
+
+struct FakeDecompiler;
+
+impl JavaDecompiler for FakeDecompiler {
+    fn name(&self) -> &'static str {
+        "fake-decompiler"
+    }
+
+    fn decompile(&self, _archive: &[u8], class: &str) -> anyhow::Result<DecompiledClass> {
+        Ok(DecompiledClass {
+            class: class.to_string(),
+            super_class: None,
+            interfaces: Vec::new(),
+            methods: vec![DecompiledMethod {
+                name: "processRow".into(),
+                descriptor: "()Z".into(),
+                fidelity: DecompiledFidelity::Statements,
+                source: "return true;".into(),
+                gaps: Vec::new(),
+            }],
+            diagnostics: Vec::new(),
+        })
+    }
+}
+
+struct Offers;
+
+#[async_trait(?Send)]
+impl EkosExtension for Offers {
+    fn name(&self) -> &'static str {
+        "offers"
+    }
+
+    fn java_decompiler(&self) -> Option<Arc<dyn JavaDecompiler>> {
+        Some(Arc::new(FakeDecompiler))
+    }
+}
+
+/// RFC 0200: no decompiler unless an extension offers one; the first one offered is used.
+#[test]
+fn a_java_decompiler_comes_only_from_an_extension_that_offers_one() {
+    assert!(Extensions::none().java_decompiler().is_none());
+    assert!(
+        Extensions::new(vec![Arc::new(Bare)])
+            .java_decompiler()
+            .is_none()
+    );
+    let both = Extensions::new(vec![Arc::new(Bare), Arc::new(Offers)]);
+    let d = both.java_decompiler().expect("offered");
+    assert_eq!(d.name(), "fake-decompiler");
+    let class = d.decompile(&[], "org/example/Step").unwrap();
+    assert_eq!(class.methods[0].fidelity, DecompiledFidelity::Statements);
+    assert_eq!(
+        serde_json::to_value(DecompiledFidelity::ControlFlow).unwrap(),
+        json!("control_flow")
+    );
 }
