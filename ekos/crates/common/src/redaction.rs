@@ -40,6 +40,15 @@ struct SecretPattern {
 }
 
 const BUILTIN_SECRET_PATTERNS: &[SecretPattern] = &[
+    // RFC 0200: Pentaho/Kettle writes connection passwords as `Encrypted <hex>` — a fixed-key
+    // obfuscation anyone can reverse, so the string is the password. First,
+    // so `generic-assigned-secret` does not take the word `Encrypted` as the value. It appears in `.ktr`/`.kjb`
+    // `<password>` elements, `shared.xml`, `kettle.properties` and repository exports.
+    SecretPattern {
+        label: "kettle-encrypted-password",
+        regex_src: r"\bEncrypted\s+[0-9a-fA-F]{8,}",
+        skip_dotted_identifier_refs: false,
+    },
     SecretPattern {
         label: "aws-access-key-id",
         regex_src: r"AKIA[0-9A-Z]{16}",
@@ -125,6 +134,14 @@ const BUILTIN_SECRET_PATTERNS: &[SecretPattern] = &[
         label: "generic-assigned-secret",
         regex_src: r#"(?i)\b(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|secret|passwd|password|access[_-]?key|auth[_-]?token)\b\s*[:=]\s*(?:"(?P<value_dq>[A-Za-z0-9/+_\-.]{8,})"|'(?P<value_sq>[A-Za-z0-9/+_\-.]{8,})'|(?P<value_bare>[A-Za-z0-9/+_\-.]{8,}))"#,
         skip_dotted_identifier_refs: true,
+    },
+    // RFC 0200: a password stated as an XML element (`<password>s3cret</password>`,
+    // `<httpPassword>…`, `<proxy_password>…`). `generic-assigned-secret` needs `:`/`=`, which XML
+    // never has. Only the element's text is replaced, so the document still parses.
+    SecretPattern {
+        label: "xml-password-element",
+        regex_src: r"(?i)<[A-Za-z_]*pass(?:word|wd)[A-Za-z_]*>(?P<value_bare>[^<]+)</",
+        skip_dotted_identifier_refs: false,
     },
 ];
 
@@ -248,7 +265,11 @@ fn redact_with_pattern(
     regex: &Regex,
     skip_dotted_identifier_refs: bool,
 ) -> String {
-    if !skip_dotted_identifier_refs {
+    let has_value_group = regex
+        .capture_names()
+        .flatten()
+        .any(|n| n.starts_with("value_"));
+    if !skip_dotted_identifier_refs && !has_value_group {
         return regex
             .replace_all(content, format!("[REDACTED:{label}]"))
             .into_owned();
@@ -261,7 +282,7 @@ fn redact_with_pattern(
                 // a regex-shape assumption) — fall back to the old whole-match behavior.
                 return format!("[REDACTED:{label}]");
             };
-            if looks_like_code_reference(value.as_str()) {
+            if skip_dotted_identifier_refs && looks_like_code_reference(value.as_str()) {
                 return whole.as_str().to_string();
             }
             // A real, third bug in this same pattern's blast radius, found live in the same run
@@ -309,6 +330,38 @@ mod tests {
 
     fn cfg() -> RedactionConfig {
         RedactionConfig::default()
+    }
+
+    /// RFC 0200: Kettle's reversible `Encrypted <hex>` passwords and XML password elements.
+    #[test]
+    fn redacts_kettle_passwords_and_keeps_the_xml_well_formed() {
+        let xml = "<connection><name>dwh</name><username>sa</username>\
+                   <password>Encrypted 2be98afc86aa7b88bb81cbe788fc0fce5</password>\
+                   <httpPassword>plain-secret</httpPassword><password/></connection>";
+        let out = redact(xml, &cfg());
+        assert!(!out.contains("2be98afc86aa7b88bb81cbe788fc0fce5"), "{out}");
+        assert!(!out.contains("plain-secret"), "{out}");
+        assert!(out.contains("<username>sa</username>"), "{out}");
+        assert!(out.contains("<httpPassword>[REDACTED:xml-password-element]</httpPassword>"));
+        assert!(roxmltree_like_balanced(&out), "{out}");
+        let props = redact(
+            "DWH_PASSWORD=Encrypted 2be98afc86aa7b88bb81cbe788fc0fce5\n",
+            &cfg(),
+        );
+        assert!(
+            !props.contains("2be98afc86aa7b88bb81cbe788fc0fce5"),
+            "{props}"
+        );
+        // Not a password: the word on its own, and an element named for something else.
+        let plain = "<description>Encrypted at rest</description><passes>3</passes>";
+        assert_eq!(redact(plain, &cfg()), plain);
+    }
+
+    /// Every `<tag>` opened is closed — enough to show only element text was replaced.
+    fn roxmltree_like_balanced(s: &str) -> bool {
+        let opens = s.matches('<').count();
+        let closes = s.matches('>').count();
+        opens == closes
     }
 
     #[test]

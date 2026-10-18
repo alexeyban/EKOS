@@ -32,7 +32,9 @@ use sha2::{Digest, Sha256};
 /// - **v3** (RFC 0148 follow-up, 2026-09-18): `ekos-binary`'s .NET reader names every call
 ///   site's owner and target assembly in the declaration's own format, and the I/O classifier no
 ///   longer claims in-memory `System.Data` / `System.IO.Path` calls.
-pub const PIPELINE_LOGIC_VERSION: u32 = 3;
+/// - **v4** (RFC 0200, 2026-10-18): redaction drops Kettle `Encrypted <hex>` passwords and the
+///   text of XML password elements, which `.ktr`/`.kjb` artifacts used to carry.
+pub const PIPELINE_LOGIC_VERSION: u32 = 4;
 
 /// SHA-256 content hash used to address artifacts and ledger entries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
