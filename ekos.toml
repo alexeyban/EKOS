@@ -108,6 +108,12 @@ model = "gpt-6-luna"
 max-tokens = 4096
 fallback = ["claude-haiku-5-5"]
 
+[llm.tasks.translate]
+# RFC 0205 bake-off 2026-10-18 (draft_bench, 32 gap steps + 15 ground-truth steps checked on
+# Trino): Haiku 5.5 matched the deterministic translation on 11/15 at ~$0.035 a run; Luna 9/15.
+model = "claude-haiku-5-5"
+fallback = ["gpt-6-luna"]
+
 [ai]
 max-tokens = 8192  # MiniMax M3 reasons; hidden reasoning tokens count against this
 

@@ -55,6 +55,28 @@ command says how many steps a model could draft, through which model, and drafts
 console, `--allow-metered` is refused unless the tenant allows metered calls (RFC 0207). Every
 call is metered and logged by the router; the budget (`[llm] budget-usd`) stops the run.
 
+## Measured (2026-10-18)
+
+`ekos-lakehouse/crates/lakehouse-ext/examples/draft_bench.rs`. **A**: the 32 gap code steps of the
+AdventureWorks corpus and Pentaho's samples — drafted, checked and planned by Trino. **B**: 15
+code steps the deterministic translator handles (`examples/bench-gold/gold.ktr` + one sample),
+drafted anyway and compared with the deterministic SQL row by row on Trino over synthetic rows
+with nulls and edge values.
+
+| model | A drafted & planned | B drafted | B equal | $ per run |
+|---|---|---|---|---|
+| Claude Haiku 5.5 | 6/32 | 15/15 | 11/15 | 0.035 |
+| GPT-6 Luna | 7/32 | 14/15 | 9/15 | 0.032 |
+| MiniMax M3 | 4/32 | 14/15 | 7/15 | 0.124 |
+
+Default route: Haiku 5.5, Luna as fallback. Nearly every disagreement is on the null row (JS
+`null + x` prints `"null"`, `null` is 0 in arithmetic, a method on null throws) — which is why
+drafts stay `llm-drafted` for review. A first run found a deterministic-translator bug instead
+(JS arithmetic on null), fixed before these numbers. Most of set A is genuinely untranslatable
+per row (loops over row metadata, random numbers, compatibility-mode scripts reading the Kettle
+API); a model answering "cannot" there is the correct result. Between two runs Haiku's A count
+moved 8 → 6: small samples, read the numbers as a ranking.
+
 ## Non-goals
 
 Drafting set-level logic (joins, aggregates), whole transformations, or anything the model would
