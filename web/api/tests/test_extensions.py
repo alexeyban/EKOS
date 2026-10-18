@@ -172,3 +172,99 @@ def test_a_binary_without_the_command_has_no_pages(
     monkeypatch.setattr(extensions._proc, "spawn", spawn)
     spec = asyncio.run(extensions.load(str(fake)))
     assert extensions.pages(spec) == []
+
+
+def _value(name: str, required: bool = False) -> dict:
+    return {**_flag(name), "kind": "value", "required": required}
+
+
+V3_CATALOGUE = {
+    "version": "test",
+    "commands": [
+        *CATALOGUE["commands"],
+        {
+            "path": ["lake", "report"],
+            "about": "",
+            "class": "read",
+            "metered": False,
+            "args": [_flag("json"), _value("package"), _value("step")],
+        },
+        {
+            "path": ["lake", "translate"],
+            "about": "",
+            "class": "external",
+            "metered": True,
+            "args": [_value("package", required=True), _flag("allow-metered")],
+        },
+    ],
+}
+
+
+def _v3_page() -> dict:
+    spec = _page(["lake", "status", "--json"])
+    page = spec["extensions"][0]["pages"][0]
+    page["panels"].append(
+        {
+            "id": "step",
+            "title": "Step",
+            "command": ["lake", "report", "--json"],
+            "view": {"kind": "code", "left": "/o", "right": "/s", "left_label": "", "right_label": ""},
+            "empty": "",
+            "params": ["package", "step"],
+        }
+    )
+    page["params"] = [
+        {"name": "package", "label": "Package", "source": "health", "rows": "/rows", "key": "/table"}
+    ]
+    return spec
+
+
+def test_rfc0207_a_panel_gets_its_selections_as_value_options(
+    setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    c, wid, ran = setup
+    monkeypatch.setattr(catalogue, "_cached", V3_CATALOGUE)
+    monkeypatch.setattr(extensions, "_cached", _v3_page())
+    url = f"/api/workspaces/{wid}/extensions/lake/lake/step"
+    r = c.get(url, params={"package": "etl", "step": "calc amount", "other": "x"}, headers=READER)
+    assert r.status_code == 200, r.text
+    assert ran == [["lake", "report", "--json", "--package=etl", "--step=calc amount"]]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [{"package": "etl"}, {"package": "etl", "step": ""}, {"package": "a\x00b", "step": "s"}, {"package": "x" * 513, "step": "s"}],
+)
+def test_rfc0207_a_missing_or_bad_selection_is_422_and_nothing_runs(
+    setup, monkeypatch: pytest.MonkeyPatch, params: dict
+) -> None:
+    c, wid, ran = setup
+    monkeypatch.setattr(catalogue, "_cached", V3_CATALOGUE)
+    monkeypatch.setattr(extensions, "_cached", _v3_page())
+    r = c.get(f"/api/workspaces/{wid}/extensions/lake/lake/step", params=params, headers=READER)
+    assert r.status_code == 422, r.text
+    assert ran == []
+
+
+def test_rfc0207_a_selection_must_be_a_value_option_of_the_read_command(
+    setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    c, wid, ran = setup
+    monkeypatch.setattr(catalogue, "_cached", V3_CATALOGUE)
+    spec = _v3_page()
+    spec["extensions"][0]["pages"][0]["panels"][1]["command"] = ["lake", "status", "--json"]
+    monkeypatch.setattr(extensions, "_cached", spec)
+    r = c.get(f"/api/workspaces/{wid}/extensions/lake/lake/step", params={"package": "a", "step": "b"}, headers=READER)
+    assert r.status_code == 404
+    assert ran == []
+
+
+def test_rfc0207_allow_metered_needs_the_tenants_permission(
+    setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    c, wid, _ = setup
+    monkeypatch.setattr(catalogue, "_cached", V3_CATALOGUE)
+    body = {"command": ["lake", "translate"], "args": {"package": "etl", "allow-metered": True}, "confirm": "lake translate"}
+    r = c.post(f"/api/workspaces/{wid}/cli", json=body, headers=OWNER)
+    assert r.status_code == 409, r.text
+    assert "metered" in r.json()["detail"]

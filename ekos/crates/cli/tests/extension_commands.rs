@@ -86,11 +86,14 @@ impl EkosExtension for Lake {
                     ],
                 },
                 empty: "Nothing yet.",
+                ..Default::default()
             }],
             actions: vec![Action {
                 label: "Apply",
                 command: vec![self.name, "apply"],
+                ..Default::default()
             }],
+            ..Default::default()
         }]
     }
 

@@ -1238,3 +1238,19 @@ details.cfg-sub {
 .ext-fields dd { margin: 0; overflow-wrap: anywhere; }
 .ext-text { white-space: pre-wrap; font-size: 0.8rem; margin: 0.5rem 0 0; }
 .ext-page .lm-table .chip { white-space: nowrap; }
+
+/* RFC 0207: selections, code, graph, markdown */
+.ext-selectors { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 0.6rem; }
+.ext-selector { display: inline-flex; flex-direction: column; gap: 0.2rem; }
+.ext-page tr.selectable { cursor: pointer; }
+.ext-page tr.selected td { background: color-mix(in srgb, var(--accent-b) 18%, transparent); }
+.ext-code { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; }
+.ext-code pre { max-height: 32rem; overflow: auto; }
+.ext-graph svg { font-size: 0.75rem; color: inherit; }
+.ext-node rect { fill: color-mix(in srgb, currentColor 6%, transparent); stroke: currentColor; stroke-opacity: 0.4; }
+.ext-node.ok rect { stroke: var(--accent-b); fill: color-mix(in srgb, var(--accent-b) 15%, transparent); }
+.ext-node.warn rect { stroke: #b7791f; fill: color-mix(in srgb, #b7791f 15%, transparent); }
+.ext-node.bad rect { stroke: var(--bad); fill: color-mix(in srgb, var(--bad) 15%, transparent); }
+.ext-node text { fill: currentColor; }
+.ext-markdown table { margin: 0.5rem 0; }
+.ext-markdown code { font-size: 0.85em; }

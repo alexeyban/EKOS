@@ -110,6 +110,16 @@ async def run_cli(
     )
     # A command prints what it read, and none takes the caller's read scope (RFC 0181).
     authz.require_all_of(principal, ws)
+    # RFC 0207: a run that may call a paid model needs the tenant's permission, whatever page
+    # or person asked for it.
+    if body.args.get("allow-metered") is True:
+        tenant = models.get_tenant(ws.tenant_id)
+        if tenant is None or not tenant.allow_metered:
+            raise HTTPException(
+                status_code=409,
+                detail=f"`{name}` with --allow-metered calls a paid model and metered calls are "
+                f"off for tenant {ws.tenant_id}; a platform owner turns them on in Admin",
+            )
     if entry["class"] in catalogue.CONFIRMED and (body.confirm or "").strip() != name:
         raise HTTPException(
             status_code=409, detail=f"type `{name}` to confirm: this command is {entry['class']}"

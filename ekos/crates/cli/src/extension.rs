@@ -172,8 +172,9 @@ pub enum DecompiledFidelity {
     Statements,
 }
 
-/// RFC 0198: one workspace tab in the web console.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+/// RFC 0198: one workspace tab in the web console. Construct with `..Default::default()` so
+/// later additions (RFC 0207) do not break the literal.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
 pub struct ConsolePage {
     /// URL segment and key; lowercase letters, digits and `-`.
     pub id: &'static str,
@@ -181,19 +182,40 @@ pub struct ConsolePage {
     pub description: &'static str,
     pub panels: Vec<Panel>,
     pub actions: Vec<Action>,
+    /// RFC 0207: selections the page keeps (a package, then a step), each filled from a source
+    /// panel's rows; panels and actions use them.
+    pub params: Vec<PageParam>,
+}
+
+/// RFC 0207: a selection on a page, chosen from the rows of `source`'s table.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
+pub struct PageParam {
+    /// The option it becomes on a panel's command (`--<name>=<value>`); lowercase letters,
+    /// digits and `-`.
+    pub name: &'static str,
+    pub label: &'static str,
+    /// The id of the panel whose rows offer the values.
+    pub source: &'static str,
+    /// JSON pointer to the rows in that panel's output (its table's `rows`).
+    pub rows: &'static str,
+    /// JSON pointer, inside one row, to the value.
+    pub key: &'static str,
 }
 
 /// The JSON a read command prints, laid out by `view`.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
 pub struct Panel {
     pub id: &'static str,
     pub title: &'static str,
     /// The full argv after the binary, e.g. `["lakehouse", "status", "--json"]`: a catalogue
-    /// command of class read and its flags. No values come from the page or the person.
+    /// command of class read and its flags. The only values from the person are the page's
+    /// selections listed in `params` (RFC 0207).
     pub command: Vec<&'static str>,
     pub view: View,
     /// Shown when the view has nothing to show (no rows, a missing field).
     pub empty: &'static str,
+    /// RFC 0207: page selections appended as `--<name>=<value>`; the panel waits for all.
+    pub params: Vec<&'static str>,
 }
 
 /// How a panel lays out its command's JSON. Pointers are RFC 6901 JSON pointers.
@@ -209,6 +231,34 @@ pub enum View {
     Fields { fields: Vec<Column> },
     /// A string, shown preformatted.
     Text { pointer: &'static str },
+    /// RFC 0207: two strings side by side (original code and the SQL it became).
+    Code {
+        left: &'static str,
+        right: &'static str,
+        left_label: &'static str,
+        right_label: &'static str,
+    },
+    /// RFC 0207: a left-to-right graph. `nodes`/`edges` point at arrays; the rest point into one
+    /// node (`id`, `label`, `group` — one lane per group —, `badge` for the colour) or one edge
+    /// (`from`, `to`, node ids).
+    Graph {
+        nodes: &'static str,
+        edges: &'static str,
+        id: &'static str,
+        label: &'static str,
+        group: &'static str,
+        badge: &'static str,
+        from: &'static str,
+        to: &'static str,
+    },
+    /// RFC 0207: a Markdown string, rendered by the console (raw HTML shown as text).
+    Markdown { pointer: &'static str },
+}
+
+impl Default for View {
+    fn default() -> Self {
+        View::Text { pointer: "" }
+    }
 }
 
 /// A table column, or one of `Fields`' fields.
@@ -238,12 +288,19 @@ impl Column {
     }
 }
 
-/// A button that runs a catalogue command as a job, with no arguments of its own.
-#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+/// A button that runs a catalogue command as a job. Its arguments come only from the page's
+/// selections (`binds`) and fixed flags (RFC 0207).
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
 pub struct Action {
     pub label: &'static str,
     /// The command's catalogue path, e.g. `["lakehouse", "sync"]`.
     pub command: Vec<&'static str>,
+    /// RFC 0207: `(argument id, page selection)` — the selection's value is that argument.
+    pub binds: Vec<(&'static str, &'static str)>,
+    /// RFC 0207: boolean flags always set, e.g. `allow-metered`.
+    pub flags: Vec<&'static str>,
+    /// RFC 0207: a sentence the person acknowledges before the run (cost, effect).
+    pub confirm: Option<&'static str>,
 }
 
 /// What an extension command gets: the same setup a built-in command has once `main_with` has

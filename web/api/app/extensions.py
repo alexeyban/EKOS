@@ -2,8 +2,9 @@
 
 The binary has already checked each page against its own catalogue. The console checks again
 before running anything: a panel's argv must start with a catalogue command of class `read`, and
-whatever follows must be that command's flags. The argv comes from the binary's declaration,
-never from a request.
+whatever follows must be that command's flags. The argv comes from the binary's declaration;
+the only values from a request are the page's selections a panel declares (RFC 0207), each
+passed as one `--name=value` to a value option of that read command.
 """
 
 from __future__ import annotations
@@ -49,9 +50,22 @@ def find_panel(
     return None
 
 
-def panel_argv(cat: dict[str, Any], panel: dict[str, Any]) -> list[str]:
-    """The panel's argv when the catalogue says it only reads; `PanelError` otherwise."""
+MAX_SELECTION = 512
+
+
+class SelectionError(ValueError):
+    """A panel needs a selection the request does not give, or gives a bad value."""
+
+
+def panel_argv(
+    cat: dict[str, Any], panel: dict[str, Any], selections: dict[str, str] | None = None
+) -> list[str]:
+    """The panel's argv when the catalogue says it only reads; `PanelError` otherwise. RFC 0207:
+    each selection the panel declares is appended as `--name=value` (`SelectionError` when one
+    is missing or not plain text)."""
+    selections = selections or {}
     argv = [str(a) for a in panel.get("command", [])]
+    base_len = len(argv)
     matches = [
         e
         for e in cat["commands"]
@@ -63,9 +77,22 @@ def panel_argv(cat: dict[str, Any], panel: dict[str, Any]) -> list[str]:
     if entry["class"] != "read":
         raise PanelError(f"`{catalogue.describe_command(entry)}` is not a read command")
     flags = {a["long"] for a in entry["args"] if a["kind"] == "flag" and a.get("long")}
-    for extra in argv[len(entry["path"]) :]:
+    for extra in argv[len(entry["path"]) : base_len]:
         if not (extra.startswith("--") and extra[2:] in flags):
             raise PanelError(f"`{extra}` is not a flag of `{catalogue.describe_command(entry)}`")
-    if any(a["required"] for a in entry["args"]):
+    wanted = [str(p) for p in panel.get("params", [])]
+    options = {a["long"] for a in entry["args"] if a["kind"] == "value" and a.get("long")}
+    for name in wanted:
+        if name not in options:
+            raise PanelError(
+                f"`{catalogue.describe_command(entry)}` has no value option `--{name}`"
+            )
+        value = selections.get(name)
+        if value is None or value == "":
+            raise SelectionError(f"choose a {name} first")
+        if len(value) > MAX_SELECTION or "\x00" in value:
+            raise SelectionError(f"{name}: at most {MAX_SELECTION} characters, no NUL")
+        argv.append(f"--{name}={value}")
+    if any(a["required"] and a.get("long") not in wanted for a in entry["args"]):
         raise PanelError(f"`{catalogue.describe_command(entry)}` needs arguments")
     return argv
