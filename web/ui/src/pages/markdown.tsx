@@ -68,17 +68,25 @@ export function parseMarkdown(text: string): Block[] {
   return out;
 }
 
-/** Inline `code` and **bold**, as React nodes. */
+/** Inline `code`, **bold** and *italic*, as React nodes. */
 export function inline(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
-  const re = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+  const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\s][^*]*\*)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let k = 0;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) parts.push(text.slice(last, m.index));
     const tok = m[0];
-    parts.push(tok.startsWith("`") ? <code key={k++}>{tok.slice(1, -1)}</code> : <strong key={k++}>{tok.slice(2, -2)}</strong>);
+    parts.push(
+      tok.startsWith("`") ? (
+        <code key={k++}>{tok.slice(1, -1)}</code>
+      ) : tok.startsWith("**") ? (
+        <strong key={k++}>{tok.slice(2, -2)}</strong>
+      ) : (
+        <em key={k++}>{tok.slice(1, -1)}</em>
+      ),
+    );
     last = m.index + tok.length;
   }
   if (last < text.length) parts.push(text.slice(last));

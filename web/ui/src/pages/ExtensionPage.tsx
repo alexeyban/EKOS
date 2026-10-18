@@ -77,15 +77,22 @@ function GraphView({ data, view }: { data: unknown; view: Extract<ExtPanel["view
   const w = 160;
   const h = 28;
   const pos = new Map(g.nodes.map((n) => [n.id, n]));
+  const lanes = new Map<string, number>();
+  for (const n of g.nodes) lanes.set(n.group, Math.min(lanes.get(n.group) ?? n.y, n.y));
   return (
     <div className="ext-graph" style={{ overflowX: "auto" }}>
-      <svg width={g.width + 20} height={g.height + 20} role="img" aria-label="graph">
+      <svg width={g.width + 20} height={g.height + 36} role="img" aria-label="graph">
         <defs>
           <marker id="ext-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
             <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
           </marker>
         </defs>
-        <g transform="translate(10,10)">
+        <g transform="translate(10,24)">
+          {[...lanes].map(([group, y]) => (
+            <text key={group} x={0} y={y - 6} className="ext-lane">
+              {group}
+            </text>
+          ))}
           {g.edges.map((e, i) => {
             const a = pos.get(e.from);
             const b = pos.get(e.to);

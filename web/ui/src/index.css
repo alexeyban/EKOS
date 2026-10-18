@@ -1247,10 +1247,11 @@ details.cfg-sub {
 .ext-code { display: grid; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); gap: 1rem; }
 .ext-code pre { max-height: 32rem; overflow: auto; }
 .ext-graph svg { font-size: 0.75rem; color: inherit; }
-.ext-node rect { fill: color-mix(in srgb, currentColor 6%, transparent); stroke: currentColor; stroke-opacity: 0.4; }
-.ext-node.ok rect { stroke: var(--accent-b); fill: color-mix(in srgb, var(--accent-b) 15%, transparent); }
-.ext-node.warn rect { stroke: #b7791f; fill: color-mix(in srgb, #b7791f 15%, transparent); }
-.ext-node.bad rect { stroke: var(--bad); fill: color-mix(in srgb, var(--bad) 15%, transparent); }
-.ext-node text { fill: currentColor; }
+.ext-node rect { fill: rgba(127, 127, 127, 0.08); stroke: rgba(127, 127, 127, 0.6); }
+.ext-node.ok rect { fill: rgba(56, 161, 105, 0.15); stroke: var(--accent-b); }
+.ext-node.warn rect { fill: rgba(183, 121, 31, 0.15); stroke: #b7791f; }
+.ext-node.bad rect { fill: rgba(197, 48, 48, 0.15); stroke: var(--bad); }
+.ext-node text { fill: var(--ink, currentColor); }
 .ext-markdown table { margin: 0.5rem 0; }
 .ext-markdown code { font-size: 0.85em; }
+.ext-lane { fill: var(--ink-soft, currentColor); font-size: 0.7rem; }
