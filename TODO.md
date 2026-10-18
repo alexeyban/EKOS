@@ -6713,8 +6713,10 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
       model drafts with anti-invention checks
 - [x] RFC 0207: console page selections, code / graph / markdown views, bound actions; metered
       `/cli` runs need the tenant's permission; the lakehouse Pentaho tab
-- [ ] RFC 0204 §M6: differential run of the original transformation in PDI vs the dbt result
-      (migrate-validate V1–V3, planted defects)
-- [ ] RFC 0206 (private ekos-binary): JVM statement recovery behind `JavaDecompiler`
+- [x] RFC 0204 §M6: written up for the community (lakehouse `docs/pentaho-verify.md`, issue
+      template, X post draft) — no PDI run here (devlog_280)
+- [x] RFC 0206 (private ekos-binary): JVM statement recovery behind `JavaDecompiler` — pdfbox
+      93.8% Statements; compiled Kettle plugins translate end to end (devlog_280)
+- [ ] RFC 0205 model bake-off: bench ready (`draft_bench`), blocked on an expired OpenCode key
 - [ ] Normaliser / Denormaliser, Data validator, Combination lookup, Delete; job entries beyond TRANS
 - [ ] Push EKOS + lakehouse; switch the lakehouse `[patch]` back to git `main` and re-lock
