@@ -1951,10 +1951,18 @@ fn tool_dependents(runtime: &Runtime<'_>, args: &Value) -> Result<Value> {
             (rel.to, &mut dependencies)
         };
         let other = runtime.load_object(&other_id)?;
+        // Issue #17: a hypothesis or proposal at the other end is not a dependency fact.
+        if other
+            .as_ref()
+            .is_some_and(ekos_kir::KirObject::is_unconfirmed_claim)
+        {
+            continue;
+        }
         bucket.push(json!({
             "id": other_id.to_string(),
             "name": other.as_ref().map(|o| o.name.clone()),
             "kind": other.as_ref().map(|o| o.kind.to_string()),
+            "status": other.as_ref().and_then(|o| o.properties.get("status")),
             "relationship": rel.kind.to_string(),
             "properties": rel.properties,
         }));

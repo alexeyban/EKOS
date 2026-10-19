@@ -1158,6 +1158,41 @@ mod tests {
     use std::sync::Arc;
     use tempfile::TempDir;
 
+    /// Issue #10: parsing the same DDL twice yields the same objects, edges and evidence —
+    /// everything but `created_at` — so a re-run on a cache miss writes no new ledger version.
+    #[test]
+    fn reparsing_unchanged_ddl_is_byte_identical_but_for_timestamps() {
+        fn stable(g: &KirGraph) -> serde_json::Value {
+            let mut v = serde_json::to_value(g).unwrap();
+            fn strip(v: &mut serde_json::Value) {
+                match v {
+                    serde_json::Value::Object(m) => {
+                        m.remove("created_at");
+                        m.values_mut().for_each(strip);
+                    }
+                    serde_json::Value::Array(a) => a.iter_mut().for_each(strip),
+                    _ => {}
+                }
+            }
+            strip(&mut v);
+            v
+        }
+        let sql = "CREATE TABLE a (id int PRIMARY KEY);\n\
+                   CREATE TABLE b (id int, a_id int REFERENCES a(id));\n";
+        let first = parse_ddl_structural(
+            sql,
+            "db/schema.sql",
+            &sqlparser::dialect::PostgreSqlDialect {},
+        );
+        let second = parse_ddl_structural(
+            sql,
+            "db/schema.sql",
+            &sqlparser::dialect::PostgreSqlDialect {},
+        );
+        assert!(!first.evidence.is_empty());
+        assert_eq!(stable(&first), stable(&second));
+    }
+
     const ECOMMERCE_SQL: &str = include_str!("../../../../tests/fixtures/ecommerce.sql");
     /// Near-real, open-source fixture: a hand-cleaned ANSI subset of Microsoft's Northwind
     /// sample schema (MIT-licensed; see the fixture file's header for provenance). Deeper

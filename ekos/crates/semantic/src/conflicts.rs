@@ -222,12 +222,15 @@ fn emit(
     for (k, v) in props {
         o.properties.insert(k.into(), v);
     }
-    out.relationships.push(KirRelationship::deterministic(
+    let mut disputes = KirRelationship::deterministic(
         RelationshipKind::Custom(DISPUTES.into()),
         id,
         subject.id,
         attribute,
-    ));
+    );
+    // The disagreeing claims are what the link rests on (issue #12).
+    disputes.evidence = o.evidence.clone();
+    out.relationships.push(disputes);
     out.objects.push(o);
 }
 
@@ -483,6 +486,7 @@ pub fn column_links(
             t.id,
             &attribute,
         );
+        rel.evidence = c.evidence.clone();
         rel.properties.insert("attribute".into(), json!(attribute));
         rel.properties
             .insert("subject_name".into(), json!(t.name.clone()));
@@ -687,6 +691,12 @@ mod tests {
         // id serial vs int is the same type; the column sets differ; only one side states a CHECK.
         assert_eq!(attrs(&c), vec!["columns"]);
         let o = &c.objects[0];
+        // Issue #12: the `Disputes` link cites the disagreeing claims.
+        assert!(
+            c.relationships
+                .iter()
+                .all(|r| !r.evidence.is_empty() && r.evidence == o.evidence)
+        );
         assert_eq!(o.name, "user_preference.columns");
         assert_eq!(o.properties["conflict_type"], DUPLICATE_DEFINITION);
         assert_eq!(o.properties["status"], OPEN);

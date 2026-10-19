@@ -350,6 +350,30 @@ impl KirObject {
     }
 }
 
+/// Object `status` values that mark an unconfirmed claim rather than an observed fact: RFC 0170
+/// business-semantics items (`hypothesis`, `needs_review`, `rejected`), RFC 0164
+/// `MigrationProposal`s (`proposed`) and the RFC 0029 `unconfirmed` convention. A walk that
+/// presents its results as facts (dependents, impact, neighbourhood) does not step onto an object
+/// carrying one of these (issue #17); a human confirmation changes the status and the object
+/// becomes walkable, with no edge rewritten.
+pub const UNCONFIRMED_OBJECT_STATUSES: [&str; 5] = [
+    "hypothesis",
+    "needs_review",
+    "rejected",
+    "proposed",
+    "unconfirmed",
+];
+
+impl KirObject {
+    /// Whether this object is an unconfirmed claim — see [`UNCONFIRMED_OBJECT_STATUSES`].
+    pub fn is_unconfirmed_claim(&self) -> bool {
+        self.properties
+            .get("status")
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| UNCONFIRMED_OBJECT_STATUSES.contains(&s))
+    }
+}
+
 /// Provenance — links a knowledge claim back to the source fragment that justifies it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KirEvidence {
@@ -361,19 +385,45 @@ pub struct KirEvidence {
 }
 
 impl KirEvidence {
+    /// Evidence whose id is derived from its content — `(location, fragment, confidence)` — so a
+    /// pass that runs again over unchanged input mints the same ids (issue #10, the evidence
+    /// counterpart of RFC 0135 Part C). Evidence ids are part of every object's and edge's content
+    /// signature, so a random id here made each re-run a new version of everything it touched.
+    /// Identical evidence collapses into one record, which is what it is. A caller that needs a
+    /// different key assigns `id` afterwards.
     pub fn new(location: SourceLocation, fragment: impl Into<String>) -> Self {
-        Self {
-            id: KirId::new(),
+        let mut ev = Self {
+            id: KirId(Uuid::nil()),
             location,
             fragment: fragment.into(),
             confidence: 1.0,
             created_at: Utc::now(),
-        }
+        };
+        ev.id = ev.content_id();
+        ev
     }
 
     pub fn with_confidence(mut self, confidence: f32) -> Self {
+        let derived = self.id == self.content_id();
         self.confidence = confidence.clamp(0.0, 1.0);
+        if derived {
+            self.id = self.content_id();
+        }
         self
+    }
+
+    /// The id [`KirEvidence::new`] derives from this record's content.
+    pub fn content_id(&self) -> KirId {
+        let loc = &self.location;
+        let seed = format!(
+            "evidence:{}:{:?}:{:?}:{}:{}",
+            loc.path,
+            loc.line,
+            loc.column,
+            self.confidence.to_bits(),
+            self.fragment
+        );
+        KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, seed.as_bytes()))
     }
 }
 
@@ -943,6 +993,30 @@ mod tests {
         rel.properties
             .insert("status".into(), serde_json::json!("rejected"));
         assert!(rel.is_pending_review());
+    }
+
+    /// Issue #10: the same evidence minted twice has the same id, so an unchanged source never
+    /// forks a new version of the objects that cite it.
+    #[test]
+    fn evidence_ids_are_derived_from_content() {
+        let a = KirEvidence::new(SourceLocation::at("db/schema.sql", 3), "CREATE TABLE t");
+        let b = KirEvidence::new(SourceLocation::at("db/schema.sql", 3), "CREATE TABLE t");
+        assert_eq!(a.id, b.id);
+        assert_ne!(
+            a.id,
+            KirEvidence::new(SourceLocation::at("db/schema.sql", 4), "CREATE TABLE t").id
+        );
+        assert_ne!(
+            a.id,
+            KirEvidence::new(SourceLocation::at("db/other.sql", 3), "CREATE TABLE t").id
+        );
+        let low = a.clone().with_confidence(0.5);
+        assert_ne!(low.id, a.id);
+        assert_eq!(low.id, b.with_confidence(0.5).id);
+        // A caller-assigned key survives `with_confidence`.
+        let mut keyed = KirEvidence::new(SourceLocation::file("x"), "y");
+        keyed.id = KirId(Uuid::from_u128(7));
+        assert_eq!(keyed.with_confidence(0.3).id, KirId(Uuid::from_u128(7)));
     }
 
     #[test]

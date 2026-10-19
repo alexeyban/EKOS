@@ -371,8 +371,9 @@ fn concentration_risks(graph: &KirGraph) -> Vec<(KirObject, KirRelationship)> {
         {
             risk.evidence.push(ev_id);
         }
-        let rel =
+        let mut rel =
             KirRelationship::deterministic(RelationshipKind::References, risk_id, *target_id, "");
+        rel.evidence = risk.evidence.clone();
         risks.push((risk, rel));
     }
     risks
@@ -1029,6 +1030,18 @@ mod tests {
             g.add_relationship(rel);
         }
         (g, target)
+    }
+
+    /// Issue #12: the risk's `References` edge cites what the risk does.
+    #[test]
+    fn concentration_risk_edge_carries_the_risk_evidence() {
+        let (g, _target) = graph_with_fan_in("hub", MIN_DEPENDENTS_FOR_CONCENTRATION_RISK);
+        let risks = concentration_risks(&g);
+        assert!(!risks.is_empty());
+        for (risk, rel) in &risks {
+            assert!(!rel.evidence.is_empty());
+            assert_eq!(rel.evidence, risk.evidence);
+        }
     }
 
     #[test]

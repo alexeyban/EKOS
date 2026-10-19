@@ -26,6 +26,9 @@ use uuid::Uuid;
 /// dependent, so callers may override it.
 pub const DEFAULT_DIRECTORY_DEPTH: usize = 3;
 
+/// How many membership facts a `Rollup` object cites as its own evidence.
+const MAX_ROLLUP_EVIDENCE: usize = 5;
+
 fn rollup_kir_id(group_key: &str) -> KirId {
     KirId(Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
@@ -156,8 +159,15 @@ pub fn synthesize_rollups(graph: &mut KirGraph, depth: usize) {
                 }
             }
 
+            // Membership is stated by the file's own path, so that is the location cited — the
+            // group key is not a file (issue #12).
+            let member_path = member
+                .properties
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&member.name);
             let ev = KirEvidence::new(
-                SourceLocation::file(group_key.clone()),
+                SourceLocation::file(member_path),
                 format!("{} is a member of {group_key}", member.name),
             );
             let ev_id = ev.id;
@@ -192,6 +202,17 @@ pub fn synthesize_rollups(graph: &mut KirGraph, depth: usize) {
                 "boundary_relationships",
                 serde_json::to_value(&boundary_counts).unwrap(),
             );
+        // The rollup rests on its membership: cite the first few membership facts (issue #12),
+        // capped like a concentration risk's evidence so a large group stays a small object.
+        // Sorted, so the cited few do not depend on the order the ledger handed objects back.
+        let mut cited: Vec<KirId> = new_relationships
+            .iter()
+            .filter(|r| r.from == rollup_id)
+            .flat_map(|r| r.evidence.iter().copied())
+            .collect();
+        cited.sort_by_key(|id| id.0);
+        cited.truncate(MAX_ROLLUP_EVIDENCE);
+        rollup.evidence = cited;
         rollup.id = rollup_id;
         new_objects.push(rollup);
     }
@@ -232,6 +253,38 @@ mod tests {
             .find(|r| r.name == "ekos/crates/kir")
             .expect("kir crate rollup");
         assert_eq!(kir_rollup.properties["member_count"], serde_json::json!(2));
+    }
+
+    /// Issue #12: a rollup and its membership edges cite evidence, located at member files.
+    #[test]
+    fn rollups_and_membership_edges_cite_member_files() {
+        let mut graph = KirGraph::new();
+        graph.add_object(file("ekos/crates/kir/src/lib.rs"));
+        graph.add_object(file("ekos/crates/kir/src/config.rs"));
+        graph.add_object(file("ekos/crates/recovery/src/lib.rs"));
+        graph.add_object(file("ekos/crates/recovery/src/other.rs"));
+        synthesize_rollups(&mut graph, 3);
+
+        let rollups: Vec<&KirObject> = graph
+            .objects
+            .iter()
+            .filter(|o| o.kind == ObjectKind::Custom("Rollup".to_string()))
+            .collect();
+        assert_eq!(rollups.len(), 2);
+        for r in &rollups {
+            assert!(!r.evidence.is_empty(), "{}", r.name);
+            let mut sorted = r.evidence.clone();
+            sorted.sort_by_key(|id| id.0);
+            assert_eq!(r.evidence, sorted, "cited in a stable order");
+        }
+        assert!(graph.relationships.iter().all(|r| !r.evidence.is_empty()));
+        for ev in &graph.evidence {
+            assert!(
+                ev.location.path.ends_with(".rs"),
+                "a member file, not a group key: {}",
+                ev.location.path
+            );
+        }
     }
 
     #[test]

@@ -336,3 +336,37 @@ A devlog per part (or one per batch of C).
 4. **Simulation** (`simulation/src/*`, ~20 call sites) — its writes go through `&dyn KnowledgeStore`
    like `commit` does. Fold into Part C or a sibling RFC? Proposal: sibling, since its identity
    model (agent actions, forum events) is genuinely different from recovered structural facts.
+
+---
+
+## Amendment (2026-10-19) — Part E: evidence ids, evidence on compiled edges, hypothesis endpoints
+
+An external review (issues #10, #12, #17) found three gaps next to Parts B and C.
+
+**E1 — evidence ids (issue #10).** `KirEvidence::new` minted a random id. Evidence ids are part
+of every object's and edge's content signature, so whenever a pass ran again on a cache miss (a
+pass-version bump, a config change, a fresh checkout), every object it touched got a new ledger
+version with no change in the source. `KirEvidence::new` now derives the id as a v5 UUID of
+`(path, line, column, confidence, fragment)`, and `with_confidence` re-derives it unless the
+caller assigned its own key. This fixes all ~90 call sites at once, so no guard test is needed:
+there is no longer a random constructor to forget about. Identical evidence collapses into one
+record, which the fact ledger already treats as "no new version". Expect a one-time version bump
+of affected objects on the first commit after upgrading; after that, re-runs over unchanged
+sources write nothing. Test: `parse_ddl_structural` twice over the same SQL gives the same
+graph, apart from timestamps.
+
+**E2 — evidence on compiled edges (issue #12).** `FeedsInto` cites both of the transform steps it
+joins; each `Disputes` link cites the conflict's claims; a concentration risk's `References` edge
+cites the risk's evidence; every business-semantics link cites its item's evidence
+(`cite_endpoint_evidence`); a `Rollup` cites up to five of its membership facts, in sorted order,
+and each membership fact is located at the member file, not at the group key. Each producer has a
+test asserting that its edges carry evidence.
+
+**E3 — hypothesis endpoints (issue #17).** Hypothesis and proposal objects carry a `status` that
+`UNCONFIRMED_OBJECT_STATUSES` lists (`hypothesis`, `needs_review`, `rejected`, `proposed`,
+`unconfirmed`). The edges that reach them carry none. `Runtime::trace_impact`,
+`load_neighborhood[_bounded]` and the `ekos_dependents` tool now refuse to step onto an object
+where `KirObject::is_unconfirmed_claim()` is true. Its edges are dropped from the neighbourhood,
+and `ekos_dependents` reports the other end's `status`. A human confirmation changes the object's
+status and makes it walkable, with no edge rewritten. `open`/`resolved` conflicts are observed
+facts about disagreement and stay walkable.

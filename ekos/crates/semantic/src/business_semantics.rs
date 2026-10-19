@@ -2018,8 +2018,30 @@ pub fn synthesize(
     for (o, sig) in b.out.objects.iter_mut().zip(sigs) {
         o.properties.insert("signature".into(), json!(sig));
     }
+    cite_endpoint_evidence(&mut b.out);
     b.out.stats = stats;
     b.out
+}
+
+/// Every link this layer makes joins one of its own items to something else, and rests on what
+/// that item rests on: copy the item's evidence onto the link (issue #12). The `from` end wins
+/// when both ends are items (`ConflictsWith`).
+fn cite_endpoint_evidence(out: &mut SemanticsOutput) {
+    let evidence: HashMap<KirId, &Vec<KirId>> =
+        out.objects.iter().map(|o| (o.id, &o.evidence)).collect();
+    for r in out
+        .relationships
+        .iter_mut()
+        .filter(|r| r.evidence.is_empty())
+    {
+        if let Some(ev) = evidence
+            .get(&r.from)
+            .filter(|e| !e.is_empty())
+            .or_else(|| evidence.get(&r.to))
+        {
+            r.evidence = (*ev).clone();
+        }
+    }
 }
 
 /// `git blame` an item's evidence lines (at most [`MAX_BLAME_LINES`]) and link each distinct commit
@@ -2340,6 +2362,16 @@ mod tests {
             .find(|o| o.name == "entity_class.id = 3")
             .unwrap();
         assert_eq!(prop(e, "label"), &json!("Employee"));
+    }
+
+    /// Issue #12: every link this layer makes cites evidence (its item's).
+    #[test]
+    fn every_link_cites_evidence() {
+        let out = synthesize(&fixture(), &SemanticsConfig::default(), Some(&Fixed));
+        assert!(!out.relationships.is_empty());
+        for r in &out.relationships {
+            assert!(!r.evidence.is_empty(), "{} has no evidence", r.kind);
+        }
     }
 
     #[test]

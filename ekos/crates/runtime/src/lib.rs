@@ -173,6 +173,7 @@ impl<'a> Runtime<'a> {
         let mut graph = KirGraph::new();
         let mut truncated = false;
         let mut visited: HashSet<KirId> = HashSet::new();
+        let mut hidden: HashSet<KirId> = HashSet::new();
         // A set, not `graph.relationships.iter().any(..)`: that linear scan ran once per edge, so
         // the walk was quadratic in the edges it collected. Same output, same order. It was *not*
         // the dominant cost measured on EKOS's own ledger (2026-09-28) — that is the per-edge
@@ -214,11 +215,23 @@ impl<'a> Runtime<'a> {
                     break 'walk;
                 }
                 visited.insert(neighbour_id);
-                if let Some(neighbour) = self.compiled_object(&neighbour_id)? {
-                    graph.add_object(neighbour);
-                    queue.push_back((neighbour_id, current_depth + 1));
+                match self.compiled_object(&neighbour_id)? {
+                    // Issue #17: an unconfirmed claim is not part of the compiled graph.
+                    Some(neighbour) if neighbour.is_unconfirmed_claim() => {
+                        hidden.insert(neighbour_id);
+                    }
+                    Some(neighbour) => {
+                        graph.add_object(neighbour);
+                        queue.push_back((neighbour_id, current_depth + 1));
+                    }
+                    None => {}
                 }
             }
+        }
+        if !hidden.is_empty() {
+            graph
+                .relationships
+                .retain(|r| !hidden.contains(&r.from) && !hidden.contains(&r.to));
         }
 
         if truncated {
@@ -298,7 +311,11 @@ impl<'a> Runtime<'a> {
                 }
                 visited.insert(neighbour_id);
 
-                if let Some(neighbour) = self.ledger.get_object(&neighbour_id)? {
+                // Issue #17: a hypothesis (RFC 0170) or proposal (RFC 0164) is not a fact to
+                // report as a dependent, whatever edge reaches it.
+                if let Some(neighbour) = self.ledger.get_object(&neighbour_id)?
+                    && !neighbour.is_unconfirmed_claim()
+                {
                     let next_depth = current_depth + 1;
                     hops.push(ImpactHop {
                         hop: next_depth,
@@ -771,6 +788,63 @@ mod tests {
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
+
+    /// Issue #17: a business-semantics hypothesis reached by an `ExplainedBy` edge is not walked
+    /// as a fact until a human confirms it.
+    #[test]
+    fn walks_skip_hypothesis_endpoints_until_confirmed() {
+        let (ledger, _dir) = temp_ledger();
+        let table = obj("ar");
+        let users = obj("users");
+        let mut concept = KirObject::new("Receivable", ObjectKind::BusinessConcept);
+        concept
+            .properties
+            .insert("status".into(), serde_json::json!("hypothesis"));
+        ledger.append_object(&table).unwrap();
+        ledger.append_object(&users).unwrap();
+        ledger.append_object(&concept).unwrap();
+        ledger
+            .append_relationship(&KirRelationship::deterministic(
+                RelationshipKind::Custom("ExplainedBy".into()),
+                table.id,
+                concept.id,
+                "",
+            ))
+            .unwrap();
+        ledger.append_relationship(&fk(table.id, users.id)).unwrap();
+
+        let rt = Runtime::new(&ledger);
+        let reached = |rt: &Runtime<'_>| -> Vec<String> {
+            rt.trace_impact(&table.id, ImpactDirection::Dependencies, &[], 3)
+                .unwrap()
+                .into_iter()
+                .map(|h| h.object.name)
+                .collect()
+        };
+        assert_eq!(reached(&rt), vec!["users".to_string()]);
+        let hood = rt.load_neighborhood(&table.id, 2).unwrap();
+        assert!(hood.objects.iter().all(|o| o.id != concept.id));
+        assert!(
+            hood.relationships
+                .iter()
+                .all(|r| r.to != concept.id && r.from != concept.id)
+        );
+
+        concept
+            .properties
+            .insert("status".into(), serde_json::json!("confirmed"));
+        ledger.append_object(&concept).unwrap();
+        let mut now = reached(&rt);
+        now.sort();
+        assert_eq!(now, vec!["Receivable".to_string(), "users".to_string()]);
+        assert!(
+            rt.load_neighborhood(&table.id, 2)
+                .unwrap()
+                .objects
+                .iter()
+                .any(|o| o.id == concept.id)
+        );
+    }
 
     #[test]
     fn load_object_unknown_returns_none() {

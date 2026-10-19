@@ -296,12 +296,17 @@ pub fn lower_to_kir(graph: &TransformGraph) -> KirGraph {
     for (from, to) in &graph.edges {
         let from_id = node_ids[from.0 as usize];
         let to_id = node_ids[to.0 as usize];
-        let rel = KirRelationship::deterministic(
+        let mut rel = KirRelationship::deterministic(
             RelationshipKind::Custom("FeedsInto".into()),
             from_id,
             to_id,
             "",
         );
+        // The edge is stated by the two steps it joins: cite both nodes' evidence (issue #12).
+        rel.evidence = vec![
+            transform_evidence_kir_id(&graph.origin, from.0 as usize),
+            transform_evidence_kir_id(&graph.origin, to.0 as usize),
+        ];
         kir.add_relationship(rel);
     }
 
@@ -548,6 +553,13 @@ mod tests {
         for obj in &kir.objects {
             assert_eq!(obj.kind, ObjectKind::Custom("TransformNode".into()));
             assert_eq!(obj.evidence.len(), 1);
+        }
+        // Issue #12: a `FeedsInto` edge cites the evidence of the two steps it joins.
+        assert!(!kir.relationships.is_empty());
+        let known: Vec<KirId> = kir.evidence.iter().map(|e| e.id).collect();
+        for rel in &kir.relationships {
+            assert_eq!(rel.evidence.len(), 2, "{rel:?}");
+            assert!(rel.evidence.iter().all(|id| known.contains(id)));
         }
     }
 
