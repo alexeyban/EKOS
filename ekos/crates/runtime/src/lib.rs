@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use ekos_kir::{
     KirEvent, KirEvidence, KirGraph, KirId, KirObject, KirRelationship, RelationshipKind,
 };
-use ekos_ledger::{KnowledgeStore, LedgerError};
+use ekos_ledger::{KnowledgeReader, LedgerError};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use thiserror::Error;
@@ -93,21 +93,23 @@ pub struct World {
 }
 
 /// Read-only view over the Knowledge Ledger. Backend-agnostic since
-/// RFC 0016: works over any [`KnowledgeStore`] (the SQLite `Ledger` or the
-/// fact engine's `FactLedger`).
+/// RFC 0016: works over any store (the SQLite `Ledger` or the fact engine's `FactLedger`).
+///
+/// It holds a [`KnowledgeReader`], which has no write methods, so the Runtime cannot write by
+/// construction (issue #13); a `&dyn KnowledgeStore` coerces to it.
 pub struct Runtime<'a> {
-    ledger: &'a dyn KnowledgeStore,
+    ledger: &'a dyn KnowledgeReader,
     /// Ids [`Self::retrieve`] leaves out (RFC 0177 §3 D). Empty except in an eval run.
     search_excluded: std::collections::HashSet<KirId>,
 }
 
 impl<'a> Runtime<'a> {
-    pub fn new<S: KnowledgeStore>(ledger: &'a S) -> Self {
+    pub fn new<S: KnowledgeReader>(ledger: &'a S) -> Self {
         Self::over(ledger)
     }
 
     /// Construct from an already-erased store reference.
-    pub fn over(ledger: &'a dyn KnowledgeStore) -> Self {
+    pub fn over(ledger: &'a dyn KnowledgeReader) -> Self {
         Self {
             ledger,
             search_excluded: std::collections::HashSet::new(),

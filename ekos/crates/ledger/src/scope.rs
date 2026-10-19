@@ -31,7 +31,7 @@ use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
 use serde::{Deserialize, Serialize};
 
 use crate::retrieval::{RankedResults, RetrievalRequest};
-use crate::{KnowledgeStore, LedgerDiff, LedgerError, RefreshOutcome, provenance};
+use crate::{KnowledgeReader, KnowledgeStore, LedgerDiff, LedgerError, RefreshOutcome, provenance};
 
 /// How many times the requested number of search hits is asked of the inner store, so that a
 /// page from which hidden hits were removed is not short.
@@ -479,48 +479,7 @@ impl ScopedStore {
     }
 }
 
-impl KnowledgeStore for ScopedStore {
-    // ── writes: never through a restricted view ──────────────────────────────
-
-    fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError> {
-        if self.is_restricted() {
-            return Err(self.refuse("writing an object"));
-        }
-        self.inner.append_object(obj)
-    }
-
-    fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError> {
-        if self.is_restricted() {
-            return Err(self.refuse("writing evidence"));
-        }
-        self.inner.append_evidence(ev)
-    }
-
-    fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError> {
-        if self.is_restricted() {
-            return Err(self.refuse("writing a relationship"));
-        }
-        self.inner.append_relationship(rel)
-    }
-
-    fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError> {
-        if self.is_restricted() {
-            return Err(self.refuse("writing an event"));
-        }
-        self.inner.append_event(ev)
-    }
-
-    fn set_write_context(&self, ctx: Option<provenance::WriteContext>) {
-        self.inner.set_write_context(ctx);
-    }
-
-    fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError> {
-        if self.is_restricted() {
-            return Err(self.refuse("copying the ledger"));
-        }
-        self.inner.vacuum_into(dest)
-    }
-
+impl KnowledgeReader for ScopedStore {
     fn refresh_snapshot(&self) -> Result<RefreshOutcome, LedgerError> {
         let outcome = self.inner.refresh_snapshot()?;
         // Decisions were made on the versions the old snapshot held.
@@ -783,6 +742,49 @@ impl KnowledgeStore for ScopedStore {
             unchanged: tracked.saturating_sub(touched.len()),
             touched,
         })
+    }
+}
+
+impl KnowledgeStore for ScopedStore {
+    // ── writes: never through a restricted view ──────────────────────────────
+
+    fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError> {
+        if self.is_restricted() {
+            return Err(self.refuse("writing an object"));
+        }
+        self.inner.append_object(obj)
+    }
+
+    fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError> {
+        if self.is_restricted() {
+            return Err(self.refuse("writing evidence"));
+        }
+        self.inner.append_evidence(ev)
+    }
+
+    fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError> {
+        if self.is_restricted() {
+            return Err(self.refuse("writing a relationship"));
+        }
+        self.inner.append_relationship(rel)
+    }
+
+    fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError> {
+        if self.is_restricted() {
+            return Err(self.refuse("writing an event"));
+        }
+        self.inner.append_event(ev)
+    }
+
+    fn set_write_context(&self, ctx: Option<provenance::WriteContext>) {
+        self.inner.set_write_context(ctx);
+    }
+
+    fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError> {
+        if self.is_restricted() {
+            return Err(self.refuse("copying the ledger"));
+        }
+        self.inner.vacuum_into(dest)
     }
 }
 
@@ -1309,28 +1311,39 @@ mod tests {
 
     #[test]
     fn every_store_method_has_a_decision_here() {
-        // The trait as written in lib.rs. A method added there must be handled in this file:
-        // a required one fails to compile, and one with a default body would otherwise be
-        // inherited without anyone having decided what a restricted reader gets from it.
+        // Both traits as written in lib.rs (issue #13 split them). A method added there must be
+        // handled in this file: a required one fails to compile, and one with a default body
+        // would otherwise be inherited without anyone having decided what a restricted reader
+        // gets from it.
         let lib = include_str!("lib.rs");
-        let body = lib
-            .split_once("pub trait KnowledgeStore: Send {")
-            .expect("KnowledgeStore trait")
-            .1;
-        let end = body.find("\n}\n").expect("end of the trait");
-        let declared: Vec<&str> = body[..end]
-            .lines()
-            .filter_map(|l| l.strip_prefix("    fn "))
-            .filter_map(|l| l.split(['(', '<']).next())
-            .collect();
-        assert!(declared.len() >= 25, "the trait was not read: {declared:?}");
+        let methods_of = |header: &str| -> Vec<String> {
+            let body = lib.split_once(header).expect(header).1;
+            let end = body.find("\n}\n").expect("end of the trait");
+            body[..end]
+                .lines()
+                .filter_map(|l| l.strip_prefix("    fn "))
+                .filter_map(|l| l.split(['(', '<']).next())
+                .map(str::to_string)
+                .collect()
+        };
+        let mut declared = methods_of("pub trait KnowledgeReader: Send {");
+        declared.extend(methods_of("pub trait KnowledgeStore: KnowledgeReader {"));
+        assert!(
+            declared.len() >= 25,
+            "the traits were not read: {declared:?}"
+        );
 
         let here = include_str!("scope.rs");
-        let wrapper = here
-            .split_once("impl KnowledgeStore for ScopedStore {")
-            .expect("the wrapper impl")
-            .1;
-        let missing: Vec<&&str> = declared
+        let block = |header: &str| -> &str {
+            let body = here.split_once(header).expect(header).1;
+            &body[..body.find("\n}\n").expect("end of the impl")]
+        };
+        let wrapper = format!(
+            "{}\n{}",
+            block("impl KnowledgeReader for ScopedStore {"),
+            block("impl KnowledgeStore for ScopedStore {")
+        );
+        let missing: Vec<&String> = declared
             .iter()
             .filter(|name| !wrapper.contains(&format!("    fn {name}(")))
             .collect();
@@ -1338,6 +1351,35 @@ mod tests {
             missing.is_empty(),
             "KnowledgeStore method(s) {missing:?} have no decision in ScopedStore (RFC 0181): \
              decide what a restricted reader gets, then implement it there"
+        );
+
+        // Implemented is not decided: a bare `self.inner.x()` passthrough would pass the check
+        // above. Each body must name the scope (issue #13 comment), or be listed here with why.
+        const PASSTHROUGH: [(&str, &str); 2] = [
+            (
+                "set_write_context",
+                "stamps provenance on later writes, which are refused anyway",
+            ),
+            (
+                "refresh_snapshot",
+                "reads nothing; clears the remembered decisions instead",
+            ),
+        ];
+        const DECISIONS: [&str; 5] = ["is_restricted", "admit", "visible", "refuse", "keep_"];
+        let mut undecided = Vec::new();
+        for name in &declared {
+            let at = wrapper.find(&format!("    fn {name}(")).unwrap();
+            let rest = &wrapper[at + 1..];
+            let body = &rest[..rest.find("\n    fn ").unwrap_or(rest.len())];
+            let decided = DECISIONS.iter().any(|d| body.contains(d));
+            let listed = PASSTHROUGH.iter().any(|(n, _)| n == name);
+            if !decided && !listed {
+                undecided.push(name);
+            }
+        }
+        assert!(
+            undecided.is_empty(),
+            "ScopedStore method(s) {undecided:?} pass through without consulting the scope"
         );
     }
 }

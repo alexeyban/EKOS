@@ -26,8 +26,8 @@ use chrono::{DateTime, Utc};
 use ekos_cluster::{ClusterError, CoordinatorClient};
 use ekos_kir::{KirEvent, KirEvidence, KirId, KirObject, KirRelationship};
 use ekos_ledger::{
-    ArmSet, ArmTiming, KnowledgeStore, LedgerDiff, LedgerError, RRF_K, RankedResults,
-    RetrievalRequest, ScoredCandidate, SignalSource, exact_name_matches, rrf_fuse,
+    ArmSet, ArmTiming, KnowledgeReader, KnowledgeStore, LedgerDiff, LedgerError, RRF_K,
+    RankedResults, RetrievalRequest, ScoredCandidate, SignalSource, exact_name_matches, rrf_fuse,
 };
 use futures::future::{join_all, try_join_all};
 use tokio::runtime::Handle;
@@ -453,20 +453,7 @@ fn write_rejected(what: &str) -> LedgerError {
     ))
 }
 
-impl KnowledgeStore for DistributedLedger {
-    fn append_object(&self, _obj: &KirObject) -> Result<bool, LedgerError> {
-        Err(write_rejected("append_object"))
-    }
-    fn append_evidence(&self, _ev: &KirEvidence) -> Result<(), LedgerError> {
-        Err(write_rejected("append_evidence"))
-    }
-    fn append_relationship(&self, _rel: &KirRelationship) -> Result<bool, LedgerError> {
-        Err(write_rejected("append_relationship"))
-    }
-    fn append_event(&self, _ev: &KirEvent) -> Result<(), LedgerError> {
-        Err(write_rejected("append_event"))
-    }
-
+impl KnowledgeReader for DistributedLedger {
     fn get_object(&self, id: &KirId) -> Result<Option<KirObject>, LedgerError> {
         let id = *id;
         self.run(
@@ -724,10 +711,6 @@ impl KnowledgeStore for DistributedLedger {
         })
     }
 
-    fn vacuum_into(&self, _dest: &std::path::Path) -> Result<(), LedgerError> {
-        Err(write_rejected("vacuum_into"))
-    }
-
     fn diff(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<LedgerDiff, LedgerError> {
         self.run(async move {
             let cat = self
@@ -754,5 +737,24 @@ impl KnowledgeStore for DistributedLedger {
             merged.touched = touched.into_iter().collect();
             Ok(merged)
         })
+    }
+}
+
+impl KnowledgeStore for DistributedLedger {
+    fn append_object(&self, _obj: &KirObject) -> Result<bool, LedgerError> {
+        Err(write_rejected("append_object"))
+    }
+    fn append_evidence(&self, _ev: &KirEvidence) -> Result<(), LedgerError> {
+        Err(write_rejected("append_evidence"))
+    }
+    fn append_relationship(&self, _rel: &KirRelationship) -> Result<bool, LedgerError> {
+        Err(write_rejected("append_relationship"))
+    }
+    fn append_event(&self, _ev: &KirEvent) -> Result<(), LedgerError> {
+        Err(write_rejected("append_event"))
+    }
+
+    fn vacuum_into(&self, _dest: &std::path::Path) -> Result<(), LedgerError> {
+        Err(write_rejected("vacuum_into"))
     }
 }

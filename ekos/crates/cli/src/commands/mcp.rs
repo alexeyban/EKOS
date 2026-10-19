@@ -40,7 +40,7 @@ use ekos_compiler_core::EkosConfig;
 use ekos_ekl::{EklInterpreter, ekl_parse};
 use ekos_kir::{EventKind, KirEvent, KirId, RelationshipKind};
 use ekos_ledger::scope::{ReadScope, ScopedStore};
-use ekos_ledger::{KnowledgeStore, RefreshOutcome};
+use ekos_ledger::{KnowledgeReader, KnowledgeStore, RefreshOutcome};
 use ekos_runtime::reason::{execute, plan_question};
 use ekos_runtime::retrieval::understand;
 use ekos_runtime::{

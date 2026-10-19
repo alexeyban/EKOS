@@ -128,3 +128,23 @@ checkout.
   and dispatched. An unknown tool still errors.
 - The private workspace carries every moved test, plus an end-to-end check that its `ekos`
   binary recovers `BinaryType` objects from a real assembly.
+
+---
+
+## Amendment (2026-10-19): extension MCP tools and human-only review (issue #14)
+
+Several decisions are human-only: confirming a business definition (RFC 0170), settling a
+conflict (RFC 0172), promoting a session note (RFC 0151), and moving or approving a migration
+(RFC 0154/0161). In-tree, `commands/review_guard.rs` checks that `commands/mcp.rs` cannot reach
+any of them. It parses the file, resolves imports, renames, groups and globs, and looks inside
+macro arguments. It also checks that each guarded entry point still exists, so a rename fails the
+test instead of leaving a dead match. The older literal scans in `semantics.rs`, `session.rs`,
+`migrate.rs` and `conflicts.rs` stay as a second layer.
+
+An extension's MCP tools (`mcp_tools` / `call_mcp_tool`) are out of reach of that guard. The
+rule for them is the same: **an extension tool must never reach a human-only entry point**,
+whether by a call or by starting an `ekos` subprocess that runs a review-class catalogue command.
+This is the extension author's obligation and is now stated on `EkosExtension::call_mcp_tool`.
+A later change could make `call_mcp_tool` take `&dyn KnowledgeReader` (RFC 0135 E4) so that an
+extension tool cannot write through the store it is handed. That changes the trait, so it waits
+until both extension repositories are updated together.

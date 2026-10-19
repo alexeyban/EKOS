@@ -27,7 +27,7 @@
 use crate::RuntimeError;
 use chrono::{DateTime, Utc};
 use ekos_kir::{KirId, KirObject, ObjectKind, RelationshipKind};
-use ekos_ledger::KnowledgeStore;
+use ekos_ledger::KnowledgeReader;
 use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
@@ -236,7 +236,7 @@ pub struct Edge {
 /// Read-only (RFC 0005). Does **not** serialize — the caller (`ekos graph export` or the
 /// `ekos_graph_export` MCP tool) turns the returned struct into JSON / NDJSON.
 pub fn export_graph(
-    store: &dyn KnowledgeStore,
+    store: &dyn KnowledgeReader,
     opts: &GraphExportOptions,
 ) -> Result<GraphExport, RuntimeError> {
     // RFC 0134 — `as_of` swaps the unbounded reads for the point-in-time bulk primitives; every
@@ -654,6 +654,7 @@ fn index_lookup(v: &[String]) -> HashMap<String, usize> {
 mod tests {
     use super::*;
     use ekos_kir::{KirEvidence, KirRelationship, SourceLocation};
+    use ekos_ledger::KnowledgeStore;
     use ekos_ledger::{FactLedger, Ledger};
 
     fn obj(name: &str, kind: ObjectKind) -> KirObject {

@@ -343,7 +343,7 @@ pub fn resolve_fact(obj: &ekos_kir::KirObject, attr: &str) -> Option<serde_json:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FactLedger, KnowledgeStore};
+    use crate::{FactLedger, KnowledgeReader};
     use ekos_kir::{KirObject, ObjectKind};
     use tempfile::tempdir;
 

@@ -26,7 +26,7 @@ pub const TRANSFORM_NODE_KIND: &str = "TransformNode";
 pub const FEEDS_INTO: &str = "FeedsInto";
 
 /// Whether `kind` is a Transformation IR node this crate can render — the gate callers filter
-/// `KnowledgeStore::all_objects()` with before calling [`render_dbt_model`], the same role
+/// `KnowledgeReader::all_objects()` with before calling [`render_dbt_model`], the same role
 /// `ekos_docs_gen::is_significant` plays for the documentation renderer.
 pub fn is_transform_node(kind: &ObjectKind) -> bool {
     matches!(kind, ObjectKind::Custom(s) if s.as_str() == TRANSFORM_NODE_KIND)

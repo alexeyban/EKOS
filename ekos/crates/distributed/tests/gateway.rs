@@ -9,8 +9,8 @@ use ekos_distributed::{DistributedLedger, partition_id, spawn_ephemeral_worker};
 use ekos_kir::{
     KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
 };
-use ekos_ledger::KnowledgeStore;
 use ekos_ledger::partitioned::{PartitionDimension, PartitionedLedger, TimeBucket};
+use ekos_ledger::{KnowledgeReader, KnowledgeStore};
 use tempfile::tempdir;
 
 fn build_workspace(root: &std::path::Path) -> (PartitionedLedger, KirObject, KirObject, KirObject) {

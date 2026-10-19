@@ -64,7 +64,10 @@ pub trait EkosExtension: Send + Sync {
     }
 
     /// `Some` if this extension owns the tool `name`. Read-only: `ledger` is the same cached store
-    /// every built-in read tool uses.
+    /// every built-in read tool uses. Like a built-in tool, an extension tool must never reach a
+    /// human-only review entry point (the list is `commands/review_guard.rs::HUMAN_ONLY`; RFC 0149
+    /// amendment, issue #14) — the in-tree guard cannot see out-of-tree code, so this is the
+    /// extension author's obligation.
     fn call_mcp_tool(
         &self,
         _name: &str,

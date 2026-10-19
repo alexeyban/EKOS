@@ -7,6 +7,7 @@ use super::{
     DateTime, KirEvent, KirEvidence, KirId, KirObject, KirRelationship, KnowledgeStore, LedgerDiff,
     LedgerError, PartitionError, PartitionedLedger, Path, Utc,
 };
+use crate::KnowledgeReader;
 
 impl From<PartitionError> for LedgerError {
     fn from(e: PartitionError) -> Self {
@@ -17,19 +18,7 @@ impl From<PartitionError> for LedgerError {
     }
 }
 
-impl KnowledgeStore for PartitionedLedger {
-    fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError> {
-        Ok(PartitionedLedger::append_object(self, obj)?)
-    }
-    fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError> {
-        Ok(PartitionedLedger::append_evidence(self, ev)?)
-    }
-    fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError> {
-        Ok(PartitionedLedger::append_relationship(self, rel)?)
-    }
-    fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError> {
-        Ok(PartitionedLedger::append_event(self, ev)?)
-    }
+impl KnowledgeReader for PartitionedLedger {
     fn get_object(&self, id: &KirId) -> Result<Option<KirObject>, LedgerError> {
         Ok(PartitionedLedger::get_object(self, id)?)
     }
@@ -91,10 +80,25 @@ impl KnowledgeStore for PartitionedLedger {
     fn evidence_count(&self) -> Result<usize, LedgerError> {
         Ok(PartitionedLedger::evidence_count(self)?)
     }
-    fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError> {
-        Ok(PartitionedLedger::vacuum_into(self, dest)?)
-    }
     fn diff(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<LedgerDiff, LedgerError> {
         Ok(PartitionedLedger::diff(self, from, to)?)
+    }
+}
+
+impl KnowledgeStore for PartitionedLedger {
+    fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError> {
+        Ok(PartitionedLedger::append_object(self, obj)?)
+    }
+    fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError> {
+        Ok(PartitionedLedger::append_evidence(self, ev)?)
+    }
+    fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError> {
+        Ok(PartitionedLedger::append_relationship(self, rel)?)
+    }
+    fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError> {
+        Ok(PartitionedLedger::append_event(self, ev)?)
+    }
+    fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError> {
+        Ok(PartitionedLedger::vacuum_into(self, dest)?)
     }
 }

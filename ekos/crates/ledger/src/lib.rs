@@ -1680,14 +1680,12 @@ pub fn merge_branch(main: &Ledger, branch: &Ledger) -> Result<MergeReport, Ledge
 /// other cause). This is additive only: any external implementor that happened to not be `Send`
 /// would now fail to compile, which is a `1.0`-breaking (not yet reached) concern, not a runtime
 /// one — no such implementor exists in this codebase.
-pub trait KnowledgeStore: Send {
-    fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError>;
-    fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError>;
-    fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError>;
-    fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError>;
-    /// RFC 0135 Part B — stamp `ctx` onto every subsequent write until changed / cleared.
-    /// Default: no-op (a backend that records no provenance ignores it).
-    fn set_write_context(&self, _ctx: Option<provenance::WriteContext>) {}
+///
+/// Issue #13: the API is two traits. `KnowledgeReader` holds every read; [`KnowledgeStore`] adds
+/// the writes on top. The Runtime, EKL and graph export take `&dyn KnowledgeReader`, so "the Runtime is
+/// read-only" is a type, not a convention: a write there does not compile. A
+/// `&dyn KnowledgeStore` coerces to `&dyn KnowledgeReader`, and the reads stay callable on it.
+pub trait KnowledgeReader: Send {
     /// RFC 0135 Part B — every write to `id` (object or relationship), oldest first, with the
     /// provenance recorded at write time. Default: empty — this backend records no provenance.
     fn audit_trail(&self, _id: &KirId) -> Result<Vec<provenance::AuditRecord>, LedgerError> {
@@ -1752,9 +1750,6 @@ pub trait KnowledgeStore: Send {
     /// `ekos status --json`). Like the other counters, never shrinks on retraction.
     /// `DistributedLedger` returns an error until a fan-out `QueryWorker` RPC exists for it.
     fn evidence_count(&self) -> Result<usize, LedgerError>;
-    /// Write a complete branch copy to `dest` (file for SQLite, directory
-    /// for the fact engine).
-    fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError>;
     /// What changed in `(from, to]`.
     fn diff(&self, from: DateTime<Utc>, to: DateTime<Utc>) -> Result<LedgerDiff, LedgerError>;
     /// RFC 0112 — bring a long-lived **read-only** handle up to date with a separate writer's
@@ -1765,24 +1760,24 @@ pub trait KnowledgeStore: Send {
     }
 }
 
+/// The writes, on top of [`KnowledgeReader`]: the compiler's `commit`, the review tools, and the
+/// other writers `commands/mcp.rs` lists in `only_listed_functions_can_write_the_ledger`.
+pub trait KnowledgeStore: KnowledgeReader {
+    fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError>;
+    fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError>;
+    fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError>;
+    fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError>;
+    /// RFC 0135 Part B — stamp `ctx` onto every subsequent write until changed / cleared.
+    /// Default: no-op (a backend that records no provenance ignores it).
+    fn set_write_context(&self, _ctx: Option<provenance::WriteContext>) {}
+    /// Write a complete branch copy to `dest` (file for SQLite, directory
+    /// for the fact engine).
+    fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError>;
+}
+
 macro_rules! delegate_store {
     ($ty:ty) => {
-        impl KnowledgeStore for $ty {
-            fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError> {
-                <$ty>::append_object(self, obj)
-            }
-            fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError> {
-                <$ty>::append_evidence(self, ev)
-            }
-            fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError> {
-                <$ty>::append_relationship(self, rel)
-            }
-            fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError> {
-                <$ty>::append_event(self, ev)
-            }
-            fn set_write_context(&self, ctx: Option<provenance::WriteContext>) {
-                <$ty>::set_write_context(self, ctx)
-            }
+        impl KnowledgeReader for $ty {
             fn audit_trail(&self, id: &KirId) -> Result<Vec<provenance::AuditRecord>, LedgerError> {
                 <$ty>::audit_trail(self, id)
             }
@@ -1863,15 +1858,33 @@ macro_rules! delegate_store {
             fn evidence_count(&self) -> Result<usize, LedgerError> {
                 <$ty>::evidence_count(self)
             }
-            fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError> {
-                <$ty>::vacuum_into(self, dest)
-            }
             fn diff(
                 &self,
                 from: DateTime<Utc>,
                 to: DateTime<Utc>,
             ) -> Result<LedgerDiff, LedgerError> {
                 Self::diff_impl(self, from, to)
+            }
+        }
+
+        impl KnowledgeStore for $ty {
+            fn append_object(&self, obj: &KirObject) -> Result<bool, LedgerError> {
+                <$ty>::append_object(self, obj)
+            }
+            fn append_evidence(&self, ev: &KirEvidence) -> Result<(), LedgerError> {
+                <$ty>::append_evidence(self, ev)
+            }
+            fn append_relationship(&self, rel: &KirRelationship) -> Result<bool, LedgerError> {
+                <$ty>::append_relationship(self, rel)
+            }
+            fn append_event(&self, ev: &KirEvent) -> Result<(), LedgerError> {
+                <$ty>::append_event(self, ev)
+            }
+            fn set_write_context(&self, ctx: Option<provenance::WriteContext>) {
+                <$ty>::set_write_context(self, ctx)
+            }
+            fn vacuum_into(&self, dest: &Path) -> Result<(), LedgerError> {
+                <$ty>::vacuum_into(self, dest)
             }
         }
     };
@@ -2042,8 +2055,8 @@ pub fn migrate_to_v3(v2_path: &Path, dest: &Path) -> Result<MigrateV3Report, Led
         versions += 1;
     }
 
-    let objects = KnowledgeStore::object_count(&facts)?;
-    let relationships = KnowledgeStore::relationship_count(&facts)?;
+    let objects = KnowledgeReader::object_count(&facts)?;
+    let relationships = KnowledgeReader::relationship_count(&facts)?;
     if objects != src.object_count()? || relationships != src.relationship_count()? {
         return Err(LedgerError::Corrupt(
             "migration count mismatch — source left untouched".into(),
@@ -3149,29 +3162,33 @@ mod tests {
         assert_eq!(report.relationships, 1);
 
         let v3 = FactLedger::open(&dest).unwrap();
-        assert_eq!(KnowledgeStore::entry_count(&v3).unwrap(), 5);
+        assert_eq!(KnowledgeReader::entry_count(&v3).unwrap(), 5);
         // Current state matches the v2 backend exactly (payload + signature).
         for id in [obj.id, other.id] {
             let a = serde_json::to_value(v2.get_object(&id).unwrap().unwrap()).unwrap();
-            let b = serde_json::to_value(KnowledgeStore::get_object(&v3, &id).unwrap().unwrap())
+            let b = serde_json::to_value(KnowledgeReader::get_object(&v3, &id).unwrap().unwrap())
                 .unwrap();
             assert_eq!(content_signature(&a), content_signature(&b));
         }
         // History with ORIGINAL timestamps: the pre-update version is at `mid`.
-        let historical = KnowledgeStore::object_at(&v3, &obj.id, mid)
+        let historical = KnowledgeReader::object_at(&v3, &obj.id, mid)
             .unwrap()
             .unwrap();
         assert!(!historical.properties.contains_key("row_count"));
         // Evidence, graph, and search all serve.
-        assert!(KnowledgeStore::get_evidence(&v3, &ev.id).unwrap().is_some());
+        assert!(
+            KnowledgeReader::get_evidence(&v3, &ev.id)
+                .unwrap()
+                .is_some()
+        );
         assert_eq!(
-            KnowledgeStore::relationships_for(&v3, &obj.id)
+            KnowledgeReader::relationships_for(&v3, &obj.id)
                 .unwrap()
                 .len(),
             1
         );
         assert_eq!(
-            KnowledgeStore::find_objects(&v3, "wolverine")
+            KnowledgeReader::find_objects(&v3, "wolverine")
                 .unwrap()
                 .len(),
             1

@@ -370,3 +370,14 @@ where `KirObject::is_unconfirmed_claim()` is true. Its edges are dropped from th
 and `ekos_dependents` reports the other end's `status`. A human confirmation changes the object's
 status and makes it walkable, with no edge rewritten. `open`/`resolved` conflicts are observed
 facts about disagreement and stay walkable.
+
+**E4 — the Runtime is read-only by type (issue #13).** `KnowledgeStore` is split into
+`KnowledgeReader` (every read, plus `audit_trail`, `fact`, `retrieve`, the counters, `diff` and
+`refresh_snapshot`) and `KnowledgeStore: KnowledgeReader` (`append_*`, `set_write_context`,
+`vacuum_into`). `Runtime` holds `&dyn KnowledgeReader`, and `export_graph` takes one too, so a
+write from either does not compile. EKL reaches the store only through `Runtime`. The split is
+source-compatible for code that holds a `&dyn KnowledgeStore` or a `T: KnowledgeStore`: reads
+stay callable and the reference coerces (trait upcasting). Code that calls a read on a concrete
+type, or writes `KnowledgeStore::get_object(…)` in full, needs `KnowledgeReader` in scope.
+`ScopedStore`'s guard test reads both traits, and now also requires every wrapper body to consult
+the scope, or to be listed as a passthrough with its reason.

@@ -112,7 +112,7 @@ async fn distributed_search_merges_top_k_across_partitions() {
 
         // the trait method rides on the same merge
         let via_trait: std::collections::HashSet<_> = {
-            use ekos_ledger::KnowledgeStore;
+            use ekos_ledger::KnowledgeReader;
             g.find_objects("orders")
                 .unwrap()
                 .into_iter()
