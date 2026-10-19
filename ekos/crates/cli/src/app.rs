@@ -965,6 +965,16 @@ enum MarketingCommands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Post a file's text to X exactly as written: no drafting, no 280-character cap
+    /// (an X Premium account accepts long posts). Without --confirm it only previews.
+    Post {
+        /// The text file to post (trailing whitespace is trimmed)
+        file: PathBuf,
+        /// Really post it; the decision is made per run and ignores the
+        /// `[marketing.twitter] enabled` gate, which governs `publish` only
+        #[arg(long)]
+        confirm: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2395,6 +2405,9 @@ async fn dispatch_marketing(
             yes,
             dry_run,
         } => crate::commands::marketing::publish(config, cwd, devlog, yes, dry_run).await,
+        MarketingCommands::Post { file, confirm } => {
+            crate::commands::marketing::post(cwd, &file, confirm).await
+        }
     }
 }
 

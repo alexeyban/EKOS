@@ -1,4 +1,4 @@
-//! `ekos marketing publish` (RFC 0030).
+//! `ekos marketing publish` and `ekos marketing post` (RFC 0030).
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -206,6 +206,52 @@ fn approve(draft: &str, auto: bool) -> Result<Option<String>> {
     }
 }
 
+/// The longest post X accepts from a Premium account.
+const MAX_POST_CHARS: usize = 25_000;
+
+/// The text `ekos marketing post` would send: the file trimmed, refused when empty or longer
+/// than X accepts.
+fn post_text(raw: &str) -> Result<String> {
+    let text = raw.trim();
+    if text.is_empty() {
+        return Err(anyhow!("the file is empty — nothing to post"));
+    }
+    let chars = text.chars().count();
+    if chars > MAX_POST_CHARS {
+        return Err(anyhow!(
+            "the text is {chars} characters; X accepts at most {MAX_POST_CHARS}"
+        ));
+    }
+    Ok(text.to_string())
+}
+
+/// `ekos marketing post <file> [--confirm]` — sends a file's text to X as written. Without
+/// `--confirm` it prints what would be posted and touches no network.
+pub async fn post(cwd: &Path, file: &Path, confirm: bool) -> Result<()> {
+    let marketing_dir = cwd.join("marketing");
+    dotenvy::from_path(marketing_dir.join(".env")).ok();
+
+    let raw = tokio::fs::read_to_string(file)
+        .await
+        .with_context(|| format!("cannot read {}", file.display()))?;
+    let text = post_text(&raw)?;
+    println!("{text}\n\n({} characters)", text.chars().count());
+
+    if !confirm {
+        println!("Preview only — pass --confirm to post it to X.");
+        return Ok(());
+    }
+    let publisher =
+        TwitterPublisher::from_env().map_err(|e| anyhow!("{e} — cannot publish to X"))?;
+    let id = publisher.publish(&text).await.context("publish failed")?;
+    println!("Posted: https://x.com/i/status/{id}");
+    log_line(
+        &marketing_dir,
+        &format!("Posted {} as tweet {id}", file.display()),
+    );
+    Ok(())
+}
+
 fn log_line(marketing_dir: &Path, message: &str) {
     let logs_dir = marketing_dir.join("logs");
     if std::fs::create_dir_all(&logs_dir).is_err() {
@@ -224,6 +270,19 @@ fn log_line(marketing_dir: &Path, message: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn post_text_is_trimmed_and_keeps_long_posts() {
+        let long = "x".repeat(1_500);
+        assert_eq!(post_text(&format!("\n{long}\n\n")).unwrap(), long);
+    }
+
+    #[test]
+    fn post_text_refuses_empty_and_oversized() {
+        assert!(post_text(" \n ").is_err());
+        assert!(post_text(&"x".repeat(MAX_POST_CHARS + 1)).is_err());
+        assert!(post_text(&"x".repeat(MAX_POST_CHARS)).is_ok());
+    }
     use tempfile::tempdir;
 
     /// Proves `marketing/.env` actually gets loaded — `dotenvy::from_path` is

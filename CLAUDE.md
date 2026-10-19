@@ -66,6 +66,7 @@ cargo run -p ekos -- ekl "FIND Object WHERE kind = 'Table'"  # Enterprise Knowle
                                              # (entities are Object / Relationship only)
 cargo run -p ekos -- identity scan          # cross-system candidate matches (RFC 0029)
 cargo run -p ekos -- marketing publish      # devlog -> tweet -> approval -> X (RFC 0030)
+cargo run -p ekos -- marketing post <file> --confirm   # a file's text to X as written (no LLM, no 280 cap)
 cargo run -p ekos -- mcp serve --workspace <dir>
 cargo run -p ekos -- docs generate --layout curated --output doc   # README/Architecture/API/
                                              # SequenceDiagrams + per-entity pages (RFC 0035/0037/0042)

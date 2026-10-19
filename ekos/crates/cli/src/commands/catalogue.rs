@@ -105,6 +105,7 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("query-worker serve", Class::Local, false),
     // Publishing to X needs a person at a terminal approving each post (RFC 0030).
     ("marketing publish", Class::Local, true),
+    ("marketing post", Class::Local, false),
     ("docs generate", Class::Write, true),
     ("graph export", Class::Read, false),
     ("dbt generate", Class::Write, false),

@@ -254,10 +254,8 @@ subcommand produces.
 
 - [x] Config file format/location — resolved: `[marketing]` in `ekos.toml`, not a separate YAML file.
 - [x] Devlog format the parser targets — resolved: this repo's real `Summary`/`PR #N` structure.
-- [ ] `TwitterPublisher` has not been run against a live X account (no credentials available in
-      this environment) — the OAuth 1.0a signer is spec-implemented and unit-tested in isolation,
-      but end-to-end verification against the real API is deferred to whoever holds
-      `TWITTER_*` credentials.
+- [x] `TwitterPublisher` against a live X account — verified 2026-10-19 (amendment below): the
+      OAuth 1.0a signer and `POST /2/tweets` posted a 1,520-character text.
 - [ ] Importance-classification heuristic is a first cut; if it proves too coarse in practice
       (e.g. misclassifies a real HIGH devlog as MEDIUM), a v1.1 could route the classification
       decision through the LLM instead of a keyword heuristic.
@@ -273,3 +271,14 @@ subcommand produces.
       pass with the new crate included.
 - [x] Design is consistent with `ekos.md`'s compiler architecture (this RFC explicitly documents
       why the feature sits *outside* the compiler pipeline rather than forcing a fit).
+
+## Amendment (2026-10-19) — `ekos marketing post`
+
+`publish` always drafts from a devlog through an LLM and caps the result at 280 characters. A
+hand-written announcement needs neither, so `ekos marketing post <file> [--confirm]` sends a file's
+text as written through the same `TwitterPublisher`: trimmed, refused when empty or over 25,000
+characters (X Premium's limit), a preview without `--confirm`. `--confirm` is the per-run human
+decision, so the `[marketing.twitter] enabled` gate (which pauses automatic `publish`) does not
+apply. Each post is appended to `marketing/logs/marketing.log`; nothing is recorded in
+`posted/tweets.json`, which is keyed by devlog. Catalogue class `local` (never from the web).
+First live run: the Pentaho verification call, tweet 2112099338776174825.
