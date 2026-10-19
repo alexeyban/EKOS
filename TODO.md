@@ -6723,3 +6723,21 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
 - [x] Push EKOS + lakehouse; switch the lakehouse `[patch]` back to git `main` and re-lock
 - [x] `ekos marketing post` (RFC 0030 amendment); Pentaho verification call posted on X;
       ekos.dev Lakehouse guides (devlog_281)
+
+## External review: issues #10–#20 (VerEKOS, 2026-10-19, devlog_283)
+
+- [x] #18 #19 #20 redaction: `read_redacted` for every source re-reader; `git blame` summaries
+      redacted; excluded paths refused (RFC 0043 amendment)
+- [x] #10 content-derived evidence ids (RFC 0135 E1)
+- [x] #12 evidence on compiled edges + rollups (RFC 0135 E2)
+- [x] #17 walks skip unconfirmed-claim endpoints; dependents carry status (RFC 0135 E3)
+- [x] #11 deterministic ClickHouse audit event; MCP ledger writers pinned by a test (RFC 0056 amendment)
+- [~] #16 review decisions cite reviewer/note evidence; CLAUDE.md corrected — **open: should
+      `AuthorizedBy` (treasury) confirmation move to a human-only CLI command?**
+- [x] #15 RFC 0007 amendment
+- [x] #13 `KnowledgeReader` / `KnowledgeStore` split; Runtime + graph export read-only by type (RFC 0135 E4)
+- [x] #14 review guard resolves imports/aliases/globs/macros; rename check (RFC 0149 amendment)
+- [ ] `EkosExtension::call_mcp_tool` to take `&dyn KnowledgeReader` (breaks both extension repos —
+      do together)
+- [ ] `build.rs` test `rebuilding_after_a_ledger_clear…` is flaky under load (`remove_dir_all`
+      DirectoryNotEmpty — a background writer still has the ledger dir open)
