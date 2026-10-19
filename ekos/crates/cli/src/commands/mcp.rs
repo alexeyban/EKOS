@@ -1386,12 +1386,14 @@ fn base_tool_definitions() -> Vec<Value> {
         },
         {
             "name": "ekos_identity_review",
-            "description": "Confirm or reject a candidate cross-system identity match (RFC 0029) — e.g. Informix cust_mstr vs. Postgres customers, proposed by `ekos identity scan`. Confirming or rejecting writes a new Event to the ledger. A write-capable MCP tool; only Custom(\"SameAs\") and Custom(\"AuthorizedBy\") (RFC 0032 payment-approval) relationships are reviewable this way.",
+            "description": "Confirm or reject a candidate cross-system identity match (RFC 0029) — e.g. Informix cust_mstr vs. Postgres customers, proposed by `ekos identity scan`. Confirming or rejecting writes a new Event to the ledger, citing evidence that names the reviewer and note. A write-capable MCP tool; only Custom(\"SameAs\") and Custom(\"AuthorizedBy\") (RFC 0032 payment-approval) relationships are reviewable this way.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "relationship_id": { "type": "string", "description": "Id of the unconfirmed SameAs relationship, from ekos_ekl (FIND Relationship WHERE kind CONTAINS 'SameAs')" },
-                    "decision": { "type": "string", "description": "\"confirmed\" or \"rejected\"" }
+                    "decision": { "type": "string", "description": "\"confirmed\" or \"rejected\"" },
+                    "reviewer": { "type": "string", "description": "Who decided (a person's name or handle). Recorded on the decision's evidence; absent means an unidentified MCP client." },
+                    "note": { "type": "string", "description": "Why. Recorded (redacted) on the decision's evidence." }
                 },
                 "required": ["relationship_id", "decision"]
             }
@@ -1403,7 +1405,9 @@ fn base_tool_definitions() -> Vec<Value> {
                 "type": "object",
                 "properties": {
                     "claim_id": { "type": "string", "description": "Id of the role Claim, from ekos_ekl (FIND Object WHERE kind CONTAINS 'Claim')" },
-                    "decision": { "type": "string", "description": "\"confirmed\" or \"rejected\"" }
+                    "decision": { "type": "string", "description": "\"confirmed\" or \"rejected\"" },
+                    "reviewer": { "type": "string", "description": "Who decided (a person's name or handle). Recorded on the decision's evidence; absent means an unidentified MCP client." },
+                    "note": { "type": "string", "description": "Why. Recorded (redacted) on the decision's evidence." }
                 },
                 "required": ["claim_id", "decision"]
             }
@@ -2308,22 +2312,95 @@ fn identity_review(config: &EkosConfig, workspace: &Path, args: &Value) -> Resul
         .insert("reviewed_at".into(), json!(Utc::now().to_rfc3339()));
     ledger.append_relationship(&rel)?;
 
-    let event_kind = review_event_kind(&rel.kind, decision);
-    let event = KirEvent {
-        id: KirId::new(),
-        kind: event_kind,
-        subject: rel_id,
-        payload: json!({ "decision": decision, "relationship_id": rel_id.to_string() }),
-        evidence: Vec::new(),
-        occurred_at: Utc::now(),
-    };
-    ledger.append_event(&event)?;
+    record_review_decision(
+        ledger.as_ref(),
+        config,
+        "ekos_identity_review",
+        review_event_kind(&rel.kind, decision),
+        rel_id,
+        json!({ "decision": decision, "relationship_id": rel_id.to_string() }),
+        args,
+    )?;
 
     Ok(json!({
         "relationship_id": rel_id.to_string(),
         "decision": decision,
         "status": "recorded",
     }))
+}
+
+/// The event a review tool records, citing evidence for the decision itself (issue #16): which
+/// tool, who decided (`reviewer`, or an unidentified MCP client) and why (`note`, redacted — it is
+/// agent-supplied text bound for the append-only ledger). The id is derived from the subject, the
+/// decision, the reviewer and the note, so repeating the same decision is one event whose history
+/// lists each time, not a new row.
+fn record_review_decision(
+    ledger: &dyn KnowledgeStore,
+    config: &EkosConfig,
+    tool: &str,
+    kind: EventKind,
+    subject: KirId,
+    mut payload: Value,
+    args: &Value,
+) -> Result<()> {
+    let redaction = config.redaction_config();
+    let text = |k: &str| {
+        args.get(k)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| ekos_common::redaction::redact(s, &redaction))
+    };
+    let reviewer = text("reviewer");
+    let note = text("note");
+    let decision = payload["decision"].as_str().unwrap_or_default().to_string();
+    let who = reviewer.as_deref().unwrap_or("an unidentified MCP client");
+    let mut fragment = format!("{tool}: {decision} {subject} by {who}");
+    if let Some(n) = &note {
+        fragment.push_str(&format!(" — {n}"));
+    }
+    let evidence = ekos_kir::KirEvidence::new(
+        ekos_kir::SourceLocation::file(format!("mcp:{tool}")),
+        fragment,
+    );
+    ledger.append_evidence(&evidence)?;
+    payload["reviewer"] = json!(reviewer);
+    payload["note"] = json!(note);
+    payload["via"] = json!("mcp");
+    let event = KirEvent {
+        id: review_event_id(
+            tool,
+            subject,
+            &decision,
+            reviewer.as_deref(),
+            note.as_deref(),
+        ),
+        kind,
+        subject,
+        payload,
+        evidence: vec![evidence.id],
+        occurred_at: Utc::now(),
+    };
+    ledger.append_event(&event)?;
+    Ok(())
+}
+
+fn review_event_id(
+    tool: &str,
+    subject: KirId,
+    decision: &str,
+    reviewer: Option<&str>,
+    note: Option<&str>,
+) -> KirId {
+    let seed = format!(
+        "review-decision:{tool}:{subject}:{decision}:{}:{}",
+        reviewer.unwrap_or_default(),
+        note.unwrap_or_default()
+    );
+    KirId(uuid::Uuid::new_v5(
+        &uuid::Uuid::NAMESPACE_URL,
+        seed.as_bytes(),
+    ))
 }
 
 /// `ekos_session_note` (RFC 0151): validates, redacts and appends to the inbox. Returns only
@@ -2503,15 +2580,15 @@ fn architecture_review(config: &EkosConfig, workspace: &Path, args: &Value) -> R
         .insert("reviewed_at".into(), json!(Utc::now().to_rfc3339()));
     ledger.append_object(&claim)?;
 
-    let event = KirEvent {
-        id: KirId::new(),
-        kind: EventKind::Modified,
-        subject: claim_id,
-        payload: json!({ "decision": decision, "claim_id": claim_id.to_string() }),
-        evidence: Vec::new(),
-        occurred_at: Utc::now(),
-    };
-    ledger.append_event(&event)?;
+    record_review_decision(
+        ledger.as_ref(),
+        config,
+        "ekos_architecture_review",
+        EventKind::Modified,
+        claim_id,
+        json!({ "decision": decision, "claim_id": claim_id.to_string() }),
+        args,
+    )?;
 
     Ok(json!({
         "claim_id": claim_id.to_string(),
@@ -2859,6 +2936,46 @@ const TRANSFORMATION_MAX_HOPS: u64 = 200;
 
 #[cfg(test)]
 mod tests {
+    /// Issue #11: the functions in this module that can write the ledger — open a writable
+    /// store, call an `append_*`, or run a live ClickHouse query (which records an audit event,
+    /// RFC 0056) — are exactly these. A new one is a decision to add here, with its reason.
+    #[test]
+    fn only_listed_functions_can_write_the_ledger() {
+        const WRITERS: [&str; 4] = [
+            // `ekos_identity_review`: confirm/reject a candidate (RFC 0029/0063).
+            "identity_review",
+            // The decision event both review tools record, with its evidence (issue #16).
+            "record_review_decision",
+            // `ekos_architecture_review`: confirm/reject a crate role (RFC 0109).
+            "architecture_review",
+            // `ekos_clickhouse_query`: records that a live system was queried (RFC 0056).
+            "run_clickhouse_query_blocking",
+        ];
+        let src = include_str!("mcp.rs");
+        let production = &src[..src.find("#[cfg(test)]\nmod tests").unwrap()];
+        let mut current = String::new();
+        let mut found = std::collections::BTreeSet::new();
+        for line in production.lines() {
+            let head = line
+                .trim_start_matches("pub(crate) ")
+                .trim_start_matches("pub ")
+                .trim_start_matches("async ");
+            if let Some(rest) = head.strip_prefix("fn ") {
+                current = rest.split(['(', '<']).next().unwrap_or("").to_string();
+            }
+            let code = line.split("//").next().unwrap_or("");
+            if code.contains("open_store(")
+                || code.contains(".append_")
+                || code.contains("run_query(")
+            {
+                found.insert(current.clone());
+            }
+        }
+        let expected: std::collections::BTreeSet<String> =
+            WRITERS.iter().map(|s| s.to_string()).collect();
+        assert_eq!(found, expected);
+    }
+
     use super::*;
 
     fn req(id: u64, method: &str, params: Value) -> String {
@@ -4649,6 +4766,48 @@ mod tests {
         let rel = ledger.get_relationship(&rel_id).unwrap().unwrap();
         assert_eq!(rel.properties["status"], "confirmed");
         assert!(rel.properties.contains_key("reviewed_at"));
+    }
+
+    /// Issue #16: the decision event cites evidence naming the reviewer and the (redacted) note.
+    #[test]
+    fn a_review_decision_cites_its_reviewer_and_note() {
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let rel_id = seeded_same_as_relationship(&config, tmp.path());
+        let note = "same customer table, key AKIAIOSFODNN7EXAMPLE in the old config";
+        let line = req(
+            31,
+            "tools/call",
+            json!({ "name": "ekos_identity_review",
+                    "arguments": { "relationship_id": rel_id.to_string(), "decision": "confirmed",
+                                   "reviewer": "alex", "note": note } }),
+        );
+        let resp =
+            parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
+        assert_eq!(resp["result"]["isError"], false, "{resp}");
+
+        let ledger = ekos_ledger::Ledger::open(&config.ledger_path(tmp.path())).unwrap();
+        let redacted = ekos_common::redaction::redact(note, &config.redaction_config());
+        let id = review_event_id(
+            "ekos_identity_review",
+            rel_id,
+            "confirmed",
+            Some("alex"),
+            Some(&redacted),
+        );
+        let event = ledger
+            .get_event(&id)
+            .unwrap()
+            .expect("a deterministic event id");
+        assert_eq!(event.payload["reviewer"], "alex");
+        assert_eq!(event.evidence.len(), 1);
+        let ev = ledger.get_evidence(&event.evidence[0]).unwrap().unwrap();
+        assert!(ev.fragment.contains("by alex"), "{}", ev.fragment);
+        assert!(
+            !ev.fragment.contains("AKIAIOSFODNN7EXAMPLE"),
+            "{}",
+            ev.fragment
+        );
     }
 
     #[test]

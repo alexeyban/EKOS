@@ -4,6 +4,11 @@
 //! fact that a query ran: SQL text, question, row count, and a content-hash of the result —
 //! avoids turning live analytical output into permanent ledger bloat while still keeping the
 //! "every conclusion traceable to evidence" spirit for the one path that touches a live system.
+//!
+//! This is the one ledger write a non-review MCP tool makes (`ekos_clickhouse_query`, issue #11):
+//! querying a live system is an observation, so it is recorded as one. The event id is derived
+//! from `(database, sql, result hash)`, so the same query with the same answer is one event whose
+//! ledger history lists each run, not a new row per call.
 
 use ekos_kir::{EventKind, KirEvent, KirEvidence, KirId, SourceLocation};
 use ekos_ledger::{KnowledgeStore, LedgerError};
@@ -17,6 +22,14 @@ fn database_kir_id(database: &str) -> KirId {
     KirId(Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
         format!("clickhouse-query:{database}").as_bytes(),
+    ))
+}
+
+/// The audit event's id: the same query with the same answer is the same event.
+fn query_event_id(database: &str, sql: &str, result_hash: &str) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("clickhouse-query-event:{database}:{result_hash}:{sql}").as_bytes(),
     ))
 }
 
@@ -41,15 +54,16 @@ pub fn record_query_event(
     let evidence_id = evidence.id;
     store.append_evidence(&evidence)?;
 
+    let result_hash = content_hash(rows);
     let payload = serde_json::json!({
         "database": database,
         "question": question,
         "sql": sql,
         "row_count": rows.len(),
-        "result_hash": content_hash(rows),
+        "result_hash": result_hash,
     });
     let event = KirEvent {
-        id: KirId::new(),
+        id: query_event_id(database, sql, &result_hash),
         kind: EventKind::Custom("ClickHouseQueryExecuted".to_string()),
         subject: database_kir_id(database),
         payload,
@@ -114,5 +128,18 @@ mod tests {
         let e1 = ledger.get_event(&id1).unwrap().unwrap();
         let e2 = ledger.get_event(&id2).unwrap().unwrap();
         assert_eq!(e1.subject, e2.subject);
+    }
+
+    /// Issue #11: repeating a query with the same answer does not add a new event row.
+    #[test]
+    fn the_same_query_and_answer_is_one_event() {
+        let (ledger, _dir) = temp_ledger();
+        let rows = vec![serde_json::json!({"n": 1})];
+        let a = record_query_event(&ledger, "analytics", "q", "SELECT 1", &rows).unwrap();
+        let b = record_query_event(&ledger, "analytics", "q again", "SELECT 1", &rows).unwrap();
+        assert_eq!(a, b);
+        let other = vec![serde_json::json!({"n": 2})];
+        let c = record_query_event(&ledger, "analytics", "q", "SELECT 1", &other).unwrap();
+        assert_ne!(a, c, "a different answer is a different observation");
     }
 }
