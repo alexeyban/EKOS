@@ -6717,6 +6717,9 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
       template, X post draft) — no PDI run here (devlog_280)
 - [x] RFC 0206 (private ekos-binary): JVM statement recovery behind `JavaDecompiler` — pdfbox
       93.8% Statements; compiled Kettle plugins translate end to end (devlog_280)
-- [ ] RFC 0205 model bake-off: bench ready (`draft_bench`), blocked on an expired OpenCode key
+- [x] RFC 0205 model bake-off: ran 2026-10-18 ($0.37): Haiku 5.5 11/15 ground truth → default
+      `[llm.tasks.translate]`, Luna fallback; found + fixed JS null arithmetic (devlog_281)
 - [ ] Normaliser / Denormaliser, Data validator, Combination lookup, Delete; job entries beyond TRANS
-- [ ] Push EKOS + lakehouse; switch the lakehouse `[patch]` back to git `main` and re-lock
+- [x] Push EKOS + lakehouse; switch the lakehouse `[patch]` back to git `main` and re-lock
+- [x] `ekos marketing post` (RFC 0030 amendment); Pentaho verification call posted on X;
+      ekos.dev Lakehouse guides (devlog_281)
