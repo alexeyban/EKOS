@@ -210,3 +210,39 @@ Vec<String> }`, added to `EkosConfig` as a new field (same opt-in-table pattern 
 | `ekos/crates/compiler-core/src/config.rs` | `+SecurityConfig`, `+SecretPatternConfig`, `+EkosConfig.security` field |
 | `ekos/crates/cli/src/commands/build.rs` | Central redaction pass right after `observer.scan()` |
 | `ekos/crates/cli/src/commands/recover.rs` | Exclusion check + redaction at all four direct-read blocks |
+
+---
+
+## Amendment (2026-10-19): re-readers and `git blame` (issues #18, #19, #20)
+
+Later RFCs added four readers of raw content outside the two entry points above, and
+an external review found that only one of them applied the whole rule:
+
+| Reader | Destination | Excluded-path check | Redaction |
+|---|---|---|---|
+| `recovery::llm_description::read_symbol_source` (RFC 0088) | external LLM prompt | **no** | yes |
+| `recovery::architecture_reasoning::read_crate_doc_comment` (RFC 0065) | external LLM prompt | **no** | **no** |
+| `cli::commands::migrate_logic::definition` (RFC 0164) | report / LLM prompt | yes | yes |
+| `cli::commands::semantics::GitBlame` (RFC 0170) | ledger (`RationaleLink`, evidence fragment) | **no** | **no** |
+
+**Rule.** Anything that reads a file in the workspace again after `ekos build`, or runs a tool
+that prints the file's history, is an entry point under this RFC. Its output is sent to a model
+or written to the ledger, so it applies both halves of the baseline: an excluded path yields
+nothing, and the text is redacted before it leaves the reader.
+
+**Design.**
+
+- `ekos_common::redaction::read_redacted(root, rel_path, config) -> Result<String,
+  SourceReadError>`: refuses an excluded `rel_path` (`SourceReadError::Excluded`), otherwise
+  reads `root/rel_path` and returns the whole file redacted. Redacting the whole file before
+  slicing it keeps spans and line numbers recorded at `recover` (which saw redacted text) valid.
+  The three source re-readers use it; none reads a workspace file directly any more.
+- `GitBlame` holds the `RedactionConfig`: an excluded path is never blamed, and each commit
+  summary is redacted before it becomes a `BlameHit`. Author name and date stay as they are
+  (structured metadata, per the Non-goals above).
+  `RationaleSource` documents that an implementation returns redacted summaries.
+
+**Tests.** `read_redacted` refuses an excluded path and redacts a planted key; each re-reader
+returns nothing for an excluded file; a mock LLM provider receives the placeholder, never the
+planted key, from a crate doc comment; a real `git` repository whose commit subject holds a
+planted key yields a `BlameHit` with the placeholder.

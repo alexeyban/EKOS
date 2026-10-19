@@ -81,6 +81,7 @@ pub async fn investigate(config: &EkosConfig, cwd: &Path, opts: InvestigateOptio
             targets.len()
         );
 
+        let redaction = config.redaction_config();
         let mut dirs = Vec::new();
         let mut context = HashMap::new();
         for c in &targets {
@@ -88,7 +89,7 @@ pub async fn investigate(config: &EkosConfig, cwd: &Path, opts: InvestigateOptio
                 continue;
             };
             dirs.push(dir.to_string());
-            if let Some(comment) = read_crate_doc_comment(cwd, dir) {
+            if let Some(comment) = read_crate_doc_comment(cwd, dir, &redaction) {
                 context.insert(dir.to_string(), comment);
             }
         }

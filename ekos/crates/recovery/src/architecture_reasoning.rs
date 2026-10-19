@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use ekos_common::redaction::{RedactionConfig, read_redacted};
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
 use ekos_kir::{
     KirEvidence, KirGraph, KirId, KirObject, ObjectKind, RelationshipKind, SourceLocation,
@@ -408,11 +409,17 @@ impl CompilerPass for ArchitectureReasoningPass {
 /// doc comment, read directly (not through an `Observer`/artifact round-trip — same direct-file-
 /// read shape `crate_topology_analyzer`'s own manifest collection already uses, per CLAUDE.md's
 /// `common` crate-map entry on this pattern). Tries `src/lib.rs` then `src/main.rs`; `None` if
-/// neither exists or neither has a leading doc comment — never fabricated.
-pub fn read_crate_doc_comment(workspace_root: &std::path::Path, crate_dir: &str) -> Option<String> {
+/// neither exists or neither has a leading doc comment — never fabricated. The comment goes to an
+/// external model, so the file is read through `read_redacted` (RFC 0043 amendment, issue #18):
+/// an excluded entry file is skipped and the text is redacted.
+pub fn read_crate_doc_comment(
+    workspace_root: &std::path::Path,
+    crate_dir: &str,
+    redaction: &RedactionConfig,
+) -> Option<String> {
     for entry_file in ["src/lib.rs", "src/main.rs"] {
-        let path = workspace_root.join(crate_dir).join(entry_file);
-        let Ok(source) = std::fs::read_to_string(&path) else {
+        let rel = format!("{}/{entry_file}", crate_dir.trim_end_matches('/'));
+        let Ok(source) = read_redacted(workspace_root, &rel, redaction) else {
             continue;
         };
         let Ok(file) = syn::parse_file(&source) else {
@@ -751,8 +758,9 @@ ekos-kir = { path = "../kir" }
         )
         .unwrap();
 
-        let comment = read_crate_doc_comment(dir.path(), "crates/example")
-            .expect("a doc comment must be found");
+        let comment =
+            read_crate_doc_comment(dir.path(), "crates/example", &RedactionConfig::default())
+                .expect("a doc comment must be found");
         assert!(comment.contains("Real example crate"));
         assert!(comment.contains("Second line"));
     }
@@ -760,6 +768,41 @@ ekos-kir = { path = "../kir" }
     #[test]
     fn read_crate_doc_comment_is_none_when_no_entry_file_exists() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(read_crate_doc_comment(dir.path(), "crates/nonexistent").is_none());
+        assert!(
+            read_crate_doc_comment(
+                dir.path(),
+                "crates/nonexistent",
+                &RedactionConfig::default()
+            )
+            .is_none()
+        );
+    }
+
+    /// Issue #18: a secret in a crate doc comment never reaches the model, and an excluded entry
+    /// file is not read.
+    #[test]
+    fn read_crate_doc_comment_redacts_and_honours_exclusions() {
+        let dir = tempfile::tempdir().unwrap();
+        let crate_dir = dir.path().join("crates/example");
+        std::fs::create_dir_all(crate_dir.join("src")).unwrap();
+        std::fs::write(
+            crate_dir.join("src/lib.rs"),
+            "//! Talks to S3 with AKIAIOSFODNN7EXAMPLE.\n\npub fn f() {}\n",
+        )
+        .unwrap();
+        let comment =
+            read_crate_doc_comment(dir.path(), "crates/example", &RedactionConfig::default())
+                .unwrap();
+        assert!(!comment.contains("AKIAIOSFODNN7EXAMPLE"), "{comment}");
+        assert!(
+            comment.contains("[REDACTED:aws-access-key-id]"),
+            "{comment}"
+        );
+
+        let excluding = RedactionConfig {
+            extra_patterns: Vec::new(),
+            extra_excluded_globs: vec!["crates/example/src/*.rs".to_string()],
+        };
+        assert!(read_crate_doc_comment(dir.path(), "crates/example", &excluding).is_none());
     }
 }

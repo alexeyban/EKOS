@@ -324,12 +324,81 @@ pub fn redact_json(value: &mut serde_json::Value, config: &RedactionConfig) {
     }
 }
 
+/// Why [`read_redacted`] returned no text.
+#[derive(Debug, thiserror::Error)]
+pub enum SourceReadError {
+    /// The path matches a built-in or configured excluded-file glob; it was not read.
+    #[error("{0} is excluded by the security rules")]
+    Excluded(String),
+    #[error("{path} could not be read: {source}")]
+    Io {
+        path: String,
+        source: std::io::Error,
+    },
+}
+
+/// Reads a workspace file again after `ekos build` (RFC 0043 amendment, issues #18-#20): an
+/// excluded `rel_path` is refused without being opened, any other file is returned whole and
+/// redacted. Every reader that re-reads source text for a model or the ledger goes through this,
+/// so neither half of the rule can be forgotten. The whole file is redacted before a caller
+/// slices it, the same text `ekos recover` recorded its spans and line numbers against.
+pub fn read_redacted(
+    root: &std::path::Path,
+    rel_path: &str,
+    config: &RedactionConfig,
+) -> Result<String, SourceReadError> {
+    if is_excluded_path(rel_path, config) {
+        return Err(SourceReadError::Excluded(rel_path.to_string()));
+    }
+    let raw =
+        std::fs::read_to_string(root.join(rel_path)).map_err(|source| SourceReadError::Io {
+            path: rel_path.to_string(),
+            source,
+        })?;
+    Ok(redact(&raw, config))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn cfg() -> RedactionConfig {
         RedactionConfig::default()
+    }
+
+    #[test]
+    fn read_redacted_refuses_an_excluded_path_and_redacts_the_rest() {
+        let dir = std::env::temp_dir().join(format!("ekos-read-redacted-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("secrets")).unwrap();
+        std::fs::write(dir.join(".env"), "TOKEN=x").unwrap();
+        std::fs::write(dir.join("secrets/prod.yaml"), "a: b").unwrap();
+        std::fs::write(
+            dir.join("lib.rs"),
+            "//! key AKIAIOSFODNN7EXAMPLE\nfn f() {}\n",
+        )
+        .unwrap();
+        let extra = RedactionConfig {
+            extra_patterns: Vec::new(),
+            extra_excluded_globs: vec!["secrets/*.yaml".into()],
+        };
+
+        assert!(matches!(
+            read_redacted(&dir, ".env", &cfg()),
+            Err(SourceReadError::Excluded(_))
+        ));
+        assert!(matches!(
+            read_redacted(&dir, "secrets/prod.yaml", &extra),
+            Err(SourceReadError::Excluded(_))
+        ));
+        let text = read_redacted(&dir, "lib.rs", &cfg()).unwrap();
+        assert!(!text.contains("AKIAIOSFODNN7EXAMPLE"), "{text}");
+        assert!(text.contains("[REDACTED:"), "{text}");
+        assert!(text.ends_with("fn f() {}\n"));
+        assert!(matches!(
+            read_redacted(&dir, "missing.rs", &cfg()),
+            Err(SourceReadError::Io { .. })
+        ));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// RFC 0200: Kettle's reversible `Encrypted <hex>` passwords and XML password elements.

@@ -25,7 +25,7 @@
 
 use crate::llm::{LlmProvider, LlmRequest};
 use crate::llm_json::json_body;
-use ekos_common::redaction::{RedactionConfig, redact};
+use ekos_common::redaction::{RedactionConfig, read_redacted};
 use ekos_kir::{
     KirEvidence, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
 };
@@ -267,6 +267,8 @@ fn build_module_prompt(
 /// provider, the same secrets/PII boundary every other raw-content entry point already enforces),
 /// capped at `MAX_SOURCE_LINES` real lines (a real cost/context-window guard, not a correctness
 /// one — an oversized real function is truncated with an honest marker, never silently dropped).
+/// An excluded file (`[security]` globs, which may have been added after the file was observed)
+/// yields `None` without being read.
 fn read_symbol_source(
     workspace_root: &Path,
     file_path: &str,
@@ -274,7 +276,7 @@ fn read_symbol_source(
     end_line: u64,
     redaction: &RedactionConfig,
 ) -> Option<String> {
-    let content = std::fs::read_to_string(workspace_root.join(file_path)).ok()?;
+    let content = read_redacted(workspace_root, file_path, redaction).ok()?;
     let lines: Vec<&str> = content.lines().collect();
     let start = (start_line.saturating_sub(1)) as usize;
     let end = (end_line as usize).min(lines.len());
@@ -290,7 +292,7 @@ fn read_symbol_source(
     if truncated {
         text.push_str("\n... [truncated, real function longer than this excerpt]");
     }
-    Some(redact(&text, redaction))
+    Some(text)
 }
 
 /// A `File` object's own `name` is relative to whichever single `[observe] paths` entry it was
@@ -1546,6 +1548,36 @@ CREATE VIEW open_ap AS SELECT * FROM ap WHERE NOT paid;\n";
         let text = read_symbol_source(workspace.path(), "f.ex", 1, 3, &config).unwrap();
         assert!(!text.contains("TESTTOKEN-abc123"));
         assert!(text.contains("[REDACTED:test-token]"));
+    }
+
+    /// Issue #20: a file excluded after it was observed is never read again for a prompt.
+    #[test]
+    fn an_excluded_file_yields_no_symbol_source() {
+        let mut config = RedactionConfig::default();
+        config
+            .extra_excluded_globs
+            .push("internal/*.ex".to_string());
+        let workspace = tempdir().unwrap();
+        std::fs::create_dir_all(workspace.path().join("internal")).unwrap();
+        std::fs::write(
+            workspace.path().join("internal/f.ex"),
+            "def f do
+  :ok
+end
+",
+        )
+        .unwrap();
+        assert!(read_symbol_source(workspace.path(), "internal/f.ex", 1, 3, &config).is_none());
+        assert!(
+            read_symbol_source(
+                workspace.path(),
+                "internal/f.ex",
+                1,
+                3,
+                &RedactionConfig::default()
+            )
+            .is_some()
+        );
     }
 
     // ── RFC 0088 — describe_project ─────────────────────────────────────────

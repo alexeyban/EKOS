@@ -11,6 +11,7 @@
 
 use super::store::{open_store, open_store_read_only};
 use anyhow::{Context, Result};
+use ekos_common::redaction::{RedactionConfig, is_excluded_path, redact};
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirGraph, KirId, KirObject};
 use ekos_ledger::KnowledgeStore;
@@ -52,7 +53,7 @@ pub async fn commit_step(
         ontology: load_vocabulary(config, cwd)?,
     };
     let blame = (config.semantics.rationale)
-        .then(|| GitBlame::new(cwd))
+        .then(|| GitBlame::new(cwd, config.redaction_config()))
         .flatten();
     let mut out = business_semantics::synthesize(
         &graph,
@@ -282,13 +283,18 @@ pub fn summary_line(s: &SemanticsStats, written: usize) -> String {
 /// `git blame --porcelain` over the workspace's files. Evidence paths are workspace-relative
 /// (`recover.rs` keys SQL passes by `path.strip_prefix(cwd)`), so a path resolves against `cwd`;
 /// git runs in the file's own directory, so an observe path holding a different repository works.
+///
+/// It is a raw-content entry point under RFC 0043 (amendment, issue #19): an excluded path is never
+/// blamed, and each commit summary is redacted before it becomes a [`BlameHit`], since a summary
+/// ends up in the append-only ledger. Author and date are structured metadata and stay as they are.
 pub struct GitBlame {
     cwd: PathBuf,
+    redaction: RedactionConfig,
 }
 
 impl GitBlame {
     /// `None` when `git` is unavailable or `cwd` is not inside a repository.
-    pub fn new(cwd: &Path) -> Option<Self> {
+    pub fn new(cwd: &Path, redaction: RedactionConfig) -> Option<Self> {
         let ok = Command::new("git")
             .arg("-C")
             .arg(cwd)
@@ -299,6 +305,7 @@ impl GitBlame {
             .success();
         ok.then(|| Self {
             cwd: cwd.to_path_buf(),
+            redaction,
         })
     }
 }
@@ -310,7 +317,7 @@ impl RationaleSource for GitBlame {
         let (Some(dir), Some(name)) = (file.parent(), file.file_name()) else {
             return Vec::new();
         };
-        if !file.is_file() || lines.is_empty() {
+        if !file.is_file() || lines.is_empty() || is_excluded_path(path, &self.redaction) {
             return Vec::new();
         }
         let mut cmd = Command::new("git");
@@ -321,7 +328,13 @@ impl RationaleSource for GitBlame {
         }
         cmd.arg("--").arg(name);
         match cmd.output() {
-            Ok(o) if o.status.success() => parse_porcelain(&String::from_utf8_lossy(&o.stdout)),
+            Ok(o) if o.status.success() => {
+                let mut hits = parse_porcelain(&String::from_utf8_lossy(&o.stdout));
+                for h in &mut hits {
+                    h.summary = redact(&h.summary, &self.redaction);
+                }
+                hits
+            }
             _ => Vec::new(),
         }
     }
@@ -1587,6 +1600,49 @@ pub fn score(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Issue #19: a commit subject holding a secret reaches the ledger only as a placeholder,
+    /// and an excluded file is never blamed.
+    #[test]
+    fn git_blame_redacts_summaries_and_skips_excluded_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            let ok = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+                .args(args)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        git(&["init", "-q"]);
+        std::fs::write(dir.path().join("schema.sql"), "CREATE TABLE t (a int);\n").unwrap();
+        std::fs::write(dir.path().join("prod.sql"), "CREATE TABLE p (a int);\n").unwrap();
+        git(&["add", "."]);
+        git(&[
+            "commit",
+            "-q",
+            "-m",
+            "rotate AKIAIOSFODNN7EXAMPLE before prod",
+        ]);
+
+        let redaction = RedactionConfig {
+            extra_patterns: Vec::new(),
+            extra_excluded_globs: vec!["prod.sql".into()],
+        };
+        let blame = GitBlame::new(dir.path(), redaction).expect("a git repository");
+        let hits = blame.blame("schema.sql", &[1]);
+        assert_eq!(hits.len(), 1);
+        assert!(
+            !hits[0].summary.contains("AKIAIOSFODNN7EXAMPLE"),
+            "{:?}",
+            hits[0]
+        );
+        assert!(hits[0].summary.contains("[REDACTED:aws-access-key-id]"));
+        assert!(blame.blame("prod.sql", &[1]).is_empty());
+    }
 
     #[test]
     fn porcelain_reports_each_line_with_its_commit_details_once_given() {

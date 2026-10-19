@@ -88,6 +88,9 @@ pub struct BlameHit {
 }
 
 /// Where rationale comes from. The CLI implements it over `git blame`; tests use a fixture.
+///
+/// An implementation is a raw-content entry point (RFC 0043): it never answers for an excluded
+/// path and returns `summary` already redacted, because the summary is written to the ledger.
 pub trait RationaleSource {
     /// The commits that last touched `lines` of `path` (a ledger evidence path). Lines it cannot
     /// answer for are simply absent.

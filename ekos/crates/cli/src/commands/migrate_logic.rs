@@ -40,13 +40,8 @@ fn definition(config: &EkosConfig, cwd: &Path, o: &KirObject) -> Result<String, 
     if path.is_empty() {
         return Err("no source path was recorded".into());
     }
-    let redaction = config.redaction_config();
-    if ekos_common::redaction::is_excluded_path(path, &redaction) {
-        return Err(format!("{path} is excluded by the security rules"));
-    }
-    let raw = std::fs::read_to_string(cwd.join(path))
-        .map_err(|e| format!("{path} could not be read: {e}"))?;
-    let redacted = ekos_common::redaction::redact(&raw, &redaction);
+    let redacted = ekos_common::redaction::read_redacted(cwd, path, &config.redaction_config())
+        .map_err(|e| e.to_string())?;
     let span = |key: &str| {
         o.properties
             .get(key)
