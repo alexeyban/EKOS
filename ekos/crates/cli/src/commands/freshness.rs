@@ -106,3 +106,68 @@ fn section(
         println!("  … {} more (raise --limit)", count - shown.len());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn committed_workspace(dir: &Path) -> EkosConfig {
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/a.rs"), "pub fn a() {}\n").unwrap();
+        std::fs::write(dir.join("src/b.rs"), "pub fn b() {}\n").unwrap();
+        std::fs::write(
+            dir.join("ekos.toml"),
+            "[workspace]\nroot = \".\"\n\n[observe]\npaths = [\".\"]\nignore-patterns = [\".ekos\"]\n\n\
+             [llm]\napi-key-env = \"EKOS_TEST_KEY_THAT_DOES_NOT_EXIST\"\n",
+        )
+        .unwrap();
+        let config = EkosConfig::from_file(&dir.join("ekos.toml")).unwrap();
+        crate::commands::init::run(&config, dir).unwrap();
+        crate::commands::build::run(&config, dir).await.unwrap();
+        crate::commands::recover::run(&config, dir, false)
+            .await
+            .unwrap();
+        crate::commands::compile::run(&config, dir).await.unwrap();
+        crate::commands::commit::run(&config, dir, true)
+            .await
+            .unwrap();
+        config
+    }
+
+    #[tokio::test]
+    async fn reports_a_fresh_then_a_changed_workspace_as_text_and_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let config = committed_workspace(dir).await;
+        // Fresh: nothing changed since the commit.
+        assert_eq!(freshness::check(&config, dir, 50).status, Status::Fresh);
+        run(&config, dir, false, 50).unwrap();
+
+        // A change (different size, so it is a change without hashing), an addition, a removal.
+        std::fs::write(dir.join("src/a.rs"), "pub fn a() { let _ = 1; }\n").unwrap();
+        std::fs::write(dir.join("src/c.rs"), "pub fn c() {}\n").unwrap();
+        std::fs::remove_file(dir.join("src/b.rs")).unwrap();
+        let f = freshness::check(&config, dir, 50);
+        assert_ne!(f.status, Status::Fresh);
+        assert_eq!((f.changed_count, f.added_count, f.removed_count), (1, 1, 1));
+        run(&config, dir, false, 50).unwrap();
+        run(&config, dir, true, 50).unwrap();
+        // A limit smaller than the lists takes the "… more" path.
+        run(&config, dir, false, 0).unwrap();
+    }
+
+    #[test]
+    fn a_section_lists_objects_and_elides_the_rest() {
+        let objs: Vec<CitingObject> = (0..7)
+            .map(|i| CitingObject {
+                id: format!("id{i}"),
+                kind: "RustSymbol".into(),
+                name: format!("f{i}"),
+            })
+            .collect();
+        let mut stale = BTreeMap::new();
+        stale.insert("src/a.rs".to_string(), objs);
+        section("Changed", 3, &["src/a.rs".to_string()], &stale);
+        section("Added", 0, &[], &stale);
+    }
+}

@@ -311,6 +311,75 @@ fn short_error(e: &str) -> String {
 mod tests {
     use super::*;
 
+    fn config(dir: &Path) -> EkosConfig {
+        std::fs::write(
+            dir.join("ekos.toml"),
+            "[workspace]\nroot = \".\"\n\n[llm]\nprovider = \"ollama\"\nmodel = \"llama3\"\n\n\
+             [llm.tasks.translate]\nmodel = \"qwen\"\n\n[llm.tasks.no-such-task]\nmodel = \"x\"\n",
+        )
+        .unwrap();
+        EkosConfig::from_file(&dir.join("ekos.toml")).unwrap()
+    }
+
+    fn record(at: &str, task: &str, model: &str, ok: bool, cost: Option<f64>) -> UsageRecord {
+        UsageRecord {
+            at: at.into(),
+            task: task.into(),
+            provider: "ollama".into(),
+            model: model.into(),
+            prompt_version: "v1".into(),
+            ok,
+            error: (!ok).then(|| "timeout".into()),
+            input_tokens: 100,
+            output_tokens: 20,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            cost_usd: cost,
+            latency_ms: 250,
+        }
+    }
+
+    #[test]
+    fn routes_report_each_task_as_text_and_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config(dir.path());
+        routes(&config, dir.path(), false).unwrap();
+        routes(&config, dir.path(), true).unwrap();
+    }
+
+    #[test]
+    fn usage_totals_the_log_and_filters_by_date() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = config(dir.path());
+        // An empty log first.
+        usage(&config, dir.path(), None, false).unwrap();
+        let path = router(&config, dir.path())
+            .usage_log()
+            .unwrap()
+            .to_path_buf();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let lines: Vec<String> = [
+            record("2026-10-01T10:00:00Z", "default", "llama3", true, Some(0.0)),
+            record(
+                "2026-10-18T10:00:00Z",
+                "translate",
+                "qwen",
+                true,
+                Some(0.01),
+            ),
+            record("2026-10-19T10:00:00Z", "translate", "qwen", false, None),
+        ]
+        .iter()
+        .map(|r| serde_json::to_string(r).unwrap())
+        .collect();
+        std::fs::write(&path, lines.join("\n") + "\nnot json\n").unwrap();
+        usage(&config, dir.path(), None, false).unwrap();
+        usage(&config, dir.path(), None, true).unwrap();
+        usage(&config, dir.path(), Some("2026-10-18"), false).unwrap();
+        usage(&config, dir.path(), Some("2026-10-18T12:00:00Z"), true).unwrap();
+        assert!(usage(&config, dir.path(), Some("last week"), false).is_err());
+    }
+
     #[test]
     fn short_error_keeps_the_hosts_message() {
         let e = r#"api error 500: {"error":{"type":"server_error","message":"Upstream request failed: Model access is disabled"}}"#;
