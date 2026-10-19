@@ -1,6 +1,6 @@
 # RFC 0007 — Identity Resolution
 
-**Status:** Accepted  
+**Status:** Accepted — amended 2026-10-19 (see the final section)  
 **Phase:** 7  
 **Crate:** `ekos-identity`
 
@@ -125,3 +125,22 @@ structured text and exits non-zero if any conflicts are detected.
   technical identifiers, not natural-language words.
 - **Pure Levenshtein**: Does not reward common prefix conventions; O(n·m) with larger
   constants than Jaro in practice for short identifiers.
+
+---
+
+## Amendment (2026-10-19): what ships today (issue #15)
+
+Several statements above describe Phase 7 and no longer match `ekos-identity`. This section
+restates the shipped algorithm. Where it differs, this section is authoritative; the text above
+is kept as history, the same way RFC 0004 corrected itself.
+
+| Above | Shipped (`ekos/crates/identity/src/lib.rs`) | Changed by |
+|---|---|---|
+| §1 "All `KirObject`s … become candidates" | A kind marked `structurally_keyed` in `ekos_kir::custom_kinds::REGISTRY` (one identified by a file path, manifest dir, source + index…) is never a candidate. Neither is a `Custom("Concept")` whose normalized name has fewer than 2 words or is too short to be specific. | RFC 0135 Part D, RFC 0026 |
+| §4 "`structural_score` = 1.0 if same ObjectKind else 0.0" | 0.0 across kinds. Within a kind: Jaccard overlap of the column-name sets when both objects have `columns`; otherwise Jaccard of row-cell tokens when both have rows (document tables); otherwise 1.0, the "no structural signal" fallback. The combined score is still `0.7 · Jaro-Winkler + 0.3 · structural`. | column-overlap scoring; RFC 0060 |
+| §5 "Default: **0.85**" | `DEFAULT_MERGE_THRESHOLD = 0.90`; `CONCEPT_MERGE_THRESHOLD = 0.95` for `Custom("Concept")`. 0.85 merged 16 of 17 known-wrong real pairs on the Plausible Analytics workspace. | RFC 0060, RFC 0026 |
+| §5 "Pairs above this threshold are merged" | Clearing the threshold only *proposes* a merge. `ekos compile` applies a proposal only when every member of the group has the same normalized name (`MergeProposal::exact_name_match`). Any other proposal becomes an `unconfirmed` `Custom("SameAs")` relationship that a person confirms or rejects (`ekos_identity_review`). No threshold reliably separates correct fuzzy merges from wrong ones. | RFC 0060, RFC 0063 |
+| §7 conflict detection | Also narrowed for groups that are expected to share a name: a `Technology`/bare-specifier `JsModule` pair (RFC 0093), and the same name across separate namespaces such as database objects vs. each language's code (RFC 0147 amendment b). | RFC 0093, RFC 0147 |
+
+Cross-system matching (different source kinds) is a separate scorer, `cross_system.rs` (RFC
+0029). It never merges either; its candidates are `unconfirmed` `SameAs` relationships too.
