@@ -381,3 +381,20 @@ stay callable and the reference coerces (trait upcasting). Code that calls a rea
 type, or writes `KnowledgeStore::get_object(…)` in full, needs `KnowledgeReader` in scope.
 `ScopedStore`'s guard test reads both traits, and now also requires every wrapper body to consult
 the scope, or to be listed as a passthrough with its reason.
+
+**E5 — evidence checked at the commit boundary (follow-up, 2026-10-19).** The per-producer tests
+from E2 only cover the producers someone remembered. `crates/cli/tests/evidence_everywhere.rs`
+runs a mixed workspace (Rust with imports and calls, Python, SQL with a foreign key and a view,
+Markdown, a CI workflow, git history) through `build → recover → resolve → compile → commit`. It
+then fails on any committed object or edge kind with empty evidence, unless that kind is listed in
+`EXEMPT` with a reason (the list is empty). Its first run found five more gaps, all now fixed:
+
+- Rust `Contains` edges share the symbol's evidence.
+- Rust `Calls` edges cite the first call site in the caller's file.
+- Rust `DependsOn` edges cite their `use` item.
+- `File → View` `Contains` edges cite the view's definition.
+- A `Crate` cites its `Cargo.toml`.
+- `PythonModule`, `RustModule` and `Technology` objects cite up to three of the references that
+  name them, smallest id first (`source_evidence::cite_incoming`).
+
+Pass versions are bumped (rust v6, python v7, view-analyzer/5).

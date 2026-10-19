@@ -511,10 +511,15 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
             if let Some(version) = &c.version {
                 obj = obj.with_property("version", serde_json::json!(version));
             }
+            let manifest_path = format!("{}/Cargo.toml", c.dir);
+            // The manifest's `[package]` is what declares the crate (issue #12 follow-up).
+            obj.evidence.push(graph.add_evidence(KirEvidence::new(
+                SourceLocation::file(manifest_path.clone()),
+                format!("[package] name = \"{}\"", c.name),
+            )));
             graph.add_object(obj);
 
             let manifest_dir = Path::new(&c.dir);
-            let manifest_path = format!("{}/Cargo.toml", c.dir);
 
             for (dep_name, value) in &c.deps {
                 // `Path` here is always a fully-resolved, repo-root-relative directory by the
@@ -618,6 +623,12 @@ impl CompilerPass for CrateTopologyAnalyzerPass {
             return Ok(());
         }
 
+        // A technology is known because files or manifests reference it: cite those references.
+        crate::source_evidence::cite_incoming(
+            &mut graph,
+            |o| matches!(&o.kind, ObjectKind::Custom(k) if k == "Technology"),
+            3,
+        );
         let knowledge = ekos_artifact::KnowledgeArtifact::new(&self.pass_id, vec![], graph);
         let json = serde_json::to_value(&knowledge)
             .map_err(|e| PassError::failed(format!("serialize KnowledgeArtifact: {e}")))?;

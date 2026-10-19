@@ -99,8 +99,9 @@ impl CompilerPass for PythonAnalyzerPass {
     /// `v4` = RFC 0141 §1 (`signature` on function symbols).
     /// `v5` = RFC 0170 (`constants` on `Enum` class symbols).
     /// `v6` = evidence on the `DependsOn` / `Contains` / `Extends` edges.
+    /// `v7` = evidence on `PythonModule` objects (the imports that name them).
     fn version(&self) -> &str {
-        "v6"
+        "v7"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -192,6 +193,12 @@ impl CompilerPass for PythonAnalyzerPass {
             return Ok(());
         }
 
+        // An imported module exists here only because something imports it: cite the imports.
+        crate::source_evidence::cite_incoming(
+            &mut combined,
+            |o| matches!(&o.kind, ObjectKind::Custom(k) if k == "PythonModule"),
+            3,
+        );
         let knowledge = ekos_artifact::KnowledgeArtifact::new(&self.pass_id, vec![], combined);
         let json = serde_json::to_value(&knowledge)
             .map_err(|e| PassError::failed(format!("serialize KnowledgeArtifact: {e}")))?;

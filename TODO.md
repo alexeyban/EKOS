@@ -6737,6 +6737,8 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
 - [x] #15 RFC 0007 amendment
 - [x] #13 `KnowledgeReader` / `KnowledgeStore` split; Runtime + graph export read-only by type (RFC 0135 E4)
 - [x] #14 review guard resolves imports/aliases/globs/macros; rename check (RFC 0149 amendment)
+- [x] Global evidence check at the commit boundary (`evidence_everywhere.rs`) + the 5 gaps it found (devlog_284)
+- [x] Writer allowlist test parses `mcp.rs` with syn (devlog_284)
 - [ ] `EkosExtension::call_mcp_tool` to take `&dyn KnowledgeReader` (breaks both extension repos —
       do together)
 - [ ] `build.rs` test `rebuilding_after_a_ledger_clear…` is flaky under load (`remove_dir_all`

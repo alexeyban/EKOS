@@ -35,7 +35,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bumped whenever this pass's output changes for the same input, so a cached run is not reused.
-const LOGIC_VERSION: &str = "view-analyzer/4";
+const LOGIC_VERSION: &str = "view-analyzer/5";
 
 /// The most source text a view's evidence carries; the exact span is always recorded.
 const MAX_FRAGMENT: usize = 4096;
@@ -409,12 +409,11 @@ pub fn recover_views_in(
             obj.properties.insert("description".into(), json!(c.text));
         }
         if let Some(file_id) = file_id {
-            graph.add_relationship(KirRelationship::deterministic(
-                RelationshipKind::Contains,
-                file_id,
-                obj.id,
-                "",
-            ));
+            // The definition is what proves the file holds the view (issue #12 follow-up).
+            let mut contains =
+                KirRelationship::deterministic(RelationshipKind::Contains, file_id, obj.id, "");
+            contains.evidence.push(evidence_id);
+            graph.add_relationship(contains);
         }
         graph.add_object(obj);
     }

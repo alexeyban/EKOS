@@ -142,4 +142,30 @@ mod tests {
         let c = record_query_event(&ledger, "analytics", "q", "SELECT 1", &other).unwrap();
         assert_ne!(a, c, "a different answer is a different observation");
     }
+
+    /// RFC 0056 amendment: a repeat is not lost. It is a new version of the same event id (the
+    /// time and the question differ), on both backends; `get_event` shows the latest.
+    #[test]
+    fn a_repeated_query_is_a_new_version_not_a_lost_row() {
+        let rows = vec![serde_json::json!({"n": 1})];
+        let sqlite = temp_ledger();
+        let facts_dir = TempDir::new().unwrap();
+        let facts = ekos_ledger::FactLedger::open(facts_dir.path()).unwrap();
+        for store in [&sqlite.0 as &dyn KnowledgeStore, &facts] {
+            let before = store.entry_count().unwrap();
+            let a = record_query_event(store, "analytics", "q", "SELECT 1", &rows).unwrap();
+            let after_first = store.entry_count().unwrap();
+            let b = record_query_event(store, "analytics", "q, again", "SELECT 1", &rows).unwrap();
+            assert_eq!(a, b);
+            assert!(
+                store.entry_count().unwrap() > after_first,
+                "the repeat was recorded"
+            );
+            assert!(after_first > before);
+            assert_eq!(
+                store.get_event(&a).unwrap().unwrap().payload["question"],
+                "q, again"
+            );
+        }
+    }
 }

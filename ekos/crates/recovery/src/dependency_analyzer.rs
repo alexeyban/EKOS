@@ -187,6 +187,12 @@ impl CompilerPass for DependencyAnalyzerPass {
             return Ok(());
         }
 
+        // A technology is known because files or manifests reference it: cite those references.
+        crate::source_evidence::cite_incoming(
+            &mut graph,
+            |o| matches!(&o.kind, ObjectKind::Custom(k) if k == "Technology"),
+            3,
+        );
         let knowledge = ekos_artifact::KnowledgeArtifact::new(&self.pass_id, vec![], graph);
         let json = serde_json::to_value(&knowledge)
             .map_err(|e| PassError::failed(format!("serialize KnowledgeArtifact: {e}")))?;

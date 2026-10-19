@@ -206,8 +206,8 @@ fn contains_run(path: &[String], run: &[&str]) -> bool {
 /// A path as its segments.
 type Path = Vec<String>;
 
-/// Every path in `source` (test modules excluded), resolved through its imports, and the globs.
-fn resolved_paths(source: &str) -> (Vec<(Path, Path)>, Vec<Path>) {
+/// `source` parsed, with its `#[cfg(test)]` items dropped, and its imports.
+fn parse_production(source: &str) -> (syn::File, Imports) {
     let mut file = syn::parse_file(source).expect("parses");
     file.items.retain(|item| {
         let attrs = match item {
@@ -221,6 +221,54 @@ fn resolved_paths(source: &str) -> (Vec<(Path, Path)>, Vec<Path>) {
     });
     let mut imports = Imports::default();
     imports.visit_file(&file);
+    (file, imports)
+}
+
+/// The functions in `source` (test modules excluded; free functions and methods) whose bodies
+/// contain a path that, resolved through the file's imports, satisfies `reaches`. Method calls
+/// count: `x.append_event(..)` is the one-segment path `append_event`. Used by `mcp.rs`'s
+/// `only_listed_functions_can_write_the_ledger` (#11), so an alias cannot hide a writer.
+pub(crate) fn functions_reaching(
+    source: &str,
+    reaches: impl Fn(&[String]) -> bool,
+) -> std::collections::BTreeSet<String> {
+    struct Fns<'a, F> {
+        imports: &'a Imports,
+        reaches: F,
+        found: std::collections::BTreeSet<String>,
+    }
+    impl<F: Fn(&[String]) -> bool> Fns<'_, F> {
+        fn check(&mut self, name: &syn::Ident, block: &syn::Block) {
+            let mut all = Vec::new();
+            paths(quote::ToTokens::to_token_stream(block), &mut all);
+            if all.iter().any(|p| (self.reaches)(&self.imports.resolve(p))) {
+                self.found.insert(name.to_string());
+            }
+        }
+    }
+    impl<'ast, F: Fn(&[String]) -> bool> Visit<'ast> for Fns<'_, F> {
+        fn visit_item_fn(&mut self, f: &'ast syn::ItemFn) {
+            self.check(&f.sig.ident, &f.block);
+            syn::visit::visit_item_fn(self, f);
+        }
+        fn visit_impl_item_fn(&mut self, f: &'ast syn::ImplItemFn) {
+            self.check(&f.sig.ident, &f.block);
+            syn::visit::visit_impl_item_fn(self, f);
+        }
+    }
+    let (file, imports) = parse_production(source);
+    let mut fns = Fns {
+        imports: &imports,
+        reaches,
+        found: Default::default(),
+    };
+    fns.visit_file(&file);
+    fns.found
+}
+
+/// Every path in `source` (test modules excluded), resolved through its imports, and the globs.
+fn resolved_paths(source: &str) -> (Vec<(Path, Path)>, Vec<Path>) {
+    let (file, imports) = parse_production(source);
     let mut all = Vec::new();
     for item in &file.items {
         paths(quote::ToTokens::to_token_stream(item), &mut all);
@@ -333,4 +381,22 @@ fn aliases_groups_globs_and_macros_are_resolved() {
     assert!(!caught(
         "use super::conflicts;\nfn f() { conflicts::open_for(); }"
     ));
+}
+
+/// The writer scan behind `only_listed_functions_can_write_the_ledger` sees aliases, method calls
+/// and macro arguments, and ignores comments and strings.
+#[test]
+fn writer_scan_resolves_aliases() {
+    let writes = |p: &[String]| {
+        p.last()
+            .is_some_and(|l| l.starts_with("append_") || l == "open_store")
+    };
+    let src = "use super::store::open_store as os;\n\
+               fn a() { let l = os(); }\n\
+               fn b(l: &L) { l.append_event(&e); }\n\
+               fn c() { format!(\"{}\", x.append_object(o)); }\n\
+               fn d() { /* open_store( */ let _ = \"append_object\"; }\n\
+               impl T { fn e(&self) { self.s.append_relationship(r); } }\n";
+    let found: Vec<String> = functions_reaching(src, writes).into_iter().collect();
+    assert_eq!(found, ["a", "b", "c", "e"]);
 }

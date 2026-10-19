@@ -56,6 +56,38 @@ pub(crate) fn attach(obj: &mut KirObject, source: &str, path: &str, graph: &mut 
     graph.add_evidence(ev);
 }
 
+/// Give each object `is_target` selects that has no evidence of its own the evidence of the edges
+/// pointing at it: up to `cap` ids, smallest first, so the choice does not depend on the order
+/// files were read. For objects that exist only because something refers to them (an imported
+/// module, a declared dependency): the reference is what proves them (issue #12 follow-up).
+pub(crate) fn cite_incoming(
+    graph: &mut KirGraph,
+    is_target: impl Fn(&KirObject) -> bool,
+    cap: usize,
+) {
+    let mut incoming: std::collections::HashMap<ekos_kir::KirId, Vec<ekos_kir::KirId>> =
+        std::collections::HashMap::new();
+    for r in &graph.relationships {
+        incoming
+            .entry(r.to)
+            .or_default()
+            .extend(r.evidence.iter().copied());
+    }
+    for o in graph
+        .objects
+        .iter_mut()
+        .filter(|o| o.evidence.is_empty() && is_target(o))
+    {
+        if let Some(evs) = incoming.get(&o.id) {
+            let mut evs = evs.clone();
+            evs.sort_by_key(|id| id.0);
+            evs.dedup();
+            evs.truncate(cap);
+            o.evidence = evs;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

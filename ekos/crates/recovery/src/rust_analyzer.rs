@@ -24,7 +24,10 @@
 use async_trait::async_trait;
 use ekos_artifact::ArtifactId;
 use ekos_compiler_core::pass::{CompilerPass, PassContext, PassError};
-use ekos_kir::{KirGraph, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind};
+use ekos_kir::{
+    KirEvidence, KirGraph, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind,
+    SourceLocation,
+};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -93,8 +96,9 @@ impl CompilerPass for RustAnalyzerPass {
     /// `v4` = RFC 0141 §1/§2 (`signature` on function/method symbols; `call_count` /
     /// `call_site_line` / `caller_is_test` on `Calls` edges).
     /// `v5` = RFC 0177 (`fields` on struct and enum symbols).
+    /// `v6` = issue #12 follow-up (evidence on `Contains`/`Calls`/`DependsOn` and `RustModule`).
     fn version(&self) -> &str {
-        "v5"
+        "v6"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -165,6 +169,7 @@ impl CompilerPass for RustAnalyzerPass {
                 .filter(|r| r.kind == RelationshipKind::Calls)
                 .count();
 
+            let mut symbol_evidence: HashMap<KirId, KirId> = HashMap::new();
             for mut obj in result.objects {
                 // RFC 0140 §1 — give the symbol a real link back to its source text.
                 //
@@ -180,16 +185,50 @@ impl CompilerPass for RustAnalyzerPass {
                 // to persist here and why RFC 0140 §3 insists query-time reads come from the
                 // artifact store rather than the live filesystem.
                 crate::source_evidence::attach(&mut obj, &data.source, &data.path, &mut combined);
+                if let Some(&ev) = obj.evidence.first() {
+                    symbol_evidence.entry(obj.id).or_insert(ev);
+                }
                 if seen_modules.insert(obj.id)
                     || !matches!(obj.kind, ObjectKind::Custom(ref k) if k == "RustModule")
                 {
                     combined.add_object(obj);
                 }
             }
-            for rel in result.relationships {
+            // Issue #12 follow-up: every edge cites the lines that state it. `Contains` shares
+            // the symbol's own evidence; `Calls` cites the first call site in the caller's file;
+            // `DependsOn` cites its `use` item.
+            for mut rel in result.relationships {
+                if rel.evidence.is_empty() {
+                    let line_span = match rel.kind {
+                        RelationshipKind::Calls => rel
+                            .properties
+                            .get("call_site_line")
+                            .and_then(serde_json::Value::as_u64)
+                            .map(|l| (l, l)),
+                        RelationshipKind::DependsOn => result
+                            .edge_spans
+                            .get(&rel.id)
+                            .map(|&(s, e)| (u64::from(s), u64::from(e))),
+                        _ => None,
+                    };
+                    if rel.kind == RelationshipKind::Contains {
+                        rel.evidence.extend(symbol_evidence.get(&rel.to).copied());
+                    } else if let Some((start, end)) = line_span {
+                        let ev = KirEvidence::new(
+                            SourceLocation::at(&data.path, start as u32),
+                            crate::source_evidence::slice_lines(&data.source, start, end),
+                        );
+                        rel.evidence.push(combined.add_evidence(ev));
+                    }
+                }
                 combined.add_relationship(rel);
             }
         }
+        crate::source_evidence::cite_incoming(
+            &mut combined,
+            |o| matches!(&o.kind, ObjectKind::Custom(k) if k == "RustModule"),
+            3,
+        );
 
         *self.stats.lock().unwrap() = stats;
 
@@ -221,6 +260,9 @@ struct RustFileResult {
     objects: Vec<KirObject>,
     relationships: Vec<KirRelationship>,
     symbol_count: usize,
+    /// The 1-indexed `(start, end)` lines of the `use` item behind a `DependsOn` edge, by
+    /// relationship id — what the per-file merge turns into that edge's evidence.
+    edge_spans: HashMap<KirId, (u32, u32)>,
 }
 
 fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileResult, syn::Error> {
@@ -229,6 +271,7 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
         objects: Vec::new(),
         relationships: Vec::new(),
         symbol_count: 0,
+        edge_spans: HashMap::new(),
     };
 
     // Top-level function name -> KirId, for resolving bare `foo(...)` calls.
@@ -252,8 +295,9 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
             Item::Use(u) => {
                 let mut modules = Vec::new();
                 flatten_use_tree(&u.tree, String::new(), &mut modules);
+                let span = item_span(u);
                 for m in modules {
-                    add_import(&m, file_id, &mut result);
+                    add_import(&m, file_id, span, &mut result);
                 }
             }
             Item::Fn(f) => {
@@ -475,17 +519,16 @@ fn rust_module_kir_id(module: &str) -> KirId {
     ))
 }
 
-fn add_import(module: &str, file_id: KirId, result: &mut RustFileResult) {
+fn add_import(module: &str, file_id: KirId, span: (u32, u32), result: &mut RustFileResult) {
     let target_id = rust_module_kir_id(module);
     let mut obj = KirObject::new(module, ObjectKind::Custom("RustModule".to_string()));
     obj.id = target_id;
     result.objects.push(obj);
-    result.relationships.push(KirRelationship::deterministic(
-        RelationshipKind::DependsOn,
-        file_id,
-        target_id,
-        "",
-    ));
+    let rel = KirRelationship::deterministic(RelationshipKind::DependsOn, file_id, target_id, "");
+    if span != (0, 0) {
+        result.edge_spans.insert(rel.id, span);
+    }
+    result.relationships.push(rel);
 }
 
 /// RFC 0088: real 1-indexed `(start_line, end_line)` from `syn`'s own joined span — `(0, 0)`

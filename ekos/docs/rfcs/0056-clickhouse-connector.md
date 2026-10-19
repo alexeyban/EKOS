@@ -328,8 +328,13 @@ exists anywhere today, and this RFC doesn't introduce one.
 live system is an observation, so it is recorded as one, not as usage telemetry (devlog_137
 explains why the other read tools log to a usage file instead). This is now stated wherever the
 read-only contract is (CLAUDE.md's MCP section). The audit event's id, previously random, is a
-v5 UUID of `(database, sql, result hash)`: repeating the same query with the same answer is one
-event whose ledger history lists each run. The SQL evidence id is content-derived as well (RFC
+v5 UUID of `(database, sql, result hash)`. **Intentional:** the same query with the same answer
+is one *event identity*. A repeat is not dropped: the payload's `occurred_at` (and usually the
+question) differs, so both backends record a new version under that id. SQLite appends a row and
+the fact engine writes a new version (test `a_repeated_query_is_a_new_version_not_a_lost_row`).
+`get_event` returns the latest run. There is no event-history read on `KnowledgeReader`, so the
+individual runs are visible through raw entry readers (`ekos_diff`, `ekos ledger audit`) rather
+than `get_event`. A different answer is a different event. The SQL evidence id is content-derived as well (RFC
 0135 Part E). A test in `commands/mcp.rs` (`only_listed_functions_can_write_the_ledger`) pins
 the functions that can open a writable store, call `append_*`, or run a live query; a new one has
 to be added to the list deliberately.

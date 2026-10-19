@@ -2952,26 +2952,15 @@ mod tests {
             // `ekos_clickhouse_query`: records that a live system was queried (RFC 0056).
             "run_clickhouse_query_blocking",
         ];
-        let src = include_str!("mcp.rs");
-        let production = &src[..src.find("#[cfg(test)]\nmod tests").unwrap()];
-        let mut current = String::new();
-        let mut found = std::collections::BTreeSet::new();
-        for line in production.lines() {
-            let head = line
-                .trim_start_matches("pub(crate) ")
-                .trim_start_matches("pub ")
-                .trim_start_matches("async ");
-            if let Some(rest) = head.strip_prefix("fn ") {
-                current = rest.split(['(', '<']).next().unwrap_or("").to_string();
-            }
-            let code = line.split("//").next().unwrap_or("");
-            if code.contains("open_store(")
-                || code.contains(".append_")
-                || code.contains("run_query(")
-            {
-                found.insert(current.clone());
-            }
-        }
+        // Parsed, not grepped (`review_guard::functions_reaching`): an import alias, a method
+        // call or a macro argument is resolved before it is matched.
+        let found =
+            crate::commands::review_guard::functions_reaching(include_str!("mcp.rs"), |p| {
+                let last = p.last().map(String::as_str).unwrap_or_default();
+                last.starts_with("append_")
+                    || last == "open_store"
+                    || (last == "run_query" && p.iter().any(|s| s == "clickhouse"))
+            });
         let expected: std::collections::BTreeSet<String> =
             WRITERS.iter().map(|s| s.to_string()).collect();
         assert_eq!(found, expected);
