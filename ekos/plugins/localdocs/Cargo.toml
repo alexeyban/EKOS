@@ -22,8 +22,8 @@ tokio.workspace = true
 tracing.workspace = true
 lopdf = "0.44"
 pdf-extract = "0.12"
-docx-rs = "0.4"
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
+roxmltree.workspace = true
 tempfile = "3"
 html2text = "0.17"
 mail-parser = "0.11"
