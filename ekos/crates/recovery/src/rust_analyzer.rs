@@ -194,33 +194,14 @@ impl CompilerPass for RustAnalyzerPass {
                     combined.add_object(obj);
                 }
             }
-            // Issue #12 follow-up: every edge cites the lines that state it. `Contains` shares
-            // the symbol's own evidence; `Calls` cites the first call site in the caller's file;
-            // `DependsOn` cites its `use` item.
             for mut rel in result.relationships {
-                if rel.evidence.is_empty() {
-                    let line_span = match rel.kind {
-                        RelationshipKind::Calls => rel
-                            .properties
-                            .get("call_site_line")
-                            .and_then(serde_json::Value::as_u64)
-                            .map(|l| (l, l)),
-                        RelationshipKind::DependsOn => result
-                            .edge_spans
-                            .get(&rel.id)
-                            .map(|&(s, e)| (u64::from(s), u64::from(e))),
-                        _ => None,
-                    };
-                    if rel.kind == RelationshipKind::Contains {
-                        rel.evidence.extend(symbol_evidence.get(&rel.to).copied());
-                    } else if let Some((start, end)) = line_span {
-                        let ev = KirEvidence::new(
-                            SourceLocation::at(&data.path, start as u32),
-                            crate::source_evidence::slice_lines(&data.source, start, end),
-                        );
-                        rel.evidence.push(combined.add_evidence(ev));
-                    }
-                }
+                cite_edge(
+                    &mut rel,
+                    &result.edge_spans,
+                    &symbol_evidence,
+                    &data,
+                    &mut combined,
+                );
                 combined.add_relationship(rel);
             }
         }
@@ -433,6 +414,43 @@ fn parse_rust_file(path: &str, source: &str, file_id: KirId) -> Result<RustFileR
     }
 
     Ok(result)
+}
+
+/// Issue #12 follow-up: every edge cites the lines that state it. `Contains` shares the symbol's
+/// own evidence; `Calls` cites the first call site in the caller's file; `DependsOn` cites its
+/// `use` item. An edge that already has evidence is left alone.
+fn cite_edge(
+    rel: &mut KirRelationship,
+    edge_spans: &HashMap<KirId, (u32, u32)>,
+    symbol_evidence: &HashMap<KirId, KirId>,
+    data: &RustArtifactData,
+    combined: &mut KirGraph,
+) {
+    if !rel.evidence.is_empty() {
+        return;
+    }
+    let lines = match rel.kind {
+        RelationshipKind::Contains => {
+            rel.evidence.extend(symbol_evidence.get(&rel.to).copied());
+            return;
+        }
+        RelationshipKind::Calls => rel
+            .properties
+            .get("call_site_line")
+            .and_then(serde_json::Value::as_u64)
+            .map(|l| (l, l)),
+        RelationshipKind::DependsOn => edge_spans
+            .get(&rel.id)
+            .map(|&(s, e)| (u64::from(s), u64::from(e))),
+        _ => None,
+    };
+    if let Some((start, end)) = lines {
+        let ev = KirEvidence::new(
+            SourceLocation::at(&data.path, start as u32),
+            crate::source_evidence::slice_lines(&data.source, start, end),
+        );
+        rel.evidence.push(combined.add_evidence(ev));
+    }
 }
 
 /// RFC 0141 §2's file-path half of `caller_is_test` — a caller under a `tests/` directory (Rust's
