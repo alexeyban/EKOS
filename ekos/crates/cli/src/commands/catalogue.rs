@@ -93,6 +93,8 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("import linkml", Class::Review, false),
     ("identity scan", Class::Write, false),
     ("treasury scan", Class::External, false),
+    ("treasury confirm", Class::Review, false),
+    ("treasury reject", Class::Review, false),
     ("branch create", Class::Write, false),
     ("branch list", Class::Read, false),
     ("branch merge", Class::Admin, false),
@@ -329,6 +331,8 @@ mod tests {
             "migrate approve",
             "migrate reject",
             "session review",
+            "treasury confirm",
+            "treasury reject",
         ] {
             assert_eq!(class_of(p).unwrap().0, Class::Review, "{p}");
         }

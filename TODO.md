@@ -6732,8 +6732,8 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
 - [x] #12 evidence on compiled edges + rollups (RFC 0135 E2)
 - [x] #17 walks skip unconfirmed-claim endpoints; dependents carry status (RFC 0135 E3)
 - [x] #11 deterministic ClickHouse audit event; MCP ledger writers pinned by a test (RFC 0056 amendment)
-- [~] #16 review decisions cite reviewer/note evidence; CLAUDE.md corrected — **open: should
-      `AuthorizedBy` (treasury) confirmation move to a human-only CLI command?**
+- [x] #16 review decisions cite reviewer/note evidence; `AuthorizedBy` is human-only —
+      `ekos treasury confirm|reject` (Review class), refused by `ekos_identity_review`
 - [x] #15 RFC 0007 amendment
 - [x] #13 `KnowledgeReader` / `KnowledgeStore` split; Runtime + graph export read-only by type (RFC 0135 E4)
 - [x] #14 review guard resolves imports/aliases/globs/macros; rename check (RFC 0149 amendment)

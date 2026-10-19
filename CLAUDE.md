@@ -177,8 +177,8 @@ RFC 0018), `ekos_diff`, `ekos_status`, `ekos_transformation_explain`/`ekos_trans
 (RFC 0065/0107-0109), the gated `ekos_clickhouse_query` (live NL-to-SQL, off by default, RFC 0056),
 the opt-in `ekos_session_note`/`ekos_session_recall`/`ekos_session_brief` (RFC 0151, `[session-memory]`; the note tool writes only the inbox file, never the ledger), the read-only `ekos_conflicts` (RFC 0172, where sources disagree; `ekos_state` also carries `open_conflicts`, and an `ekos_query`/`ekos_retrieve` claim about a disputed attribute carries `disputed: true` — RFC 0173, `EvidenceSet::mark_disputed` in `runtime/src/reason.rs` with the lookup supplied by `commands/conflicts.rs::flag_disputed`, since the Runtime cannot know which conflicts are current; `ekos ask` gets the same lookup through `AiRuntime::with_disputes`, and a label conflict carries a second `Disputes` link to its column's table whose `attribute` property — `columns.<col>.meaning` — is what the lookup uses for that table), the opt-in read-only `ekos_semantics_lookup`/`ekos_semantics_gaps` (RFC 0170, `[semantics]`; every result carries its review status in words — there is no MCP tool that confirms a definition), and the two write-capable review tools `ekos_identity_review` (confirm/reject a candidate identity
 match — cross-system, RFC 0029, or same-source fuzzy, RFC 0063; the tool doesn't distinguish
-origin, only kind: `Custom("SameAs")` **and** `Custom("AuthorizedBy")`, the RFC 0032 treasury
-payment authorization, so an agent with this tool can confirm a payment authorization) and
+origin, only `Custom("SameAs")`; an RFC 0032 treasury `AuthorizedBy` is **human-only**,
+`ekos treasury confirm|reject` → `commands/treasury.rs::review_authorization`, issue #16) and
 `ekos_architecture_review` (confirm/reject an LLM-classified crate role, RFC 0109). Both record
 the decision as an event citing evidence with the optional `reviewer`/`note` arguments (issue
 #16). The gated `ekos_clickhouse_query` also writes: one evidence + `ClickHouseQueryExecuted`

@@ -384,3 +384,17 @@ than an absent one.
 - The scoring weights and floor are untuned: there is no real DAO ground truth in this repository.
 - Multi-send decoding depends on the explorer exposing internal transactions / token transfers; a batch
   the explorer does not decode appears as one opaque payment.
+
+---
+
+## Amendment (2026-10-19): confirming an authorization is human-only (issue #16)
+
+This RFC had `ekos_identity_review` accept `AuthorizedBy`, so any agent with the MCP tool could
+record that a real payment was approved. That is now a person's decision. `ekos treasury confirm
+<id> [--as <name>] [--note <why>]` and `ekos treasury reject <id> --note <why>` (catalogue class
+Review, so the web console runs them as the signed-in reviewer) write the relationship's new
+version with `reviewed_by`/`reviewed_at`/`review_note`, plus an
+`AuthorizationConfirmed`/`AuthorizationRejected` event citing evidence that names the reviewer.
+`ekos_identity_review` refuses an `AuthorizedBy` and names the CLI command instead.
+`commands/review_guard.rs` lists `review_authorization` among the entry points `mcp.rs` must not
+reach.

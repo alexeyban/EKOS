@@ -84,6 +84,12 @@ const HUMAN_ONLY: &[HumanOnly] = &[
         why: "RFC 0161: an approval request is only built to approve",
     },
     HumanOnly {
+        path: &["review_authorization"],
+        defined_in: include_str!("treasury.rs"),
+        definition: "pub fn review_authorization(",
+        why: "RFC 0032 / issue #16: confirming a payment authorization is a human decision",
+    },
+    HumanOnly {
         path: &["Actor", "Human"],
         defined_in: include_str!("../../../migrate/src/lifecycle.rs"),
         definition: "    Human,",

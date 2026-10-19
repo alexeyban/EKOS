@@ -1301,9 +1301,28 @@ enum IdentityCommands {
 enum TreasuryCommands {
     /// Score committed `TreasuryPayment` objects against `GovernanceProposal` objects and write
     /// each candidate as an `unconfirmed` `AuthorizedBy` relationship, then list the payments with
-    /// no candidate approval. Never confirms anything — review with the `ekos_identity_review`
-    /// MCP tool.
+    /// no candidate approval. Never confirms anything — a person reviews with `ekos treasury
+    /// confirm|reject`.
     Scan,
+    /// Confirm that a payment was authorized by a proposal (an `AuthorizedBy` candidate).
+    /// Human-only: no MCP tool can do this.
+    Confirm {
+        /// The `AuthorizedBy` relationship id
+        relationship_id: String,
+        #[arg(long = "as")]
+        by: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Reject an `AuthorizedBy` candidate (a reason is required). Human-only.
+    Reject {
+        /// The `AuthorizedBy` relationship id
+        relationship_id: String,
+        #[arg(long = "as")]
+        by: Option<String>,
+        #[arg(long)]
+        note: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2252,6 +2271,30 @@ fn dispatch_treasury(
 ) -> Result<()> {
     match subcommand {
         TreasuryCommands::Scan => crate::commands::treasury::scan(config, cwd),
+        TreasuryCommands::Confirm {
+            relationship_id,
+            by,
+            note,
+        } => crate::commands::treasury::review_authorization(
+            config,
+            cwd,
+            &relationship_id,
+            true,
+            by,
+            note,
+        ),
+        TreasuryCommands::Reject {
+            relationship_id,
+            by,
+            note,
+        } => crate::commands::treasury::review_authorization(
+            config,
+            cwd,
+            &relationship_id,
+            false,
+            by,
+            note,
+        ),
     }
 }
 

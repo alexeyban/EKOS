@@ -209,15 +209,29 @@ async fn payments_are_matched_to_approvals_end_to_end_and_unmatched_ones_have_no
         "ekos_state must show the candidate: {state}"
     );
 
-    // Confirm A's candidate through the one write-capable review tool.
-    let review = tool(
+    // An agent cannot confirm a payment authorization (issue #16): the MCP review tool refuses.
+    let line = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                       "params": { "name": "ekos_identity_review",
+                                   "arguments": { "relationship_id": a[0].id.to_string(),
+                                                  "decision": "confirmed" } } })
+    .to_string();
+    let mut cache = ekos::commands::mcp::StoreCache::new();
+    let refused: Value = serde_json::from_str(
+        &ekos::commands::mcp::handle_message_with(&config, dir, &line, &mut cache, &ext).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(refused["result"]["isError"], true, "{refused}");
+
+    // A person confirms it: `ekos treasury confirm`.
+    ekos::commands::treasury::review_authorization(
         &config,
         dir,
-        &ext,
-        "ekos_identity_review",
-        json!({ "relationship_id": a[0].id.to_string(), "decision": "confirmed" }),
-    );
-    assert_eq!(review["decision"], "confirmed");
+        &a[0].id.to_string(),
+        true,
+        Some("treasurer".into()),
+        Some("proposal P1 passed".into()),
+    )
+    .unwrap();
 
     // A re-scan must keep that human decision.
     ekos::commands::treasury::scan(&config, dir).unwrap();

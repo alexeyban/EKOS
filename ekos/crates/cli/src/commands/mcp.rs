@@ -1386,7 +1386,7 @@ fn base_tool_definitions() -> Vec<Value> {
         },
         {
             "name": "ekos_identity_review",
-            "description": "Confirm or reject a candidate cross-system identity match (RFC 0029) — e.g. Informix cust_mstr vs. Postgres customers, proposed by `ekos identity scan`. Confirming or rejecting writes a new Event to the ledger, citing evidence that names the reviewer and note. A write-capable MCP tool; only Custom(\"SameAs\") and Custom(\"AuthorizedBy\") (RFC 0032 payment-approval) relationships are reviewable this way.",
+            "description": "Confirm or reject a candidate identity match (RFC 0029/0063) — e.g. Informix cust_mstr vs. Postgres customers, proposed by `ekos identity scan`. Confirming or rejecting writes a new Event to the ledger, citing evidence that names the reviewer and note. A write-capable MCP tool; only Custom(\"SameAs\") relationships are reviewable this way. A treasury payment authorization (AuthorizedBy) is reviewed by a person with `ekos treasury confirm|reject`, never through MCP.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -2270,13 +2270,11 @@ fn tool_clickhouse_query(config: &EkosConfig, workspace: &Path, args: &Value) ->
 /// The event recorded for a review decision. An identity merge is a `Merged` event; a payment
 /// authorization (RFC 0032) is not a merge of anything, so it gets its own named kinds rather than
 /// borrowing `Merged`'s meaning.
-fn review_event_kind(rel_kind: &RelationshipKind, decision: &str) -> EventKind {
-    let is_authorization = matches!(rel_kind, RelationshipKind::Custom(k) if k == "AuthorizedBy");
-    match (is_authorization, decision) {
-        (true, "confirmed") => EventKind::Custom("AuthorizationConfirmed".into()),
-        (true, _) => EventKind::Custom("AuthorizationRejected".into()),
-        (false, "confirmed") => EventKind::Merged,
-        (false, _) => EventKind::Modified,
+/// The event an identity decision records: a confirmed `SameAs` is a merge.
+fn review_event_kind(decision: &str) -> EventKind {
+    match decision {
+        "confirmed" => EventKind::Merged,
+        _ => EventKind::Modified,
     }
 }
 
@@ -2298,13 +2296,16 @@ fn identity_review(config: &EkosConfig, workspace: &Path, args: &Value) -> Resul
     let mut rel = ledger
         .get_relationship(&rel_id)?
         .ok_or_else(|| anyhow::anyhow!("relationship not found: {rel_id}"))?;
-    // `SameAs` (RFC 0029/0063) and `AuthorizedBy` (RFC 0032) are structurally identical review
-    // candidates — an `unconfirmed` relationship a human or agent confirms or rejects — so they
-    // share this one write-capable tool rather than growing a parallel one.
-    if !matches!(&rel.kind, RelationshipKind::Custom(k) if k == "SameAs" || k == "AuthorizedBy") {
+    // `SameAs` only (RFC 0029/0063). An `AuthorizedBy` (RFC 0032) says real money was approved:
+    // a person decides that with `ekos treasury confirm|reject`, never an agent (issue #16).
+    if matches!(&rel.kind, RelationshipKind::Custom(k) if k == "AuthorizedBy") {
         anyhow::bail!(
-            "not a SameAs or AuthorizedBy candidate, cannot be reviewed through this tool: {rel_id}"
+            "{rel_id} is a payment authorization (AuthorizedBy): a person reviews it with \
+             `ekos treasury confirm|reject`, not through MCP"
         );
+    }
+    if !matches!(&rel.kind, RelationshipKind::Custom(k) if k == "SameAs") {
+        anyhow::bail!("not a SameAs candidate, cannot be reviewed through this tool: {rel_id}");
     }
 
     rel.properties.insert("status".into(), json!(decision));
@@ -2316,7 +2317,7 @@ fn identity_review(config: &EkosConfig, workspace: &Path, args: &Value) -> Resul
         ledger.as_ref(),
         config,
         "ekos_identity_review",
-        review_event_kind(&rel.kind, decision),
+        review_event_kind(decision),
         rel_id,
         json!({ "decision": decision, "relationship_id": rel_id.to_string() }),
         args,
@@ -4811,9 +4812,8 @@ mod tests {
     }
 
     #[test]
-    fn identity_review_confirms_an_authorized_by_candidate() {
-        // RFC 0032 — `AuthorizedBy` shares this tool with `SameAs`, but confirming a payment's
-        // authorization must not be recorded as a `Merged` event.
+    fn identity_review_refuses_an_authorized_by_candidate() {
+        // Issue #16: confirming a payment's authorization is human-only (`ekos treasury confirm`).
         use ekos_kir::{KirObject, KirRelationship, ObjectKind};
         use ekos_ledger::Ledger;
 
@@ -4848,27 +4848,20 @@ mod tests {
         );
         let resp =
             parse(&handle_message(&config, tmp.path(), &line, &mut StoreCache::new()).unwrap());
-        assert_eq!(resp["result"]["isError"], false, "{resp}");
+        assert_eq!(resp["result"]["isError"], true, "{resp}");
 
         let ledger = Ledger::open(&config.ledger_path(tmp.path())).unwrap();
         let rel = ledger.get_relationship(&rel_id).unwrap().unwrap();
-        assert_eq!(rel.properties["status"], "confirmed");
+        assert_eq!(
+            rel.properties["status"], "unconfirmed",
+            "nothing was written"
+        );
     }
 
     #[test]
-    fn review_event_kinds_distinguish_authorizations_from_identity_merges() {
-        let same_as = RelationshipKind::Custom("SameAs".into());
-        let auth = RelationshipKind::Custom("AuthorizedBy".into());
-        assert_eq!(review_event_kind(&same_as, "confirmed"), EventKind::Merged);
-        assert_eq!(review_event_kind(&same_as, "rejected"), EventKind::Modified);
-        assert_eq!(
-            review_event_kind(&auth, "confirmed"),
-            EventKind::Custom("AuthorizationConfirmed".into())
-        );
-        assert_eq!(
-            review_event_kind(&auth, "rejected"),
-            EventKind::Custom("AuthorizationRejected".into())
-        );
+    fn a_confirmed_identity_is_a_merge() {
+        assert_eq!(review_event_kind("confirmed"), EventKind::Merged);
+        assert_eq!(review_event_kind("rejected"), EventKind::Modified);
     }
 
     #[test]

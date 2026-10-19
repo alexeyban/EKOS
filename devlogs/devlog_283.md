@@ -16,8 +16,8 @@ code and held. Three issues were secrets leaking past RFC 0043. One was ledger c
 evidence ids made every re-run of a pass a new version of every object it touched. The rest were
 invariants kept only by convention: evidence on compiled edges, hypotheses walked as facts, an
 MCP tool that writes, a read-only Runtime holding a writable store, and review guards that an
-alias gets around. All eleven are addressed. #16 has one decision left open for the maintainer
-(whether agents may confirm a treasury `AuthorizedBy`).
+alias gets around. All eleven are addressed; on #16 the maintainer decided that confirming a treasury
+`AuthorizedBy` is human-only, so it moved from the MCP tool to `ekos treasury confirm|reject`.
 
 ---
 
@@ -74,8 +74,10 @@ index text that had already been redacted, so slicing raw text and redacting the
   `record_review_decision` on its first run.
 - Both review tools take optional `reviewer`/`note`; the decision event cites an evidence record
   naming them (note redacted) and has a deterministic id.
-- **Open:** `ekos_identity_review` confirms `AuthorizedBy`. There is no CLI path for that today,
-  so moving it to human-only means building `ekos treasury review`.
+- **`AuthorizedBy` is human-only** (maintainer's decision): `ekos treasury confirm|reject`
+  (Review class; reject needs `--note`) → `treasury::review_authorization`, guarded by
+  `review_guard.rs`. `ekos_identity_review` now refuses an `AuthorizedBy` and names the command.
+  RFC 0032 amendment.
 
 ---
 
