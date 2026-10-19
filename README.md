@@ -83,15 +83,18 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 
 - The **Observation Layer** collects facts only — it never interprets business meaning.
 - The **ledger is append-only** — knowledge is never modified in place.
-- The **Runtime is read-only** — it reconstructs and interprets state, never modifies it.
+- The **Runtime is read-only** — it reconstructs and interprets state, never modifies it. This is enforced by the type system: the store API is split into a read-only `KnowledgeReader` and a `KnowledgeStore` that adds the writes, and the Runtime, EKL and graph export only ever hold a `KnowledgeReader`.
+- **Human decisions stay human.** Confirming business definitions, settling conflicts, promoting session notes, approving migrations and confirming treasury payment authorizations are CLI / web console actions only; a test parses the MCP server and fails if any of them becomes reachable from it, even through a renamed import.
 - **AI systems** consume reconstructed knowledge through the Runtime; they never touch raw enterprise systems directly. The one explicit, scoped, audited exception is the gated `ekos_clickhouse_query` MCP tool (RFC 0056, off by default) — see below.
-- Every compiler pass is **deterministic** and **side-effect-free**.
+- Every compiler pass is **deterministic** and **side-effect-free**. Evidence ids are derived from the evidence's content, so re-running a pass over unchanged sources writes no new ledger versions.
 - Every artifact is **content-addressable** (id + checksum + metadata + dependencies + version).
 - **Secrets and PII are never observed or stored** (RFC 0043) — a built-in baseline redacts known
   secret shapes (AWS/GitHub/Slack/Google/Stripe tokens, private keys, JWTs, generic
   key/password assignments) from all observed content, and excludes files like `.env`/`*.pem`/
-  `id_rsa` entirely. `ekos.toml`'s `[security]` section can only extend this baseline, never
-  disable it.
+  `id_rsa` entirely. The same rule covers every later re-read of a workspace file for a model or
+  the ledger (symbol source, crate doc comments, view definitions: one shared `read_redacted`)
+  and the `git blame` commit subjects recorded as rationale. `ekos.toml`'s `[security]` section
+  can only extend this baseline, never disable it.
 
 ## Implementation
 
@@ -888,7 +891,10 @@ The same real-world entity observed under different names across systems (Inform
 Postgres `customers`, Databricks `gold.dim_customer`) can be linked too: `ekos identity scan`
 scores candidate cross-system matches (column overlap, naming-pattern similarity, type
 compatibility) and writes them as `unconfirmed` relationships — never a silent auto-merge — for
-review via the `ekos_identity_review` MCP tool.
+review via the `ekos_identity_review` MCP tool (optional `reviewer` and `note`, recorded on the
+decision's evidence). Treasury payment authorizations (`ekos treasury scan`, RFC 0032) are
+different: a person confirms or rejects each with `ekos treasury confirm|reject <id>` (`reject`
+needs `--note`); no MCP tool can.
 
 Same-source duplicates (`ekos resolve`/`ekos
 compile`, e.g. two `Table` objects both literally named `customers`) auto-merge only when the
@@ -1509,8 +1515,9 @@ LLM — RFC 0124), `ekos_ekl` (EKL filters on built-in columns and on any proper
 `COUNT`/`GROUP BY` aggregation — RFC 0096, and `SEMANTIC 'text'` retrieval candidate sets — RFC
 0124), `ekos_neighborhood` (`depth` 0-3, stops at `max_objects` — default 500, at most
 5,000 — and says so with `truncated: true`),
-`ekos_state`, `ekos_dependents` (single-hop impact analysis), `ekos_impact` (directed,
-kind-filtered, multi-hop impact tracing — RFC 0018), `ekos_graph_export` (the whole compiled
+`ekos_state`, `ekos_dependents` (single-hop impact analysis; each entry shows the other end's
+`status`), `ekos_impact` (directed, kind-filtered, multi-hop impact tracing — RFC 0018; like the
+neighbourhood, it never steps onto an unconfirmed hypothesis or proposal), `ekos_graph_export` (the whole compiled
 graph as nodes + edges in one call — filtered, optionally collapsed to super-nodes, truncation
 reported; RFC 0127), `ekos_diff` (raw ledger-entry changes since
 T), `ekos_audit` (the write history of one object/relationship with the pipeline run, stage, and
@@ -1529,8 +1536,10 @@ RFC 0065/0068 §55/RFC 0107-0108), `ekos_semantics_lookup`/`ekos_semantics_gaps`
 the recovered business meaning of a table, column or code value with its review status and
 evidence, and the open semantic gaps; read-only — confirming or rejecting stays a human-only CLI /
 web console action), and `ekos_identity_review`/`ekos_architecture_review` (confirm or
-reject a cross-system identity match, or an LLM-classified crate role claim — RFC 0029/RFC 0109,
-the two write-capable tools; every other tool reads only the local ledger, except the opt-in
+reject a `SameAs` identity candidate, or an LLM-classified crate role claim — RFC 0029/RFC 0109,
+the two write-capable tools; each decision is an event citing evidence that names the optional
+`reviewer` and `note`; every other tool reads only the local ledger, except the gated
+`ekos_clickhouse_query`, which records each live query, and the opt-in
 `ekos_session_note`, RFC 0151 — it writes a redacted note to a local inbox file, never to the ledger). Long-lived server
 sessions reuse one cached, read-only ledger handle across calls without ever blocking a concurrent
 `ekos build`/`commit` in another process (RFC 0097). Every read tool (and `ekos ekl` run from the
@@ -1872,7 +1881,8 @@ warnings.
 an LLM builds a ClickHouse `SELECT` from the compiled schema and the question, the generated SQL is
 parsed and hard-rejected unless it's exactly one `SELECT` (no writes, no multi-statement batches),
 then it's run live, redacted, and returned — every call is recorded as an Evidence/Event pair in the
-ledger for audit, though the row data itself is never ledgered:
+ledger for audit (the same query with the same answer is one event whose history lists each run),
+though the row data itself is never ledgered:
 
 ```bash
 ekos clickhouse ask "how many orders were placed last week?"

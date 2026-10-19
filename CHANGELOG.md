@@ -2,6 +2,15 @@
 
 ## Unreleased (on `main` since v1.1.0)
 
+- **Security / external review (issues #10–#20, devlog_283):**
+  - **Fixed:** redaction gaps. Crate `//!` doc comments were sent to the LLM unredacted, `[llm-description]` re-read files excluded by `[security]`, and `git blame` commit subjects reached the ledger unredacted. Every re-reader now goes through `ekos_common::redaction::read_redacted` (exclusion, then redaction), and blame summaries are redacted.
+  - **Fixed:** evidence ids were random, so any pass re-run on a cache miss wrote a new version of every object it touched. They are now derived from content. Expect one round of new versions at the first commit after upgrading.
+  - **Fixed:** several compiled edges (`FeedsInto`, `Disputes`, risk `References`, business-semantics links) and `Rollup` objects carried no evidence.
+  - **Fixed:** `ekos_dependents`, `ekos_impact` and `ekos_neighborhood` walked onto unconfirmed hypotheses and migration proposals as if they were facts. They skip them until a person confirms, and `ekos_dependents` shows the other end's `status`.
+  - **Changed:** confirming a treasury payment authorization (`AuthorizedBy`) is human-only. Use `ekos treasury confirm|reject <id>`; `ekos_identity_review` now reviews `SameAs` only.
+  - **New:** `ekos_identity_review` / `ekos_architecture_review` take optional `reviewer` and `note`, recorded on evidence that the decision event cites. The ClickHouse audit event has a deterministic id.
+  - **Changed (API):** `KnowledgeStore` is split into `KnowledgeReader` + `KnowledgeStore: KnowledgeReader`, and `Runtime::new`/`over` and `export_graph` take a reader. Code that calls reads on a concrete store type, or writes `KnowledgeStore::get_object(…)` in full, needs `KnowledgeReader` in scope.
+  - Docs: RFC 0007 amended to describe the shipped identity algorithm; amendments to RFCs 0032, 0043, 0056, 0135 and 0149.
 - **Fixed:** a chained run's stages (pipeline, Init & compile) had the 30-minute limit of a single command, so a large project's commit was killed (exit 124). They now take `run_stage_timeout_seconds` (default 6 hours, Settings → Runs).
 - **Fixed:** Python import / contains / extends edges and git ownership / co-change edges now carry evidence (file and line, or the commits). `ekos coverage` reported "Python: 0 relationships" and "Git history: 0 relationships" for projects with thousands of edges, and none could be cited. Takes effect at the next `ekos recover` (analyzer versions bumped).
 - **Fixed:** LLM descriptions use `[llm] max-tokens` (default 4096) instead of a hard-coded 1024; a reasoning model ran out of tokens before finishing its answer.

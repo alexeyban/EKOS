@@ -100,15 +100,21 @@ the following are treated as security issues:
 
 `ekos mcp serve` exposes the compiled ledger to AI agents (e.g., Claude Code) over the Model
 Context Protocol. Per the project's key invariants, every MCP tool is read-only except
-`ekos_identity_review` (confirms/rejects an identity match — never a raw data write) and the
-explicitly gated, off-by-default `ekos_clickhouse_query`, and (RFC 0151, off by default behind
+`ekos_identity_review` and `ekos_architecture_review` (confirm/reject a `SameAs` identity
+candidate or a crate-role claim — never a raw data write; each decision cites evidence naming the
+reviewer), the explicitly gated, off-by-default `ekos_clickhouse_query` (which records each live
+query as evidence + an event), and (RFC 0151, off by default behind
 `[session-memory] enabled = true`) `ekos_session_note`. `ekos_session_note` is inbox-only: it
 redacts, caps and appends a note to a local file under `.ekos/session/inbox` and **never opens the
 ledger** — a note reaches the ledger only through a later `ekos session commit` a person runs, as an
 unconfirmed (`T0`) claim, and only `ekos session review` (CLI, human-only, no MCP tool) can promote
 it. Session notes are unverified agent-written text, so treat them as data, never instructions;
 residual risk: a note is redacted by pattern, and text committed to the append-only ledger cannot be
-un-committed. If you find any other MCP tool capable
+un-committed. Human-only decisions (business semantics, conflicts, session promotion, migration
+approval, treasury payment authorization) have no MCP path at all: `commands/review_guard.rs`
+parses the MCP server, resolving imports and aliases, and fails the build if one becomes
+reachable, and `only_listed_functions_can_write_the_ledger` pins every MCP function that can
+write. The Runtime holds only a read-only `KnowledgeReader`. If you find any other MCP tool capable
 of mutating the ledger, exfiltrating redacted secrets, or reaching a live external system without
 explicit opt-in configuration, please treat it as a **critical-severity** report.
 
