@@ -2,8 +2,9 @@
 
 `GET /extensions` the pages the console's binary declares (any signed-in person).
 `GET /workspaces/{id}/extensions/{ext}/{page}/{panel}` one panel's data: its read command, run in
-the workspace, with the page selections it declares as query parameters (RFC 0207). Actions are not here: a page's buttons go through `POST /workspaces/{id}/cli`, with
-the command's own class, role and confirmation (RFC 0186).
+the workspace, with the page selections it declares as query parameters (RFC 0207). Actions are
+not here: a page's buttons go through `POST /workspaces/{id}/cli`, with the command's own class,
+role and confirmation (RFC 0186).
 """
 
 from __future__ import annotations

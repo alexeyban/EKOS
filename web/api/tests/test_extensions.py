@@ -208,13 +208,25 @@ def _v3_page() -> dict:
             "id": "step",
             "title": "Step",
             "command": ["lake", "report", "--json"],
-            "view": {"kind": "code", "left": "/o", "right": "/s", "left_label": "", "right_label": ""},
+            "view": {
+                "kind": "code",
+                "left": "/o",
+                "right": "/s",
+                "left_label": "",
+                "right_label": "",
+            },
             "empty": "",
             "params": ["package", "step"],
         }
     )
     page["params"] = [
-        {"name": "package", "label": "Package", "source": "health", "rows": "/rows", "key": "/table"}
+        {
+            "name": "package",
+            "label": "Package",
+            "source": "health",
+            "rows": "/rows",
+            "key": "/table",
+        }
     ]
     return spec
 
@@ -233,7 +245,12 @@ def test_rfc0207_a_panel_gets_its_selections_as_value_options(
 
 @pytest.mark.parametrize(
     "params",
-    [{"package": "etl"}, {"package": "etl", "step": ""}, {"package": "a\x00b", "step": "s"}, {"package": "x" * 513, "step": "s"}],
+    [
+        {"package": "etl"},
+        {"package": "etl", "step": ""},
+        {"package": "a\x00b", "step": "s"},
+        {"package": "x" * 513, "step": "s"},
+    ],
 )
 def test_rfc0207_a_missing_or_bad_selection_is_422_and_nothing_runs(
     setup, monkeypatch: pytest.MonkeyPatch, params: dict
@@ -254,7 +271,11 @@ def test_rfc0207_a_selection_must_be_a_value_option_of_the_read_command(
     spec = _v3_page()
     spec["extensions"][0]["pages"][0]["panels"][1]["command"] = ["lake", "status", "--json"]
     monkeypatch.setattr(extensions, "_cached", spec)
-    r = c.get(f"/api/workspaces/{wid}/extensions/lake/lake/step", params={"package": "a", "step": "b"}, headers=READER)
+    r = c.get(
+        f"/api/workspaces/{wid}/extensions/lake/lake/step",
+        params={"package": "a", "step": "b"},
+        headers=READER,
+    )
     assert r.status_code == 404
     assert ran == []
 
@@ -264,7 +285,11 @@ def test_rfc0207_allow_metered_needs_the_tenants_permission(
 ) -> None:
     c, wid, _ = setup
     monkeypatch.setattr(catalogue, "_cached", V3_CATALOGUE)
-    body = {"command": ["lake", "translate"], "args": {"package": "etl", "allow-metered": True}, "confirm": "lake translate"}
+    body = {
+        "command": ["lake", "translate"],
+        "args": {"package": "etl", "allow-metered": True},
+        "confirm": "lake translate",
+    }
     r = c.post(f"/api/workspaces/{wid}/cli", json=body, headers=OWNER)
     assert r.status_code == 409, r.text
     assert "metered" in r.json()["detail"]
