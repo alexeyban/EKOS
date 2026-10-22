@@ -73,9 +73,9 @@ reserved pool.
 - Wallet: `u2zUCiUHRoGp9jKRsyjMGQ8x9Z3UdtERm174aiXURZo`
 - Total: 14,000,000 EKOS
 - Unlock schedule: linear, monthly
-- Unlock per month: 1,166,600 EKOS (14,000,000 ÷ 12)
+- Unlock per month: 1.1666M EKOS (14,000,000 ÷ 12)
 - Next unlock: Nov 3, 2026
-- As of writing: 0 EKOS claimed, 0 EKOS unlocked
+- As of 2026-10-22: 2.3333M EKOS unlocked
 
 These figures are sourced from the live Streamflow vesting contract and may drift over
 time — the contract itself is the source of truth.
@@ -98,8 +98,7 @@ trading fees and slippage on the purchase.
 
 **Bounty #1 — "Make EKOS More Visible":** published Sunday, August 23, 2026 — active through
 Sunday, August 30, 2026. The full 3,600,000 EKOS was paid out to 9 winners
-([bounties](https://pump.fun/profile/EKOSBuilder?tab=bounties)), in late August 2026 (around
-August 24; the exact day was not recorded).
+([bounties](https://pump.fun/profile/EKOSBuilder?tab=bounties)) on 2026-09-01.
 
 **Bounty #2:** 2,500,000 EKOS, funded from the Founder Personal Wallet. It sits in the Pump.fun
 bounty program ([bounty #2](https://pump.fun/go/bb35a0d7-ac6d-43ab-b4d0-68a5518d57ec)), which is on
@@ -110,7 +109,7 @@ Bounty Fund balance (2026-10-22): 2,500,000 EKOS — bounty #2.
 ## Staking Pool
 
 4,000,000 EKOS sits in a [StakePoint staking pool](https://stakepoint.app/embed/pool/cmvj8dje60000l308pgn2q79q?color=fb57ff&theme=dark),
-funded before the 2026-10-22 snapshot:
+created and funded on 2026-10-22 for a 90-day term, with prolongation:
 
 | Amount | From | Purpose |
 |---|---|---|
