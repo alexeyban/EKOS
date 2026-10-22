@@ -59,7 +59,8 @@ reward budget is not counted: it is paid out to stakers.
 - **Community Rewards, 5M → 2M:** 3M moved to fund the staking pool's reward budget.
 - **Founder Personal Wallet, 3.55M → 2.55M:** 1M staked by the founder in the staking pool.
 - **Bounty Fund:** bounty #1 (3.6M EKOS) was paid in full to 9 winners. The current 2.5M is
-  bounty #2; its refund returns to the Bounty Fund.
+  bounty #2, funded from the founder's personal wallet and now on hold in the Pump.fun bounty
+  program; its expected refund returns to the Bounty Fund.
 
 The "Public / market holders" figure is total supply minus the named wallets above; the
 circulating-supply figure is total supply minus only the locked tokens. Neither is a separate
@@ -73,7 +74,7 @@ reserved pool.
 - Total: 14,000,000 EKOS
 - Unlock schedule: linear, monthly
 - Unlock per month: 1,166,600 EKOS (14,000,000 ÷ 12)
-- Next unlock: Sep 4, 2026, 1:31 AM GMT+2
+- Next unlock: Nov 3, 2026
 - As of writing: 0 EKOS claimed, 0 EKOS unlocked
 
 These figures are sourced from the live Streamflow vesting contract and may drift over
@@ -97,11 +98,12 @@ trading fees and slippage on the purchase.
 
 **Bounty #1 — "Make EKOS More Visible":** published Sunday, August 23, 2026 — active through
 Sunday, August 30, 2026. The full 3,600,000 EKOS was paid out to 9 winners
-([bounties](https://pump.fun/profile/EKOSBuilder?tab=bounties)).
+([bounties](https://pump.fun/profile/EKOSBuilder?tab=bounties)), in late August 2026 (around
+August 24; the exact day was not recorded).
 
-**Bounty #2:** 2,500,000 EKOS
-([Pump.fun](https://pump.fun/go/bb35a0d7-ac6d-43ab-b4d0-68a5518d57ec)); a refund is pending and
-returns to the Bounty Fund. _Funding source: to be recorded here._
+**Bounty #2:** 2,500,000 EKOS, funded from the Founder Personal Wallet. It sits in the Pump.fun
+bounty program ([bounty #2](https://pump.fun/go/bb35a0d7-ac6d-43ab-b4d0-68a5518d57ec)), which is on
+hold; a refund is expected and returns to the Bounty Fund.
 
 Bounty Fund balance (2026-10-22): 2,500,000 EKOS — bounty #2.
 
