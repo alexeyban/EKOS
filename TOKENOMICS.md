@@ -20,35 +20,46 @@ removing it from supply. All percentages in this document are relative to the cu
 
 **Circulating supply: ~949,410,000 EKOS (~98.1%)** — the total minus the only 18,000,000 EKOS that
 is time-locked (Founder Vesting 14M + Founder Lock 4M). Every other wallet listed below sits in
-circulation: it is unlocked and spendable, and in the founder's personal wallet's case is mostly
-tokens bought back on the open market.
+circulation: it is unlocked and spendable (the staking pool's tokens are held by the pool contract),
+and in the founder's personal wallet's case is mostly tokens bought back on the open market.
 
 _Burn transaction reference: to be recorded here (Solscan link + date)._
 
 ## Allocation
 
 Every row is part of the 967,410,000 total supply — this table shows *where it sits*, not a
-carve-out from a separate pool.
+carve-out from a separate pool. About 97% is held by the market; founder and community allocations
+together hold about 3%.
 
-| Holder | Quantity | % of Supply | Status |
+Snapshot as of **2026-10-22**; balances change on-chain.
+
+| Holder | EKOS | % of Supply | Status |
 |---|---|---|---|
-| Public / market holders | ~937,260,000 | ~96.9% | In circulation — Pump.fun bonding curve / open market |
-| Founder — Vesting | 14,000,000 | ~1.45% | **Locked** — Streamflow vesting, linear monthly |
-| Community Rewards | 5,000,000 | ~0.52% | In circulation — undistributed, separate Metamask wallet |
-| Founder Lock | 4,000,000 | ~0.41% | **Locked** — Streamflow lock |
-| Bounty Fund | 3,600,000 | ~0.37% | In circulation — community bounty wallet (see below) |
-| Founder — Personal Wallet | 3,550,000 | ~0.37% | In circulation — mostly open-market buys |
-| Treasury | 0 | — | Fully allocated to the Bounty Fund on 2026-08-27 |
+| Public / market holders | ~938,360,000 | ~97.00% | Circulating — Pump.fun bonding curve / open market |
+| Founder Vesting | 14,000,000 | 1.45% | **Vesting** — Streamflow, linear monthly |
+| Founder Lock | 4,000,000 | 0.41% | **Locked until Jul 27, 2027** — Streamflow lock |
+| Staking Pool | 4,000,000 | 0.41% | 3M reward budget + 1M founder stake ([StakePoint](https://stakepoint.app/embed/pool/cmvj8dje60000l308pgn2q79q?color=fb57ff&theme=dark)) |
+| Founder Personal Wallet | 2,550,000 | 0.26% | Unlocked — mostly open-market buys |
+| Bounty Fund | 2,500,000 | 0.26% | Bounty #2 refund pending (see below) |
+| Community Rewards | 2,000,000 | 0.21% | Held for distribution — separate Metamask wallet |
+| Treasury | 0 | 0% | Fully allocated to the Bounty Fund on 2026-08-27 |
+| **Total supply** | **967,410,000** | **100%** | |
 
 **Locked total: 18,000,000 EKOS (~1.9%).** Everything else is in circulation.
 
-Founder custody total: 30,150,000 EKOS (~3.1% of supply) — Founder Vesting + Founder Lock +
-Community Rewards + Bounty Fund + personal wallet. This is a *transparency* figure for what the
-founder can currently move, **not** locked or reserved supply: only the 18,000,000 EKOS above is
-locked, the Bounty Fund and Community Rewards are earmarked for community distribution, and the
-personal wallet is mostly open-market buys. It is up from the earlier ~2.8% figure partly from a
-2,000,000 EKOS open-market purchase by the founder on 2026-08-27 (see Bounty Fund & Disbursements
-below), and partly because the burn shrank the denominator.
+Founder custody total: 26,050,000 EKOS (~2.7% of supply) — Founder Vesting + Founder Lock +
+personal wallet + the founder's 1,000,000 EKOS stake in the staking pool + Bounty Fund + Community
+Rewards. This is a *transparency* figure, **not** locked or reserved supply: only the 18,000,000
+EKOS above is locked, the Bounty Fund and Community Rewards are earmarked for community
+distribution, and the personal wallet is mostly open-market buys. The staking pool's 3,000,000 EKOS
+reward budget is not counted: it is paid out to stakers.
+
+### How the pools changed since the first draft
+
+- **Community Rewards, 5M → 2M:** 3M moved to fund the staking pool's reward budget.
+- **Founder Personal Wallet, 3.55M → 2.55M:** 1M staked by the founder in the staking pool.
+- **Bounty Fund:** bounty #1 (3.6M EKOS) was paid in full to 9 winners. The current 2.5M is
+  bounty #2; its refund returns to the Bounty Fund.
 
 The "Public / market holders" figure is total supply minus the named wallets above; the
 circulating-supply figure is total supply minus only the locked tokens. Neither is a separate
@@ -79,15 +90,32 @@ activity and future community bounties.
 | 2026-08-27 | 2,000,000 EKOS | Treasury | Bounty Fund | https://pump.fun/go/d3beb920-3526-4394-9a19-13eee1500fd0 |
 | 2026-08-27 | 1,600,000 EKOS | Founder — Personal Wallet | Bounty Fund | https://pump.fun/go/d3beb920-3526-4394-9a19-13eee1500fd0 |
 
-Bounty Fund balance: 3,600,000 EKOS.
-
 Separately, on 2026-08-27 the founder purchased 2,000,000 EKOS on the open market (Pump.fun). After
-the 1,600,000 EKOS bounty contribution and this purchase, the Founder — Personal Wallet holds
+the 1,600,000 EKOS bounty contribution and this purchase, the Founder — Personal Wallet held
 3,550,000 EKOS — the ~90,000 EKOS below the arithmetic (3,240,000 − 1,600,000 + 2,000,000) is
 trading fees and slippage on the purchase.
 
-**"Make EKOS More Visible" bounty window:** published Sunday, August 23, 2026 — active through
-Sunday, August 30, 2026.
+**Bounty #1 — "Make EKOS More Visible":** published Sunday, August 23, 2026 — active through
+Sunday, August 30, 2026. The full 3,600,000 EKOS was paid out to 9 winners
+([bounties](https://pump.fun/profile/EKOSBuilder?tab=bounties)).
+
+**Bounty #2:** 2,500,000 EKOS
+([Pump.fun](https://pump.fun/go/bb35a0d7-ac6d-43ab-b4d0-68a5518d57ec)); a refund is pending and
+returns to the Bounty Fund. _Funding source: to be recorded here._
+
+Bounty Fund balance (2026-10-22): 2,500,000 EKOS — bounty #2.
+
+## Staking Pool
+
+4,000,000 EKOS sits in a [StakePoint staking pool](https://stakepoint.app/embed/pool/cmvj8dje60000l308pgn2q79q?color=fb57ff&theme=dark),
+funded before the 2026-10-22 snapshot:
+
+| Amount | From | Purpose |
+|---|---|---|
+| 3,000,000 EKOS | Community Rewards | Reward budget, paid out to stakers |
+| 1,000,000 EKOS | Founder Personal Wallet | Founder's own stake |
+
+The pool is also embedded on [ekos.dev/token](https://ekos.dev/token/#staking).
 
 ## Distribution Principles
 
