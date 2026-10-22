@@ -1,0 +1,48 @@
+
+name: Email notification on main push
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send email notification
+        uses: dawidd6/action-send-mail@v22
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+
+          subject: >-
+            [GitHub] Push to main:
+            ${{ github.repository }}
+
+          to: ${{ secrets.MAIL_TO }}
+          from: GitHub Actions <${{ secrets.MAIL_USERNAME }}>
+
+          body: |
+            A push was made to the main branch.
+
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Pushed by: ${{ github.actor }}
+            Commit: ${{ github.sha }}
+
+            Commit message:
+            ${{ github.event.head_commit.message }}
+
+            Compare changes:
+            ${{ github.event.compare }}
+
+            View commit:
+            https://github.com/${{ github.repository }}/commit/${{ github.sha }}
