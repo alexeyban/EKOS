@@ -18,8 +18,10 @@ Originally minted at 1,000,000,000 EKOS; **32,590,000 EKOS has since been burned
 removing it from supply. All percentages in this document are relative to the current
 967,410,000 supply.
 
-**Circulating supply: ~949,410,000 EKOS (~98.1%)** — the total minus the only 18,000,000 EKOS that
-is time-locked (Founder Vesting 14M + Founder Lock 4M). Every other wallet listed below sits in
+**Circulating supply: ~949,410,000 EKOS (~98.1%)** — the total minus the 18,000,000 EKOS held in
+Streamflow contracts (Founder Vesting 14M + Founder Lock 4M). Of those, ~15,666,700 EKOS is still
+time-locked; the other 2.3333M EKOS of Founder Vesting is unlocked but not yet claimed (as of
+2026-10-22), so it is still in the contract and not in circulation. Every other wallet listed below sits in
 circulation: it is unlocked and spendable (the staking pool's tokens are held by the pool contract),
 and in the founder's personal wallet's case is mostly tokens bought back on the open market.
 
@@ -36,7 +38,7 @@ Snapshot as of **2026-10-22**; balances change on-chain.
 | Holder | EKOS | % of Supply | Status |
 |---|---|---|---|
 | Public / market holders | ~938,360,000 | ~97.00% | Circulating — Pump.fun bonding curve / open market |
-| Founder Vesting | 14,000,000 | 1.45% | **Vesting** — Streamflow, linear monthly |
+| Founder Vesting | 14,000,000 | 1.45% | **Vesting** — Streamflow, linear monthly; 2.3333M unlocked, not yet claimed |
 | Founder Lock | 4,000,000 | 0.41% | **Locked until Jul 27, 2027** — Streamflow lock |
 | Staking Pool | 4,000,000 | 0.41% | 3M reward budget + 1M founder stake ([StakePoint](https://stakepoint.app/embed/pool/cmvj8dje60000l308pgn2q79q?color=fb57ff&theme=dark)) |
 | Founder Personal Wallet | 2,550,000 | 0.26% | Unlocked — mostly open-market buys |
@@ -45,12 +47,13 @@ Snapshot as of **2026-10-22**; balances change on-chain.
 | Treasury | 0 | 0% | Fully allocated to the Bounty Fund on 2026-08-27 |
 | **Total supply** | **967,410,000** | **100%** | |
 
-**Locked total: 18,000,000 EKOS (~1.9%).** Everything else is in circulation.
+**In Streamflow contracts: 18,000,000 EKOS (~1.9%)** — ~15,666,700 EKOS (~1.6%) still time-locked,
+plus 2.3333M EKOS unlocked but unclaimed. Everything else is in circulation.
 
 Founder custody total: 26,050,000 EKOS (~2.7% of supply) — Founder Vesting + Founder Lock +
 personal wallet + the founder's 1,000,000 EKOS stake in the staking pool + Bounty Fund + Community
-Rewards. This is a *transparency* figure, **not** locked or reserved supply: only the 18,000,000
-EKOS above is locked, the Bounty Fund and Community Rewards are earmarked for community
+Rewards. This is a *transparency* figure, **not** locked or reserved supply: only the ~15,666,700
+EKOS above is still time-locked, the Bounty Fund and Community Rewards are earmarked for community
 distribution, and the personal wallet is mostly open-market buys. The staking pool's 3,000,000 EKOS
 reward budget is not counted: it is paid out to stakers.
 
@@ -75,7 +78,7 @@ reserved pool.
 - Unlock schedule: linear, monthly
 - Unlock per month: 1.1666M EKOS (14,000,000 ÷ 12)
 - Next unlock: Nov 3, 2026
-- As of 2026-10-22: 2.3333M EKOS unlocked
+- As of 2026-10-22: 2.3333M EKOS unlocked, 0 EKOS claimed (the unlocked tokens remain in the contract)
 
 These figures are sourced from the live Streamflow vesting contract and may drift over
 time — the contract itself is the source of truth.
