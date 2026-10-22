@@ -6263,6 +6263,12 @@ the git history, a hostile-input run against the real MCP server, and timing on 
       lockfiles (caught the advisory in two workspaces and the stale one). `ci.yml` itself is left
       untouched, per the maintainer's standing instruction.
 - [ ] 12 unmaintained-crate warnings (`instant`, `paste`, `unic-*`, `ttf-parser`); replace over time
+- [x] RUSTSEC-2026-0381/0382/0383 (emSign intermediates): `rustls-webpki` 0.103.16,
+      `webpki-roots`/`webpki-root-certs` 1.0.10 in all three workspaces (devlog_285)
+- [ ] `lru` 0.12.5 unsound warnings (RUSTSEC-2026-0253, RUSTSEC-2026-0002): reported, not fatal;
+      move off 0.12 when the dependents allow it
+- [x] Console CI pinned to Python 3.12 (`UV_PYTHON`) after macos-14 moved to 3.14 and
+      `fa2-modified` 0.4 has no cp314 wheel (devlog_285); drop the pin once wheels exist
 - [x] MCP tools still ignore unknown argument names (`max_depth` for `max_hops` runs the default) —
       refused against each tool's own schema since devlog_225, with a source-scan guard that every
       key a handler reads is declared; console impact `max_hops` aligned to the tool's cap of 20
