@@ -605,6 +605,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plsql"
+version = "1.1.0"
+dependencies = [
+ "ekos-plpgsql",
+]
+
+[[package]]
 name = "ekos-plugin-git"
 version = "1.1.0"
 dependencies = [
@@ -652,6 +659,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-sql-dialect-oracle"
+version = "1.1.0"
+dependencies = [
+ "ekos-plsql",
+ "ekos-sql-dialect-sdk",
+ "sqlparser",
+]
+
+[[package]]
 name = "ekos-plugin-sql-dialect-postgres"
 version = "1.1.0"
 dependencies = [
@@ -688,10 +704,12 @@ dependencies = [
  "ekos-kir",
  "ekos-ledger",
  "ekos-plpgsql",
+ "ekos-plsql",
  "ekos-plugin-sql-dialect-clickhouse",
  "ekos-plugin-sql-dialect-databricks",
  "ekos-plugin-sql-dialect-mssql",
  "ekos-plugin-sql-dialect-mysql",
+ "ekos-plugin-sql-dialect-oracle",
  "ekos-plugin-sql-dialect-postgres",
  "ekos-plugin-sql-dialect-snowflake",
  "ekos-plugin-sql-dialect-trino",
