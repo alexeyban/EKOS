@@ -521,6 +521,13 @@ fn candidate_blocks(objects: &[KirObject]) -> HashMap<(String, String), Vec<usiz
         {
             continue;
         }
+        // RFC 0211: an object read from a live catalog is keyed by (database, owner, name), and
+        // the catalog is the authority the code's claims are compared against. Merging it into a
+        // same-named table recovered from a script would erase exactly the difference the
+        // code ↔ database conflicts report; two owners' tables of one name are two tables.
+        if obj.properties.get("origin").and_then(|v| v.as_str()) == Some("live") {
+            continue;
+        }
         let norm = similarity::normalize(&obj.name);
         if matches!(&obj.kind, ObjectKind::Custom(k) if k == "Concept")
             && (norm.split_whitespace().count() < MIN_CONCEPT_NAME_WORDS
@@ -1268,6 +1275,35 @@ mod tests {
         ]);
         let result = DefaultResolver::new().resolve(&g);
         assert!(result.conflicts.is_empty(), "{:?}", result.conflicts);
+    }
+
+    /// RFC 0211: a table read from the live catalog never merges — not with the script's table
+    /// of the same name, not with another owner's — while two scripted twins still do.
+    #[test]
+    fn a_live_catalog_table_is_never_a_merge_candidate() {
+        let live = |name: &str| {
+            KirObject::new(name, ObjectKind::Table)
+                .with_property("origin", serde_json::json!("live"))
+        };
+        let mut g = KirGraph::new();
+        for o in [
+            live("C_INVOICE"),
+            live("C_INVOICE"),
+            KirObject::new("c_invoice", ObjectKind::Table),
+            KirObject::new("C_Invoice", ObjectKind::Table),
+        ] {
+            g.add_object(o);
+        }
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(result.proposals.len(), 1, "{:?}", result.proposals);
+        let scripted: Vec<KirId> = g.objects[2..].iter().map(|o| o.id).collect();
+        assert_eq!(result.proposals[0].source_ids.len(), 2);
+        assert!(
+            result.proposals[0]
+                .source_ids
+                .iter()
+                .all(|id| scripted.contains(id))
+        );
     }
 
     /// RFC 0209: the narrowing is exact — a Java type beside an unrelated kind still conflicts.

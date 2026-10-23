@@ -107,7 +107,8 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 `simulation` (RFC 0047-0055's opt-in World Engine — see below), `clickhouse-query` (RFC 0056's
 opt-in live NL-to-SQL query engine — see below), `evals` (RFC 0138's answer-grading harness — see
 below), `session` (RFC 0151 agent session memory), `plpgsql` (RFC 0163's PL/pgSQL parser and
-procedural IR), `plsql` (RFC 0210's Oracle script scanner and PL/SQL front end), and EKOS Migrate's `migrate`, `migrate-dq`, `migrate-logic`, `migrate-validate`, `migrate-approval`,
+procedural IR), `plsql` (RFC 0210's Oracle script scanner and PL/SQL front end), `ora-live` (RFC 0211's
+read-only Oracle catalog reader), and EKOS Migrate's `migrate`, `migrate-dq`, `migrate-logic`, `migrate-validate`, `migrate-approval`,
 `migrate-report`, `migrate-target-clickhouse` and `pg-live` (RFC 0154–0162 — see below). The same workspace also builds `ekos` with a generic extension seam (RFC 0149) that out-of-tree
 builds plug extra connectors and MCP tools into.
 
@@ -132,7 +133,9 @@ recovery — `if`/loop/`switch`/`try` with the IL offset of every line, labelled
 reached — plus a per-method migration spec, a Python-rewrite parity check and sandboxed characterization tests that
 run the original and check the rewrite against what it did, RFC 0150; RFC 0148 — shipped
 as a separately licensed extension build, not part of this open-source repository, RFC 0149), ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
-0056), plus scaffolded proof-of-concept clients for Salesforce, SAP, Oracle,
+0056), a live Oracle catalog connector (read-only sessions, catalog reconciled against the
+database's own object counts, behind the `oracle` build feature — RFC 0211), plus scaffolded
+proof-of-concept clients for Salesforce, SAP,
 Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
 account). SQL in the PostgreSQL, SQL Server (T-SQL), MySQL, Snowflake, Databricks and ClickHouse dialects is
 parsed from files (RFC 0031); live PostgreSQL / SQL Server database connectors and a Jira connector remain planned.
@@ -763,6 +766,46 @@ sets with 26,060 changes, none unrecognized; no model calls.
 ekos recover   # … PL/SQL routines: …   Schema history: 2154 migration script(s), 26060 change(s) …
 ekos ekl "FIND Object WHERE kind = 'SchemaChange' AND table = 'C_Invoice'"
 ```
+
+### Live Oracle catalog and code ↔ database conflicts (RFC 0211)
+
+A project can name an Oracle database next to its sources. `ekos build` reads its catalog through a
+read-only session — `SET TRANSACTION READ ONLY`, a write probe that must be refused, settings pinned,
+a call timeout — and checks that every kind it read matches the database's own object count, so a
+user who cannot see some objects is an error, not a smaller answer. The password is never in the
+file, only the name of the variable holding it:
+
+```toml
+[[databases]]
+name = "erp-db"
+kind = "oracle"
+connect = "localhost:51521/XEPDB1"
+user = "ekos_ro"
+password-env = "EKOS_ORACLE_PASSWORD"
+owners = ["ADEMPIERE"]
+```
+
+`ekos recover` turns the catalog into ordinary `Table`, `View` and `Procedure` objects marked
+`origin: live` (routines go through the same PL/SQL reader as files); they never merge with tables
+from scripts. `ekos commit` then compares the code's claims with the database and records each
+disagreement as a conflict that cites both sides: a model table or column the database lacks, a
+table no model describes, a mandatory model column that is nullable, a routine file whose text
+differs from the installed one. When the source tree accounts for a difference — a migration newer
+than the database, a translation table — the conflict carries that explanation.
+
+On iDempiere (source `release-13`, the release 12 seed on Oracle XE): schema changes linked to their
+table 11,748 → 28,916 of 31,620; 444 conflicts, 239 explained, every pending-migration explanation
+confirmed against the database's own record of applied scripts. Among the rest: tables of modules
+removed from the code but not the seed, a model column no script ever created, and an installed
+procedure that builds `NVARCHAR2` columns where its file says `VARCHAR2`. No model calls.
+
+```bash
+cargo build --release -p ekos --features oracle      # needs Oracle Instant Client at run time
+ekos commit    # … Code ↔ database: 754 table(s) and 22 routine(s) compared … 239 of 444 explained …
+ekos conflicts list --type model_column_missing
+```
+
+The testbed is `docker-compose.oracle.yml` + `deploy/fixtures/idempiere-oracle.sh`.
 
 ### PL/pgSQL stored procedures (RFC 0163)
 

@@ -41,6 +41,9 @@ pub const JAVA_TYPE_KIND: &str = "JavaType";
 pub const JAVA_METHOD_KIND: &str = "JavaMethod";
 pub const MODEL_TABLE_KIND: &str = "ModelTable";
 
+/// Bump when the pass's output for the same sources changes.
+const LOGIC_VERSION: &str = "java-analyzer/2";
+
 #[derive(Debug, Deserialize)]
 struct JavaArtifactData {
     path: String,
@@ -119,6 +122,9 @@ impl CompilerPass for JavaAnalyzerPass {
             .map(std::string::ToString::to_string)
             .collect();
         ids.sort();
+        // Without it a change to the analyzer (or to the application-model recognizer) is served
+        // stale from cache for unchanged sources (found adding RFC 0211's `virtual_column`).
+        ids.push(LOGIC_VERSION.to_string());
         ids
     }
 

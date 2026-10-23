@@ -1,195 +1,179 @@
-//! Oracle schema observer plugin (Phase 14 — scaffold, see RFC 0012).
+//! RFC 0211 §3.5 — the live Oracle catalog observer.
 //!
-//! Same surface as a Postgres/SQL Server connector would have: tables,
-//! constraints, and views. `OracleDbClient`'s methods are a **documented
-//! stub** returning `OracleClientError::NotImplemented` — the `oracle` crate
-//! (ODPI-C bindings) needs Oracle Instant Client native libraries that aren't
-//! installable in this environment, and adding that dependency risks breaking
-//! `cargo build --workspace` for anyone without them. The trait, metadata
-//! types, and `Observer` mapping logic are real and unit-tested against
-//! `MockOracleClient`; only the live-database wiring is deferred (RFC 0012).
+//! One `[[databases]]` entry of kind `oracle` becomes one observer. A scan connects through
+//! `ekos-ora-live` as a read-only user, reads each listed owner's catalog from one read-only
+//! snapshot, reconciles it against the dictionary, and emits:
+//!
+//! - one `catalog` artifact per owner: the census, the view family read, the write probe's result
+//!   and any `… ANY …` privilege the session holds — the facts a reviewer needs to trust the rest;
+//! - one `object` artifact per catalog object (table with its columns, view, routine, constraint,
+//!   index, …), its text already redacted by `ora-live`.
+//!
+//! No row value is read here. The database work runs on a blocking thread: the driver is
+//! synchronous, and `ekos build` drives observers from an async runtime.
 
 use async_trait::async_trait;
 use ekos_artifact::ObservationArtifact;
+use ekos_common::redaction::RedactionConfig;
 use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
-use serde::{Deserialize, Serialize};
+use ekos_ora_live::{CatalogSnapshot, ObjectKind, OraError, OraSource, SessionPolicy, WriteCheck};
 use std::sync::Arc;
-use thiserror::Error;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ColumnMetadata {
-    pub name: String,
-    pub data_type: String,
-    pub nullable: bool,
+pub use ekos_ora_live::OraConnection;
+
+/// The observer's name, and the `source_kind` its artifacts carry.
+pub const OBSERVER: &str = "oracle";
+
+/// What one scan of a database read.
+#[derive(Debug, Clone)]
+pub struct DatabaseReading {
+    pub snapshots: Vec<CatalogSnapshot>,
+    /// Probed against the first table of the first owner that has one.
+    pub write_check: Option<WriteCheck>,
+    /// `SESSION_PRIVS` entries containing `ANY`: a finding even when the probe was refused.
+    pub any_privileges: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TableMetadata {
-    pub name: String,
-    pub columns: Vec<ColumnMetadata>,
+/// Where a reading comes from: the live database, or a fixed reading in tests.
+pub trait CatalogReader: Send + Sync {
+    fn read(&self) -> Result<DatabaseReading, OraError>;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ConstraintMetadata {
-    pub name: String,
-    pub table: String,
-    pub constraint_type: String, // "PRIMARY KEY" | "FOREIGN KEY" | "UNIQUE" | "CHECK"
-    pub columns: Vec<String>,
-    /// (referenced_table, referenced_columns) — populated for FOREIGN KEY constraints.
-    pub references: Option<(String, Vec<String>)>,
+/// Reads a live database through `ekos-ora-live`.
+pub struct LiveReader {
+    pub connection: OraConnection,
+    pub owners: Vec<String>,
+    pub run_id: String,
+    pub policy: SessionPolicy,
+    pub redaction: RedactionConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ViewMetadata {
-    pub name: String,
-    pub definition: String,
-}
-
-#[derive(Debug, Error)]
-pub enum OracleClientError {
-    #[error("not implemented: live Oracle driver wiring is deferred (RFC 0012) — {0}")]
-    NotImplemented(&'static str),
-    #[error("{0}")]
-    Other(String),
-}
-
-/// Interface for retrieving Oracle schema metadata. Constructor-injected into
-/// `OracleObserver`.
-#[async_trait]
-pub trait OracleClient: Send + Sync {
-    async fn list_tables(&self) -> Result<Vec<TableMetadata>, OracleClientError>;
-    async fn list_constraints(&self) -> Result<Vec<ConstraintMetadata>, OracleClientError>;
-    async fn list_views(&self) -> Result<Vec<ViewMetadata>, OracleClientError>;
-}
-
-/// Real client — stubbed. See module docs and RFC 0012 for why no live driver
-/// is wired up yet.
-pub struct OracleDbClient {
-    pub connection_string: String,
-}
-
-impl OracleDbClient {
-    pub fn new(connection_string: impl Into<String>) -> Self {
-        Self {
-            connection_string: connection_string.into(),
+impl CatalogReader for LiveReader {
+    fn read(&self) -> Result<DatabaseReading, OraError> {
+        let source = OraSource::connect(&self.connection, &self.run_id, &self.policy)?;
+        let family = source.family();
+        let mut snapshots = Vec::new();
+        for owner in &self.owners {
+            snapshots.push(ekos_ora_live::introspect(
+                &source,
+                owner,
+                family,
+                &self.redaction,
+            )?);
         }
+        let probe = snapshots.iter().find_map(|s| {
+            s.of_kind(ObjectKind::Table)
+                .next()
+                .map(|t| (s.owner.clone(), t.name.clone()))
+        });
+        let write_check = match probe {
+            Some((owner, table)) => Some(source.check_write_refused(&owner, &table)?),
+            None => None,
+        };
+        let any_privileges = source
+            .session_privileges()?
+            .into_iter()
+            .filter(|p| p.contains(" ANY "))
+            .collect();
+        Ok(DatabaseReading {
+            snapshots,
+            write_check,
+            any_privileges,
+        })
     }
 }
 
-#[async_trait]
-impl OracleClient for OracleDbClient {
-    async fn list_tables(&self) -> Result<Vec<TableMetadata>, OracleClientError> {
-        Err(OracleClientError::NotImplemented("list_tables"))
-    }
-
-    async fn list_constraints(&self) -> Result<Vec<ConstraintMetadata>, OracleClientError> {
-        Err(OracleClientError::NotImplemented("list_constraints"))
-    }
-
-    async fn list_views(&self) -> Result<Vec<ViewMetadata>, OracleClientError> {
-        Err(OracleClientError::NotImplemented("list_views"))
-    }
-}
-
-/// In-process client for unit tests — returns fixed metadata, no database dependency.
-pub struct MockOracleClient {
-    pub tables: Vec<TableMetadata>,
-    pub constraints: Vec<ConstraintMetadata>,
-    pub views: Vec<ViewMetadata>,
-}
-
-impl MockOracleClient {
-    pub fn new(
-        tables: Vec<TableMetadata>,
-        constraints: Vec<ConstraintMetadata>,
-        views: Vec<ViewMetadata>,
-    ) -> Self {
-        Self {
-            tables,
-            constraints,
-            views,
-        }
-    }
-}
-
-#[async_trait]
-impl OracleClient for MockOracleClient {
-    async fn list_tables(&self) -> Result<Vec<TableMetadata>, OracleClientError> {
-        Ok(self.tables.clone())
-    }
-
-    async fn list_constraints(&self) -> Result<Vec<ConstraintMetadata>, OracleClientError> {
-        Ok(self.constraints.clone())
-    }
-
-    async fn list_views(&self) -> Result<Vec<ViewMetadata>, OracleClientError> {
-        Ok(self.views.clone())
-    }
-}
-
-/// Observer emitting one `ObservationArtifact` per table (with its constraints
-/// attached) plus one per view.
+/// One `[[databases]]` entry of kind `oracle`.
 pub struct OracleObserver {
-    client: Arc<dyn OracleClient>,
+    /// The `[[databases]] name`: it keys every artifact and object of this database.
+    database: String,
+    reader: Arc<dyn CatalogReader>,
 }
 
 impl OracleObserver {
-    pub fn new(client: Arc<dyn OracleClient>) -> Self {
-        Self { client }
+    pub fn new(database: impl Into<String>, reader: Arc<dyn CatalogReader>) -> Self {
+        Self {
+            database: database.into(),
+            reader,
+        }
     }
+}
+
+/// `oracle://<database>/<OWNER>` and `…/<kind>/<NAME>`: stable, and never a file path, so the
+/// excluded-file globs of RFC 0043 cannot match it by accident.
+pub fn catalog_target(database: &str, owner: &str) -> String {
+    format!("oracle://{database}/{owner}")
+}
+
+pub fn object_target(database: &str, owner: &str, kind: ObjectKind, name: &str) -> String {
+    format!("oracle://{database}/{owner}/{}/{name}", kind.as_str())
+}
+
+/// The artifacts of one reading. Pure, so the mapping is tested without a database.
+pub fn artifacts(database: &str, reading: &DatabaseReading) -> Vec<ObservationArtifact> {
+    let mut out = Vec::new();
+    for s in &reading.snapshots {
+        let data = serde_json::json!({
+            "kind": "catalog",
+            "database": database,
+            "owner": s.owner,
+            "family": s.family,
+            "census": s.census,
+            "listed": s.counts().into_iter().map(|(k, n)| (k.as_str(), n)).collect::<std::collections::BTreeMap<_, _>>(),
+            "columns": s.columns,
+            "folded_not_null": s.folded_not_null,
+            "other_constraints": s.other_constraints,
+            "write_check": reading.write_check,
+            "any_privileges": reading.any_privileges,
+        });
+        out.push(
+            ObservationArtifact::new(OBSERVER, catalog_target(database, &s.owner), data)
+                .with_producer("ekos-plugin-oracle"),
+        );
+        for o in &s.objects {
+            let data = serde_json::json!({
+                "kind": "object",
+                "database": database,
+                "object": o,
+            });
+            out.push(
+                ObservationArtifact::new(
+                    OBSERVER,
+                    object_target(database, &o.owner, o.kind, &o.name),
+                    data,
+                )
+                .with_producer("ekos-plugin-oracle"),
+            );
+        }
+    }
+    out
 }
 
 #[async_trait]
 impl Observer for OracleObserver {
     fn name(&self) -> &str {
-        "oracle"
+        OBSERVER
     }
 
     async fn scan(&self, _ctx: &ScanContext) -> Result<ObservationPackage, ObserveError> {
-        let tables = self
-            .client
-            .list_tables()
+        let reader = Arc::clone(&self.reader);
+        let reading = tokio::task::spawn_blocking(move || reader.read())
             .await
-            .map_err(|e| ObserveError::connector(format!("oracle table list failed: {e}")))?;
-        let constraints =
-            self.client.list_constraints().await.map_err(|e| {
-                ObserveError::connector(format!("oracle constraint list failed: {e}"))
+            .map_err(|e| ObserveError::connector(format!("oracle reader stopped: {e}")))?
+            .map_err(|e| {
+                ObserveError::connector(format!("oracle database {}: {e}", self.database))
             })?;
-        let views = self
-            .client
-            .list_views()
-            .await
-            .map_err(|e| ObserveError::connector(format!("oracle view list failed: {e}")))?;
-
-        let mut pkg = ObservationPackage::new("oracle", "database");
-
-        for table in &tables {
-            let table_constraints: Vec<&ConstraintMetadata> = constraints
-                .iter()
-                .filter(|c| c.table == table.name)
-                .collect();
-            let data = serde_json::json!({
-                "kind": "table",
-                "columns": table.columns,
-                "constraints": table_constraints,
-            });
-            pkg.push(
-                ObservationArtifact::new("oracle", &table.name, data)
-                    .with_producer("ekos-plugin-oracle"),
-            );
+        let mut pkg = ObservationPackage::new(OBSERVER, "database");
+        for a in artifacts(&self.database, &reading) {
+            pkg.push(a);
         }
-
-        for view in &views {
-            let data = serde_json::json!({
-                "kind": "view",
-                "definition": view.definition,
-            });
-            pkg.push(
-                ObservationArtifact::new("oracle", &view.name, data)
-                    .with_producer("ekos-plugin-oracle"),
-            );
-        }
-
+        let objects: usize = reading.snapshots.iter().map(|s| s.objects.len()).sum();
+        tracing::info!(
+            database = %self.database,
+            owners = reading.snapshots.len(),
+            objects,
+            "oracle catalog read"
+        );
         Ok(pkg)
     }
 }
@@ -197,84 +181,101 @@ impl Observer for OracleObserver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ekos_ora_live::{CatalogObject, Census, ViewFamily};
 
-    fn orders_table() -> TableMetadata {
-        TableMetadata {
-            name: "ORDERS".into(),
-            columns: vec![
-                ColumnMetadata {
-                    name: "ID".into(),
-                    data_type: "NUMBER".into(),
-                    nullable: false,
-                },
-                ColumnMetadata {
-                    name: "CUSTOMER_ID".into(),
-                    data_type: "NUMBER".into(),
-                    nullable: false,
-                },
-            ],
+    struct Fixed(DatabaseReading);
+
+    impl CatalogReader for Fixed {
+        fn read(&self) -> Result<DatabaseReading, OraError> {
+            Ok(self.0.clone())
         }
     }
 
-    fn fk_constraint() -> ConstraintMetadata {
-        ConstraintMetadata {
-            name: "FK_ORDERS_CUSTOMER".into(),
-            table: "ORDERS".into(),
-            constraint_type: "FOREIGN KEY".into(),
-            columns: vec!["CUSTOMER_ID".into()],
-            references: Some(("CUSTOMERS".into(), vec!["ID".into()])),
-        }
-    }
-
-    #[tokio::test]
-    async fn emits_artifact_per_table_and_view() {
-        let client = Arc::new(MockOracleClient::new(
-            vec![orders_table()],
-            vec![fk_constraint()],
-            vec![ViewMetadata {
-                name: "ORDER_SUMMARY".into(),
-                definition: "SELECT ...".into(),
+    fn reading() -> DatabaseReading {
+        let table = CatalogObject {
+            kind: ObjectKind::Table,
+            owner: "ADEMPIERE".into(),
+            name: "C_INVOICE".into(),
+            status: Some("VALID".into()),
+            detail: serde_json::json!({ "columns": [{ "name": "C_INVOICE_ID", "data_type": "NUMBER(10,0)", "nullable": false }] }),
+        };
+        let f = CatalogObject {
+            kind: ObjectKind::Function,
+            owner: "ADEMPIERE".into(),
+            name: "INVOICEOPEN".into(),
+            status: Some("VALID".into()),
+            detail: serde_json::json!({ "text": "FUNCTION invoiceOpen RETURN NUMBER IS BEGIN RETURN 0; END;" }),
+        };
+        DatabaseReading {
+            snapshots: vec![CatalogSnapshot {
+                owner: "ADEMPIERE".into(),
+                family: ViewFamily::Dba,
+                objects: vec![table, f],
+                census: [
+                    (
+                        "TABLE".to_string(),
+                        Census {
+                            valid: 1,
+                            invalid: 0,
+                        },
+                    ),
+                    (
+                        "FUNCTION".to_string(),
+                        Census {
+                            valid: 1,
+                            invalid: 0,
+                        },
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+                columns: 1,
+                folded_not_null: 0,
+                other_constraints: Default::default(),
             }],
-        ));
-        let observer = OracleObserver::new(client);
-        let ctx = ScanContext::new(".");
-        let pkg = observer.scan(&ctx).await.unwrap();
-        assert_eq!(pkg.len(), 2);
+            write_check: Some(WriteCheck::RefusedByServer {
+                message: "ORA-01031: insufficient privileges".into(),
+            }),
+            any_privileges: vec![],
+        }
     }
 
     #[tokio::test]
-    async fn table_artifact_carries_its_constraints() {
-        let client = Arc::new(MockOracleClient::new(
-            vec![orders_table()],
-            vec![fk_constraint()],
-            vec![],
-        ));
-        let observer = OracleObserver::new(client);
-        let ctx = ScanContext::new(".");
-        let pkg = observer.scan(&ctx).await.unwrap();
-        let artifact = pkg
+    async fn a_scan_emits_one_catalog_artifact_and_one_per_object() {
+        let obs = OracleObserver::new("erp", Arc::new(Fixed(reading())));
+        let pkg = obs.scan(&ScanContext::new(".")).await.unwrap();
+        let targets: Vec<&str> = pkg
             .artifacts
             .iter()
-            .find(|a| a.content.target == "ORDERS")
-            .unwrap();
-        let constraints = artifact.content.data["constraints"].as_array().unwrap();
-        assert_eq!(constraints.len(), 1);
-        assert_eq!(constraints[0]["constraint_type"], "FOREIGN KEY");
+            .map(|a| a.content.target.as_str())
+            .collect();
+        assert_eq!(
+            targets,
+            [
+                "oracle://erp/ADEMPIERE",
+                "oracle://erp/ADEMPIERE/table/C_INVOICE",
+                "oracle://erp/ADEMPIERE/function/INVOICEOPEN",
+            ]
+        );
+        let catalog = &pkg.artifacts[0].content.data;
+        assert_eq!(catalog["family"], "dba");
+        assert_eq!(catalog["write_check"]["result"], "refused_by_server");
+        assert_eq!(catalog["listed"]["table"], 1);
+        assert_eq!(pkg.artifacts[1].content.data["object"]["kind"], "table");
     }
 
     #[tokio::test]
-    async fn stub_real_client_returns_not_implemented() {
-        let client = OracleDbClient::new("oracle://scratch");
-        let err = client.list_tables().await.unwrap_err();
-        assert!(matches!(err, OracleClientError::NotImplemented(_)));
-    }
-
-    #[tokio::test]
-    async fn empty_database_produces_no_artifacts() {
-        let client = Arc::new(MockOracleClient::new(vec![], vec![], vec![]));
-        let observer = OracleObserver::new(client);
-        let ctx = ScanContext::new(".");
-        let pkg = observer.scan(&ctx).await.unwrap();
-        assert!(pkg.is_empty());
+    async fn a_reader_failure_names_the_database() {
+        struct Failing;
+        impl CatalogReader for Failing {
+            fn read(&self) -> Result<DatabaseReading, OraError> {
+                Err(OraError::DriverNotBuilt)
+            }
+        }
+        let obs = OracleObserver::new("erp", Arc::new(Failing));
+        let Err(err) = obs.scan(&ScanContext::new(".")).await else {
+            panic!("a failing reader must fail the scan");
+        };
+        assert!(err.to_string().contains("oracle database erp"), "{err}");
     }
 }

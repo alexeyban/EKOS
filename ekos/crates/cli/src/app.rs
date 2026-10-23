@@ -1130,12 +1130,14 @@ enum ClickHouseCommands {
 
 #[derive(Subcommand)]
 enum ConflictsCommands {
-    /// The current conflicts: duplicate definitions, merge losses, label mismatches
+    /// The current conflicts: duplicate definitions, merge losses, label mismatches, code ↔ database
     List {
         /// Only one status: open, resolved or dismissed
         #[arg(long)]
         status: Option<String>,
-        /// Only one type: duplicate_definition, merge_loss or label_mismatch
+        /// Only one type: duplicate_definition, merge_loss, label_mismatch, doc_vs_data, or (RFC 0211)
+        /// model_table_missing, table_without_model, model_column_missing, mandatory_but_nullable,
+        /// routine_text_differs
         #[arg(long = "type")]
         conflict_type: Option<String>,
         #[arg(long)]

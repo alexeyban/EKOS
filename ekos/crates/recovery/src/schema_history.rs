@@ -42,7 +42,7 @@ pub const CHANGE_SET: &str = "SchemaChangeSet";
 /// The change kind (one per DDL operation).
 pub const CHANGE: &str = "SchemaChange";
 
-const LOGIC_VERSION: &str = "schema-history/1";
+const LOGIC_VERSION: &str = "schema-history/2";
 const MAX_FRAGMENT: usize = 2048;
 
 /// Directory names that say which engine a script is for; never a release name.
@@ -1091,6 +1091,8 @@ fn emit_change(
         ("applied_at", json!(ctx.name.applied_at)),
         ("tickets", json!(ctx.name.tickets)),
         ("engine", json!(ctx.engine)),
+        // RFC 0211: the release a change ships in orders it against a database's own release.
+        ("release", json!(release_of(ctx.source_path))),
         ("source_path", json!(ctx.source_path)),
         ("line", json!(line)),
     ] {

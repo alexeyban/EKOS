@@ -189,6 +189,11 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(application family, table name) — RFC 0209; a code claim, never merged into a database Table",
     },
     CustomKind {
+        name: "OracleCatalog",
+        structurally_keyed: true,
+        note: "(database, owner) — RFC 0211; one live catalog summary per schema read",
+    },
+    CustomKind {
         name: "SchemaChangeSet",
         structurally_keyed: true,
         note: "migration script path — RFC 0210; twin engines' scripts share a name and are two change sets",
@@ -489,6 +494,7 @@ mod tests {
             "ModelTable",
             "SchemaChangeSet",
             "SchemaChange",
+            "OracleCatalog",
             "JsModule",
             "JsSymbol",
             "Document",

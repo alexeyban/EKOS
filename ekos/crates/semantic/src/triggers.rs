@@ -244,9 +244,9 @@ pub fn link_and_classify_triggers(graph: &mut KirGraph) -> TriggerLinkStats {
     let mut routines = NameIndex::default();
     for o in &graph.objects {
         if matches!(o.kind, ObjectKind::Table | ObjectKind::Dataset) || is_custom(o, "View") {
-            relations.add(&o.name, o.id);
+            relations.add_object(o);
         } else if is_custom(o, "Procedure") {
-            routines.add(&o.name, o.id);
+            routines.add_object(o);
         }
     }
     let index: BTreeMap<uuid::Uuid, usize> = graph

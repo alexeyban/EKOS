@@ -42,7 +42,7 @@ pub fn link_changes(graph: &mut KirGraph) -> SchemaLinkStats {
     let mut relations = NameIndex::default();
     for o in &graph.objects {
         if o.kind == ObjectKind::Table || is_custom(o, "View") {
-            relations.add(&o.name, o.id);
+            relations.add_object(o);
         }
     }
     let mut stats = SchemaLinkStats::default();

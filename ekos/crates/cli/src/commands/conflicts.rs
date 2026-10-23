@@ -85,12 +85,14 @@ pub fn carry_review(ledger: &dyn KnowledgeStore, fresh: &mut KirObject) -> Resul
 }
 
 /// What one commit derived.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone)]
 pub struct ConflictStats {
     pub open: usize,
     pub resolved: usize,
     pub dismissed: usize,
     pub written: usize,
+    /// RFC 0211: what the code ↔ database comparison found this commit.
+    pub live: ekos_semantic::live_conflicts::LiveConflictStats,
 }
 
 impl ConflictStats {
@@ -138,28 +140,43 @@ pub fn commit_step(
             let links = conflicts::column_links(&g, &enums, &tables);
             g.relationships.extend(links);
         }
-        for ev in &g.evidence {
-            ledger.append_evidence(ev)?;
-        }
-        for o in &g.objects {
-            let mut o = o.clone();
-            carry_review(ledger, &mut o)?;
-            if ledger.append_object(&o)? {
-                written += 1;
-            }
-            ids.insert(o.id.to_string());
-        }
-        for r in &g.relationships {
-            if ledger.append_relationship(r)? {
-                written += 1;
-            }
-        }
+        written += append_conflicts(ledger, &g, &mut ids)?;
     }
+    // RFC 0211: the code's claims against the live catalog. Compares nothing unless both exist.
+    let (g, live) = ekos_semantic::live_conflicts::detect(&ledger.all_objects()?);
+    written += append_conflicts(ledger, &g, &mut ids)?;
     write_manifest(config, cwd, &ids, ConflictStats::default())?;
     let mut stats = count(&items_in(config, cwd, ledger)?);
-    write_manifest(config, cwd, &ids, stats)?;
+    write_manifest(config, cwd, &ids, stats.clone())?;
     stats.written = written;
+    stats.live = live;
     Ok(stats)
+}
+
+/// Append a detector's conflicts, keeping review decisions; returns how many records were new.
+fn append_conflicts(
+    ledger: &dyn KnowledgeStore,
+    g: &ekos_kir::KirGraph,
+    ids: &mut BTreeSet<String>,
+) -> Result<usize> {
+    let mut written = 0;
+    for ev in &g.evidence {
+        ledger.append_evidence(ev)?;
+    }
+    for o in &g.objects {
+        let mut o = o.clone();
+        carry_review(ledger, &mut o)?;
+        if ledger.append_object(&o)? {
+            written += 1;
+        }
+        ids.insert(o.id.to_string());
+    }
+    for r in &g.relationships {
+        if ledger.append_relationship(r)? {
+            written += 1;
+        }
+    }
+    Ok(written)
 }
 
 fn count(items: &[KirObject]) -> ConflictStats {
@@ -208,6 +225,7 @@ pub fn recorded_counts(config: &EkosConfig, cwd: &Path) -> Option<ConflictStats>
         resolved: n("resolved"),
         dismissed: n("dismissed"),
         written: 0,
+        live: Default::default(),
     })
 }
 
@@ -431,6 +449,8 @@ pub fn brief(o: &KirObject) -> Value {
         "picked_claim": o.properties.get("picked_claim"),
         "review_note": o.properties.get("review_note"),
         "measured": o.properties.get("measured"),
+        // RFC 0211: what in the source tree accounts for it, when something does.
+        "explanation": o.properties.get("explanation"),
     })
 }
 
@@ -556,6 +576,25 @@ fn truncate(t: &str, n: usize) -> String {
     }
 }
 
+/// RFC 0211: an explanation in words.
+fn explanation_line(e: &Value) -> String {
+    let get = |k: &str| e.get(k).and_then(Value::as_str).unwrap_or_default();
+    match get("kind") {
+        "pending_migration" => format!(
+            "{} in {}:{} ({}), newer than what this database has run",
+            get("operation"),
+            get("script"),
+            e.get("line").and_then(Value::as_u64).unwrap_or(0),
+            get("applied_at")
+        ),
+        "translation_table" => format!(
+            "a translation table, read through the model of {}",
+            get("parent")
+        ),
+        other => other.to_string(),
+    }
+}
+
 /// `ekos conflicts show`.
 pub fn show(config: &EkosConfig, cwd: &Path, target: &str, json_out: bool) -> Result<()> {
     let ledger = open_store_read_only(config, cwd)?;
@@ -585,6 +624,9 @@ pub fn show(config: &EkosConfig, cwd: &Path, target: &str, json_out: bool) -> Re
     }
     if let Some(chosen) = o.properties.get("chosen").filter(|v| !v.is_null()) {
         println!("  EKOS kept: {chosen}");
+    }
+    if let Some(e) = o.properties.get("explanation") {
+        println!("  explained: {}", explanation_line(e));
     }
     // RFC 0172 Phase 3 — the measurement behind a doc-vs-data conflict, so it can be re-run.
     if let Some(m) = o.properties.get("measured") {

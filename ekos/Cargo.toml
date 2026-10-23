@@ -26,6 +26,7 @@ members = [
     "crates/migrate",
     "crates/migrate-validate",
     "crates/pg-live",
+    "crates/ora-live",
     "crates/migrate-dq",
     "crates/migrate-logic",
     "crates/migrate-target-clickhouse",
@@ -111,6 +112,7 @@ ekos-ledger                        = { path = "crates/ledger", version = "1.1.0"
 ekos-marketing                     = { path = "crates/marketing", version = "1.1.0" }
 ekos-observation-sdk               = { path = "crates/observation-sdk", version = "1.1.0" }
 ekos-plugin-clickhouse             = { path = "plugins/clickhouse", version = "1.1.0" }
+ekos-plugin-oracle                 = { path = "plugins/oracle", version = "1.1.0" }
 ekos-plugin-confluence             = { path = "plugins/confluence", version = "1.1.0" }
 ekos-plugin-crypto                 = { path = "plugins/crypto", version = "1.1.0" }
 ekos-plugin-elixir                 = { path = "plugins/elixir", version = "1.1.0" }
@@ -142,6 +144,7 @@ ekos-session                       = { path = "crates/session", version = "1.1.0
 ekos-migrate                       = { path = "crates/migrate", version = "1.1.0" }
 ekos-migrate-validate              = { path = "crates/migrate-validate", version = "1.1.0" }
 ekos-pg-live                       = { path = "crates/pg-live", version = "1.1.0" }
+ekos-ora-live                      = { path = "crates/ora-live", version = "1.1.0" }
 ekos-migrate-dq                    = { path = "crates/migrate-dq", version = "1.1.0" }
 ekos-migrate-logic                 = { path = "crates/migrate-logic", version = "1.1.0" }
 ekos-migrate-target-clickhouse     = { path = "crates/migrate-target-clickhouse", version = "1.1.0" }
@@ -184,6 +187,7 @@ chrono = { version = "0.4", features = ["serde"] }
 # Hashing
 sha2 = "0.10"
 postgres = "0.19"
+oracle = "0.6.3"
 hex  = "0.4"
 
 # Storage

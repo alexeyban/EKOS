@@ -1,0 +1,32 @@
+# RFC 0211 Part 0 — the Oracle database EKOS's live Oracle connector is developed and tested against.
+#
+# Separate from docker-compose.migrate.yml for the same reason that file is separate from the dev
+# one: nothing else needs an Oracle running, and XE takes about 2 GB of memory.
+#
+# Usage:
+#   docker compose -f docker-compose.oracle.yml up -d
+#   deploy/fixtures/idempiere-oracle.sh                  # imports the iDempiere seed (once)
+#   docker compose -f docker-compose.oracle.yml down -v  # -v also drops the data
+#
+# Oracle XE 21c is the version iDempiere's own wiki documents. The image is gvenzl's, pinned by
+# tag: Oracle's own registry image has no slim variant and needs a licence click-through.
+# The password is deliberately weak and local-only; the port is bound to loopback.
+services:
+  oracle-xe:
+    image: gvenzl/oracle-xe:21.3.0-slim
+    environment:
+      ORACLE_PASSWORD: ekos-local-only
+      TZ: UTC
+    ports:
+      - "127.0.0.1:51521:1521"
+    volumes:
+      - oracle-xe-data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+volumes:
+  oracle-xe-data:

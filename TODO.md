@@ -6757,8 +6757,11 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 
 ### Part 0 — testbed
 - [x] iDempiere source pinned (`release-13`), code census measured (devlog_286)
-- [ ] Oracle XE 21c / Free 23ai compose profile + seed import, `ekos_ro` read-only user
-- [ ] PostgreSQL twin (parity + fallback demo source); census committed (objects, columns, rows)
+- [x] Oracle XE 21c compose profile (`docker-compose.oracle.yml`) + iDempiere 12 seed import
+      (`deploy/fixtures/idempiere-oracle.sh`), `ekos_ro` read-only user, census committed
+      (`evals/oracle-idempiere/part0/`) (devlog_288)
+- [ ] Full (non-slim) XE image or time-zone file v26, so `TEST`/`AD_SCHEDULER` rows import (`ORA-30094`)
+- [ ] PostgreSQL twin (parity + fallback demo source); row census
 
 ### Part I — EKOS core, deterministic
 - [x] RFC 0209 Phase 1 — Java observer + declaration parser, `JavaType`/`JavaMethod` (devlog_286)
@@ -6773,9 +6776,19 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       complete, 991/992 statements (devlog_287)
 - [x] RFC 0210 Phase 3 — schema history: 2,154 change sets, 26,060 changes, 0 unrecognized; commit links (devlog_287)
 - [ ] RFC 0210 follow-ups: measure view parsing in Oracle files (the view pass reads raw text, which keeps
-      `(+)`/`FORCE`); link the 17,171 changes to dump-only tables via RFC 0211's catalog; PL/SQL lowering into the Transformation IR (with RFC 0164); `db/oracle` ↔ `db/postgresql`
+      `(+)`/`FORCE`); ~~link the 17,171 changes to dump-only tables via RFC 0211's catalog~~ (done,
+      17,171 → 3, devlog_288); PL/SQL lowering into the Transformation IR (with RFC 0164); `db/oracle` ↔ `db/postgresql`
       twin diff; replayed per-table schema from the change sets (input to RFC 0211)
-- [ ] RFC 0211 — `ora-live`, profiling, code ↔ database conflicts (`ModelTable` vs `Table`)
+- [x] RFC 0211 Phase 1 — `crates/ora-live`: guarded read-only sessions, write probe, `DBA_*` catalog
+      reconciled exactly with the census (devlog_288)
+- [x] RFC 0211 Phase 2 — `[[databases]]`, Oracle observer, `OracleCatalogPass`; schema changes linked
+      11,748 → 28,916 of 31,620 (devlog_288)
+- [x] RFC 0211 Phase 3 — code ↔ database conflicts with explanations (pending migration by time + release
+      horizon, translation tables); 444 conflicts, 239 explained, 173/173 checked against
+      `AD_MigrationScript` (devlog_288)
+- [ ] RFC 0211 Phase 4 — profiles P0–P2 + archive/supplemental log facts; no-row-value ledger gate
+- [ ] RFC 0211 follow-ups: `change_not_applied` (opt-in `AD_MigrationScript` read, decision D3); compare the
+      37 ambiguous routine names; `ekos doctor` names a missing Instant Client
 - [ ] RFC 0212 — write behaviour: update/delete evidence per table
 - [ ] I.8 docs/wiki snapshot, git ticket links; I.9 structured run logs (`run.log.jsonl`)
 - [ ] Part I exit: 25-question eval with expected citations, without and with the database

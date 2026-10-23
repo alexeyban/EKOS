@@ -50,6 +50,9 @@ pub struct EkosConfig {
     /// the directories of `[observe] paths`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<SourceConfig>,
+    /// RFC 0211: live databases whose catalog `ekos build` reads (`[[databases]]`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub databases: Vec<DatabaseConfig>,
     /// RFC 0191: settings of out-of-tree extensions, one table each (`[extensions.lakehouse]`).
     /// Core keeps them as given and never reads them; an extension reads its own with
     /// [`EkosConfig::extension_settings`]. Every other unknown section is still an error.
@@ -937,6 +940,31 @@ impl StorageConfig {
     }
 }
 
+/// RFC 0211: one live database whose catalog `ekos build` reads, read-only.
+///
+/// The password is named by an environment variable; the value is never in this file, the ledger
+/// or a log (RFC 0154's rule, as for `[migrate]` connections).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct DatabaseConfig {
+    /// Unique in the project; `[a-z0-9][a-z0-9_-]{0,62}`. It keys the database's objects.
+    pub name: String,
+    pub kind: DatabaseKind,
+    /// Easy Connect string: `host:port/service`.
+    pub connect: String,
+    pub user: String,
+    /// The environment variable holding the password.
+    pub password_env: String,
+    /// The schemas (owners) to read, as the dictionary spells them (`ADEMPIERE`).
+    pub owners: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum DatabaseKind {
+    Oracle,
+}
+
 /// RFC 0178 Part 2: one named input of a project.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -1052,6 +1080,7 @@ impl Default for EkosConfig {
             freshness: FreshnessConfig::default(),
             conflicts: ConflictsConfig::default(),
             sources: Vec::new(),
+            databases: Vec::new(),
             extensions: std::collections::BTreeMap::new(),
             location: None,
             read_scope: None,
@@ -1132,6 +1161,23 @@ impl EkosConfig {
             }
             if !paths.insert(s.path.as_path()) {
                 anyhow::bail!("[[sources]] path {} is listed twice", s.path.display());
+            }
+        }
+        // RFC 0211: a database's name keys its objects as a source's does, so the two share one
+        // namespace.
+        for d in &self.databases {
+            if !is_valid_name(&d.name) {
+                anyhow::bail!(
+                    "[[databases]] name {:?}: use lowercase letters, digits, `-` and `_`, starting \
+                     with a letter or digit, at most 63 characters",
+                    d.name
+                );
+            }
+            if !names.insert(d.name.as_str()) {
+                anyhow::bail!("[[databases]] name {:?} is already used", d.name);
+            }
+            if d.owners.is_empty() {
+                anyhow::bail!("[[databases]] {:?} lists no owners to read", d.name);
             }
         }
         Ok(())
@@ -1452,6 +1498,41 @@ path = "/tmp/ekos-containers/b"
             cfg.storage.containers[0].path,
             PathBuf::from("/tmp/ekos-containers/a")
         );
+    }
+
+    /// RFC 0211: `[[databases]]` parses, and its names share the sources' namespace.
+    #[test]
+    fn databases_parse_and_share_the_source_namespace() {
+        let db = "[[databases]]\nname = \"erp\"\nkind = \"oracle\"\nconnect = \"h:1521/S\"\n\
+                  user = \"ekos_ro\"\npassword-env = \"ERP_PW\"\nowners = [\"ADEMPIERE\"]\n";
+        let cfg: EkosConfig = toml::from_str(db).unwrap();
+        cfg.check_sources().unwrap();
+        assert_eq!(cfg.databases[0].kind, DatabaseKind::Oracle);
+        assert_eq!(cfg.databases[0].password_env, "ERP_PW");
+
+        let clash: EkosConfig = toml::from_str(&format!(
+            "[[sources]]\nname = \"erp\"\npath = \"x\"\n\n{db}"
+        ))
+        .unwrap();
+        assert!(
+            clash
+                .check_sources()
+                .unwrap_err()
+                .to_string()
+                .contains("already used")
+        );
+
+        let none: EkosConfig = toml::from_str(&db.replace("[\"ADEMPIERE\"]", "[]")).unwrap();
+        assert!(
+            none.check_sources()
+                .unwrap_err()
+                .to_string()
+                .contains("no owners")
+        );
+
+        let password: Result<EkosConfig, _> =
+            toml::from_str(&format!("{db}password = \"hunter2\"\n"));
+        assert!(password.is_err(), "a password value is not a field");
     }
 
     /// The core RFC 0111 groundwork claim: naming an active container redirects the *entire*

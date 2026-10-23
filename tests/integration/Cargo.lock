@@ -626,9 +626,9 @@ dependencies = [
 
 [[package]]
 name = "ctutils"
-version = "0.4.2"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d5515a3834141de9eafb9717ad39eea8247b5674e6066c404e8c4b365d2a29e"
+checksum = "38d28fb6aa7dd680b3ffd1a3e64e115c177bdba63c0ae7f9cd48129ff05c4fa0"
 dependencies = [
  "cmov",
 ]
@@ -800,6 +800,7 @@ dependencies = [
  "ekos-plugin-java",
  "ekos-plugin-javascript",
  "ekos-plugin-localdocs",
+ "ekos-plugin-oracle",
  "ekos-plugin-pentaho",
  "ekos-plugin-perl",
  "ekos-plugin-python",
@@ -1168,6 +1169,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-ora-live"
+version = "1.1.0"
+dependencies = [
+ "ekos-common",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "ekos-pg-live"
 version = "1.1.0"
 dependencies = [
@@ -1385,6 +1396,21 @@ dependencies = [
  "tracing",
  "walkdir",
  "zip",
+]
+
+[[package]]
+name = "ekos-plugin-oracle"
+version = "1.1.0"
+dependencies = [
+ "async-trait",
+ "ekos-artifact",
+ "ekos-common",
+ "ekos-observation-sdk",
+ "ekos-ora-live",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

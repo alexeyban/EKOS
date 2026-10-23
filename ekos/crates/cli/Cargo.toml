@@ -26,6 +26,10 @@ default = []
 # storage (S3 / Azure / …). Off by default so a stock build never compiles the `object_store`
 # stack; a co-located Local-mode cluster works without it.
 distributed = ["ekos-distributed/object-store", "ekos-segment-backend/object-store"]
+# RFC 0211 — the live Oracle driver (rust-oracle over ODPI-C). Off by default: it needs a C
+# compiler to build and Oracle Instant Client at run time. Without it, a `[[databases]]` entry of
+# kind `oracle` fails `ekos build` with a message saying so.
+oracle = ["ekos-plugin-oracle/oracle"]
 
 [dependencies]
 ekos-common.workspace = true
@@ -66,6 +70,7 @@ ekos-plugin-treasury.workspace = true
 ekos-plugin-governance.workspace = true
 ekos-plugin-confluence.workspace = true
 ekos-plugin-clickhouse.workspace = true
+ekos-plugin-oracle.workspace = true
 ekos-plugin-localdocs.workspace = true
 ekos-plugin-pentaho.workspace = true
 ekos-plugin-python.workspace = true

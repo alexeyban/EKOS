@@ -360,8 +360,15 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
             crate::commands::semantics::summary_line(stats, *written)
         );
     }
-    if let Some(stats) = conflict_stats.filter(|s| s.total() > 0) {
+    if let Some(stats) = conflict_stats.as_ref().filter(|s| s.total() > 0) {
         println!("  Conflicting evidence:  {}", stats.summary_line());
+    }
+    if let Some(l) = conflict_stats
+        .as_ref()
+        .map(|s| &s.live)
+        .filter(|l| l.tables_compared + l.routines_compared > 0)
+    {
+        println!("  Code ↔ database:       {}", live_summary(l));
     }
     if let Some(stats) = &embed_stats {
         println!(
@@ -443,6 +450,47 @@ fn commit_data_lineage(ledger: &dyn KnowledgeStore) -> Result<usize> {
     }
 
     Ok(written)
+}
+
+/// RFC 0211: one line on what the code ↔ database comparison found.
+fn live_summary(l: &ekos_semantic::live_conflicts::LiveConflictStats) -> String {
+    let horizon = l.horizon.map_or_else(
+        || "none".to_string(),
+        |h| {
+            let d = h.to_string();
+            format!(
+                "{}-{}-{}T{}:{}",
+                &d[..4],
+                &d[4..6],
+                &d[6..8],
+                &d[8..10],
+                &d[10..12]
+            )
+        },
+    );
+    let horizon = match &l.horizon_release {
+        Some(r) => format!("{r}, {horizon}"),
+        None => horizon,
+    };
+    format!(
+        "{} table(s) and {} routine(s) compared, {} ambiguous; {} model table(s) missing, {} \
+         table(s) without a model, {} model column(s) missing, {} mandatory but nullable, {} \
+         routine text(s) differ — {} of {} explained (migration horizon {horizon}); {} virtual and \
+         {} redacted column(s) not compared; {} invalid object(s)",
+        l.tables_compared,
+        l.routines_compared,
+        l.ambiguous,
+        l.model_table_missing,
+        l.table_without_model,
+        l.model_column_missing,
+        l.mandatory_but_nullable,
+        l.routine_text_differs,
+        l.explained,
+        l.conflicts(),
+        l.virtual_columns,
+        l.redacted_names,
+        l.invalid_objects
+    )
 }
 
 /// RFC 0163: links recovered routines to the tables they read/write (`ReadsFrom`/`WritesTo` per
@@ -972,6 +1020,19 @@ fn evidence_record_to_kir(ev: &EvidenceRecord) -> KirEvidence {
 mod tests {
     use super::*;
     use ekos_kir::{KirId, ObjectKind};
+
+    /// RFC 0211 — both horizons are on the line, so a reader can see why an early-dated script
+    /// still counts as pending.
+    #[test]
+    fn live_summary_names_the_release_and_time_horizons() {
+        let mut l = ekos_semantic::live_conflicts::LiveConflictStats {
+            horizon: Some(202412061452),
+            ..Default::default()
+        };
+        assert!(live_summary(&l).contains("(migration horizon 2024-12-06T14:52)"));
+        l.horizon_release = Some("iD11".into());
+        assert!(live_summary(&l).contains("(migration horizon iD11, 2024-12-06T14:52)"));
+    }
 
     /// RFC 0142 — the progress line has to stay readable and honest.
     #[test]

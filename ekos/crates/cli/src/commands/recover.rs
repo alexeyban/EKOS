@@ -12,13 +12,13 @@ use ekos_recovery::{
     DbtAnalyzerPass, DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass,
     DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass,
     GovernanceAnalyzerPass, JavaAnalyzerPass, JavaScriptAnalyzerPass, JavaScriptStats, JavaStats,
-    LlmRouter, LocalDocAnalyzerPass, MockLlmProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass,
-    PentahoStats, PerlAnalyzerPass, PerlStats, PlPgSqlAnalyzerPass, PlPgSqlStats,
-    PlSqlAnalyzerPass, PlSqlStats, PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass,
-    RustAnalyzerPass, RustStats, SchemaHistoryPass, SchemaHistoryStats, SqlAnalyzerPass,
-    SqlTransformAnalyzerPass, SqlTransformStats, Task, TreasuryAnalyzerPass, TriggerAnalyzerPass,
-    TriggerStats, ViewAnalyzerPass, ViewStats, build_dialect_registry, llm::LlmProvider,
-    resolve_dialect_name,
+    LlmRouter, LocalDocAnalyzerPass, MockLlmProvider, OracleCatalogPass, OracleCatalogStats,
+    PackageJsonAnalyzerPass, PentahoAnalyzerPass, PentahoStats, PerlAnalyzerPass, PerlStats,
+    PlPgSqlAnalyzerPass, PlPgSqlStats, PlSqlAnalyzerPass, PlSqlStats, PythonAnalyzerPass,
+    PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats, SchemaHistoryPass,
+    SchemaHistoryStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats, Task,
+    TreasuryAnalyzerPass, TriggerAnalyzerPass, TriggerStats, ViewAnalyzerPass, ViewStats,
+    build_dialect_registry, llm::LlmProvider, resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -153,6 +153,35 @@ fn print_plsql_stats(handles: &[Arc<std::sync::Mutex<PlSqlStats>>]) {
     );
 }
 
+fn print_oracle_catalog_stats(handle: Option<&Arc<std::sync::Mutex<OracleCatalogStats>>>) {
+    let Some(handle) = handle else {
+        return;
+    };
+    let s = handle.lock().unwrap().clone();
+    // A pass served from cache does not run, so it fills no counters; zeros would read as an
+    // empty database.
+    if s.catalogs == 0 {
+        println!("  Oracle catalog: unchanged since the last recover (cached)");
+        return;
+    }
+    let r = &s.routines.routines;
+    println!(
+        "  Oracle catalog: {} schema(s), {} tables, {} foreign keys ({} unresolved), {} views \
+         ({} unread), {} routines ({} complete, {} partial), {} statements, {} invalid object(s)",
+        s.catalogs,
+        s.tables,
+        s.foreign_keys,
+        s.foreign_keys_unresolved,
+        s.views,
+        s.views_unparsed,
+        r.routines,
+        r.complete,
+        r.partial,
+        r.statements,
+        s.invalid_objects
+    );
+}
+
 fn print_history_stats(handles: &[Arc<std::sync::Mutex<SchemaHistoryStats>>]) {
     let mut t = SchemaHistoryStats::default();
     for handle in handles {
@@ -246,6 +275,8 @@ struct SqlStatsHandles {
     views: Vec<Arc<std::sync::Mutex<ViewStats>>>,
     triggers: Vec<Arc<std::sync::Mutex<TriggerStats>>>,
     history: Vec<Arc<std::sync::Mutex<SchemaHistoryStats>>>,
+    /// RFC 0211: the live Oracle catalog pass (one per run, when any database was observed).
+    oracle: Option<Arc<std::sync::Mutex<OracleCatalogStats>>>,
 }
 
 /// Everything `ekos recover` reports once its passes have run.
@@ -439,6 +470,7 @@ impl RecoverSummary {
         print_plpgsql_stats(&sql_stats.plpgsql);
         print_plsql_stats(&sql_stats.plsql);
         print_history_stats(&sql_stats.history);
+        print_oracle_catalog_stats(sql_stats.oracle.as_ref());
         print_run_outcome(config, cwd, parallel, report, ctx)
     }
 }
@@ -1298,6 +1330,21 @@ pub async fn run_with(
             clickhouse_artifact_ids,
         );
         pass_manager.register(Box::new(clickhouse_pass));
+    }
+
+    // ── Live Oracle catalog artifacts (RFC 0211) ─────────────────────────
+    let oracle_artifact_ids = collect_artifact_ids_for_connector(&*artifact_store, "oracle");
+    if !oracle_artifact_ids.is_empty() {
+        let stats = Arc::new(std::sync::Mutex::new(OracleCatalogStats::default()));
+        sql_stats.oracle = Some(Arc::clone(&stats));
+        pass_manager.register(Box::new(OracleCatalogPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            oracle_artifact_ids,
+            stats,
+        )));
     }
 
     // ── Local document artifacts (RFC 0023) ──────────────────────────────

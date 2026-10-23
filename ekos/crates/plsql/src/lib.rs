@@ -12,4 +12,4 @@ pub mod parse;
 pub mod script;
 
 pub use parse::{Routine, ScriptRoutines, TriggerSpec, read_script};
-pub use script::{Tok, TokKind, Unit, UnitKind, neutralize_quotes, tokens, units};
+pub use script::{Tok, TokKind, Unit, UnitKind, mask_comments, neutralize_quotes, tokens, units};

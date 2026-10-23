@@ -56,6 +56,10 @@ pub struct ModelColumn {
     /// The default written beside it in that block (`@#Date@`, `CO`, `N`), as written.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
+    /// RFC 0211: the setter throws `"… is virtual column"` — the dictionary computes the value
+    /// (`AD_Column.ColumnSQL`), so the database has no such column and that is not drift.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub virtual_column: bool,
     /// `false` when the setter uses `set_ValueNoCheck` — the dictionary marks it not updatable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updatable: Option<bool>,
@@ -431,7 +435,12 @@ fn read_setter(sf: &SourceFile<'_>, m: &MethodDecl, c: &mut ModelColumn) {
     }
     if let Some((open, close)) = m.body {
         let body = &sf.file.tokens[open..close];
-        if body.iter().any(|t| t.is("set_ValueNoCheck")) {
+        if body
+            .iter()
+            .any(|t| t.kind == TokKind::Str && t.text.contains("is virtual column"))
+        {
+            c.virtual_column = true;
+        } else if body.iter().any(|t| t.is("set_ValueNoCheck")) {
             c.updatable = Some(false);
         } else if body.iter().any(|t| t.is("set_Value")) {
             c.updatable = Some(true);
@@ -535,6 +544,7 @@ public interface I_C_Invoice
     public static final String COLUMNNAME_DocStatus = "DocStatus";
 	public String getDocStatus();
     public static final String COLUMNNAME_GrandTotal = "GrandTotal";
+    public static final String COLUMNNAME_OpenAmt = "OpenAmt";
 	public BigDecimal getGrandTotal();
     public static final String COLUMNNAME_IsApproved = "IsApproved";
 	public boolean isApproved();
@@ -599,6 +609,12 @@ public class X_C_Invoice extends PO implements I_C_Invoice, I_Persistent
 	{
 		set_ValueNoCheck (COLUMNNAME_IsApproved, Boolean.valueOf(IsApproved));
 	}
+	/** Set Open Amount.
+		@param OpenAmt Open item amount
+	*/
+	public void setOpenAmt (BigDecimal OpenAmt)
+	{
+		throw new IllegalArgumentException ("OpenAmt is virtual column");	}
 }
 "#;
 
@@ -657,7 +673,8 @@ public class MInvoice extends X_C_Invoice implements DocAction, IDocsPostProcess
                 "C_BPartner_ID",
                 "DocStatus",
                 "GrandTotal",
-                "IsApproved"
+                "IsApproved",
+                "OpenAmt"
             ]
         );
         assert_eq!(t.evidence, Some(("m/X_C_Invoice.java".into(), 4)));
@@ -696,6 +713,11 @@ public class MInvoice extends X_C_Invoice implements DocAction, IDocsPostProcess
         assert_eq!(status.values.get("DR").map(String::as_str), Some("Drafted"));
         assert_eq!(status.default.as_deref(), Some("DR"));
         assert_eq!(status.updatable, Some(true));
+        assert!(
+            c["OpenAmt"].virtual_column,
+            "the generator says so in the setter"
+        );
+        assert!(!status.virtual_column);
 
         let approved = &c["IsApproved"];
         assert!(approved.boolean);

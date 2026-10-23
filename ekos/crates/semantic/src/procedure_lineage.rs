@@ -44,15 +44,38 @@ impl ProcedureLinkStats {
     }
 }
 
+/// The `origin` property value of an object read from a live database catalog (RFC 0211).
+pub const LIVE_ORIGIN: &str = "live";
+
+/// `true` for an object a live catalog reader produced rather than one recovered from files.
+pub fn is_live(o: &KirObject) -> bool {
+    o.properties.get("origin").and_then(|v| v.as_str()) == Some(LIVE_ORIGIN)
+}
+
 /// Names → object ids, exact (lower-cased full name) and by last dotted segment.
+///
+/// RFC 0211: objects read from a live catalog sit in a second layer, consulted only when no
+/// file-derived object has the name. A database and the scripts that built it name the same
+/// tables; ranking them together would make every scripted table ambiguous and drop links that
+/// resolve today, while the catalog alone still resolves what no file defines.
 #[derive(Default)]
 pub(crate) struct NameIndex {
     // Keyed by the inner `Uuid` (`KirId` is not `Ord`), so iteration — and edge order — is stable.
     exact: HashMap<String, BTreeSet<Uuid>>,
     tail: HashMap<String, BTreeSet<Uuid>>,
+    live: Option<Box<NameIndex>>,
 }
 
 impl NameIndex {
+    /// Index an object under its name, in the live layer when a catalog reader produced it.
+    pub(crate) fn add_object(&mut self, o: &KirObject) {
+        if is_live(o) {
+            self.live.get_or_insert_default().add(&o.name, o.id);
+        } else {
+            self.add(&o.name, o.id);
+        }
+    }
+
     pub(crate) fn add(&mut self, name: &str, id: KirId) {
         let n = name.to_lowercase();
         let tail = n.rsplit('.').next().unwrap_or(&n).to_string();
@@ -66,6 +89,14 @@ impl NameIndex {
     /// ones — in a stable order. For callers that can use *all* candidates honestly (trigger
     /// classification checks whether every definition agrees), never to pick one.
     pub(crate) fn candidates(&self, name: &str) -> Vec<KirId> {
+        let found = self.own_candidates(name);
+        match &self.live {
+            Some(live) if found.is_empty() => live.own_candidates(name),
+            _ => found,
+        }
+    }
+
+    fn own_candidates(&self, name: &str) -> Vec<KirId> {
         let n = name.to_lowercase();
         if let Some(ids) = self.exact.get(&n) {
             return ids.iter().map(|u| KirId(*u)).collect();
@@ -82,6 +113,13 @@ impl NameIndex {
     }
 
     pub(crate) fn resolve(&self, name: &str) -> Result<(KirId, &'static str), bool> {
+        match (self.resolve_own(name), &self.live) {
+            (Err(false), Some(live)) => live.resolve_own(name),
+            (found, _) => found,
+        }
+    }
+
+    fn resolve_own(&self, name: &str) -> Result<(KirId, &'static str), bool> {
         let n = name.to_lowercase();
         let unique = |s: Option<&BTreeSet<Uuid>>| match s {
             Some(ids) if ids.len() == 1 => Ok(KirId(*ids.iter().next().unwrap())),
@@ -145,9 +183,9 @@ pub fn link_procedures(graph: &mut KirGraph) -> ProcedureLinkStats {
     for o in &graph.objects {
         // RFC 0169: views are relations a routine reads, so they resolve alongside tables.
         if matches!(o.kind, ObjectKind::Table | ObjectKind::Dataset) || is_custom(o, "View") {
-            tables.add(&o.name, o.id);
+            tables.add_object(o);
         } else if is_custom(o, "Procedure") {
-            routines.add(&o.name, o.id);
+            routines.add_object(o);
         }
     }
 
@@ -268,6 +306,39 @@ mod tests {
     use super::*;
     use ekos_kir::KirEvidence;
     use ekos_kir::SourceLocation;
+
+    fn table(name: &str, live: bool) -> KirObject {
+        let o = KirObject::new(name, ObjectKind::Table);
+        if live {
+            o.with_property("origin", serde_json::json!(LIVE_ORIGIN))
+        } else {
+            o
+        }
+    }
+
+    #[test]
+    fn a_live_catalog_object_resolves_only_names_no_file_defines() {
+        let scripted = table("C_Invoice", false);
+        let live_twin = table("C_INVOICE", true);
+        let dump_only = table("C_ORDER", true);
+        let mut index = NameIndex::default();
+        for o in [&scripted, &live_twin, &dump_only] {
+            index.add_object(o);
+        }
+        assert_eq!(index.resolve("c_invoice").map(|r| r.0), Ok(scripted.id));
+        assert_eq!(index.candidates("C_INVOICE"), [scripted.id]);
+        assert_eq!(index.resolve("C_Order").map(|r| r.0), Ok(dump_only.id));
+        assert_eq!(
+            index.resolve("adempiere.c_order").map(|r| r.1),
+            Ok("unqualified")
+        );
+        assert_eq!(index.resolve("nowhere"), Err(false));
+
+        // Two scripted definitions stay ambiguous; the catalog does not break the tie.
+        let other = table("c_invoice", false);
+        index.add_object(&other);
+        assert_eq!(index.resolve("C_INVOICE"), Err(true));
+    }
 
     fn obj(g: &mut KirGraph, name: &str, kind: ObjectKind, props: &[(&str, &[&str])]) -> KirId {
         let mut o = KirObject::new(name, kind);

@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
 Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
-`devlog_287.md` as of this writing) before starting non-trivial work: they are the project's
+`devlog_288.md` as of this writing) before starting non-trivial work: they are the project's
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
-`ekos/docs/rfcs/` has `0025`+ (highest: `0210`). **Check both directories for the highest existing number before
+`ekos/docs/rfcs/` has `0025`+ (highest: `0211`). **Check both directories for the highest existing number before
 picking one for a new RFC** — two RFCs have already collided on the same number once (0027) from
 sessions that only checked one location.
 
@@ -152,7 +152,19 @@ inline body is a `Procedure` named after it plus a `Trigger` whose `function` na
 migration script into a keyed `SchemaChangeSet` + one `SchemaChange` per DDL operation, classified
 from tokens (sqlparser 0.53 reads Oracle `MODIFY c NOT NULL` as a column of type `NOT`), including
 iDempiere's PostgreSQL `INSERT INTO t_alter_column` rows; `semantic/src/schema_history.rs` links
-changes to tables at commit (`Changes`, unique name only). `SqlAnalyzerPass` stamps `dialect` on
+changes to tables at commit (`Changes`, unique name only). RFC 0211: `crates/ora-live` is the
+**fourth raw-content entry point** (live Oracle catalog; driver `oracle` behind the crate feature
+`oracle`, off by default; Instant Client on `LD_LIBRARY_PATH` at run time) — reads `DBA_*` (through
+`ALL_*` a read-only user sees 0 of 48 functions and the counts still reconcile), inside `SET
+TRANSACTION READ ONLY`, reconciled against `*_OBJECTS`. `[[databases]]` in `ekos.toml` (the password's
+variable **name**, never its value) → `plugins/oracle` observer at build → `OracleCatalogPass` at
+recover → objects with `origin: live`, which identity never merges and name lookups
+(`procedure_lineage::NameIndex::add_object`, `data_lineage`) use only for names no file defines.
+`semantic/src/live_conflicts.rs` compares `ModelTable`s / `db/oracle` routines with them at commit
+(RFC 0172 conflicts with an `explanation`: `pending_migration` by time **and** release horizon,
+`translation_table`). A pass that calls another analyzer's functions must fold that analyzer's
+`LOGIC_VERSION` into its cache key (two stale-cache bugs). Testbed: `docker-compose.oracle.yml` +
+`deploy/fixtures/idempiere-oracle.sh`; live suite `EKOS_ORACLE_LIVE=1`. `SqlAnalyzerPass` stamps `dialect` on
 every `Table`, and `conflicts` compares claims only within one dialect (`generic` = unknown, compared
 with all) — engine twins of one script are two databases, not a dispute. `init --detect` writes one
 `[[recover.sql.dialect-rules]]` per engine-named directory (`oracle/`, `postgresql/`, …).
@@ -163,7 +175,7 @@ config schema, the `Binary*` custom-kind registry rows and identity's binary nar
 private build wrote still resolves and queries here. Public crates must never depend on it.
 
 Scaffolded proof-of-concept only (mock API shapes, not exercised against live accounts):
-`salesforce`, `sap`, `oracle`, `fabric`, `snowflake`.
+`salesforce`, `sap`, `fabric`, `snowflake` (`oracle` is live since RFC 0211).
 
 `crate_topology_analyzer`/`cicd_analyzer` (RFC 0042, in `recovery`, not `plugins/`) and the
 dependency-scan block in `recover.rs` are a second, separate raw-content entry point — they walk

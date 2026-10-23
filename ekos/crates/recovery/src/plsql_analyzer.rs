@@ -28,7 +28,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bumped whenever this pass's output changes for the same input.
-const LOGIC_VERSION: &str = "plsql-analyzer/1";
+pub(crate) const LOGIC_VERSION: &str = "plsql-analyzer/3";
 const MAX_FRAGMENT: usize = 4096;
 
 /// Per-file counters, for `ekos recover`'s summary.

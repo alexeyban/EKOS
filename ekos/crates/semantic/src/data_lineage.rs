@@ -42,17 +42,25 @@ fn reads_writes_kir_id(kind_label: &str, from: KirId, to: KirId) -> KirId {
 /// new record.
 pub fn link_transform_nodes_to_tables(graph: &mut KirGraph) {
     let mut tables_by_name: HashMap<String, Vec<KirId>> = HashMap::new();
+    // RFC 0211: a live catalog's relations are used only for names no file-derived one has (see
+    // `procedure_lineage::NameIndex`).
+    let mut live_by_name: HashMap<String, Vec<KirId>> = HashMap::new();
     for obj in &graph.objects {
         // RFC 0169: a `View` is a relation a transformation reads from or writes (its own `Sink`).
         let is_view = matches!(&obj.kind, ObjectKind::Custom(k) if k == "View");
         if matches!(obj.kind, ObjectKind::Table | ObjectKind::Dataset) || is_view {
-            tables_by_name
+            let layer = if crate::procedure_lineage::is_live(obj) {
+                &mut live_by_name
+            } else {
+                &mut tables_by_name
+            };
+            layer
                 .entry(obj.name.to_lowercase())
                 .or_default()
                 .push(obj.id);
         }
     }
-    if tables_by_name.is_empty() {
+    if tables_by_name.is_empty() && live_by_name.is_empty() {
         return;
     }
 
@@ -69,7 +77,8 @@ pub fn link_transform_nodes_to_tables(graph: &mut KirGraph) {
         let Some(object_name) = obj.properties.get("object_name").and_then(|v| v.as_str()) else {
             continue;
         };
-        let Some(matches) = tables_by_name.get(&object_name.to_lowercase()) else {
+        let key = object_name.to_lowercase();
+        let Some(matches) = tables_by_name.get(&key).or_else(|| live_by_name.get(&key)) else {
             continue;
         };
         let [table_id] = matches.as_slice() else {

@@ -916,7 +916,7 @@ pub fn synthesize(
     let mut index = NameIndex::default();
     let mut by_id: HashMap<Uuid, usize> = HashMap::new();
     for (i, t) in tables.iter().enumerate() {
-        index.add(&t.obj.name, t.obj.id);
+        index.add_object(t.obj);
         by_id.insert(t.obj.id.0, i);
     }
     let mut sites = collect_sites(graph, &tables, &index, &by_id, &mut stats);

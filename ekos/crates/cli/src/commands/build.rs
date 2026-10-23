@@ -16,6 +16,7 @@ use ekos_plugin_governance::{DEFAULT_HUB_URL, SnapshotClient, SnapshotObserver};
 use ekos_plugin_java::JavaObserver;
 use ekos_plugin_javascript::JavaScriptObserver;
 use ekos_plugin_localdocs::{LocalDocsObserver, TesseractOcr};
+use ekos_plugin_oracle::{LiveReader as OracleLiveReader, OracleObserver};
 use ekos_plugin_pentaho::PentahoObserver;
 use ekos_plugin_perl::PerlObserver;
 use ekos_plugin_python::PythonObserver;
@@ -246,6 +247,24 @@ fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Ob
             );
         }
     }
+    // RFC 0211: one observer per `[[databases]]` entry. Configured, so a failure is a build error
+    // rather than a skipped connector.
+    for d in &config.databases {
+        match d.kind {
+            ekos_compiler_core::DatabaseKind::Oracle => {
+                observers.push(Box::new(OracleObserver::new(
+                    d.name.clone(),
+                    Arc::new(OracleLiveReader {
+                        connection: ekos_ora_live_connection(d),
+                        owners: d.owners.clone(),
+                        run_id: format!("build/{}", d.name),
+                        policy: Default::default(),
+                        redaction: config.redaction_config(),
+                    }),
+                )));
+            }
+        }
+    }
     match (
         std::env::var(CLICKHOUSE_URL_ENV),
         std::env::var(CLICKHOUSE_DATABASE_ENV),
@@ -264,6 +283,17 @@ fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Ob
         }
     }
     observers
+}
+
+/// The connection of one `[[databases]]` entry: the password stays an environment variable name.
+fn ekos_ora_live_connection(
+    d: &ekos_compiler_core::DatabaseConfig,
+) -> ekos_plugin_oracle::OraConnection {
+    ekos_plugin_oracle::OraConnection {
+        connect_string: d.connect.clone(),
+        user: d.user.clone(),
+        password_env: d.password_env.clone(),
+    }
 }
 
 /// RFC 0043/0079 — the one place every observer's artifacts pass before they are stored: excluded

@@ -1,0 +1,32 @@
+
+BANNER_FULL
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+Oracle Database 21c Express Edition Release 21.0.0.0.0 - Production
+Version 21.3.0.0.0
+
+
+CHARACTERSET
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+AL32UTF8
+
+OBJECT_TYPE		    VALID    INVALID
+---------------------- ---------- ----------
+FUNCTION		       48	   0
+INDEX			     2109	   0
+LOB			       45	   0
+PROCEDURE		       14	   0
+TABLE			      903	   0
+TYPE				1	   0
+VIEW			      160	   0
+
+WHAT				      N
+---------------------------- ----------
+table columns			  18520
+view columns			  11937
+constraints R			   3686
+constraints C			  12958
+constraints P			    892
+constraints U			    908
+views longer than 4000		     40
+recycle bin			      0
+rows (optimizer statistics)	 182848

@@ -40,7 +40,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bumped whenever this pass's output changes for the same input, so a cached run is not reused.
-const LOGIC_VERSION: &str = "plpgsql-analyzer/5";
+pub(crate) const LOGIC_VERSION: &str = "plpgsql-analyzer/7";
 
 /// The most source text one statement's evidence carries. A statement longer than this is rare;
 /// its exact byte span is always recorded, so the full text stays recoverable from the file.
@@ -223,6 +223,36 @@ pub struct ParsedRoutine<'a> {
     pub header_len: Option<usize>,
 }
 
+/// RFC 0211: a fingerprint of a routine's text that a script and the database's copy share when
+/// they define the same routine — comments removed, case folded, whitespace collapsed, and the
+/// `CREATE [OR REPLACE] [EDITIONABLE | NONEDITIONABLE]` head dropped (the dictionary stores the
+/// text without it). Comments go because a re-licensed header is not a different routine
+/// (measured: iDempiere's dump still carries the old Compiere header its files lost). Folding case
+/// also folds string literals: a change only in a literal's case is not seen. Comments are masked
+/// by Oracle's rules (block comments do not nest); a PostgreSQL routine with a nested comment
+/// fingerprints slightly differently, which only matters when comparing it with itself.
+pub fn routine_text_hash(text: &str) -> String {
+    let lowered = ekos_plsql::mask_comments(text).to_lowercase();
+    let mut words: Vec<&str> = lowered.split_whitespace().collect();
+    let skip = match words.as_slice() {
+        ["create", "or", "replace", w, ..] if is_edition_word(w) => 4,
+        ["create", "or", "replace", ..] => 3,
+        ["create", w, ..] if is_edition_word(w) => 2,
+        ["create", ..] => 1,
+        _ => 0,
+    };
+    words.drain(..skip);
+    let normalized = words.join(" ");
+    let normalized = normalized.trim_end_matches(['/', ';', ' ']);
+    ekos_common::ContentHash::of_str(normalized)
+        .as_str()
+        .to_string()
+}
+
+fn is_edition_word(w: &str) -> bool {
+    matches!(w, "editionable" | "noneditionable")
+}
+
 /// Write routines into KIR: one `Procedure` each, its statements, their footprints. Pure: same
 /// input, same graph (ids included). Shared by every procedural-language pass, so a PL/SQL routine
 /// and a PL/pgSQL one have the same shape in the ledger.
@@ -400,6 +430,7 @@ fn emit_procedure(
         ),
     )
     .with_property("source_path", json!(source_path))
+    .with_property("text_hash", json!(routine_text_hash(text)))
     .with_property("line", json!(line))
     .with_property("span_start", json!(offset))
     .with_property("span_end", json!(offset + text.len()))
@@ -912,6 +943,26 @@ fn fragment_for(stmt: &ProcStmt, source: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 0211: the script's text and the dictionary's copy hash alike; a body change does not.
+    #[test]
+    fn a_routine_text_hash_ignores_the_create_head_case_and_layout() {
+        let script = "CREATE OR REPLACE FUNCTION invoiceOpen (p IN NUMBER)\n  RETURN NUMBER\nAS\nBEGIN\n  RETURN 0;\nEND invoiceOpen;";
+        let dictionary = "FUNCTION invoiceOpen (p IN NUMBER) RETURN NUMBER AS BEGIN RETURN 0; END invoiceOpen;\n";
+        let editioned = "create or replace editionable function INVOICEOPEN (p in number) return number as begin return 0; end invoiceopen;";
+        let relicensed = "FUNCTION invoiceOpen (p IN NUMBER) RETURN NUMBER AS /* Compiere licence */ BEGIN -- old\n RETURN 0; END invoiceOpen;";
+        assert_eq!(routine_text_hash(script), routine_text_hash(relicensed));
+        assert_ne!(
+            routine_text_hash(script),
+            routine_text_hash(&script.replace("RETURN 0", "RETURN '--0'"))
+        );
+        assert_eq!(routine_text_hash(script), routine_text_hash(dictionary));
+        assert_eq!(routine_text_hash(script), routine_text_hash(editioned));
+        assert_ne!(
+            routine_text_hash(script),
+            routine_text_hash(&dictionary.replace("RETURN 0", "RETURN 1"))
+        );
+    }
 
     const FILE: &str = "-- schema\n\
 CREATE TABLE t (id int);\n\

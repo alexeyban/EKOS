@@ -1,0 +1,21 @@
+[package]
+name = "ekos-ora-live"
+description = "RFC 0211 — live Oracle connector: guarded read-only sessions, catalog introspection reconciled against the dictionary, redaction at the entry point"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[features]
+# The driver (rust-oracle, ODPI-C). Off by default: it compiles with a C compiler, and Oracle
+# Instant Client is loaded at run time (RFC 0211 §3.2, plan decision D1).
+oracle = ["dep:oracle"]
+
+[dependencies]
+oracle = { workspace = true, optional = true }
+ekos-common.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

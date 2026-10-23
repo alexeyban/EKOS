@@ -8,6 +8,7 @@ pub mod business_semantics;
 pub mod conflicts;
 pub mod data_lineage;
 pub mod doc_links;
+pub mod live_conflicts;
 pub mod ontology;
 pub mod procedure_lineage;
 pub mod rollup;
