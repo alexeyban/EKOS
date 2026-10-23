@@ -16,7 +16,7 @@ use ekos_plugin_governance::{DEFAULT_HUB_URL, SnapshotClient, SnapshotObserver};
 use ekos_plugin_java::JavaObserver;
 use ekos_plugin_javascript::JavaScriptObserver;
 use ekos_plugin_localdocs::{LocalDocsObserver, TesseractOcr};
-use ekos_plugin_oracle::{LiveReader as OracleLiveReader, OracleObserver};
+use ekos_plugin_oracle::{LiveReader as OracleLiveReader, OracleObserver, ProfileTier};
 use ekos_plugin_pentaho::PentahoObserver;
 use ekos_plugin_perl::PerlObserver;
 use ekos_plugin_python::PythonObserver;
@@ -247,24 +247,6 @@ fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Ob
             );
         }
     }
-    // RFC 0211: one observer per `[[databases]]` entry. Configured, so a failure is a build error
-    // rather than a skipped connector.
-    for d in &config.databases {
-        match d.kind {
-            ekos_compiler_core::DatabaseKind::Oracle => {
-                observers.push(Box::new(OracleObserver::new(
-                    d.name.clone(),
-                    Arc::new(OracleLiveReader {
-                        connection: ekos_ora_live_connection(d),
-                        owners: d.owners.clone(),
-                        run_id: format!("build/{}", d.name),
-                        policy: Default::default(),
-                        redaction: config.redaction_config(),
-                    }),
-                )));
-            }
-        }
-    }
     match (
         std::env::var(CLICKHOUSE_URL_ENV),
         std::env::var(CLICKHOUSE_DATABASE_ENV),
@@ -283,6 +265,68 @@ fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Ob
         }
     }
     observers
+}
+
+/// RFC 0211: one observer per `[[databases]]` entry, with its name. Kept apart from the file
+/// observers: a database is live state, so it is read once per build — never once per source
+/// directory, and never skipped because the source tree's fingerprint is unchanged.
+fn database_observers(config: &EkosConfig) -> Vec<(String, Box<dyn Observer>)> {
+    config
+        .databases
+        .iter()
+        .map(|d| {
+            let observer: Box<dyn Observer> = match d.kind {
+                ekos_compiler_core::DatabaseKind::Oracle => Box::new(OracleObserver::new(
+                    d.name.clone(),
+                    Arc::new(OracleLiveReader {
+                        connection: ekos_ora_live_connection(d),
+                        owners: d.owners.clone(),
+                        run_id: format!("build/{}", d.name),
+                        policy: Default::default(),
+                        redaction: config.redaction_config(),
+                        profile: match d.profile {
+                            ekos_compiler_core::DatabaseProfile::P0 => ProfileTier::P0,
+                            ekos_compiler_core::DatabaseProfile::P1 => ProfileTier::P1,
+                            ekos_compiler_core::DatabaseProfile::P2 => ProfileTier::P2,
+                        },
+                    }),
+                )),
+            };
+            (d.name.clone(), observer)
+        })
+        .collect()
+}
+
+/// RFC 0211: read every database (or only `only`) once. A configured database that cannot be read
+/// is an error: a build that silently kept last time's catalog would report it as current.
+/// Returns how many were read.
+async fn read_databases(
+    config: &EkosConfig,
+    cwd: &Path,
+    only: Option<&str>,
+    artifact_store: &PackArtifactStore,
+    index_entries: &mut HashMap<String, ekos_artifact::ArtifactId>,
+) -> Result<usize> {
+    let redaction_config = config.redaction_config();
+    let mut read = 0;
+    for (name, observer) in database_observers(config) {
+        if only.is_some_and(|o| o != name) {
+            continue;
+        }
+        read += 1;
+        let mut package = observer
+            .scan(&ScanContext::new(cwd))
+            .await
+            .map_err(|e| anyhow::anyhow!("database {name}: {e}"))?;
+        redact_package(&mut package, &redaction_config, "");
+        for artifact in &package.artifacts {
+            let artifact_json = serde_json::to_value(artifact)?;
+            let key = format!("{}/{}", observer.name(), artifact.content.target);
+            artifact_store.write(&artifact.id, &artifact_json)?;
+            index_entries.insert(key, artifact.id.clone());
+        }
+    }
+    Ok(read)
 }
 
 /// The connection of one `[[databases]]` entry: the password stays an environment variable name.
@@ -542,8 +586,14 @@ pub async fn run_selected(
 ) -> Result<()> {
     if let Some(name) = only
         && !config.sources.iter().any(|s| s.name == name)
+        && !config.databases.iter().any(|d| d.name == name)
     {
-        let known: Vec<&str> = config.sources.iter().map(|s| s.name.as_str()).collect();
+        let known: Vec<&str> = config
+            .sources
+            .iter()
+            .map(|s| s.name.as_str())
+            .chain(config.databases.iter().map(|d| d.name.as_str()))
+            .collect();
         anyhow::bail!(
             "--source {name:?} is not a source of this project (sources: {})",
             if known.is_empty() {
@@ -688,6 +738,9 @@ pub async fn run_selected(
         }
     }
 
+    connectors_rescanned +=
+        read_databases(config, cwd, only, &artifact_store, &mut index_entries).await?;
+
     save_fingerprints(&fingerprint_path, &fingerprints)?;
     // RFC 0171 — what this build observed; `ekos commit` promotes it once the ledger has it.
     if config.freshness.enabled {
@@ -784,6 +837,33 @@ mod tests {
             "File objects must be reproduced after a ledger clear, even though the fingerprint \
              cache matches the unchanged source content"
         );
+    }
+
+    /// RFC 0211: a configured database is read on every build — even when the source tree's
+    /// fingerprint is unchanged — and one that cannot be read fails the build instead of leaving
+    /// last time's catalog in place as if current. (This build has no Oracle driver, which is
+    /// exactly such a database.)
+    #[cfg(not(feature = "oracle"))]
+    #[tokio::test]
+    async fn a_configured_database_is_read_every_build_and_its_failure_is_an_error() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("hello.txt"), b"hello world").unwrap();
+        let mut config = EkosConfig::default();
+        run(&config, dir.path()).await.unwrap();
+
+        config.databases.push(ekos_compiler_core::DatabaseConfig {
+            name: "erp".into(),
+            kind: ekos_compiler_core::DatabaseKind::Oracle,
+            connect: "localhost:1/NONE".into(),
+            user: "ekos_ro".into(),
+            password_env: "EKOS_TEST_UNSET_PASSWORD".into(),
+            owners: vec!["ADEMPIERE".into()],
+            profile: Default::default(),
+        });
+        // The file tree is unchanged, so the fingerprint matches; the database is read anyway.
+        let err = run(&config, dir.path()).await.unwrap_err().to_string();
+        assert!(err.contains("database erp"), "{err}");
+        assert!(err.contains("no Oracle driver"), "{err}");
     }
 
     /// Real bug, found live rehearsing the RFC 0045 demo end-to-end: a `File` object's own

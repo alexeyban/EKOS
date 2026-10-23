@@ -180,6 +180,15 @@ fn print_oracle_catalog_stats(handle: Option<&Arc<std::sync::Mutex<OracleCatalog
         r.statements,
         s.invalid_objects
     );
+    println!(
+        "  Oracle profile:  tier {}; {} table(s) scanned, {} failed or skipped; log mode {}; {} \
+         object(s) no longer in the database",
+        s.profile_tiers.join(", "),
+        s.tables_profiled,
+        s.tables_profile_failed,
+        s.log_modes.join(", "),
+        s.stale_objects
+    );
 }
 
 fn print_history_stats(handles: &[Arc<std::sync::Mutex<SchemaHistoryStats>>]) {

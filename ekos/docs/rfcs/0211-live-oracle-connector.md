@@ -122,17 +122,35 @@ alongside `pg-live`, as RFC 0043 requires.
 
 | Tier | Source | Cost |
 |---|---|---|
-| P0 | `ALL_TABLES.NUM_ROWS`, `LAST_ANALYZED`, `ALL_TAB_COL_STATISTICS.NUM_DISTINCT`/`NUM_NULLS`/`AVG_COL_LEN` | dictionary only |
-| P1 | `SELECT COUNT(*)` per table, under the call timeout | one scan per table |
-| P2 | per-column `MIN`/`MAX` of numeric and date columns, `MAX(LENGTH)` of character columns | one scan per table |
+| P0 | `*_TABLES.NUM_ROWS`, `*_TAB_COL_STATISTICS.NUM_NULLS`/`NUM_DISTINCT`/`AVG_COL_LEN`/`LAST_ANALYZED`, read with the catalog in the same snapshot | dictionary only |
+| P1 | `SELECT COUNT(*)` per table | one scan per table |
+| P2 | one aggregate query per table: `COUNT(*)`, a non-null count per column (exact nulls), `MIN`/`MAX` of number and date columns, `MAX(LENGTH(…))` of character columns | one scan per table |
 
-`LOW_VALUE`/`HIGH_VALUE` are never selected: they are raw row values. P2 bounds go through the same
-"suppressed for PII-class columns" rule as `pg-live`, and never reach the ledger for a column
-classed as personal data.
+`[[databases]] profile = "p0" | "p1" | "p2"` chooses the tier; P0 is the default because it scans
+nothing. P1/P2 run inside `SET TRANSACTION READ ONLY` under the call timeout.
+
+- **No text value leaves the database.** A character column contributes a count and a length, never
+  `MIN`/`MAX` (those *are* values); `LOW_VALUE`/`HIGH_VALUE` are never selected. Number and date
+  bounds are kept, except for a column whose name `ekos_common::pii` classifies (moved there from
+  `pg-live`, so both connectors apply one rule; it now also matches run-together names such as
+  `CREDITCARDNUMBER`, since over-suppressing is the safe direction).
+- `LONG` columns are skipped (`COUNT(long)` is illegal); LOBs and other non-scalar types are counted
+  through `COUNT(CASE WHEN c IS NOT NULL THEN 1 END)` (`COUNT(lob)` is `ORA-00932`).
+- Select lists are split at 900 expressions (Oracle's limit is 1,000).
+- A failing table records its error and the run continues; an ODPI-C call timeout closes the
+  session (`DPI-1067`), so the remaining tables are marked skipped rather than failing one by one.
+- P0 counts are marked `nulls_exact: false` / `row_count_exact: false`: statistics are as old as
+  `LAST_ANALYZED`.
+
+The result lands on the table (`profile`: tier, row count, exactness) and each column (`profile`:
+nulls, exactness, distinct, average/maximum length, bounds, `values_suppressed` with the PII class).
+`semantic::live_conflicts` attaches it to every `mandatory_but_nullable` conflict as RFC 0172's
+`measured` block — violating rows, total rows, exactness and the query that re-counts them — and the
+commit summary splits those conflicts into columns that hold nulls, hold none, or were not measured.
 
 **Log state facts** (for Part IV): `V$DATABASE.LOG_MODE`, `SUPPLEMENTAL_LOG_DATA_MIN`/`_PK`/`_ALL`,
-and per-table `ALL_LOG_GROUPS`. Read through `SELECT_CATALOG_ROLE`; when refused, recorded as
-`unknown` with the error, never as `off`.
+`FORCE_LOGGING`, and the owner's `DBA_LOG_GROUPS` count, on the `OracleCatalog` object. When
+refused, recorded as `unknown` with the error, never as `off`.
 
 ### 3.5 Into the ledger
 
@@ -298,4 +316,46 @@ measured gap that made a pending rename an explanation too.
 a dictionary row read, which decision D3 keeps out of this RFC; it is the first candidate for the
 opt-in cross-check. Ambiguous routines (37 names) are counted, not compared. Profiles and log facts
 are Phase 4.
+
+### Phase 4 — profiles and log state (2026-10-23)
+
+Live suite, 6 tests. The gate: a row seeded into `AD_STORAGEPROVIDER` with marker strings in
+`NAME`, `PASSWORD`, `USERNAME`, `URL` and `FOLDER`; after a P2 profile, the serialized snapshot,
+profile counts and log state contain none of them, while the row is counted (`row_count` 1) and
+`PASSWORD` measured only by length. The row is removed by a drop guard.
+
+| | |
+|---|---|
+| P2 over the seed | 903 of 903 tables, 18,520 of 18,520 columns with exact null counts, 6 s; 0 failed |
+| P0 statistics present | 901 of 903 tables analyzed; 18,471 table columns with `NUM_NULLS` |
+| bounds withheld (PII name rules) | 32 columns |
+| log state | `NOARCHIVELOG`, no supplemental logging, no force logging, 0 log groups — CDC (Part IV) needs a DBA change first |
+
+The first P2 attempt failed 41 tables: `COUNT(lob)` is `ORA-00932`. LOBs are now counted through
+`IS NOT NULL`.
+
+Whole tree at `profile = "p2"`: the 116 `mandatory_but_nullable` conflicts split into **11 columns
+holding nulls** (rows that break the model's rule — `AD_PrintFormatItem.AD_PrintFormatChild_ID` in
+2,711 rows, `C_Currency.RoundOffFactor` in 175) and **105 holding none** (a `NOT NULL` would hold
+today), all counted exactly. Each conflict's own re-count query, run independently against the
+database, returned the recorded number for all 116.
+
+The full XE image was tried for the `ORA-30094` rows: it ships the same single time-zone file (v35)
+as the slim image, so `TEST` and `AD_SCHEDULER` stay empty in the testbed — a measured limit, not a
+pending fix.
+
+**Defects the profiled run exposed, fixed:**
+
+- `ekos build` ran database observers inside the per-source loop: skipped whenever the source
+  tree's fingerprint was unchanged (a changed database or `profile` setting was never read), and
+  read once per source directory. Databases now run once per build, always, and a read failure is a
+  build error (the comment said so; the code only warned).
+- `compile` deduplicates a multi-input pass's outputs by its exact input set, so every past catalog
+  read survived and was merged — an old table version could win (the first P2 run's profiles never
+  reached the model). `KnowledgeContent::supersedes_earlier_runs` (omitted when false, so existing
+  ids are unchanged) makes `compile` keep only a pass's newest output; the catalog pass sets it and
+  writes an output even when empty.
+- The artifact store keeps every version of every object, so a dropped table would be recovered
+  forever. Each catalog artifact now lists the objects it read, and the pass drops the rest
+  (`stale_objects` on the recover line).
 

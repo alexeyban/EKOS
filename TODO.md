@@ -6760,7 +6760,8 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] Oracle XE 21c compose profile (`docker-compose.oracle.yml`) + iDempiere 12 seed import
       (`deploy/fixtures/idempiere-oracle.sh`), `ekos_ro` read-only user, census committed
       (`evals/oracle-idempiere/part0/`) (devlog_288)
-- [ ] Full (non-slim) XE image or time-zone file v26, so `TEST`/`AD_SCHEDULER` rows import (`ORA-30094`)
+- [x] ~~Full (non-slim) XE image for time-zone file v26~~ — measured: the full image has the same single file
+      (v35); `TEST`/`AD_SCHEDULER` rows stay absent in the testbed (devlog_289)
 - [ ] PostgreSQL twin (parity + fallback demo source); row census
 
 ### Part I — EKOS core, deterministic
@@ -6786,7 +6787,12 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] RFC 0211 Phase 3 — code ↔ database conflicts with explanations (pending migration by time + release
       horizon, translation tables); 444 conflicts, 239 explained, 173/173 checked against
       `AD_MigrationScript` (devlog_288)
-- [ ] RFC 0211 Phase 4 — profiles P0–P2 + archive/supplemental log facts; no-row-value ledger gate
+- [x] RFC 0211 Phase 4 — profiles P0–P2 (`[[databases]] profile`), log-state facts, marker-row gate; 116
+      mandatory-but-nullable → 11 hold nulls / 105 none, all re-counted (devlog_289)
+- [x] Live sources outside the build fingerprint; superseding pass output at compile; dropped catalog objects
+      leave the model (devlog_289)
+- [ ] `supersedes_earlier_runs` for other whole-answer multi-input passes (`dependency_analyzer`?) — measure the
+      accumulation first
 - [ ] RFC 0211 follow-ups: `change_not_applied` (opt-in `AD_MigrationScript` read, decision D3); compare the
       37 ambiguous routine names; `ekos doctor` names a missing Instant Client
 - [ ] RFC 0212 — write behaviour: update/delete evidence per table

@@ -335,6 +335,16 @@ pub fn queries(family: ViewFamily) -> Vec<Query> {
                  WHERE owner = :1 AND comments IS NOT NULL"
             ),
         ),
+        // Profile tier P0 (§3.4): optimizer statistics, no scan. `LOW_VALUE` / `HIGH_VALUE` are
+        // never selected — they are raw row values.
+        q(
+            "column_statistics",
+            format!(
+                "SELECT table_name, column_name, num_nulls, num_distinct, avg_col_len, \
+                 last_analyzed FROM {f}_tab_col_statistics \
+                 WHERE owner = :1 AND table_name NOT LIKE 'BIN$%'"
+            ),
+        ),
     ]
 }
 
@@ -382,7 +392,8 @@ pub fn introspect(
     let status_of = |t: &str, name: &str| status.get(&(t.to_string(), name.to_string())).cloned();
     let comments = table_comments(get("table_comments"), &r);
     let column_comments = column_comments(get("column_comments"), &r);
-    let mut columns = columns_by_table(get("columns"), &column_comments, &r);
+    let statistics = column_statistics(get("column_statistics"));
+    let mut columns = columns_by_table(get("columns"), &column_comments, &statistics, &r);
     snapshot.columns = columns.values().map(Vec::len).sum();
 
     for row in get("tables") {
@@ -397,6 +408,7 @@ pub fn introspect(
         }
         if let Some(n) = number(row, 4) {
             detail["num_rows"] = n.into();
+            detail["profile"] = crate::profile::TableProfile::from_statistics(n).into_json();
         }
         if let Some(t) = cell(row, 5) {
             detail["last_analyzed"] = t.into();
@@ -604,9 +616,30 @@ pub fn render_type(
     }
 }
 
+/// P0 column profiles by (table, column): counts from the optimizer's statistics, never exact.
+fn column_statistics(
+    rows: &[Vec<Option<String>>],
+) -> BTreeMap<(String, String), serde_json::Value> {
+    rows.iter()
+        .map(|row| {
+            let mut p = serde_json::json!({ "tier": "p0", "nulls_exact": false });
+            for (i, key) in [(2, "nulls"), (3, "distinct"), (4, "avg_length")] {
+                if let Some(n) = number(row, i) {
+                    p[key] = n.into();
+                }
+            }
+            if let Some(t) = cell(row, 5) {
+                p["analyzed"] = t.into();
+            }
+            ((text(row, 0), text(row, 1)), p)
+        })
+        .collect()
+}
+
 fn columns_by_table(
     rows: &[Vec<Option<String>>],
     comments: &BTreeMap<(String, String), String>,
+    statistics: &BTreeMap<(String, String), serde_json::Value>,
     r: &dyn Fn(&str) -> String,
 ) -> BTreeMap<String, Vec<serde_json::Value>> {
     let mut out: BTreeMap<String, Vec<serde_json::Value>> = BTreeMap::new();
@@ -629,8 +662,12 @@ fn columns_by_table(
         if let Some(d) = cell(row, 10).map(str::trim).filter(|d| !d.is_empty()) {
             c["default"] = r(d).into();
         }
-        if let Some(comment) = comments.get(&(table.clone(), name)) {
+        let key = (table.clone(), name);
+        if let Some(comment) = comments.get(&key) {
             c["comment"] = comment.as_str().into();
+        }
+        if let Some(p) = statistics.get(&key).filter(|p| p.get("nulls").is_some()) {
+            c["profile"] = p.clone();
         }
         out.entry(table).or_default().push(c);
     }
@@ -879,6 +916,17 @@ mod tests {
                 ],
             )
             .with(
+                "column_statistics",
+                &[&[
+                    Some("C_INVOICE"),
+                    Some("C_BPARTNER_ID"),
+                    Some("3"),
+                    Some("40"),
+                    Some("5"),
+                    Some("2024-12-01T10:00:00"),
+                ]],
+            )
+            .with(
                 "columns",
                 &[
                     &[
@@ -1092,6 +1140,12 @@ mod tests {
         assert_eq!(cols[3]["nullable"], true);
         assert_eq!(t.detail["num_rows"], 120);
         assert_eq!(s.columns, 4);
+        // P0: statistics, marked inexact; a column without statistics has no profile at all.
+        assert_eq!(t.detail["profile"]["row_count_exact"], false);
+        assert_eq!(cols[3]["profile"]["nulls"], 3);
+        assert_eq!(cols[3]["profile"]["nulls_exact"], false);
+        assert_eq!(cols[3]["profile"]["distinct"], 40);
+        assert!(cols[0].get("profile").is_none());
     }
 
     #[test]

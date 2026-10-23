@@ -25,12 +25,12 @@ use ekos_kir::{
 };
 use ekos_sql_dialect_sdk::SqlDialectParser;
 use serde_json::{Value, json};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bump when the mapping's output changes.
-pub const LOGIC_VERSION: &str = "oracle-catalog/1";
+pub const LOGIC_VERSION: &str = "oracle-catalog/3";
 
 /// The custom kind of the per-owner summary object.
 pub const CATALOG_KIND: &str = "OracleCatalog";
@@ -46,6 +46,15 @@ pub struct OracleCatalogStats {
     pub views_unparsed: usize,
     pub routines: PlSqlStats,
     pub invalid_objects: usize,
+    /// RFC 0211 §3.4: the profile tier each catalog was read at, tables a scan profiled or
+    /// failed on, and the archive-log mode (`NOARCHIVELOG`, …, or `unknown`).
+    pub profile_tiers: Vec<String>,
+    pub tables_profiled: usize,
+    pub tables_profile_failed: usize,
+    pub log_modes: Vec<String>,
+    /// Object artifacts left from an earlier read that the newest catalog no longer lists: an
+    /// object dropped from the database. Not recovered.
+    pub stale_objects: usize,
 }
 
 fn live_id(prefix: &str, key: &str) -> KirId {
@@ -114,16 +123,52 @@ pub fn recover_catalog(artifacts: &[(String, Value)]) -> (KirGraph, OracleCatalo
     let mut graph = KirGraph::new();
     let mut stats = OracleCatalogStats::default();
     let mut items: Vec<Item> = Vec::new();
+    // The objects each newest catalog read lists, by its target. The artifact store keeps every
+    // version of every object, so an object dropped from the database would otherwise live on.
+    let mut listed: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for (target, data) in artifacts {
         match data.get("kind").and_then(Value::as_str) {
             Some("catalog") => {
                 add_catalog(&mut graph, target, data);
                 stats.catalogs += 1;
+                if let Some(objects) = data.get("objects").and_then(Value::as_array) {
+                    listed.insert(
+                        target.as_str(),
+                        objects.iter().filter_map(Value::as_str).collect(),
+                    );
+                }
+                let p = &data["profile"];
+                stats
+                    .profile_tiers
+                    .push(p["tier"].as_str().unwrap_or("p0").to_string());
+                stats.tables_profiled += p["tables_profiled"].as_u64().unwrap_or(0) as usize;
+                stats.tables_profile_failed += (p["tables_failed"].as_u64().unwrap_or(0)
+                    + p["tables_skipped"].as_u64().unwrap_or(0))
+                    as usize;
+                stats.log_modes.push(
+                    data["log_state"]["log_mode"]
+                        .as_str()
+                        .unwrap_or("unknown")
+                        .to_string(),
+                );
             }
             Some("object") => items.extend(item(target, data)),
             _ => {}
         }
     }
+    let before = items.len();
+    items.retain(|i| {
+        let catalog = format!("oracle://{}/{}", i.database, i.owner);
+        match listed.get(catalog.as_str()) {
+            Some(objects) => i
+                .target
+                .strip_prefix(&format!("{catalog}/"))
+                .is_some_and(|entry| objects.contains(entry)),
+            // A catalog written before the list existed: keep everything, as before.
+            None => true,
+        }
+    });
+    stats.stale_objects = before - items.len();
     items.sort_by(|a, b| a.target.cmp(&b.target));
     stats.invalid_objects = items
         .iter()
@@ -226,6 +271,8 @@ fn add_catalog(graph: &mut KirGraph, target: &str, data: &Value) {
         "other_constraints",
         "write_check",
         "any_privileges",
+        "profile",
+        "log_state",
     ] {
         if let Some(v) = data.get(k) {
             o.properties.insert(k.into(), v.clone());
@@ -259,7 +306,11 @@ fn add_table(graph: &mut KirGraph, i: &Item, c: Option<&TableConstraints>) -> Ki
                     out[k] = true.into();
                 }
             }
-            for (from, to) in [("default", "default"), ("comment", "description")] {
+            for (from, to) in [
+                ("default", "default"),
+                ("comment", "description"),
+                ("profile", "profile"),
+            ] {
                 if let Some(v) = col.get(from) {
                     out[to] = v.clone();
                 }
@@ -289,6 +340,7 @@ fn add_table(graph: &mut KirGraph, i: &Item, c: Option<&TableConstraints>) -> Ki
         ("comment", "description"),
         ("num_rows", "num_rows"),
         ("last_analyzed", "last_analyzed"),
+        ("profile", "profile"),
         ("temporary", "temporary"),
         ("partitioned", "partitioned"),
         ("iot_type", "iot_type"),
@@ -457,11 +509,11 @@ impl CompilerPass for OracleCatalogPass {
             );
         }
         *self.stats.lock().unwrap() = stats;
-        if graph.objects.is_empty() {
-            return Ok(());
-        }
+        // A catalog read is the database's whole state: it replaces earlier reads, so an object
+        // dropped from the database leaves the compiled model too.
         let knowledge =
-            ekos_artifact::KnowledgeArtifact::new(&self.pass_id, self.artifact_ids.clone(), graph);
+            ekos_artifact::KnowledgeArtifact::new(&self.pass_id, self.artifact_ids.clone(), graph)
+                .superseding_earlier_runs();
         let json = serde_json::to_value(&knowledge)
             .map_err(|e| PassError::failed(format!("serialize KnowledgeArtifact: {e}")))?;
         ctx.artifact_store
@@ -492,7 +544,8 @@ mod tests {
                 "oracle://erp/ADEMPIERE".into(),
                 json!({ "kind": "catalog", "database": "erp", "owner": "ADEMPIERE", "family": "dba",
                         "census": { "TABLE": { "valid": 2, "invalid": 0 } },
-                        "write_check": { "result": "refused_by_server", "message": "ORA-01031" } }),
+                        "write_check": { "result": "refused_by_server", "message": "ORA-01031" },
+                        "log_state": { "log_mode": "NOARCHIVELOG" } }),
             ),
             object(
                 "table",
@@ -500,8 +553,10 @@ mod tests {
                 json!({ "columns": [
                     { "name": "C_INVOICE_ID", "data_type": "NUMBER(10,0)", "nullable": false },
                     { "name": "ISACTIVE", "data_type": "CHAR(1)", "nullable": false, "default": "'Y'" },
-                    { "name": "C_BPARTNER_ID", "data_type": "NUMBER(10,0)", "nullable": true, "comment": "Business partner" },
-                ], "num_rows": 12, "comment": "Invoice" }),
+                    { "name": "C_BPARTNER_ID", "data_type": "NUMBER(10,0)", "nullable": true, "comment": "Business partner",
+                      "profile": { "tier": "p2", "nulls": 0, "nulls_exact": true } },
+                ], "num_rows": 12, "comment": "Invoice",
+                   "profile": { "tier": "p2", "row_count": 12, "row_count_exact": true } }),
             ),
             object(
                 "table",
@@ -558,6 +613,8 @@ mod tests {
         assert_eq!(cols[1]["default"], "'Y'");
         assert!(cols[2].get("not_null").is_none());
         assert_eq!(cols[2]["description"], "Business partner");
+        assert_eq!(cols[2]["profile"]["nulls_exact"], true);
+        assert_eq!(t.properties["profile"]["row_count"], 12);
         assert_eq!(t.properties["origin"], "live");
         assert_eq!(t.properties["dialect"], "oracle");
         assert_eq!(t.properties["description"], "Invoice");
@@ -600,6 +657,27 @@ mod tests {
         assert!(stats.routines.routines.statements >= 2);
     }
 
+    /// An object an earlier read stored but the newest catalog no longer lists was dropped from
+    /// the database: it must not be recovered.
+    #[test]
+    fn an_object_the_newest_catalog_does_not_list_is_not_recovered() {
+        let mut artifacts = catalog();
+        let listed: Vec<String> = artifacts
+            .iter()
+            .filter_map(|(t, _)| t.strip_prefix("oracle://erp/ADEMPIERE/"))
+            .filter(|e| *e != "table/C_BPARTNER")
+            .map(str::to_string)
+            .collect();
+        artifacts[0].1["objects"] = json!(listed);
+        let (g, stats) = recover_catalog(&artifacts);
+        assert_eq!(stats.stale_objects, 1);
+        assert!(!g.objects.iter().any(|o| o.name == "C_BPARTNER"));
+        assert!(g.objects.iter().any(|o| o.name == "C_INVOICE"));
+        // Without a list (a catalog written before it existed) everything is kept.
+        let (_, old) = recover_catalog(&catalog());
+        assert_eq!(old.stale_objects, 0);
+    }
+
     #[test]
     fn the_catalog_summary_is_one_keyed_object_per_owner() {
         let (g, _) = recover_catalog(&catalog());
@@ -614,6 +692,7 @@ mod tests {
             c[0].properties["write_check"]["result"],
             "refused_by_server"
         );
+        assert_eq!(c[0].properties["log_state"]["log_mode"], "NOARCHIVELOG");
     }
 
     #[test]

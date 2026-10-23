@@ -468,6 +468,19 @@ fn live_summary(l: &ekos_semantic::live_conflicts::LiveConflictStats) -> String 
             )
         },
     );
+    let measured = l.nullable_holding_nulls + l.nullable_without_nulls;
+    let nullable = if measured == 0 {
+        String::new()
+    } else {
+        format!(
+            "; mandatory-but-nullable rows: {} column(s) hold nulls, {} hold none, {} not measured \
+             ({} counted exactly)",
+            l.nullable_holding_nulls,
+            l.nullable_without_nulls,
+            l.nullable_unmeasured,
+            l.nullable_counted_exactly
+        )
+    };
     let horizon = match &l.horizon_release {
         Some(r) => format!("{r}, {horizon}"),
         None => horizon,
@@ -476,7 +489,7 @@ fn live_summary(l: &ekos_semantic::live_conflicts::LiveConflictStats) -> String 
         "{} table(s) and {} routine(s) compared, {} ambiguous; {} model table(s) missing, {} \
          table(s) without a model, {} model column(s) missing, {} mandatory but nullable, {} \
          routine text(s) differ — {} of {} explained (migration horizon {horizon}); {} virtual and \
-         {} redacted column(s) not compared; {} invalid object(s)",
+         {} redacted column(s) not compared; {} invalid object(s){nullable}",
         l.tables_compared,
         l.routines_compared,
         l.ambiguous,
@@ -1032,6 +1045,14 @@ mod tests {
         assert!(live_summary(&l).contains("(migration horizon 2024-12-06T14:52)"));
         l.horizon_release = Some("iD11".into());
         assert!(live_summary(&l).contains("(migration horizon iD11, 2024-12-06T14:52)"));
+        assert!(!live_summary(&l).contains("mandatory-but-nullable rows"));
+        l.nullable_holding_nulls = 2;
+        l.nullable_without_nulls = 5;
+        l.nullable_counted_exactly = 7;
+        assert!(live_summary(&l).contains(
+            "mandatory-but-nullable rows: 2 column(s) hold nulls, 5 hold none, 0 not measured (7 \
+             counted exactly)"
+        ));
     }
 
     /// RFC 0142 — the progress line has to stay readable and honest.

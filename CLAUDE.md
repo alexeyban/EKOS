@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
 Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
-`devlog_288.md` as of this writing) before starting non-trivial work: they are the project's
+`devlog_289.md` as of this writing) before starting non-trivial work: they are the project's
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
@@ -162,8 +162,14 @@ recover → objects with `origin: live`, which identity never merges and name lo
 (`procedure_lineage::NameIndex::add_object`, `data_lineage`) use only for names no file defines.
 `semantic/src/live_conflicts.rs` compares `ModelTable`s / `db/oracle` routines with them at commit
 (RFC 0172 conflicts with an `explanation`: `pending_migration` by time **and** release horizon,
-`translation_table`). A pass that calls another analyzer's functions must fold that analyzer's
-`LOGIC_VERSION` into its cache key (two stale-cache bugs). Testbed: `docker-compose.oracle.yml` +
+`translation_table`; `mandatory_but_nullable` carries a `measured` null count from the profile).
+Profiles: `ora-live::profile` (`[[databases]] profile = p0|p1|p2`) — a text column is never a
+`MIN`/`MAX` argument, PII rules are the shared `ekos_common::pii`. **Live sources run outside the
+build fingerprint** (`build.rs::read_databases`, once per build, failure fatal); the catalog pass's
+output sets `KnowledgeContent::supersedes_earlier_runs`, so `compile` keeps only its newest read
+(multi-input passes otherwise accumulate every past output and merge them), and each catalog
+artifact lists the objects it read so a dropped table leaves. A pass that calls another analyzer's
+functions must fold that analyzer's `LOGIC_VERSION` into its cache key (two stale-cache bugs). Testbed: `docker-compose.oracle.yml` +
 `deploy/fixtures/idempiere-oracle.sh`; live suite `EKOS_ORACLE_LIVE=1`. `SqlAnalyzerPass` stamps `dialect` on
 every `Table`, and `conflicts` compares claims only within one dialect (`generic` = unknown, compared
 with all) — engine twins of one script are two databases, not a dispute. `init --detect` writes one

@@ -9,17 +9,21 @@
 //! - one `object` artifact per catalog object (table with its columns, view, routine, constraint,
 //!   index, …), its text already redacted by `ora-live`.
 //!
-//! No row value is read here. The database work runs on a blocking thread: the driver is
+//! Profiles (`ora-live::profile`) add counts, null counts, number and date bounds and text
+//! lengths at the tier the `[[databases]]` entry allows — never a text value. The database work
+//! runs on a blocking thread: the driver is
 //! synchronous, and `ekos build` drives observers from an async runtime.
 
 use async_trait::async_trait;
 use ekos_artifact::ObservationArtifact;
 use ekos_common::redaction::RedactionConfig;
 use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
-use ekos_ora_live::{CatalogSnapshot, ObjectKind, OraError, OraSource, SessionPolicy, WriteCheck};
+use ekos_ora_live::{
+    CatalogSnapshot, ObjectKind, OraError, OraSource, ProfileStats, SessionPolicy, WriteCheck,
+};
 use std::sync::Arc;
 
-pub use ekos_ora_live::OraConnection;
+pub use ekos_ora_live::{OraConnection, ProfileTier};
 
 /// The observer's name, and the `source_kind` its artifacts carry.
 pub const OBSERVER: &str = "oracle";
@@ -32,6 +36,10 @@ pub struct DatabaseReading {
     pub write_check: Option<WriteCheck>,
     /// `SESSION_PRIVS` entries containing `ANY`: a finding even when the probe was refused.
     pub any_privileges: Vec<String>,
+    /// One per snapshot, in the same order.
+    pub profiles: Vec<ProfileStats>,
+    /// Archive-log and supplemental-logging state, per owner in snapshot order.
+    pub log_states: Vec<serde_json::Value>,
 }
 
 /// Where a reading comes from: the live database, or a fixed reading in tests.
@@ -46,6 +54,7 @@ pub struct LiveReader {
     pub run_id: String,
     pub policy: SessionPolicy,
     pub redaction: RedactionConfig,
+    pub profile: ProfileTier,
 }
 
 impl CatalogReader for LiveReader {
@@ -53,13 +62,18 @@ impl CatalogReader for LiveReader {
         let source = OraSource::connect(&self.connection, &self.run_id, &self.policy)?;
         let family = source.family();
         let mut snapshots = Vec::new();
+        let mut profiles = Vec::new();
+        let mut log_states = Vec::new();
         for owner in &self.owners {
-            snapshots.push(ekos_ora_live::introspect(
+            let mut snapshot = ekos_ora_live::introspect(&source, owner, family, &self.redaction)?;
+            profiles.push(ekos_ora_live::profile::scan(
                 &source,
-                owner,
-                family,
+                &mut snapshot,
+                self.profile,
                 &self.redaction,
             )?);
+            log_states.push(ekos_ora_live::profile::log_state(&source, owner));
+            snapshots.push(snapshot);
         }
         let probe = snapshots.iter().find_map(|s| {
             s.of_kind(ObjectKind::Table)
@@ -79,6 +93,8 @@ impl CatalogReader for LiveReader {
             snapshots,
             write_check,
             any_privileges,
+            profiles,
+            log_states,
         })
     }
 }
@@ -109,10 +125,21 @@ pub fn object_target(database: &str, owner: &str, kind: ObjectKind, name: &str) 
     format!("oracle://{database}/{owner}/{}/{name}", kind.as_str())
 }
 
+/// `<kind>/<NAME>` of every object in `s`, sorted: the tail of each object's target.
+pub fn object_entries(s: &CatalogSnapshot) -> Vec<String> {
+    let mut v: Vec<String> = s
+        .objects
+        .iter()
+        .map(|o| format!("{}/{}", o.kind.as_str(), o.name))
+        .collect();
+    v.sort();
+    v
+}
+
 /// The artifacts of one reading. Pure, so the mapping is tested without a database.
 pub fn artifacts(database: &str, reading: &DatabaseReading) -> Vec<ObservationArtifact> {
     let mut out = Vec::new();
-    for s in &reading.snapshots {
+    for (n, s) in reading.snapshots.iter().enumerate() {
         let data = serde_json::json!({
             "kind": "catalog",
             "database": database,
@@ -125,6 +152,10 @@ pub fn artifacts(database: &str, reading: &DatabaseReading) -> Vec<ObservationAr
             "other_constraints": s.other_constraints,
             "write_check": reading.write_check,
             "any_privileges": reading.any_privileges,
+            "profile": reading.profiles.get(n),
+            "log_state": reading.log_states.get(n),
+            // What this read found, so recover can drop objects an earlier read left behind.
+            "objects": object_entries(s),
         });
         out.push(
             ObservationArtifact::new(OBSERVER, catalog_target(database, &s.owner), data)
@@ -237,6 +268,8 @@ mod tests {
                 message: "ORA-01031: insufficient privileges".into(),
             }),
             any_privileges: vec![],
+            profiles: vec![],
+            log_states: vec![],
         }
     }
 

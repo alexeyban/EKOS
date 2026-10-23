@@ -1,4 +1,5 @@
-//! RFC 0157 — PII classification, and what it suppresses.
+//! RFC 0157 — PII classification, and what it suppresses. Shared by `pg-live` and `ora-live`
+//! (RFC 0211).
 //!
 //! The rule this module exists to enforce: **hashing is not anonymization.** On a low-cardinality
 //! column (`status`, `country`, `gender`, a first name) an attacker holding the hash and the domain
@@ -105,9 +106,12 @@ const NAME_RULES: &[(&str, PiiClass)] = &[
 /// Classify by column name alone.
 pub fn classify_name(column: &str) -> Option<Classification> {
     let lower = column.to_ascii_lowercase();
+    // Applications that run words together (`CREDITCARDNUMBER`, iDempiere's convention) must match
+    // the same rules as snake_case ones; over-suppressing is the safe direction (RFC 0211).
+    let joined = lower.replace('_', "");
     NAME_RULES
         .iter()
-        .find(|(frag, _)| lower.contains(frag))
+        .find(|(frag, _)| lower.contains(frag) || joined.contains(&frag.replace('_', "")))
         .map(|(_, class)| Classification {
             class: *class,
             method: Method::ColumnName,
@@ -213,6 +217,20 @@ fn looks_like_phone(s: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 0211: run-together names (Oracle/iDempiere style) classify like snake_case ones.
+    #[test]
+    fn run_together_names_classify_like_snake_case_ones() {
+        for (name, class) in [
+            ("CREDITCARDNUMBER", PiiClass::PaymentCard),
+            ("DATEOFBIRTH", PiiClass::DateOfBirth),
+            ("ACCOUNTNUMBER", PiiClass::BankAccount),
+            ("credit_card_number", PiiClass::PaymentCard),
+        ] {
+            assert_eq!(classify_name(name).map(|c| c.class), Some(class), "{name}");
+        }
+        assert!(classify_name("C_INVOICE_ID").is_none());
+    }
 
     #[test]
     fn longest_name_match_wins() {

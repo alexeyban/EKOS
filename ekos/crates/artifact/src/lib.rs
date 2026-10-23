@@ -180,6 +180,12 @@ pub struct KnowledgeContent {
     pub pass_name: String,
     pub input_ids: Vec<ArtifactId>,
     pub kir: KirGraph,
+    /// RFC 0211: this output is the pass's whole answer, replacing every earlier output of the
+    /// same pass — a live catalog read, where an object absent now was dropped. `compile` then
+    /// keeps only the newest per pass name instead of one per exact input set (which kept every
+    /// past read and merged them). Omitted when false, so existing ids are unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub supersedes_earlier_runs: bool,
 }
 
 /// Compiled KIR output from one compiler pass.
@@ -198,6 +204,7 @@ impl KnowledgeArtifact {
             pass_name: pass_name.into(),
             input_ids,
             kir,
+            supersedes_earlier_runs: false,
         };
         let id = compute_content_id(&content);
         Self {
@@ -206,6 +213,14 @@ impl KnowledgeArtifact {
             meta: ArtifactMeta::default(),
             content,
         }
+    }
+
+    /// Mark this output as replacing every earlier output of the same pass (see
+    /// [`KnowledgeContent::supersedes_earlier_runs`]).
+    pub fn superseding_earlier_runs(mut self) -> Self {
+        self.content.supersedes_earlier_runs = true;
+        self.id = compute_content_id(&self.content);
+        self
     }
 }
 

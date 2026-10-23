@@ -63,6 +63,14 @@ pub struct LiveConflictStats {
     pub horizon_release: Option<String>,
     /// Live objects whose dictionary status is not `VALID`: a fact on the object, counted here.
     pub invalid_objects: usize,
+    /// Of the `mandatory_but_nullable` conflicts: columns whose profile counts nulls in the data
+    /// (the code's rule is broken by real rows), columns it counts none in (adding `NOT NULL`
+    /// would hold today), and columns without a profile. Exact counts come from a P2 scan, the
+    /// rest from optimizer statistics.
+    pub nullable_holding_nulls: usize,
+    pub nullable_without_nulls: usize,
+    pub nullable_unmeasured: usize,
+    pub nullable_counted_exactly: usize,
 }
 
 impl LiveConflictStats {
@@ -511,13 +519,55 @@ fn compare_columns(out: &mut Out, model: &KirObject, table: &KirObject) {
                 .history
                 .pending(&["modify_column"], &table_lc, Some(&lower));
             let attr = format!("columns.{written}.nullable");
-            out.add(
-                conflict(table, &attr, MANDATORY_BUT_NULLABLE, claims, None),
-                why,
-            );
+            let mut part = conflict(table, &attr, MANDATORY_BUT_NULLABLE, claims, None);
+            match null_measurement(table, col) {
+                Some(m) => {
+                    if m["violating_rows"].as_i64().unwrap_or(0) > 0 {
+                        out.stats.nullable_holding_nulls += 1;
+                    } else {
+                        out.stats.nullable_without_nulls += 1;
+                    }
+                    if m["exact"] == true {
+                        out.stats.nullable_counted_exactly += 1;
+                    }
+                    for o in &mut part.objects {
+                        o.properties.insert("measured".into(), m.clone());
+                    }
+                }
+                None => out.stats.nullable_unmeasured += 1,
+            }
+            out.add(part, why);
             out.stats.mandatory_but_nullable += 1;
         }
     }
+}
+
+/// What the column's profile (RFC 0211 §3.4) says about the rows that break a mandatory rule: in
+/// the shape RFC 0172's doc-vs-data measurements use, with the query that re-counts them.
+fn null_measurement(table: &KirObject, col: &Value) -> Option<Value> {
+    let p = col.get("profile")?;
+    let nulls = p.get("nulls")?.as_i64()?;
+    let exact = p.get("nulls_exact") == Some(&json!(true));
+    let name = col.get("name").and_then(Value::as_str).unwrap_or_default();
+    let owner = prop(table, "owner").unwrap_or_default();
+    let mut m = json!({
+        "violating_rows": nulls,
+        "exact": exact,
+        "tier": p.get("tier").cloned().unwrap_or(Value::Null),
+        "against": "the model's mandatory flag",
+        "sql": format!("SELECT COUNT(*) FROM \"{owner}\".\"{}\" WHERE \"{}\" IS NULL", table.name, name.to_uppercase()),
+    });
+    if let Some(rows) = table
+        .properties
+        .get("profile")
+        .and_then(|t| t.get("row_count"))
+    {
+        m["rows"] = rows.clone();
+    }
+    if let Some(at) = p.get("analyzed") {
+        m["measured_at"] = at.clone();
+    }
+    Some(m)
 }
 
 /// The definition among same-named routine files: the only one outside a migration script.
@@ -861,6 +911,67 @@ mod tests {
         let e = explanation(&g, "columns.C_CostCenter_ID").unwrap();
         assert_eq!(e["script"], "migration/iD13/oracle/b.sql");
         assert_eq!(e["release"], "iD13");
+    }
+
+    /// A profile turns "mandatory but nullable" into a measurement: rows that break the rule,
+    /// none, or not measured — with the query that re-counts them.
+    #[test]
+    fn a_profile_measures_the_rows_that_break_a_mandatory_rule() {
+        let table = live_table(
+            "C_ORDER",
+            json!([
+                { "name": "DATEPROMISED", "profile": { "tier": "p2", "nulls": 3, "nulls_exact": true } },
+                { "name": "DESCRIPTION", "profile": { "tier": "p0", "nulls": 0, "nulls_exact": false, "analyzed": "2024-12-01T10:00:00" } },
+                { "name": "POREFERENCE" },
+            ]),
+        )
+        .with_property(
+            "profile",
+            json!({ "tier": "p2", "row_count": 10, "row_count_exact": true }),
+        );
+        let objects = vec![
+            table,
+            model(
+                "C_Order",
+                json!({
+                    "DatePromised": { "mandatory": true, "source": "X.java:1" },
+                    "Description": { "mandatory": true, "source": "X.java:2" },
+                    "POReference": { "mandatory": true, "source": "X.java:3" },
+                }),
+            ),
+        ];
+        let (g, stats) = detect(&objects);
+        assert_eq!(stats.mandatory_but_nullable, 3);
+        assert_eq!(
+            (
+                stats.nullable_holding_nulls,
+                stats.nullable_without_nulls,
+                stats.nullable_unmeasured,
+                stats.nullable_counted_exactly
+            ),
+            (1, 1, 1, 1)
+        );
+        let measured = |attr: &str| {
+            g.objects
+                .iter()
+                .find(|o| o.properties["attribute"] == attr)
+                .and_then(|o| o.properties.get("measured"))
+                .cloned()
+        };
+        let m = measured("columns.DatePromised.nullable").unwrap();
+        assert_eq!(
+            (m["violating_rows"].clone(), m["rows"].clone()),
+            (json!(3), json!(10))
+        );
+        assert_eq!(
+            m["sql"],
+            "SELECT COUNT(*) FROM \"ADEMPIERE\".\"C_ORDER\" WHERE \"DATEPROMISED\" IS NULL"
+        );
+        assert_eq!(
+            measured("columns.Description.nullable").unwrap()["measured_at"],
+            "2024-12-01T10:00:00"
+        );
+        assert!(measured("columns.POReference.nullable").is_none());
     }
 
     /// A pending rename explains the new name a model already uses (iD13's

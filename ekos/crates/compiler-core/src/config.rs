@@ -957,12 +957,29 @@ pub struct DatabaseConfig {
     pub password_env: String,
     /// The schemas (owners) to read, as the dictionary spells them (`ADEMPIERE`).
     pub owners: Vec<String>,
+    /// How much `ekos build` may measure (RFC 0211 §3.4). `p0` (default) reads optimizer
+    /// statistics only; `p1` counts each table's rows; `p2` scans each table once for exact null
+    /// counts, number and date bounds and text lengths. No tier stores a text value.
+    #[serde(default)]
+    pub profile: DatabaseProfile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum DatabaseKind {
     Oracle,
+}
+
+/// RFC 0211 §3.4 profile tiers, in increasing cost.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum DatabaseProfile {
+    #[default]
+    P0,
+    P1,
+    P2,
 }
 
 /// RFC 0178 Part 2: one named input of a project.
@@ -1509,6 +1526,13 @@ path = "/tmp/ekos-containers/b"
         cfg.check_sources().unwrap();
         assert_eq!(cfg.databases[0].kind, DatabaseKind::Oracle);
         assert_eq!(cfg.databases[0].password_env, "ERP_PW");
+        assert_eq!(
+            cfg.databases[0].profile,
+            DatabaseProfile::P0,
+            "statistics only"
+        );
+        let p2: EkosConfig = toml::from_str(&format!("{db}profile = \"p2\"\n")).unwrap();
+        assert_eq!(p2.databases[0].profile, DatabaseProfile::P2);
 
         let clash: EkosConfig = toml::from_str(&format!(
             "[[sources]]\nname = \"erp\"\npath = \"x\"\n\n{db}"
@@ -1535,7 +1559,6 @@ path = "/tmp/ekos-containers/b"
         assert!(password.is_err(), "a password value is not a field");
     }
 
-    /// The core RFC 0111 groundwork claim: naming an active container redirects the *entire*
     /// RFC 0178 Part 2: `[[sources]]` replaces `[observe] paths` and names each base.
     #[test]
     fn sources_become_named_observe_bases() {

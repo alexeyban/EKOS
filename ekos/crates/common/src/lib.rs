@@ -1,4 +1,5 @@
 pub mod compress;
+pub mod pii;
 pub mod project;
 pub mod redaction;
 

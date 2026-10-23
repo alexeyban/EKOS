@@ -793,11 +793,20 @@ table no model describes, a mandatory model column that is nullable, a routine f
 differs from the installed one. When the source tree accounts for a difference — a migration newer
 than the database, a translation table — the conflict carries that explanation.
 
+`profile = "p0" | "p1" | "p2"` decides how much `ekos build` measures: optimizer statistics only
+(the default), exact row counts, or one aggregate scan per table for exact null counts, number and
+date bounds and text lengths. No tier stores a text value — a seeded marker row checks it — and
+number and date bounds are withheld for columns named like personal data. A mandatory model column
+that is nullable in the database then carries the count of rows that break the rule and the query
+that re-counts them. The catalog also records the archive-log and supplemental-logging state.
+
 On iDempiere (source `release-13`, the release 12 seed on Oracle XE): schema changes linked to their
 table 11,748 → 28,916 of 31,620; 444 conflicts, 239 explained, every pending-migration explanation
 confirmed against the database's own record of applied scripts. Among the rest: tables of modules
 removed from the code but not the seed, a model column no script ever created, and an installed
-procedure that builds `NVARCHAR2` columns where its file says `VARCHAR2`. No model calls.
+procedure that builds `NVARCHAR2` columns where its file says `VARCHAR2`. At `profile = "p2"`
+(903 tables in 6 s), of 116 mandatory-but-nullable columns 11 hold nulls and 105 none, each count
+re-checked against the database. No model calls.
 
 ```bash
 cargo build --release -p ekos --features oracle      # needs Oracle Instant Client at run time

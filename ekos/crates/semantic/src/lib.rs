@@ -525,6 +525,8 @@ fn dedup_knowledge_artifact_ids(store: &dyn ArtifactStore, ids: &[ArtifactId]) -
     enum Key {
         SingleTarget(String, String),
         ExactInputs(String, Vec<String>),
+        /// RFC 0211: a pass whose output replaces its earlier runs (`supersedes_earlier_runs`).
+        Pass(String),
     }
 
     let mut newest: HashMap<Key, (ArtifactId, Option<DateTime<Utc>>)> = HashMap::new();
@@ -550,7 +552,9 @@ fn dedup_knowledge_artifact_ids(store: &dyn ArtifactStore, ids: &[ArtifactId]) -
             .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&Utc));
 
-        let key = if input_ids.len() == 1 {
+        let key = if json["supersedes_earlier_runs"].as_bool() == Some(true) {
+            Key::Pass(pass_name)
+        } else if input_ids.len() == 1 {
             let target = store
                 .read(&ArtifactId(input_ids[0].clone()))
                 .ok()
@@ -583,11 +587,24 @@ fn dedup_knowledge_artifact_ids(store: &dyn ArtifactStore, ids: &[ArtifactId]) -
         }
     }
 
+    // A superseding output also replaces that pass's outputs written before the flag existed.
+    let superseding: HashSet<String> = newest
+        .keys()
+        .filter_map(|k| match k {
+            Key::Pass(pass) => Some(pass.clone()),
+            _ => None,
+        })
+        .collect();
+    newest.retain(|k, _| match k {
+        Key::SingleTarget(pass, _) | Key::ExactInputs(pass, _) => !superseding.contains(pass),
+        Key::Pass(_) => true,
+    });
     let mut result: Vec<(String, String, String)> = newest
         .into_iter()
         .map(|(key, (id, _))| match key {
             Key::SingleTarget(pass, target) => (target, pass, id.to_string()),
             Key::ExactInputs(pass, inputs) => (inputs.join(","), pass, id.to_string()),
+            Key::Pass(pass) => (String::new(), pass, id.to_string()),
         })
         .collect();
     result.sort();
@@ -1444,6 +1461,53 @@ mod tests {
             vec![new_ka],
             "byte-identical multi-input reruns must still collapse; got old={old_ka:?}"
         );
+    }
+
+    /// RFC 0211: a live catalog read has a different input set every time the database changes,
+    /// so keying by exact inputs kept every past read and merged them — an old table version
+    /// could win, and a dropped table never left. A superseding pass keeps only its newest output.
+    #[test]
+    fn dedup_keeps_only_the_newest_output_of_a_superseding_pass() {
+        use ekos_artifact::FileSystemArtifactStore;
+
+        let dir = TempDir::new().unwrap();
+        let store = FileSystemArtifactStore::new(dir.path());
+        let write = |inputs: Vec<ArtifactId>, at: DateTime<Utc>, name: &str| {
+            let mut graph = KirGraph::new();
+            graph.objects.push(KirObject::new(name, ObjectKind::Table));
+            let mut a = ekos_artifact::KnowledgeArtifact::new("oracle-catalog:ws", inputs, graph)
+                .superseding_earlier_runs();
+            a.meta.created_at = at;
+            store
+                .write(&a.id, &serde_json::to_value(&a).unwrap())
+                .unwrap();
+            a.id
+        };
+        let a = write_observation(&store, "a", "1");
+        let b = write_observation(&store, "b", "2");
+        let c = write_observation(&store, "c", "3");
+        let now = Utc::now();
+        // Written before the flag existed: superseded all the same.
+        write_knowledge(
+            &store,
+            "oracle-catalog:ws",
+            vec![a.clone(), b.clone(), c.clone()],
+            now - chrono::Duration::hours(3),
+            "read0",
+        );
+        write(
+            vec![a.clone(), b.clone()],
+            now - chrono::Duration::hours(2),
+            "read1",
+        );
+        write(
+            vec![a.clone(), c],
+            now - chrono::Duration::hours(1),
+            "read2",
+        );
+        let newest = write(vec![a, b], now, "read3");
+        let deduped = dedup_knowledge_artifact_ids(&store, &store.list().unwrap());
+        assert_eq!(deduped, vec![newest]);
     }
 
     /// Two files, one analyzer: the artifacts come back in source order however their

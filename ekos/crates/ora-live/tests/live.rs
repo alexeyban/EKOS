@@ -10,7 +10,8 @@
 
 use ekos_common::redaction::RedactionConfig;
 use ekos_ora_live::{
-    ObjectKind, OraConnection, OraSource, SessionPolicy, ViewFamily, WriteCheck, introspect,
+    ObjectKind, OraConnection, OraSource, ProfileTier, SessionPolicy, ViewFamily, WriteCheck,
+    introspect, profile,
 };
 
 fn live() -> bool {
@@ -190,4 +191,96 @@ fn long_columns_read_in_full() {
         )
         .unwrap();
     println!("default {:?}", d[0][0]);
+}
+
+/// A plain driver connection as the schema owner, for seeding only. `OraSource` has no way to
+/// write, and should not gain one for a test.
+fn schema_owner() -> oracle::Connection {
+    let password = std::env::var("IDEMPIERE_DB_PASSWORD").expect("IDEMPIERE_DB_PASSWORD");
+    oracle::Connection::connect("adempiere", password, connect_string())
+        .expect("connect as the schema owner")
+}
+
+const MARKERS: &[&str] = &[
+    "ekos-marker-name-5f1c",
+    "ekos-marker-password-9b2e",
+    "ekos-marker-user-41d7",
+    "https://ekos-marker-url-c08a.example",
+    "/ekos-marker-folder-77e3",
+];
+
+/// Removes the marker row however the test ends.
+struct MarkerRow(oracle::Connection);
+
+impl Drop for MarkerRow {
+    fn drop(&mut self) {
+        let _ = self.0.execute(
+            "DELETE FROM adempiere.ad_storageprovider WHERE ad_storageprovider_id = 999999",
+            &[],
+        );
+        let _ = self.0.commit();
+    }
+}
+
+/// RFC 0211 §5's gate: after the most invasive profile (P2), nothing that leaves the crate — the
+/// snapshot, the profile counts, the log state — holds a text value of a seeded row.
+#[test]
+fn a_p2_profile_holds_no_text_value_of_a_seeded_row() {
+    if !live() {
+        return;
+    }
+    let owner = schema_owner();
+    owner
+        .execute(
+            &format!(
+                "INSERT INTO adempiere.ad_storageprovider (ad_storageprovider_id, ad_client_id, \
+             ad_org_id, createdby, updatedby, name, password, username, url, folder) \
+             VALUES (999999, 0, 0, 100, 100, '{}', '{}', '{}', '{}', '{}')",
+                MARKERS[0], MARKERS[1], MARKERS[2], MARKERS[3], MARKERS[4]
+            ),
+            &[],
+        )
+        .unwrap();
+    owner.commit().unwrap();
+    let _cleanup = MarkerRow(owner);
+
+    let s = read_only();
+    let mut snap = introspect(&s, "ADEMPIERE", s.family(), &RedactionConfig::default()).unwrap();
+    let t = std::time::Instant::now();
+    let stats = profile::scan(&s, &mut snap, ProfileTier::P2, &RedactionConfig::default()).unwrap();
+    println!("P2 in {:?}: {stats:?}", t.elapsed());
+    let log = profile::log_state(&s, "ADEMPIERE");
+    println!("log state: {log}");
+
+    let out = serde_json::to_string(&(&snap, &stats, &log)).unwrap();
+    for m in MARKERS {
+        assert!(!out.contains(m), "{m} reached the snapshot");
+    }
+    // The row was seen: counted, and its text measured only by length.
+    let table = snap
+        .of_kind(ObjectKind::Table)
+        .find(|t| t.name == "AD_STORAGEPROVIDER")
+        .unwrap();
+    assert_eq!(table.detail["profile"]["row_count"], 1);
+    let password = table.detail["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "PASSWORD")
+        .unwrap();
+    assert_eq!(password["profile"]["nulls"], 0);
+    assert_eq!(password["profile"]["max_length"], MARKERS[1].len());
+    let failures: Vec<String> = snap
+        .of_kind(ObjectKind::Table)
+        .filter_map(|t| {
+            t.detail["profile"]["error"]
+                .as_str()
+                .map(|e| format!("{}: {e}", t.name))
+        })
+        .collect();
+    for f in failures.iter().take(5) {
+        println!("failed: {}", f.lines().next().unwrap_or_default());
+    }
+    assert_eq!(stats.tables_failed, 0);
+    assert_eq!(log["log_mode"], "NOARCHIVELOG");
 }

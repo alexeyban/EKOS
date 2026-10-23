@@ -6,6 +6,7 @@
 
 use crate::OraError;
 use crate::catalog::{CatalogSource, Query, Rows, ViewFamily};
+use crate::profile::ScanSource;
 
 /// How a source session is configured. Policy, not constants: the right timeout for a large
 /// warehouse is not the right one for an application database.
@@ -294,6 +295,20 @@ impl CatalogSource for OraSource {
 
     fn end_snapshot(&self) -> Result<(), OraError> {
         self.end_transaction()
+    }
+}
+
+impl ScanSource for OraSource {
+    fn scan(&self, sql: &str) -> Result<Rows, OraError> {
+        self.rows_of(sql, &[])
+    }
+
+    fn begin_read_only(&self) -> Result<(), OraError> {
+        OraSource::begin_read_only(self)
+    }
+
+    fn end_transaction(&self) -> Result<(), OraError> {
+        OraSource::end_transaction(self)
     }
 }
 

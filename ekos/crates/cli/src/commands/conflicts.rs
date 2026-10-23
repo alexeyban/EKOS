@@ -629,12 +629,9 @@ pub fn show(config: &EkosConfig, cwd: &Path, target: &str, json_out: bool) -> Re
         println!("  explained: {}", explanation_line(e));
     }
     // RFC 0172 Phase 3 — the measurement behind a doc-vs-data conflict, so it can be re-run.
+    // RFC 0211 — or a profile's null count behind a mandatory-but-nullable one.
     if let Some(m) = o.properties.get("measured") {
-        println!(
-            "  measured:  {} row(s) contradict the documentation ({})",
-            m["violating_rows"],
-            m["measured_at"].as_str().unwrap_or("?")
-        );
+        println!("  measured:  {}", measured_line(m));
         println!("  query:     {}", m["sql"].as_str().unwrap_or(""));
     }
     if let Some(p) = o.properties.get("picked_claim") {
@@ -702,10 +699,48 @@ pub fn resolve(
     Ok(())
 }
 
+/// A measurement in words: how many rows contradict what, and how it was counted.
+fn measured_line(m: &serde_json::Value) -> String {
+    let against = m["against"].as_str().unwrap_or("the documentation");
+    let how = match (m["exact"].as_bool(), m["measured_at"].as_str()) {
+        (Some(false), Some(at)) => format!("optimizer statistics of {at}"),
+        (Some(false), None) => "optimizer statistics".to_string(),
+        (Some(true), _) => "exact count".to_string(),
+        (None, at) => at.unwrap_or("?").to_string(),
+    };
+    let of = m["rows"]
+        .as_i64()
+        .map_or_else(String::new, |n| format!(" of {n}"));
+    format!(
+        "{}{of} row(s) contradict {against} ({how})",
+        m["violating_rows"]
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use ekos_kir::ObjectKind;
+
+    /// RFC 0211: a profile's null count reads as a count against the model, and says how it was
+    /// counted; RFC 0172's doc-vs-data wording is unchanged.
+    #[test]
+    fn a_measurement_says_what_it_contradicts_and_how_it_was_counted() {
+        let p2 = serde_json::json!({ "violating_rows": 3, "rows": 10, "exact": true,
+            "against": "the model's mandatory flag" });
+        assert_eq!(
+            measured_line(&p2),
+            "3 of 10 row(s) contradict the model's mandatory flag (exact count)"
+        );
+        let p0 = serde_json::json!({ "violating_rows": 0, "exact": false,
+            "measured_at": "2024-12-01T10:00:00", "against": "the model's mandatory flag" });
+        assert!(measured_line(&p0).ends_with("(optimizer statistics of 2024-12-01T10:00:00)"));
+        let doc = serde_json::json!({ "violating_rows": 4, "measured_at": "2026-10-11T09:00" });
+        assert_eq!(
+            measured_line(&doc),
+            "4 row(s) contradict the documentation (2026-10-11T09:00)"
+        );
+    }
 
     fn enum_meaning() -> KirObject {
         let mut o = KirObject::new(
