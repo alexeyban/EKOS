@@ -107,7 +107,7 @@ Every semantic conclusion is supported by evidence. Every change is auditable.
 `simulation` (RFC 0047-0055's opt-in World Engine — see below), `clickhouse-query` (RFC 0056's
 opt-in live NL-to-SQL query engine — see below), `evals` (RFC 0138's answer-grading harness — see
 below), `session` (RFC 0151 agent session memory), `plpgsql` (RFC 0163's PL/pgSQL parser and
-procedural IR), and EKOS Migrate's `migrate`, `migrate-dq`, `migrate-logic`, `migrate-validate`, `migrate-approval`,
+procedural IR), `plsql` (RFC 0210's Oracle script scanner and PL/SQL front end), and EKOS Migrate's `migrate`, `migrate-dq`, `migrate-logic`, `migrate-validate`, `migrate-approval`,
 `migrate-report`, `migrate-target-clickhouse` and `pg-live` (RFC 0154–0162 — see below). The same workspace also builds `ekos` with a generic extension seam (RFC 0149) that out-of-tree
 builds plug extra connectors and MCP tools into.
 
@@ -119,7 +119,12 @@ Transformation IR — RFC 0038/0040), Rust source (real AST parsing, real functi
 RFC 0041), Elixir and JavaScript/TypeScript source (real AST + `Calls` recovery — RFC 0081/0082),
 Perl source (`.pl`/`.pm`/`.t`/`.psgi`, plus `.cgi` with a real `perl` shebang — packages, subs,
 `use`/`require` dependencies, `use parent`/`use base`/`@ISA` inheritance, POD descriptions and
-source spans; RFC 0147), **compiled .NET and JVM binaries with no source available**
+source spans; RFC 0147), Java source (`.java` — types, methods and constructors with spans,
+signatures and Javadoc, imports and inheritance resolved inside the tree, SQL built in method
+bodies folded and linked to the tables it reads and writes, `IDEMPIERE-NNNN` ticket anchors; for the
+iDempiere/ADempiere family, the generated model classes become `ModelTable`s with every column's
+business name, list values, mandatory flag, default and code-declared foreign key — RFC 0209),
+**compiled .NET and JVM binaries with no source available**
 (`.dll`/`.exe`/`.class`/`.jar`/`.war`/`.ear` — types, methods, signatures, fields, the real call
 graph, branch structure, string/numeric constants and external I/O boundaries, read in-process
 from CLI metadata and bytecode with no .NET SDK or JRE required; for .NET, per-method statement
@@ -732,6 +737,32 @@ from a Pentaho `.ktr`/`.kjb` job can be diffed against a newly drafted SQL pipel
 reading required. `Unmapped` is deliberate, not a gap swept under the rug: anything that can't be
 parsed is still recorded as evidenced fact ("something is here, not yet understood"), never
 silently dropped.
+
+### Oracle scripts, PL/SQL and schema history (RFC 0210)
+
+An `oracle` SQL dialect reads Oracle schemas and SQL*Plus scripts: `SET`/`PROMPT`/`@file` lines and
+whole PL/SQL units are set aside, Oracle-only clauses (`ENABLE NOVALIDATE`, `ADD (…)` column lists,
+`MODIFY c DEFAULT x`, `VARCHAR2(10 BYTE)`, `FORCE` views, `(+)`, `MINUS`, physical attributes, …)
+are rewritten — always keeping the file's line numbers. `ekos init --detect` adds one dialect rule
+per engine-named directory, so a project shipping each migration for Oracle and for PostgreSQL reads
+each copy with its own grammar, and the two copies are no longer reported as conflicting:
+definitions are compared only within one dialect.
+
+PL/SQL functions, procedures, triggers and packages are read into the same procedural IR as
+PL/pgSQL and written as the same `Procedure` / `ProcedureStatement` objects, with a computed
+fidelity label; an Oracle trigger's inline body is a `Procedure`, classified like any trigger
+function. Migration scripts named `<yyyyMMddHHmm>_<description>.sql` become `SchemaChangeSet`s
+(time, release, engine, tickets) holding one `SchemaChange` per operation — `add_column`,
+`modify_column`, `add_constraint`, … — linked to their table at `ekos commit`.
+
+On iDempiere `release-13`: Oracle migration statements rejected 5,317 → 9 (of 62,251); `db/oracle`
+60 of 61 routines recovered completely (991 of 992 statements — the gap is a `GOTO`); 2,154 change
+sets with 26,060 changes, none unrecognized; no model calls.
+
+```bash
+ekos recover   # … PL/SQL routines: …   Schema history: 2154 migration script(s), 26060 change(s) …
+ekos ekl "FIND Object WHERE kind = 'SchemaChange' AND table = 'C_Invoice'"
+```
 
 ### PL/pgSQL stored procedures (RFC 0163)
 

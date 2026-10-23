@@ -67,7 +67,8 @@ fn classify(
         Err(why) => return ("Unknown", vec![why]),
     };
     let prop = |k: &str| f.properties.get(k).cloned().unwrap_or(Value::Null);
-    if prop("language").as_str() != Some("plpgsql") {
+    // RFC 0210: an Oracle trigger's body is a PL/SQL routine with the same IR facts.
+    if !matches!(prop("language").as_str(), Some("plpgsql" | "plsql")) {
         return (
             "Unknown",
             vec![format!(

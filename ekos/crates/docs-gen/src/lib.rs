@@ -718,6 +718,10 @@ pub fn is_entity_page_kind(kind: &ObjectKind) -> bool {
                     | "ElixirSymbol"
                     | "PerlPackage"
                     | "PerlSymbol"
+                    // RFC 0209: Java types and methods, and the application model's tables.
+                    | "JavaType"
+                    | "JavaMethod"
+                    | "ModelTable"
                     | "JsModule"
                     | "JsSymbol"
                     | "BinaryAssembly"
@@ -3170,6 +3174,7 @@ fn is_symbol_kind(kind: &ObjectKind) -> bool {
                 || s == "ElixirSymbol"
                 || s == "JsSymbol"
                 || s == "PerlSymbol"
+                || s == "JavaMethod"
                 || s == "BinaryMethod"
                 // RFC 0163: a SQL routine is a callable symbol, grouped under its `File`.
                 || s == "Procedure"
@@ -3221,7 +3226,7 @@ pub fn render_api(objects: &[KirObject], relationships: &[KirRelationship]) -> R
         .iter()
         .filter(|o| {
             matches!(&o.kind, ObjectKind::Custom(s)
-                if s == "ElixirModule" || s == "PerlPackage" || s == "BinaryType")
+                if s == "ElixirModule" || s == "PerlPackage" || s == "BinaryType" || s == "JavaType")
         })
         .map(|o| (o.id, o))
         .collect();
@@ -3586,6 +3591,8 @@ const DOC_BEARING_CUSTOM_KINDS: &[&str] = &[
     "JsModule",
     "PerlSymbol",
     "PerlPackage",
+    "JavaMethod",
+    "JavaType",
     "BinaryMethod",
     "BinaryType",
     // RFC 0163 / 0169: `description` from `COMMENT ON FUNCTION|PROCEDURE|VIEW`.

@@ -290,12 +290,26 @@ pub struct Suggestion {
     pub detail: String,
 }
 
+/// A directory named after a database engine that holds `.sql` files (RFC 0210): `migration/iD13/
+/// oracle/`. Projects that support several engines keep one copy of each script per engine, and a
+/// single default dialect reads half of them under the wrong grammar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EngineDirectory {
+    /// The directory name as written.
+    pub name: String,
+    /// The registry dialect it implies.
+    pub dialect: &'static str,
+    /// `.sql` files anywhere under a directory of that name.
+    pub sql_files: usize,
+}
+
 /// Everything a scan of the workspace found.
 #[derive(Debug, Clone, Default)]
 pub struct Detection {
     pub sources: Vec<DetectedSource>,
     pub contaminants: Vec<Contaminant>,
     pub sql_dialect: Option<DialectGuess>,
+    pub engine_directories: Vec<EngineDirectory>,
     pub suggestions: Vec<Suggestion>,
 }
 
@@ -437,6 +451,49 @@ pub fn detect_contaminants(paths: &[String]) -> Vec<Contaminant> {
                 observed_files: *observed_files,
                 capped: false,
             })
+        })
+        .collect()
+}
+
+/// Directory names that say which engine the SQL below them is for.
+const ENGINE_DIRECTORIES: &[(&str, &str)] = &[
+    ("oracle", "oracle"),
+    ("postgresql", "postgres"),
+    ("postgres", "postgres"),
+    ("pg", "postgres"),
+    ("mysql", "mysql"),
+    ("mssql", "mssql"),
+    ("sqlserver", "mssql"),
+    ("snowflake", "snowflake"),
+    ("clickhouse", "clickhouse"),
+    ("databricks", "databricks"),
+    ("trino", "trino"),
+];
+
+/// Pure: the engine-named directories holding `.sql` files, in name order.
+pub fn detect_engine_directories(paths: &[String]) -> Vec<EngineDirectory> {
+    let mut found: BTreeMap<String, (&'static str, usize)> = BTreeMap::new();
+    for raw in paths {
+        let path = normalize(raw);
+        if !path.to_ascii_lowercase().ends_with(".sql") {
+            continue;
+        }
+        let mut dirs: Vec<&str> = path.split('/').collect();
+        dirs.pop();
+        let named: BTreeSet<&str> = dirs.into_iter().collect();
+        for dir in named {
+            let lower = dir.to_ascii_lowercase();
+            if let Some((_, dialect)) = ENGINE_DIRECTORIES.iter().find(|(n, _)| *n == lower) {
+                found.entry(dir.to_string()).or_insert((dialect, 0)).1 += 1;
+            }
+        }
+    }
+    found
+        .into_iter()
+        .map(|(name, (dialect, sql_files))| EngineDirectory {
+            name,
+            dialect,
+            sql_files,
         })
         .collect()
 }
@@ -616,12 +673,14 @@ pub fn detect_workspace(cwd: &Path, config: &EkosConfig) -> Result<Detection> {
     }
 
     let sql_dialect = guess_dialect(&sql_samples);
+    let engine_directories = detect_engine_directories(&clean);
     let suggestions = build_suggestions(cwd, &sources, &sql_samples);
 
     Ok(Detection {
         sources,
         contaminants,
         sql_dialect,
+        engine_directories,
         suggestions,
     })
 }
@@ -760,6 +819,7 @@ pub fn render_config(detection: &Detection) -> String {
             out.push_str("default-dialect = \"generic\"\n");
         }
     }
+    render_engine_rules(&mut out, &detection.engine_directories);
     out.push('\n');
 
     out.push_str("# ── Detected inputs ──────────────────────────────────────────────────────\n");
@@ -792,6 +852,25 @@ pub fn render_config(detection: &Detection) -> String {
     );
 
     out
+}
+
+/// One `[[recover.sql.dialect-rules]]` per engine-named directory: a file there is that engine's
+/// SQL whatever the default says.
+fn render_engine_rules(out: &mut String, dirs: &[EngineDirectory]) {
+    if dirs.is_empty() {
+        return;
+    }
+    out.push_str(
+        "# Directories named after a database engine. A file under one is that engine's SQL,\n\
+         # whatever the default above says: projects that support several engines keep one copy\n\
+         # of each script per engine, and reading both under one grammar fails half of them.\n",
+    );
+    for d in dirs {
+        out.push_str(&format!(
+            "[[recover.sql.dialect-rules]]\n# {} .sql file(s) under `{}/`.\npath-glob = \"**/{}/**\"\ndialect = \"{}\"\n",
+            d.sql_files, d.name, d.name, d.dialect
+        ));
+    }
 }
 
 /// A contaminant's file count, marked as a floor when the enumeration was capped.
@@ -1054,6 +1133,7 @@ mod tests {
                 }],
                 sampled_files: 47,
             }),
+            engine_directories: Vec::new(),
             suggestions: vec![Suggestion {
                 headline: "GitHub remote detected".into(),
                 detail: "a".repeat(200),
@@ -1074,6 +1154,80 @@ mod tests {
             rendered.contains("3758 file(s)"),
             "the reason a pattern is excluded must survive into the file"
         );
+    }
+
+    /// RFC 0210: one copy of each migration per engine, each read under its own dialect.
+    #[test]
+    fn engine_named_directories_become_dialect_rules() {
+        let paths: Vec<String> = [
+            "migration/iD13/oracle/202507311636_IDEMPIERE-6640.sql",
+            "migration/iD13/postgresql/202507311636_IDEMPIERE-6640.sql",
+            "migration/iD12/oracle/a.sql",
+            "db/oracle/functions/f.SQL",
+            "docs/oracle/readme.md",
+            "src/oracle.sql",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let dirs = detect_engine_directories(&paths);
+        assert_eq!(
+            dirs,
+            vec![
+                EngineDirectory {
+                    name: "oracle".into(),
+                    dialect: "oracle",
+                    sql_files: 3
+                },
+                EngineDirectory {
+                    name: "postgresql".into(),
+                    dialect: "postgres",
+                    sql_files: 1
+                },
+            ]
+        );
+        let rendered = render_config(&Detection {
+            engine_directories: dirs,
+            ..Detection::default()
+        });
+        let parsed: EkosConfig = toml::from_str(&rendered).expect("valid ekos.toml");
+        let rules: Vec<(&str, &str)> = parsed
+            .recover
+            .sql
+            .dialect_rules
+            .iter()
+            .map(|r| (r.path_glob.as_str(), r.dialect.as_str()))
+            .collect();
+        assert_eq!(
+            rules,
+            [("**/oracle/**", "oracle"), ("**/postgresql/**", "postgres")]
+        );
+        let rules: Vec<ekos_recovery::DialectRule> = parsed
+            .recover
+            .sql
+            .dialect_rules
+            .iter()
+            .map(|r| ekos_recovery::DialectRule {
+                path_glob: r.path_glob.clone(),
+                dialect: r.dialect.clone(),
+            })
+            .collect();
+        for (path, dialect) in [
+            (
+                "migration/iD13/oracle/202507311636_IDEMPIERE-6640.sql",
+                "oracle",
+            ),
+            (
+                "migration/iD13/postgresql/202507311636_IDEMPIERE-6640.sql",
+                "postgres",
+            ),
+            ("schema.sql", "generic"),
+        ] {
+            assert_eq!(
+                ekos_recovery::resolve_dialect_name(&rules, "generic", path),
+                dialect
+            );
+        }
     }
 
     /// A capped enumeration must never print as a total.

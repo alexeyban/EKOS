@@ -32,6 +32,7 @@ members = [
     "crates/migrate-approval",
     "crates/migrate-report",
     "crates/plpgsql",
+    "crates/plsql",
     "crates/cli",
     "crates/evals",
     "crates/demo-server",
@@ -54,12 +55,14 @@ members = [
     "plugins/rust",
     "plugins/elixir",
     "plugins/perl",
+    "plugins/java",
     "plugins/javascript",
     "plugins/sql-dialect-mysql",
     "plugins/sql-dialect-postgres",
     "plugins/sql-dialect-snowflake",
     "plugins/sql-dialect-databricks",
     "plugins/sql-dialect-trino",
+    "plugins/sql-dialect-oracle",
     "plugins/sql-dialect-mssql",
     "plugins/sql-dialect-clickhouse",
     "crates/clickhouse-query",
@@ -119,11 +122,13 @@ ekos-plugin-javascript             = { path = "plugins/javascript", version = "1
 ekos-plugin-localdocs              = { path = "plugins/localdocs", version = "1.1.0" }
 ekos-plugin-pentaho                = { path = "plugins/pentaho", version = "1.1.0" }
 ekos-plugin-perl                   = { path = "plugins/perl", version = "1.1.0" }
+ekos-plugin-java                   = { path = "plugins/java", version = "1.1.0" }
 ekos-plugin-python                 = { path = "plugins/python", version = "1.1.0" }
 ekos-plugin-rust                   = { path = "plugins/rust", version = "1.1.0" }
 ekos-plugin-sql-dialect-clickhouse = { path = "plugins/sql-dialect-clickhouse", version = "1.1.0" }
 ekos-plugin-sql-dialect-databricks = { path = "plugins/sql-dialect-databricks", version = "1.1.0" }
 ekos-plugin-sql-dialect-trino = { path = "plugins/sql-dialect-trino", version = "1.1.0" }
+ekos-plugin-sql-dialect-oracle = { path = "plugins/sql-dialect-oracle", version = "1.1.0" }
 ekos-plugin-sql-dialect-mssql      = { path = "plugins/sql-dialect-mssql", version = "1.1.0" }
 ekos-plugin-sql-dialect-mysql      = { path = "plugins/sql-dialect-mysql", version = "1.1.0" }
 ekos-plugin-sql-dialect-postgres   = { path = "plugins/sql-dialect-postgres", version = "1.1.0" }
@@ -143,6 +148,7 @@ ekos-migrate-target-clickhouse     = { path = "crates/migrate-target-clickhouse"
 ekos-migrate-approval              = { path = "crates/migrate-approval", version = "1.1.0" }
 ekos-migrate-report                = { path = "crates/migrate-report", version = "1.1.0" }
 ekos-plpgsql                       = { path = "crates/plpgsql", version = "1.1.0" }
+ekos-plsql                         = { path = "crates/plsql", version = "1.1.0" }
 ekos-simulation                    = { path = "crates/simulation", version = "1.1.0" }
 ekos-sql-dialect-sdk               = { path = "crates/sql-dialect-sdk", version = "1.1.0" }
 

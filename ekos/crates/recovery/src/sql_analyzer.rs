@@ -140,17 +140,19 @@ impl CompilerPass for SqlAnalyzerPass {
         &self.pass_id
     }
 
+    /// `v5` = RFC 0210: every `Table` records the `dialect` it was read under.
     /// `v4` = RFC 0176: per-statement fallback and `ALTER TABLE … ADD … FOREIGN KEY`.
     /// `v3` = RFC 0170 Phase 3: a seed row cites its own line. `v2` = RFC 0170: `Table` objects gained `check_constraints`, `seed_rows` and column
     /// `not_null`/`primary_key`/`unique`/`description_line`. `cache_inputs` hashes only the SQL, so
     /// without this a workspace recovered before 0170 keeps serving tables without them.
     fn version(&self) -> &str {
-        "v4"
+        "v5"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
+        hasher.update(self.dialect_name.as_bytes());
         hasher.update(self.sql.as_bytes());
         vec![hex::encode(hasher.finalize())]
     }
@@ -171,6 +173,7 @@ impl CompilerPass for SqlAnalyzerPass {
             );
             return Ok(());
         }
+        stamp_dialect(&mut graph, &self.dialect_name);
 
         // ── Author-written descriptions (RFC 0146 Phase 2) ──────────────────
         // Applied before the LLM so generated prose can never displace the schema's own
@@ -324,6 +327,21 @@ fn foreign_key_kir_id(from: KirId, to: KirId, fk_desc: &str) -> KirId {
 /// Parse SQL DDL and return a `KirGraph` with tables as `KirObject`s and FK
 /// constraints as `KirRelationship`s. No LLM; pure structural extraction.
 ///
+/// RFC 0210: the dialect a definition was read under. Two engines' definitions of one table share
+/// its id (see [`table_kir_id`]), and `conflicts::duplicate_definitions` compares only claims made
+/// under the same dialect — `NUMBER(10)` for Oracle and `NUMERIC(10)` for PostgreSQL describe two
+/// databases, not one disputed column.
+pub fn stamp_dialect(graph: &mut KirGraph, dialect_name: &str) {
+    for o in graph
+        .objects
+        .iter_mut()
+        .filter(|o| o.kind == ObjectKind::Table)
+    {
+        o.properties
+            .insert("dialect".to_string(), serde_json::json!(dialect_name));
+    }
+}
+
 /// `dialect` (RFC 0031) is resolved by the caller — `recover.rs` via the dialect registry, or
 /// `&GenericDialect {}` directly for ANSI-baseline callers/tests that don't need the full
 /// `SqlDialectParser` machinery.

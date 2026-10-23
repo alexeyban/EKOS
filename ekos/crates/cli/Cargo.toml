@@ -72,6 +72,7 @@ ekos-plugin-python.workspace = true
 ekos-plugin-rust.workspace = true
 ekos-plugin-elixir.workspace = true
 ekos-plugin-perl.workspace = true
+ekos-plugin-java.workspace = true
 ekos-plugin-javascript.workspace = true
 clap.workspace = true
 uuid.workspace = true

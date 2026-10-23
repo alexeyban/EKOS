@@ -1,0 +1,17 @@
+[package]
+name = "ekos-plugin-sql-dialect-oracle"
+description = "Oracle SqlDialectParser plugin (RFC 0210)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ekos-sql-dialect-sdk.workspace = true
+ekos-plsql.workspace = true
+sqlparser.workspace = true
+
+[dev-dependencies]
+walkdir.workspace = true

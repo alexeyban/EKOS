@@ -82,6 +82,11 @@ pub fn normalize_type(t: &str) -> String {
         "timetz" | "time with time zone" => "timetz",
         other => other,
     };
+    // `NUMERIC(10,0)` is `NUMERIC(10)`: a zero scale is the default scale (Oracle's `NUMBER` too).
+    let args = match (base, args.strip_suffix(",0)")) {
+        ("numeric" | "number", Some(p)) => format!("{p})"),
+        _ => args,
+    };
     format!("{base}{args}")
 }
 
@@ -264,24 +269,24 @@ fn compare_members(
     conflict_type: &str,
     evidence: &HashMap<KirId, &KirEvidence>,
 ) {
-    let per_member: Vec<(BTreeMap<String, Value>, Origin)> = members
+    let per_member: Vec<(BTreeMap<String, Value>, Origin, Option<&str>)> = members
         .iter()
-        .map(|m| (facts(m), origin(m, evidence)))
+        .map(|m| (facts(m), origin(m, evidence), dialect_of(m)))
         .collect();
-    let attributes: BTreeSet<&String> = per_member.iter().flat_map(|(f, _)| f.keys()).collect();
+    let attributes: BTreeSet<&String> = per_member.iter().flat_map(|(f, _, _)| f.keys()).collect();
     for attr in attributes {
-        let stating: Vec<(&Value, &(String, Option<u32>))> = per_member
+        let stating: Vec<Stated> = per_member
             .iter()
-            .filter_map(|(f, o)| f.get(attr).map(|v| (v, o)))
+            .filter_map(|(f, o, d)| f.get(attr).map(|v| (v, o, *d)))
             .collect();
-        let distinct: BTreeSet<String> = stating.iter().map(|(v, _)| v.to_string()).collect();
-        if stating.len() < 2 || distinct.len() < 2 {
+        let disputed = disputed_claims(&stating);
+        if disputed.is_empty() {
             continue;
         }
-        let claims = stating
-            .iter()
-            .map(|(v, (path, line))| Claim {
-                value: (*v).clone(),
+        let claims = disputed
+            .into_iter()
+            .map(|(v, (path, line), _)| Claim {
+                value: v.clone(),
                 path: path.clone(),
                 line: *line,
                 source: kind_label(&subject.kind),
@@ -290,6 +295,47 @@ fn compare_members(
         let chosen = facts(members[members.len() - 1]).get(attr).cloned();
         emit(out, subject, attr, conflict_type, claims, chosen);
     }
+}
+
+/// One member's value for an attribute: the value, where it is stated, the dialect it was read under.
+type Stated<'a> = (&'a Value, &'a (String, Option<u32>), Option<&'a str>);
+
+/// The dialect a definition was read under (RFC 0210), or `None` when unknown — unstated, or the
+/// ANSI `generic` baseline, which says nothing about the engine.
+fn dialect_of(o: &KirObject) -> Option<&str> {
+    o.properties
+        .get("dialect")
+        .and_then(Value::as_str)
+        .filter(|d| *d != "generic")
+}
+
+/// The claims that disagree, compared within one dialect at a time (RFC 0210 §3.2): two engines'
+/// definitions of one table describe two databases, so `NUMBER(10)` and `NUMERIC(10)` are not a
+/// dispute. A claim of unknown dialect is compared with every dialect. Empty when nothing
+/// disagrees.
+fn disputed_claims<'a>(stating: &[Stated<'a>]) -> Vec<Stated<'a>> {
+    let dialects: BTreeSet<Option<&str>> = stating
+        .iter()
+        .map(|(_, _, d)| *d)
+        .filter(Option::is_some)
+        .collect();
+    let groups: Vec<Option<&str>> = if dialects.is_empty() {
+        vec![None]
+    } else {
+        dialects.into_iter().collect()
+    };
+    let mut keep: BTreeSet<usize> = BTreeSet::new();
+    for g in groups {
+        let members: Vec<usize> = (0..stating.len())
+            .filter(|&i| stating[i].2.is_none() || stating[i].2 == g)
+            .collect();
+        let distinct: BTreeSet<String> =
+            members.iter().map(|&i| stating[i].0.to_string()).collect();
+        if members.len() >= 2 && distinct.len() >= 2 {
+            keep.extend(members);
+        }
+    }
+    keep.into_iter().map(|i| stating[i]).collect()
 }
 
 /// Detector 1. Objects sharing an id collapse to the last one (path order, devlog_242); every
@@ -658,6 +704,8 @@ mod tests {
             ("character varying(20)", "VARCHAR (20)"),
             ("timestamp with time zone", "timestamptz"),
             ("NUMERIC(10, 2)", "decimal(10,2)"),
+            ("NUMBER(10,0)", "number(10)"),
+            ("numeric(10, 0)", "DECIMAL(10)"),
         ] {
             assert_eq!(normalize_type(a), normalize_type(b), "{a} vs {b}");
         }
@@ -716,6 +764,110 @@ mod tests {
         assert_eq!(c.evidence.len(), 2);
         assert_eq!(c.relationships.len(), 1);
         assert_eq!(c.relationships[0].to, g.objects[0].id);
+    }
+
+    fn in_dialect(mut t: (KirObject, KirEvidence), dialect: &str) -> (KirObject, KirEvidence) {
+        t.0.properties.insert("dialect".into(), json!(dialect));
+        t
+    }
+
+    /// RFC 0210: iDempiere ships every migration once per engine. The Oracle and PostgreSQL
+    /// definitions of one table describe two databases; their type spellings are not a dispute.
+    #[test]
+    fn two_engines_definitions_are_not_compared() {
+        let ora = in_dialect(
+            table(
+                "AD_AttachmentFile",
+                "migration/iD13/oracle/x.sql",
+                json!([{"name":"ad_client_id","data_type":"NUMBER(10)"},{"name":"uu","data_type":"VARCHAR2(36)"}]),
+                Value::Null,
+            ),
+            "oracle",
+        );
+        let pg = in_dialect(
+            table(
+                "AD_AttachmentFile",
+                "migration/iD13/postgresql/x.sql",
+                json!([{"name":"ad_client_id","data_type":"NUMERIC(10)"},{"name":"uu","data_type":"UUID"}]),
+                Value::Null,
+            ),
+            "postgres",
+        );
+        let mut g = graph(vec![ora, pg]);
+        assert!(duplicate_definitions(&mut g).objects.is_empty());
+        assert_eq!(g.objects.len(), 1, "still one table");
+    }
+
+    #[test]
+    fn one_engine_disagreeing_with_itself_is_still_a_conflict() {
+        let a = in_dialect(
+            table(
+                "t",
+                "a/oracle/1.sql",
+                json!([{"name":"x","data_type":"NUMBER(10)"}]),
+                Value::Null,
+            ),
+            "oracle",
+        );
+        let b = in_dialect(
+            table(
+                "t",
+                "a/postgresql/1.sql",
+                json!([{"name":"x","data_type":"NUMERIC(10)"}]),
+                Value::Null,
+            ),
+            "postgres",
+        );
+        let c = in_dialect(
+            table(
+                "t",
+                "a/oracle/2.sql",
+                json!([{"name":"x","data_type":"NUMBER(12)"}]),
+                Value::Null,
+            ),
+            "oracle",
+        );
+        let mut g = graph(vec![a, b, c]);
+        let out = duplicate_definitions(&mut g);
+        assert_eq!(attrs(&out), vec!["columns.x.data_type"]);
+        let paths: Vec<&str> = out.objects[0].properties["claims"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            ["a/oracle/1.sql", "a/oracle/2.sql"],
+            "the PostgreSQL claim is not part of it"
+        );
+    }
+
+    #[test]
+    fn a_definition_of_unknown_dialect_is_compared_with_every_engine() {
+        let a = in_dialect(
+            table(
+                "t",
+                "o.sql",
+                json!([{"name":"x","data_type":"NUMBER(10)"}]),
+                Value::Null,
+            ),
+            "oracle",
+        );
+        let b = in_dialect(
+            table(
+                "t",
+                "g.sql",
+                json!([{"name":"x","data_type":"int"}]),
+                Value::Null,
+            ),
+            "generic",
+        );
+        let mut g = graph(vec![a, b]);
+        assert_eq!(
+            attrs(&duplicate_definitions(&mut g)),
+            vec!["columns.x.data_type"]
+        );
     }
 
     #[test]

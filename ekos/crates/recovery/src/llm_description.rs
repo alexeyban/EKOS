@@ -76,6 +76,7 @@ const MAX_SOURCE_LINES: usize = 400;
 const MODULE_KINDS: &[&str] = &[
     "ElixirModule",
     "PerlPackage",
+    "JavaType",
     "RustModule",
     "PythonModule",
     "JsModule",
@@ -89,6 +90,7 @@ const SYMBOL_KINDS: &[&str] = &[
     "PythonSymbol",
     "JsSymbol",
     "PerlSymbol",
+    "JavaMethod",
     "BinaryMethod",
     // RFC 0163 / 0169: both carry `source_span` and hang off their `File` (`Contains`), which is
     // what symbol descriptions read source by — without both they would be skipped silently.

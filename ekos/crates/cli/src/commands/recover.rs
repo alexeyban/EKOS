@@ -11,13 +11,14 @@ use ekos_recovery::{
     ClickHouseAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass, CryptoAnalyzerPass,
     DbtAnalyzerPass, DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass,
     DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass,
-    GovernanceAnalyzerPass, JavaScriptAnalyzerPass, JavaScriptStats, LlmRouter,
-    LocalDocAnalyzerPass, MockLlmProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass,
+    GovernanceAnalyzerPass, JavaAnalyzerPass, JavaScriptAnalyzerPass, JavaScriptStats, JavaStats,
+    LlmRouter, LocalDocAnalyzerPass, MockLlmProvider, PackageJsonAnalyzerPass, PentahoAnalyzerPass,
     PentahoStats, PerlAnalyzerPass, PerlStats, PlPgSqlAnalyzerPass, PlPgSqlStats,
-    PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats,
-    SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats, Task, TreasuryAnalyzerPass,
-    TriggerAnalyzerPass, TriggerStats, ViewAnalyzerPass, ViewStats, build_dialect_registry,
-    llm::LlmProvider, resolve_dialect_name,
+    PlSqlAnalyzerPass, PlSqlStats, PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass,
+    RustAnalyzerPass, RustStats, SchemaHistoryPass, SchemaHistoryStats, SqlAnalyzerPass,
+    SqlTransformAnalyzerPass, SqlTransformStats, Task, TreasuryAnalyzerPass, TriggerAnalyzerPass,
+    TriggerStats, ViewAnalyzerPass, ViewStats, build_dialect_registry, llm::LlmProvider,
+    resolve_dialect_name,
 };
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
@@ -120,6 +121,68 @@ fn print_plpgsql_stats(handles: &[Arc<std::sync::Mutex<PlPgSqlStats>>]) {
     }
 }
 
+fn print_plsql_stats(handles: &[Arc<std::sync::Mutex<PlSqlStats>>]) {
+    let mut t = PlSqlStats::default();
+    for handle in handles {
+        let s = handle.lock().unwrap();
+        t.routines.routines += s.routines.routines;
+        t.routines.complete += s.routines.complete;
+        t.routines.partial += s.routines.partial;
+        t.routines.statements += s.routines.statements;
+        t.routines.unrecovered += s.routines.unrecovered;
+        t.triggers += s.triggers;
+        t.anonymous_blocks += s.anonymous_blocks;
+        t.unterminated += s.unterminated;
+        t.skipped += s.skipped;
+    }
+    if t.routines.routines == 0 && t.anonymous_blocks == 0 && t.skipped == 0 {
+        return;
+    }
+    println!(
+        "  PL/SQL routines: {} ({} complete, {} partial, {} triggers), {} statements, {} unrecovered; \
+         {} anonymous block(s) not recovered, {} unit(s) skipped, {} without a closing /",
+        t.routines.routines,
+        t.routines.complete,
+        t.routines.partial,
+        t.triggers,
+        t.routines.statements,
+        t.routines.unrecovered,
+        t.anonymous_blocks,
+        t.skipped,
+        t.unterminated
+    );
+}
+
+fn print_history_stats(handles: &[Arc<std::sync::Mutex<SchemaHistoryStats>>]) {
+    let mut t = SchemaHistoryStats::default();
+    for handle in handles {
+        let s = handle.lock().unwrap();
+        t.change_sets += s.change_sets;
+        t.changes += s.changes;
+        t.data_statements += s.data_statements;
+        t.unrecognized += s.unrecognized;
+        for (k, v) in &s.by_operation {
+            *t.by_operation.entry(k.clone()).or_default() += v;
+        }
+    }
+    if t.change_sets == 0 {
+        return;
+    }
+    let top: Vec<String> = t
+        .by_operation
+        .iter()
+        .map(|(op, n)| format!("{n} {op}"))
+        .collect();
+    println!(
+        "  Schema history: {} migration script(s), {} change(s) ({}), {} data statement(s), {} unrecognized ALTER operation(s)",
+        t.change_sets,
+        t.changes,
+        top.join(", "),
+        t.data_statements,
+        t.unrecognized
+    );
+}
+
 /// How the run went: passes run and skipped, pass errors, and the diagnostics summary (RFC 0076,
 /// written to `.ekos/diagnostics/recover.log` when there is anything to say). Fails when a pass
 /// reported an error.
@@ -174,13 +237,21 @@ fn count_line(label: &str, n: usize) {
     }
 }
 
+/// The counters of every per-`.sql`-file pass, read once the passes have run.
+#[derive(Default)]
+struct SqlStatsHandles {
+    transform: Vec<Arc<std::sync::Mutex<SqlTransformStats>>>,
+    plpgsql: Vec<Arc<std::sync::Mutex<PlPgSqlStats>>>,
+    plsql: Vec<Arc<std::sync::Mutex<PlSqlStats>>>,
+    views: Vec<Arc<std::sync::Mutex<ViewStats>>>,
+    triggers: Vec<Arc<std::sync::Mutex<TriggerStats>>>,
+    history: Vec<Arc<std::sync::Mutex<SchemaHistoryStats>>>,
+}
+
 /// Everything `ekos recover` reports once its passes have run.
 struct RecoverSummary {
     sql_count: usize,
-    sql_transform_stats_handles: Vec<Arc<std::sync::Mutex<SqlTransformStats>>>,
-    plpgsql_stats_handles: Vec<Arc<std::sync::Mutex<PlPgSqlStats>>>,
-    view_stats_handles: Vec<Arc<std::sync::Mutex<ViewStats>>>,
-    trigger_stats_handles: Vec<Arc<std::sync::Mutex<TriggerStats>>>,
+    sql_stats: SqlStatsHandles,
     dep_file_count: usize,
     git_count: usize,
     crypto_batch_count: usize,
@@ -201,6 +272,8 @@ struct RecoverSummary {
     elixir_stats: Option<Arc<std::sync::Mutex<ElixirStats>>>,
     perl_count: usize,
     perl_stats: Option<Arc<std::sync::Mutex<PerlStats>>>,
+    java_count: usize,
+    java_stats: Option<Arc<std::sync::Mutex<JavaStats>>>,
     extension_reports: Vec<Box<dyn FnOnce() -> Vec<String> + Send>>,
     javascript_count: usize,
     javascript_stats: Option<Arc<std::sync::Mutex<JavaScriptStats>>>,
@@ -221,10 +294,7 @@ impl RecoverSummary {
     ) -> Result<()> {
         let RecoverSummary {
             sql_count,
-            sql_transform_stats_handles,
-            plpgsql_stats_handles,
-            view_stats_handles,
-            trigger_stats_handles,
+            sql_stats,
             dep_file_count,
             git_count,
             crypto_batch_count,
@@ -245,6 +315,8 @@ impl RecoverSummary {
             elixir_stats,
             perl_count,
             perl_stats,
+            java_count,
+            java_stats,
             extension_reports,
             javascript_count,
             javascript_stats,
@@ -313,6 +385,32 @@ impl RecoverSummary {
                 s.packages_total, s.symbols_total
             );
         }
+        count_line("Java files analysed", java_count);
+        if let Some(stats) = &java_stats {
+            let s = *stats.lock().unwrap();
+            println!(
+                "  Java types/methods recovered: {} types ({} generated), {} methods; files {} parsed, {} partial ({} members unclassified), {} skipped",
+                s.types_total,
+                s.generated_types,
+                s.methods_total,
+                s.files_parsed,
+                s.files_partial,
+                s.unclassified_members,
+                s.files_skipped
+            );
+            if s.model_tables > 0 {
+                println!(
+                    "  Application model (RFC 0209): {} tables, {} columns, {} code-declared references",
+                    s.model_tables, s.model_columns, s.model_references
+                );
+            }
+            if s.sql_statements > 0 {
+                println!(
+                    "  Embedded SQL: {} statements ({} parsed, {} partial, {} unparsed), {} method→table links",
+                    s.sql_statements, s.sql_parsed, s.sql_partial, s.sql_unparsed, s.sql_links
+                );
+            }
+        }
         for report in extension_reports {
             for line in report() {
                 println!("  {line}");
@@ -335,10 +433,12 @@ impl RecoverSummary {
                 s.crates_considered, s.roles_assigned, s.rejected_unknown_crate
             );
         }
-        print_sql_transform_stats(&sql_transform_stats_handles);
-        print_trigger_stats(&trigger_stats_handles);
-        print_view_stats(&view_stats_handles);
-        print_plpgsql_stats(&plpgsql_stats_handles);
+        print_sql_transform_stats(&sql_stats.transform);
+        print_trigger_stats(&sql_stats.triggers);
+        print_view_stats(&sql_stats.views);
+        print_plpgsql_stats(&sql_stats.plpgsql);
+        print_plsql_stats(&sql_stats.plsql);
+        print_history_stats(&sql_stats.history);
         print_run_outcome(config, cwd, parallel, report, ctx)
     }
 }
@@ -354,10 +454,7 @@ async fn register_sql_passes(
     llm: &TaskLlm<'_>,
     pass_manager: &mut ekos_compiler_core::pass::PassManager,
     sql_count: &mut usize,
-    sql_transform_stats_handles: &mut Vec<Arc<std::sync::Mutex<SqlTransformStats>>>,
-    plpgsql_stats_handles: &mut Vec<Arc<std::sync::Mutex<PlPgSqlStats>>>,
-    view_stats_handles: &mut Vec<Arc<std::sync::Mutex<ViewStats>>>,
-    trigger_stats_handles: &mut Vec<Arc<std::sync::Mutex<TriggerStats>>>,
+    sql_stats: &mut SqlStatsHandles,
     dialect_registry: &ekos_recovery::DialectRegistry,
     dialect_rules: &[DialectRule],
     default_dialect: &str,
@@ -444,7 +541,7 @@ async fn register_sql_passes(
                 dialect_name,
                 dialect_parser.sqlparser_dialect(),
             );
-            sql_transform_stats_handles.push(transform_pass.stats_handle());
+            sql_stats.transform.push(transform_pass.stats_handle());
             pass_manager.register(Box::new(transform_pass));
 
             // ── PL/pgSQL procedural IR (RFC 0163) ─────────────────────────
@@ -462,44 +559,90 @@ async fn register_sql_passes(
                 Some(&ob.key),
             );
 
-            // ── Views (RFC 0169) ──────────────────────────────────────────
-            // Same file-as-written text, the file's resolved dialect, one view at a time.
-            if ViewAnalyzerPass::applies_to(&sql) {
-                let view_pass = ViewAnalyzerPass::new(
-                    &rel_str,
-                    sql.clone(),
-                    dialect_name,
-                    dialect_parser.sqlparser_dialect(),
-                )
-                .with_file(file_key.clone());
-                view_stats_handles.push(view_pass.stats_handle());
-                pass_manager.register(Box::new(view_pass));
-            }
-
-            // ── Triggers (RFC 0163) — classified later, against their functions ──
-            if TriggerAnalyzerPass::applies_to(&sql) {
-                let trigger_pass = TriggerAnalyzerPass::new(
-                    &rel_str,
-                    sql.clone(),
-                    dialect_name,
-                    dialect_parser.sqlparser_dialect(),
-                )
-                .with_file(file_key.clone());
-                trigger_stats_handles.push(trigger_pass.stats_handle());
-                pass_manager.register(Box::new(trigger_pass));
-            }
-
-            if PlPgSqlAnalyzerPass::applies_to(dialect_name, &sql) {
-                let plpgsql_pass =
-                    PlPgSqlAnalyzerPass::new(&rel_str, sql.clone()).with_file(file_key.clone());
-                plpgsql_stats_handles.push(plpgsql_pass.stats_handle());
-                pass_manager.register(Box::new(plpgsql_pass));
-            }
+            let file = SqlFile {
+                rel_str: &rel_str,
+                sql: &sql,
+                dialect_name,
+                dialect_parser,
+                file_key: &file_key,
+            };
+            register_file_analysis_passes(&file, pass_manager, sql_stats);
 
             *sql_count += 1;
         }
     }
     Ok(())
+}
+
+/// One `.sql` file, read and redacted, with its resolved dialect.
+struct SqlFile<'a> {
+    rel_str: &'a str,
+    /// The text as written (redacted), not the dialect-preprocessed one: spans and lines cite it.
+    sql: &'a str,
+    dialect_name: &'a str,
+    dialect_parser: &'a dyn ekos_recovery::SqlDialectParser,
+    /// The owning `File` object's id key.
+    file_key: &'a str,
+}
+
+/// The per-file analysis passes beyond DDL and transformations: views, triggers, routines in
+/// either procedural language, and schema history.
+fn register_file_analysis_passes(
+    f: &SqlFile<'_>,
+    pass_manager: &mut ekos_compiler_core::pass::PassManager,
+    sql_stats: &mut SqlStatsHandles,
+) {
+    // ── Views (RFC 0169) ──────────────────────────────────────────
+    // Same file-as-written text, the file's resolved dialect, one view at a time.
+    if ViewAnalyzerPass::applies_to(f.sql) {
+        let view_pass = ViewAnalyzerPass::new(
+            f.rel_str,
+            f.sql.to_string(),
+            f.dialect_name,
+            f.dialect_parser.sqlparser_dialect(),
+        )
+        .with_file(f.file_key.to_string());
+        sql_stats.views.push(view_pass.stats_handle());
+        pass_manager.register(Box::new(view_pass));
+    }
+
+    // ── Triggers (RFC 0163) — classified later, against their functions ──
+    // An Oracle trigger carries its body inline: the PL/SQL pass below reads it whole.
+    let oracle = PlSqlAnalyzerPass::applies_to(f.dialect_name);
+    if TriggerAnalyzerPass::applies_to(f.sql) && !oracle {
+        let trigger_pass = TriggerAnalyzerPass::new(
+            f.rel_str,
+            f.sql.to_string(),
+            f.dialect_name,
+            f.dialect_parser.sqlparser_dialect(),
+        )
+        .with_file(f.file_key.to_string());
+        sql_stats.triggers.push(trigger_pass.stats_handle());
+        pass_manager.register(Box::new(trigger_pass));
+    }
+
+    if PlPgSqlAnalyzerPass::applies_to(f.dialect_name, f.sql) {
+        let plpgsql_pass = PlPgSqlAnalyzerPass::new(f.rel_str, f.sql.to_string())
+            .with_file(f.file_key.to_string());
+        sql_stats.plpgsql.push(plpgsql_pass.stats_handle());
+        pass_manager.register(Box::new(plpgsql_pass));
+    }
+
+    // ── PL/SQL procedural IR (RFC 0210) — the same objects, Oracle's language ──
+    if oracle {
+        let plsql_pass =
+            PlSqlAnalyzerPass::new(f.rel_str, f.sql.to_string()).with_file(f.file_key.to_string());
+        sql_stats.plsql.push(plsql_pass.stats_handle());
+        pass_manager.register(Box::new(plsql_pass));
+    }
+
+    // ── Schema history (RFC 0210) — a `<timestamp>_<description>.sql` migration script ──
+    if SchemaHistoryPass::applies_to(f.rel_str) {
+        let history_pass = SchemaHistoryPass::new(f.rel_str, f.sql.to_string(), f.dialect_name)
+            .with_file(f.file_key.to_string());
+        sql_stats.history.push(history_pass.stats_handle());
+        pass_manager.register(Box::new(history_pass));
+    }
 }
 
 /// Whether a walked entry is a directory named by one of the `[observe]` ignore patterns.
@@ -1003,10 +1146,7 @@ pub async fn run_with(
     // so each needs its own exclusion check + redaction before content reaches an analyzer pass.
     let redaction_config = config.redaction_config();
     let mut sql_count = 0usize;
-    let mut sql_transform_stats_handles: Vec<Arc<std::sync::Mutex<SqlTransformStats>>> = Vec::new();
-    let mut plpgsql_stats_handles: Vec<Arc<std::sync::Mutex<PlPgSqlStats>>> = Vec::new();
-    let mut view_stats_handles: Vec<Arc<std::sync::Mutex<ViewStats>>> = Vec::new();
-    let mut trigger_stats_handles: Vec<Arc<std::sync::Mutex<TriggerStats>>> = Vec::new();
+    let mut sql_stats = SqlStatsHandles::default();
 
     // ── SQL dialect resolution (RFC 0031) ─────────────────────────────────
     // Registry is compile-time (mirrors the Observer plugin pattern) — a new dialect means a
@@ -1033,10 +1173,7 @@ pub async fn run_with(
         &llm,
         &mut pass_manager,
         &mut sql_count,
-        &mut sql_transform_stats_handles,
-        &mut plpgsql_stats_handles,
-        &mut view_stats_handles,
-        &mut trigger_stats_handles,
+        &mut sql_stats,
         &dialect_registry,
         &dialect_rules,
         default_dialect,
@@ -1249,6 +1386,22 @@ pub async fn run_with(
         pass_manager.register(Box::new(perl_pass));
     }
 
+    // ── Java .java artifacts (RFC 0209) ─────────────────────────────────────
+    let java_artifact_ids = collect_artifact_ids_for_connector(&*artifact_store, "java");
+    let java_count = java_artifact_ids.len();
+    let mut java_stats: Option<Arc<std::sync::Mutex<JavaStats>>> = None;
+    if !java_artifact_ids.is_empty() {
+        let java_pass = JavaAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            java_artifact_ids,
+        );
+        java_stats = Some(java_pass.stats_handle());
+        pass_manager.register(Box::new(java_pass));
+    }
+
     // ── Out-of-tree passes (RFC 0149) ───────────────────────────────────────
     let extension_reports =
         register_extension_passes(ext, config, cwd, &*artifact_store, &mut pass_manager);
@@ -1404,10 +1557,7 @@ pub async fn run_with(
 
     let summary = RecoverSummary {
         sql_count,
-        sql_transform_stats_handles,
-        plpgsql_stats_handles,
-        view_stats_handles,
-        trigger_stats_handles,
+        sql_stats,
         dep_file_count,
         git_count,
         crypto_batch_count,
@@ -1428,6 +1578,8 @@ pub async fn run_with(
         elixir_stats,
         perl_count,
         perl_stats,
+        java_count,
+        java_stats,
         extension_reports,
         javascript_count,
         javascript_stats,

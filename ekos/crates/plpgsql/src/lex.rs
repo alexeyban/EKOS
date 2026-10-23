@@ -265,19 +265,22 @@ fn plain_token(src: &str, i: usize) -> Spanned {
             end,
         };
     }
-    // Multi-character operators.
-    let two = if i + 1 < s.len() { &src[i..i + 2] } else { "" };
-    if matches!(two, ":=" | ".." | "||" | "<=" | ">=" | "<>" | "!=") {
+    // Multi-character operators. Compared as bytes: slicing `src[i..i + 2]` panics when a
+    // multibyte character (a byte-order mark, a typographic quote) sits at `i`.
+    let two = s.get(i..i + 2).unwrap_or_default();
+    if matches!(two, b":=" | b".." | b"||" | b"<=" | b">=" | b"<>" | b"!=") {
         return Spanned {
-            tok: Tok::Op(two.to_string()),
+            tok: Tok::Op(String::from_utf8_lossy(two).into_owned()),
             start: i,
             end: i + 2,
         };
     }
+    // A non-ASCII character is one punctuation token, never a split of its bytes.
+    let ch = src[i..].chars().next().unwrap_or(c as char);
     Spanned {
-        tok: Tok::Punct(c as char),
+        tok: Tok::Punct(ch),
         start: i,
-        end: i + 1,
+        end: i + ch.len_utf8(),
     }
 }
 
@@ -377,6 +380,14 @@ pub fn function_body(src: &str) -> Result<Option<(String, usize, usize)>, LexErr
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_multibyte_character_is_one_token_and_never_a_panic() {
+        let toks = super::lex("\u{feff}x := 1; y \u{2019}").unwrap();
+        assert_eq!(toks[0].tok, super::Tok::Punct('\u{feff}'));
+        assert_eq!((toks[0].start, toks[0].end), (0, 3));
+        assert!(toks.iter().any(|t| t.tok == super::Tok::Op(":=".into())));
+    }
+
     use super::*;
 
     fn dollars(src: &str) -> Vec<(String, String)> {

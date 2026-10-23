@@ -34,6 +34,10 @@ const CODE_KINDS: &[&str] = &[
     "ElixirSymbol",
     "PerlPackage",
     "PerlSymbol",
+    "JavaType",
+    "JavaMethod",
+    // RFC 0209: a backticked table name in a doc links to the application model's table.
+    "ModelTable",
     "BinaryType",
     "BinaryMethod",
     "Crate",

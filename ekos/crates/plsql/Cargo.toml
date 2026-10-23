@@ -1,0 +1,15 @@
+[package]
+name = "ekos-plsql"
+description = "RFC 0210 — Oracle script scanning and a PL/SQL front end producing RFC 0163's procedural IR"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ekos-plpgsql.workspace = true
+
+[dev-dependencies]
+walkdir.workspace = true

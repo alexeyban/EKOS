@@ -865,6 +865,7 @@ dependencies = [
  "ekos-plugin-git",
  "ekos-plugin-github",
  "ekos-plugin-governance",
+ "ekos-plugin-java",
  "ekos-plugin-javascript",
  "ekos-plugin-localdocs",
  "ekos-plugin-pentaho",
@@ -1299,6 +1300,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plsql"
+version = "1.1.0"
+dependencies = [
+ "ekos-plpgsql",
+ "walkdir",
+]
+
+[[package]]
 name = "ekos-plugin-clickhouse"
 version = "1.1.0"
 dependencies = [
@@ -1446,6 +1455,24 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "ekos-plugin-java"
+version = "1.1.0"
+dependencies = [
+ "async-trait",
+ "ekos-artifact",
+ "ekos-common",
+ "ekos-observation-sdk",
+ "hex",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "walkdir",
 ]
 
 [[package]]
@@ -1658,6 +1685,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-sql-dialect-oracle"
+version = "1.1.0"
+dependencies = [
+ "ekos-plsql",
+ "ekos-sql-dialect-sdk",
+ "sqlparser",
+ "walkdir",
+]
+
+[[package]]
 name = "ekos-plugin-sql-dialect-postgres"
 version = "1.1.0"
 dependencies = [
@@ -1710,10 +1747,12 @@ dependencies = [
  "ekos-kir",
  "ekos-ledger",
  "ekos-plpgsql",
+ "ekos-plsql",
  "ekos-plugin-sql-dialect-clickhouse",
  "ekos-plugin-sql-dialect-databricks",
  "ekos-plugin-sql-dialect-mssql",
  "ekos-plugin-sql-dialect-mysql",
+ "ekos-plugin-sql-dialect-oracle",
  "ekos-plugin-sql-dialect-postgres",
  "ekos-plugin-sql-dialect-snowflake",
  "ekos-plugin-sql-dialect-trino",
@@ -1744,6 +1783,7 @@ dependencies = [
  "toml",
  "tracing",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

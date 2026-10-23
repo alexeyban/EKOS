@@ -19,6 +19,20 @@ use crate::ir::{
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Origin {
     pub offset: usize,
+    pub flavor: Flavor,
+}
+
+/// Which procedural language a body is written in. PL/SQL (RFC 0210) shares PL/pgSQL's statement
+/// grammar — both descend from Ada — and adds a few forms; they are recognised only under
+/// [`Flavor::PlSql`], so PL/pgSQL parsing never changes because of them.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Flavor {
+    #[default]
+    PlPgSql,
+    /// Adds: a bare procedure call (`p(x);`, `pkg.p(x);`, `p;`) as `Perform`, `EXECUTE IMMEDIATE`,
+    /// `RAISE_APPLICATION_ERROR(…)` as a raise, `FORALL i IN a..b <dml>` as a range loop,
+    /// `SAVEPOINT`, and `GOTO` as an explicit gap.
+    PlSql,
 }
 
 struct Parser<'a> {
@@ -329,6 +343,13 @@ fn first_word(s: &str) -> String {
         .to_ascii_uppercase()
 }
 
+/// `(a, b)` → `a, b`; anything else unchanged.
+fn strip_parens(s: &str) -> &str {
+    s.strip_prefix('(')
+        .and_then(|x| x.strip_suffix(')'))
+        .map_or(s, str::trim)
+}
+
 /// Byte comparison, not slicing: `t[..kw.len()]` panics when the text starts with a multibyte
 /// character, and PL/pgSQL is full of comments and identifiers that do.
 fn starts_with_kw(s: &str, kw: &str) -> bool {
@@ -415,7 +436,17 @@ impl<'a> Parser<'a> {
                 }
                 // A label opens a loop: `<<outer>> LOOP … END LOOP`.
                 if let Some((label, rest)) = split_label(text) {
+                    // In PL/SQL a label also marks a `GOTO` target before any statement.
+                    let opens_loop = matches!(first_word(rest).as_str(), "LOOP" | "WHILE" | "FOR");
+                    if self.origin.flavor == Flavor::PlSql && !opens_loop {
+                        return self.statement(rest);
+                    }
                     return self.loop_stmt(rest, span, Some(label));
+                }
+                if self.origin.flavor == Flavor::PlSql
+                    && let Some(stmt) = self.plsql_statement(text, span)
+                {
+                    return stmt;
                 }
                 ProcStmt::Unrecovered {
                     raw: text.to_string(),
@@ -424,6 +455,72 @@ impl<'a> Parser<'a> {
                 }
             }
         }
+    }
+
+    /// The PL/SQL statement forms PL/pgSQL does not have (see [`Flavor::PlSql`]).
+    fn plsql_statement(&self, text: &'a str, span: Span) -> Option<ProcStmt> {
+        let t = text.trim().trim_end_matches(';').trim_end();
+        let name_end = t
+            .find(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '.' | '$' | '#')))
+            .unwrap_or(t.len());
+        let (name, rest) = (&t[..name_end], t[name_end..].trim());
+        let upper = name.to_ascii_uppercase();
+        match upper.as_str() {
+            "" | "END" | "ELSE" | "ELSIF" | "THEN" | "LOOP" | "WHEN" | "EXCEPTION" | "BEGIN"
+            | "DECLARE" | "IS" | "AS" | "PIPE" => None,
+            "RAISE_APPLICATION_ERROR" => Some(ProcStmt::Raise {
+                level: "exception".into(),
+                message: strip_parens(rest).to_string(),
+                span,
+            }),
+            "SAVEPOINT" => Some(ProcStmt::Sql {
+                sql: t.to_string(),
+                into: None,
+                span,
+            }),
+            "GOTO" => Some(ProcStmt::Unrecovered {
+                raw: text.to_string(),
+                reason: "GOTO: a jump this IR does not model".into(),
+                span,
+            }),
+            "FORALL" => self.forall(text, span),
+            _ if rest.is_empty() || (rest.starts_with('(') && rest.ends_with(')')) => {
+                Some(ProcStmt::Perform {
+                    sql: t.to_string(),
+                    span,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// `FORALL i IN lo..hi <dml>`: the DML once per index, a range loop around one statement.
+    /// `INDICES OF` / `VALUES OF` iterate a collection and are left unrecovered.
+    fn forall(&self, text: &'a str, span: Span) -> Option<ProcStmt> {
+        let rest = after_kw(text.trim_start(), 6);
+        let var = rest.split_whitespace().next()?.to_string();
+        let after_var = after_kw(rest, var.len());
+        if !starts_with_kw(after_var, "IN") {
+            return None;
+        }
+        let range = after_kw(after_var, 2);
+        let dml_at = ["INSERT", "UPDATE", "DELETE", "MERGE", "EXECUTE"]
+            .iter()
+            .filter_map(|kw| find_kw(range, kw))
+            .min()?;
+        let (from, to) = range[..dml_at].split_once("..")?;
+        let dml = range[dml_at..].trim_end();
+        Some(ProcStmt::Loop {
+            kind: LoopKind::ForRange {
+                var,
+                from: from.trim().to_string(),
+                to: to.trim().to_string(),
+                reverse: false,
+            },
+            body: vec![self.statement(dml)],
+            label: None,
+            span,
+        })
     }
 
     fn sql(&self, text: &str, span: Span) -> ProcStmt {
@@ -484,7 +581,10 @@ impl<'a> Parser<'a> {
     }
 
     fn dynamic(&self, text: &str, span: Span) -> ProcStmt {
-        let rest = after_kw(text, 7);
+        let mut rest = after_kw(text, 7);
+        if self.origin.flavor == Flavor::PlSql && starts_with_kw(rest, "IMMEDIATE") {
+            rest = after_kw(rest, 9);
+        }
         // A keyword search, not `" USING "`: the clause is often on its own line.
         let (expr, using) = match find_kw(rest, "USING") {
             Some(at) => (
@@ -1180,7 +1280,13 @@ pub fn parse_function(src: &str) -> Result<ProcedureIr, crate::lex::LexError> {
         Some((body, collapsed, start)) => {
             // Parsed unescaped, then every span mapped back onto the source as written: a
             // statement after N doubled quotes sits N bytes further on in the file.
-            let mut stmts = parse_body(&body, Origin { offset: 0 });
+            let mut stmts = parse_body(
+                &body,
+                Origin {
+                    offset: 0,
+                    ..Default::default()
+                },
+            );
             let map = |v: usize| start + v + collapsed.partition_point(|&p| p < v);
             for s in &mut stmts {
                 s.spans_mut(&mut |sp| {
@@ -1196,7 +1302,13 @@ pub fn parse_function(src: &str) -> Result<ProcedureIr, crate::lex::LexError> {
             let Some((body, start, _end)) = crate::lex::function_body(src)? else {
                 return Ok(ProcedureIr::signature_only(signature));
             };
-            parse_body(&body, Origin { offset: start })
+            parse_body(
+                &body,
+                Origin {
+                    offset: start,
+                    ..Default::default()
+                },
+            )
         }
     };
     // A body is one `BEGIN … END` block; lift its declarations so callers see them directly.

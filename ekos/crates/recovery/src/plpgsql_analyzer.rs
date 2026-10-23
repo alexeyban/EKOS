@@ -51,7 +51,7 @@ const MAX_FRAGMENT: usize = 4096;
 pub struct PlPgSqlStats {
     /// Routine definitions found, in any language.
     pub routines: usize,
-    /// Of those, PL/pgSQL.
+    /// Of those, in a procedural language whose body is parsed: PL/pgSQL, or PL/SQL (RFC 0210).
     pub plpgsql: usize,
     /// PL/pgSQL routines at `Statements` fidelity.
     pub complete: usize,
@@ -187,30 +187,65 @@ pub fn recover_routines_in(
     sql: &str,
     file_key: Option<&str>,
 ) -> (KirGraph, PlPgSqlStats) {
-    let mut stats = PlPgSqlStats::default();
-    let mut graph = KirGraph::new();
-
     let found = match routines(sql) {
         Ok(r) => r,
         Err(e) => {
-            stats.lex_error = Some(e.to_string());
-            return (graph, stats);
+            let stats = PlPgSqlStats {
+                lex_error: Some(e.to_string()),
+                ..Default::default()
+            };
+            return (KirGraph::new(), stats);
         }
     };
+    let parsed = found
+        .iter()
+        .filter_map(|routine| {
+            Some(ParsedRoutine {
+                ir: parse_function(routine.text).ok()?,
+                offset: routine.offset,
+                text: routine.text,
+                header_len: None,
+            })
+        })
+        .collect();
+    recover_parsed_routines(source_path, sql, file_key, parsed)
+}
+
+/// One routine definition, already parsed into the procedural IR by its language's front end —
+/// `ekos-plpgsql` for PL/pgSQL, `ekos-plsql` for PL/SQL (RFC 0210). Spans in `ir` are relative to
+/// `text`, which sits at byte `offset` of the file.
+pub struct ParsedRoutine<'a> {
+    pub ir: ProcedureIr,
+    pub offset: usize,
+    pub text: &'a str,
+    /// Bytes of `text` before the body, when the front end knows; otherwise everything up to the
+    /// first quote (PL/pgSQL's `AS $$` / `AS '`).
+    pub header_len: Option<usize>,
+}
+
+/// Write routines into KIR: one `Procedure` each, its statements, their footprints. Pure: same
+/// input, same graph (ids included). Shared by every procedural-language pass, so a PL/SQL routine
+/// and a PL/pgSQL one have the same shape in the ledger.
+pub fn recover_parsed_routines(
+    source_path: &str,
+    sql: &str,
+    file_key: Option<&str>,
+    found: Vec<ParsedRoutine<'_>>,
+) -> (KirGraph, PlPgSqlStats) {
+    let mut stats = PlPgSqlStats::default();
+    let mut graph = KirGraph::new();
 
     // `CREATE OR REPLACE` of the same routine later in the same file replaces it, exactly as it
     // does in the database. Keyed and ordered, so output order is the file's, deterministically.
     let mut by_key: BTreeMap<String, Parsed> = BTreeMap::new();
-    for (position, routine) in found.iter().enumerate() {
-        let Ok(ir) = parse_function(routine.text) else {
-            continue;
-        };
+    for (position, routine) in found.into_iter().enumerate() {
         stats.routines += 1;
         let parsed = Parsed {
             position,
-            ir,
+            ir: routine.ir,
             offset: routine.offset,
             text: routine.text,
+            header_len: routine.header_len,
         };
         if by_key
             .insert(procedure_key(source_path, &parsed.ir), parsed)
@@ -259,6 +294,7 @@ struct Parsed<'a> {
     ir: ProcedureIr,
     offset: usize,
     text: &'a str,
+    header_len: Option<usize>,
 }
 
 /// The file a routine is recovered from.
@@ -279,7 +315,11 @@ fn emit_procedure(
 ) {
     let (source_path, sql) = (file.source_path, file.sql);
     let Parsed {
-        ir, offset, text, ..
+        ir,
+        offset,
+        text,
+        header_len,
+        ..
     } = parsed;
     let (offset, text) = (*offset, *text);
     let proc_id = kir_id(&format!("plpgsql:procedure:{key}"));
@@ -302,7 +342,7 @@ fn emit_procedure(
         Fidelity::Statements => "statements",
     };
     let is_plpgsql = ir.fidelity() != Fidelity::Signature;
-    if ir.signature.language == "plpgsql" {
+    if matches!(ir.signature.language.as_str(), "plpgsql" | "plsql") {
         stats.plpgsql += 1;
         match ir.fidelity() {
             Fidelity::Statements => stats.complete += 1,
@@ -313,10 +353,11 @@ fn emit_procedure(
 
     // The header — everything before the body — is what establishes the routine's existence and
     // signature, and is short; the body's own statements carry their own evidence.
-    let header_end = text
-        .find("$")
-        .or_else(|| text.find('\''))
-        .unwrap_or(text.len());
+    let header_end = header_len.unwrap_or_else(|| {
+        text.find("$")
+            .or_else(|| text.find('\''))
+            .unwrap_or(text.len())
+    });
     let mut evidence = KirEvidence::new(
         SourceLocation {
             path: source_path.to_string(),

@@ -6749,3 +6749,38 @@ extension; this repo gets only what reads and understands (RFC 0190 "Where each 
       do together)
 - [ ] `build.rs` test `rebuilding_after_a_ledger_clear…` is flaky under load (`remove_dir_all`
       DirectoryNotEmpty — a background writer still has the ledger dir open)
+
+## Oracle / iDempiere: static analysis for legacy estates + lakehouse operator workflow (plan v3, RFCs 0209–0218)
+
+Testbed: iDempiere `release-13` @ `3355eb5fc9`. Order: Part 0 testbed → Part I core analyzers (no DB first) →
+Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Part III deletes → Part IV CDC (opt-in).
+
+### Part 0 — testbed
+- [x] iDempiere source pinned (`release-13`), code census measured (devlog_286)
+- [ ] Oracle XE 21c / Free 23ai compose profile + seed import, `ekos_ro` read-only user
+- [ ] PostgreSQL twin (parity + fallback demo source); census committed (objects, columns, rows)
+
+### Part I — EKOS core, deterministic
+- [x] RFC 0209 Phase 1 — Java observer + declaration parser, `JavaType`/`JavaMethod` (devlog_286)
+- [x] RFC 0209 Phase 2 — application model recognizer, `ModelTable` (devlog_286)
+- [x] RFC 0209 Phase 3 — embedded SQL harvester, `ReadsFrom`/`WritesTo` to `ModelTable` (devlog_286)
+- [x] RFC 0209 Phase 4 — ticket anchors in Java comments (devlog_286)
+- [ ] RFC 0209 follow-ups: `ModelTable` business names into RFC 0170 synthesis; config list of ticket keys;
+      reduce the 219 unparsed embedded statements (clause-sized placeholders)
+- [x] RFC 0210 Phase 1 — `oracle` dialect (17 line-preserving rewrites), `dialect` on `Table`, conflicts within
+      one dialect, `init --detect` engine-directory rules; Oracle migration statements rejected 5,317 → 9 (devlog_287)
+- [x] RFC 0210 Phase 2 — `crates/plsql` + `Flavor::PlSql` + `PlSqlAnalyzerPass`; `db/oracle` 60/61 routines
+      complete, 991/992 statements (devlog_287)
+- [x] RFC 0210 Phase 3 — schema history: 2,154 change sets, 26,060 changes, 0 unrecognized; commit links (devlog_287)
+- [ ] RFC 0210 follow-ups: measure view parsing in Oracle files (the view pass reads raw text, which keeps
+      `(+)`/`FORCE`); link the 17,171 changes to dump-only tables via RFC 0211's catalog; PL/SQL lowering into the Transformation IR (with RFC 0164); `db/oracle` ↔ `db/postgresql`
+      twin diff; replayed per-table schema from the change sets (input to RFC 0211)
+- [ ] RFC 0211 — `ora-live`, profiling, code ↔ database conflicts (`ModelTable` vs `Table`)
+- [ ] RFC 0212 — write behaviour: update/delete evidence per table
+- [ ] I.8 docs/wiki snapshot, git ticket links; I.9 structured run logs (`run.log.jsonl`)
+- [ ] Part I exit: 25-question eval with expected citations, without and with the database
+
+### Parts II–V (ekos-lakehouse, console) — not started
+- [ ] RFC 0213 step bar + review/sign-off · RFC 0214 source-estate docs + publish · RFC 0215 requirements → marts
+- [ ] RFC 0216 `SourceEngine` seam + Oracle · RFC 0212 lakehouse delete handling · RFC 0217 optional CDC
+- [ ] RFC 0218 generated demo book

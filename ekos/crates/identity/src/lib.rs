@@ -323,6 +323,28 @@ fn is_expected_binary_declaration_group<'a>(group: impl Iterator<Item = &'a KirO
     seen.len() >= 2
 }
 
+/// RFC 0209: a same-name-different-kind group drawn **only** from Java source declarations —
+/// `Custom("JavaType")` and `Custom("JavaMethod")` — is expected, for the reason
+/// [`is_expected_binary_declaration_group`] gives for compiled ones: a constructor carries its
+/// class's name by the language's own rule, so every class with an explicit constructor would
+/// otherwise conflict with itself. Any other kind in the group keeps it a conflict.
+fn is_expected_java_declaration_group<'a>(group: impl Iterator<Item = &'a KirObject>) -> bool {
+    const DECLARATION_KINDS: &[&str] = &["JavaType", "JavaMethod"];
+    let mut seen: Vec<&str> = Vec::new();
+    for obj in group {
+        let ObjectKind::Custom(name) = &obj.kind else {
+            return false;
+        };
+        let Some(kind) = DECLARATION_KINDS.iter().find(|k| *k == name) else {
+            return false;
+        };
+        if !seen.contains(kind) {
+            seen.push(kind);
+        }
+    }
+    seen.len() >= 2
+}
+
 /// RFC 0169: a same-name-different-kind group of **only** `Custom("View")` and
 /// `Custom("Procedure")` (and, since RFC 0163's triggers, `Custom("Trigger")`) is expected — the narrowing
 /// [`is_expected_perl_package_symbol_pair`] applies to its own pair.
@@ -366,6 +388,8 @@ fn is_expected_sql_namespace_group<'a>(group: impl Iterator<Item = &'a KirObject
 /// |---|---|---|
 /// | database | `Table`, `View`, `Procedure`, `Trigger` | only tables, or only views/routines/triggers ([`is_expected_sql_namespace_group`]) |
 /// | Perl | `PerlPackage`, `PerlSymbol` | any mix ([`is_expected_perl_package_symbol_pair`]) |
+/// | Java | `JavaType`, `JavaMethod` | any mix ([`is_expected_java_declaration_group`]) |
+/// | application model | `ModelTable` | always (one kind) |
 /// | JavaScript, Python, Rust, Elixir | `*Module`, `*Symbol` | one kind only |
 ///
 /// Found live on LedgerSMB: with `lib/` observed beside `sql/`, **16 conflicts, every one Perl
@@ -380,6 +404,11 @@ fn is_expected_sql_namespace_group<'a>(group: impl Iterator<Item = &'a KirObject
 fn is_expected_cross_namespace_group<'a>(group: impl Iterator<Item = &'a KirObject>) -> bool {
     const LANGUAGES: &[(&str, &[&str])] = &[
         ("perl", &["PerlPackage", "PerlSymbol"]),
+        ("java", &["JavaType", "JavaMethod"]),
+        // RFC 0209: the application's own model of a table, read from its code. Beside the
+        // database's `Table` of the same name it is the expected pair, not a conflict — RFC 0211
+        // compares the two attribute by attribute instead.
+        ("appmodel", &["ModelTable"]),
         ("js", &["JsModule", "JsSymbol"]),
         ("python", &["PythonModule", "PythonSymbol"]),
         ("rust", &["RustModule", "RustSymbol"]),
@@ -412,7 +441,7 @@ fn is_expected_cross_namespace_group<'a>(group: impl Iterator<Item = &'a KirObje
                 let routines = kinds.iter().any(|k| k != "Table");
                 tables != routines
             }
-            "perl" => true,
+            "perl" | "java" => true,
             _ => kinds.len() == 1,
         })
 }
@@ -439,6 +468,7 @@ fn detect_kind_conflicts(objects: &[KirObject]) -> Vec<ConflictReport> {
             if is_expected_technology_jsmodule_pair(indices.iter().map(|&i| &objects[i]))
                 || is_expected_perl_package_symbol_pair(indices.iter().map(|&i| &objects[i]))
                 || is_expected_binary_declaration_group(indices.iter().map(|&i| &objects[i]))
+                || is_expected_java_declaration_group(indices.iter().map(|&i| &objects[i]))
                 || is_expected_sql_namespace_group(indices.iter().map(|&i| &objects[i]))
                 || is_expected_cross_namespace_group(indices.iter().map(|&i| &objects[i]))
             {
@@ -1215,6 +1245,41 @@ mod tests {
             "a Perl package and a same-named sub is expected, not a conflict — got: {:?}",
             result.conflicts
         );
+    }
+
+    /// RFC 0209: a Java class and its own constructor share a name by the language's rule.
+    #[test]
+    fn a_java_type_and_its_constructor_do_not_conflict() {
+        let g = make_graph(&[
+            ("MInvoice", ObjectKind::Custom("JavaType".to_string())),
+            ("MInvoice", ObjectKind::Custom("JavaMethod".to_string())),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(result.conflicts.is_empty(), "{:?}", result.conflicts);
+    }
+
+    /// RFC 0209: the application model's `C_Invoice` beside the database's `c_invoice` is the
+    /// pair RFC 0211 compares, not an identity conflict.
+    #[test]
+    fn a_model_table_beside_the_database_table_does_not_conflict() {
+        let g = make_graph(&[
+            ("C_Invoice", ObjectKind::Custom("ModelTable".to_string())),
+            ("c_invoice", ObjectKind::Table),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(result.conflicts.is_empty(), "{:?}", result.conflicts);
+    }
+
+    /// RFC 0209: the narrowing is exact — a Java type beside an unrelated kind still conflicts.
+    #[test]
+    fn a_java_type_beside_a_declared_technology_still_conflicts() {
+        let g = make_graph(&[
+            ("Invoice", ObjectKind::Custom("JavaType".to_string())),
+            ("Invoice", ObjectKind::Custom("JavaMethod".to_string())),
+            ("invoice", ObjectKind::Custom("Technology".to_string())),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert_eq!(result.conflicts.len(), 1);
     }
 
     /// RFC 0169, found live on LedgerSMB: the view `employee_search` and two functions named

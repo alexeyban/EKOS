@@ -49,6 +49,8 @@ ekos-plugin-sql-dialect-postgres.workspace = true
 ekos-plugin-sql-dialect-snowflake.workspace = true
 ekos-plugin-sql-dialect-databricks.workspace = true
 ekos-plugin-sql-dialect-trino.workspace = true
+ekos-plugin-sql-dialect-oracle.workspace = true
+ekos-plsql.workspace = true
 ekos-plugin-sql-dialect-mssql.workspace = true
 ekos-plugin-sql-dialect-clickhouse.workspace = true
 glob.workspace = true
@@ -57,5 +59,6 @@ serde_yaml.workspace = true
 regex.workspace = true
 
 [dev-dependencies]
+walkdir = { workspace = true }
 tempfile = "3"
 tokio = { workspace = true }

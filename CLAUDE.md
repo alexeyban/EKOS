@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
 Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
-`devlog_285.md` as of this writing) before starting non-trivial work: they are the project's
+`devlog_287.md` as of this writing) before starting non-trivial work: they are the project's
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
-`ekos/docs/rfcs/` has `0025`+ (highest: `0207`). **Check both directories for the highest existing number before
+`ekos/docs/rfcs/` has `0025`+ (highest: `0210`). **Check both directories for the highest existing number before
 picking one for a new RFC** — two RFCs have already collided on the same number once (0027) from
 sessions that only checked one location.
 
@@ -127,12 +127,35 @@ Each plugin implements `Observer` from `observation-sdk` and is registered indep
 `ekos/Cargo.toml`'s workspace members. Real/tested: `file`, `git`, `github`, `confluence`,
 `localdocs` (PDF/DOCX/text/Markdown/HTML/email), `pentaho` (`.ktr`/`.kjb`, RFC 0027), `crypto`,
 `python` (real AST + PySpark DataFrame chains into the Transformation IR, RFC 0038/0040), `rust`
-(real AST + the first real `Calls` function-call graph, RFC 0041), `elixir`/`javascript` (real
+(real AST + the first real `Calls` function-call graph, RFC 0041), `java` (RFC 0209: hand-written
+declaration parser in `recovery/src/java_syntax.rs`, `JavaType`/`JavaMethod`; `app_model.rs` turns
+iDempiere-family generated `I_`/`X_` classes into `ModelTable`s — a code claim, never merged into a
+database `Table`; `java_sql.rs` folds SQL built in method bodies; generated files get no `JavaMethod`
+objects; the kinds are built from constants, so `every_java_kind_has_a_keyed_registry_row` guards them),
+`elixir`/`javascript` (real
 AST + `Calls` recovery), `clickhouse` (real HTTP client, schema metadata + the opt-in live
-NL-to-SQL query engine, RFC 0056). `sql-dialect-{postgres,mysql,mssql,snowflake,databricks,clickhouse,trino}`
+NL-to-SQL query engine, RFC 0056). `sql-dialect-{postgres,mysql,mssql,snowflake,databricks,clickhouse,trino,oracle}`
 implement the `SqlDialectParser` trait (RFC 0031; `trino` is RFC 0190 — `GenericDialect` plus a
 `preprocess` that blanks time travel, `ALTER TABLE … EXECUTE` and `TABLESAMPLE`; the dbt analyzer
-falls back to it).
+falls back to it; `oracle` is RFC 0210 — `GenericDialect` plus a line-preserving `preprocess` that
+blanks SQL*Plus commands and whole PL/SQL units, and rewrites Oracle-only clauses, listed in the
+crate docs). Oracle scripts are split by `crates/plsql`'s `script` module (Oracle quoting: `''`
+escapes, backslash is plain, `q'[…]'`; units end at a `/` line; block comments do **not** nest —
+PostgreSQL's do, so never mask Oracle text with `ekos-plpgsql`'s scanner). `crates/plsql` also
+reads PL/SQL routines, triggers and packages into RFC 0163's `ProcedureIr`, handing each
+`BEGIN … END` to `ekos_plpgsql::parse_body` with `Origin { flavor: Flavor::PlSql }` (PL/SQL-only
+statement forms are recognised only under that flavor, so PL/pgSQL parsing never changes);
+`recovery/src/plsql_analyzer.rs` writes them through `plpgsql_analyzer::recover_parsed_routines`, so
+both languages produce identical `Procedure`/`ProcedureStatement` objects, and an Oracle trigger's
+inline body is a `Procedure` named after it plus a `Trigger` whose `function` names it.
+`recovery/src/schema_history.rs` (RFC 0210) turns every `<yyyyMMddHHmm[ss]>_<description>.sql`
+migration script into a keyed `SchemaChangeSet` + one `SchemaChange` per DDL operation, classified
+from tokens (sqlparser 0.53 reads Oracle `MODIFY c NOT NULL` as a column of type `NOT`), including
+iDempiere's PostgreSQL `INSERT INTO t_alter_column` rows; `semantic/src/schema_history.rs` links
+changes to tables at commit (`Changes`, unique name only). `SqlAnalyzerPass` stamps `dialect` on
+every `Table`, and `conflicts` compares claims only within one dialect (`generic` = unknown, compared
+with all) — engine twins of one script are two databases, not a dispute. `init --detect` writes one
+`[[recover.sql.dialect-rules]]` per engine-named directory (`oracle/`, `postgresql/`, …).
 **Not in this repo:** RFC 0148's compiled .NET/JVM binary decompiler (readers, observer, analyzer pass,
 `[binary-reconstruction]`, `ekos_binary_explain`) lives in the private `alexeyban/ekos-binary` workspace as
 an RFC 0149 extension with its own `ekos` binary. Public EKOS keeps only the `[binary-reconstruction]`

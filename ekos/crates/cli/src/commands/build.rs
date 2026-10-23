@@ -13,6 +13,7 @@ use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
 use ekos_plugin_github::{GitHubApiClient, GitHubObserver};
 use ekos_plugin_governance::{DEFAULT_HUB_URL, SnapshotClient, SnapshotObserver};
+use ekos_plugin_java::JavaObserver;
 use ekos_plugin_javascript::JavaScriptObserver;
 use ekos_plugin_localdocs::{LocalDocsObserver, TesseractOcr};
 use ekos_plugin_pentaho::PentahoObserver;
@@ -151,6 +152,8 @@ fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Ob
         // RFC 0147: local .pl/.pm/.t/.psgi files (and .cgi with a real perl shebang), no
         // credential to gate on — runs unconditionally, same as JavaScriptObserver.
         Box::new(PerlObserver::new()),
+        // RFC 0209: local .java sources, verbatim; parsed by JavaAnalyzerPass at recover.
+        Box::new(JavaObserver::new()),
     ];
     // RFC 0149: out-of-tree observers (e.g. the private RFC 0148 binary decompiler) run after the
     // built-in ones.

@@ -238,7 +238,8 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     // against every file's tables, which first coexist in this ledger read.
     ledger.set_write_context(Some(write_ctx("commit:procedure-lineage")));
     let step = phase_note("linking procedures");
-    let (procedure_links_added, procedure_link_stats) = commit_procedure_lineage(&*ledger)?;
+    let (procedure_links_added, procedure_link_stats, schema_link_stats) =
+        commit_procedure_lineage(&*ledger)?;
     step.done();
 
     // RFC 0170: business-semantics hypotheses — after procedure lineage, for the same reason: a
@@ -341,6 +342,15 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
             procedure_link_stats.ambiguous
         );
     }
+    if schema_link_stats.changes > 0 {
+        println!(
+            "  Schema history links:  {} of {} change(s) linked to their table ({} ambiguous name(s), {} not compiled)",
+            schema_link_stats.linked,
+            schema_link_stats.changes,
+            schema_link_stats.ambiguous,
+            schema_link_stats.missing
+        );
+    }
     if lineage_links_added > 0 {
         println!("  Data lineage links:    {lineage_links_added}");
     }
@@ -441,7 +451,11 @@ fn commit_data_lineage(ledger: &dyn KnowledgeStore) -> Result<usize> {
 /// relationships newly written and what the linker resolved.
 fn commit_procedure_lineage(
     ledger: &dyn KnowledgeStore,
-) -> Result<(usize, procedure_lineage::ProcedureLinkStats)> {
+) -> Result<(
+    usize,
+    procedure_lineage::ProcedureLinkStats,
+    ekos_semantic::schema_history::SchemaLinkStats,
+)> {
     let objects = ledger.all_objects()?;
     let mut graph = KirGraph {
         objects,
@@ -450,13 +464,15 @@ fn commit_procedure_lineage(
         evidence: Vec::new(),
     };
     let stats = procedure_lineage::link_procedures(&mut graph);
+    // RFC 0210: migration-script changes → the tables they change, by the same unique-name rule.
+    let schema_stats = ekos_semantic::schema_history::link_changes(&mut graph);
     let mut written = 0usize;
     for rel in &graph.relationships {
         if ledger.append_relationship(rel)? {
             written += 1;
         }
     }
-    Ok((written, stats))
+    Ok((written, stats, schema_stats))
 }
 
 /// RFC 0109: a freshly-compiled role `Claim` never carries `review_status` — the reasoning pass

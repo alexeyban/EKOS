@@ -174,6 +174,31 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(owning package/file id, sub name) — RFC 0147",
     },
     CustomKind {
+        name: "JavaType",
+        structurally_keyed: true,
+        note: "fully qualified type name — RFC 0209; org.compiere.model.* shares a prefix across ~1,500 types",
+    },
+    CustomKind {
+        name: "JavaMethod",
+        structurally_keyed: true,
+        note: "(owning type id, name, parameter types) — RFC 0209; overloads are distinct",
+    },
+    CustomKind {
+        name: "ModelTable",
+        structurally_keyed: true,
+        note: "(application family, table name) — RFC 0209; a code claim, never merged into a database Table",
+    },
+    CustomKind {
+        name: "SchemaChangeSet",
+        structurally_keyed: true,
+        note: "migration script path — RFC 0210; twin engines' scripts share a name and are two change sets",
+    },
+    CustomKind {
+        name: "SchemaChange",
+        structurally_keyed: true,
+        note: "(migration script path, ordinal) — RFC 0210; the same ADD COLUMN recurs across releases",
+    },
+    CustomKind {
         name: "JsModule",
         structurally_keyed: true,
         note: "qualified module name — RFC 0085",
@@ -459,6 +484,11 @@ mod tests {
             "ElixirSymbol",
             "PerlPackage",
             "PerlSymbol",
+            "JavaType",
+            "JavaMethod",
+            "ModelTable",
+            "SchemaChangeSet",
+            "SchemaChange",
             "JsModule",
             "JsSymbol",
             "Document",

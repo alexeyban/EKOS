@@ -25,5 +25,5 @@ pub mod parse;
 pub mod source;
 
 pub use ir::{CursorOp, Fidelity, LoopKind, ProcSignature, ProcStmt, ProcedureIr, Span, VarDecl};
-pub use parse::{Origin, parse_body, parse_function};
+pub use parse::{Flavor, Origin, parse_body, parse_function};
 pub use source::{RoutineSource, SqlStatement, head_words, line_of, routines, statements};

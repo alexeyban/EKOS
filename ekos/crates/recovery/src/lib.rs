@@ -3,6 +3,7 @@
 //! Phase 6. Requires RFC 0003 (KIR) and RFC 0008 (LLM policy).
 
 pub mod anthropic;
+pub mod app_model;
 pub mod architecture_diff;
 pub mod architecture_drift;
 pub mod architecture_evaluator;
@@ -23,6 +24,9 @@ pub mod git_analyzer;
 pub mod github_analyzer;
 pub mod glossary;
 pub mod governance_analyzer;
+pub mod java_analyzer;
+pub mod java_sql;
+pub mod java_syntax;
 pub mod javascript_analyzer;
 pub mod llm;
 pub mod llm_description;
@@ -37,11 +41,13 @@ pub mod perl_analyzer;
 pub mod perl_sql;
 pub mod plpgsql_analyzer;
 pub mod plpgsql_footprint;
+pub mod plsql_analyzer;
 pub mod pricing;
 pub mod python_analyzer;
 pub mod requirements_analyzer;
 pub mod route;
 pub mod rust_analyzer;
+pub mod schema_history;
 pub mod semantics_llm;
 mod source_evidence;
 pub mod sql_analyzer;
@@ -76,6 +82,8 @@ pub use crypto_analyzer::CryptoAnalyzerPass;
 pub use dbt_analyzer::DbtAnalyzerPass;
 pub use dependency_analyzer::DependencyAnalyzerPass;
 pub use document_semantics_analyzer::{DocumentSemanticsAnalyzerPass, DocumentSemanticsStats};
+/// The dialect trait the registry holds (RFC 0031), for callers that pass a resolved parser on.
+pub use ekos_sql_dialect_sdk::SqlDialectParser;
 pub use elixir_analyzer::{ElixirAnalyzerPass, ElixirStats};
 pub use embed::{
     CachedEmbeddingProvider, EmbedStats, EmbeddingProvider, MockEmbeddingProvider,
@@ -84,6 +92,7 @@ pub use embed::{
 pub use git_analyzer::GitAnalyzerPass;
 pub use github_analyzer::GitHubAnalyzerPass;
 pub use governance_analyzer::GovernanceAnalyzerPass;
+pub use java_analyzer::{JavaAnalyzerPass, JavaStats};
 pub use javascript_analyzer::{JavaScriptAnalyzerPass, JavaScriptStats};
 pub use llm::{
     LlmError, LlmProvider, LlmRequest, LlmResponse, MOCK_MODEL_NAME, MockLlmProvider, Task,
@@ -101,10 +110,12 @@ pub use package_json_analyzer::PackageJsonAnalyzerPass;
 pub use pentaho_analyzer::{PentahoAnalyzerPass, PentahoStats};
 pub use perl_analyzer::{PerlAnalyzerPass, PerlStats};
 pub use plpgsql_analyzer::{PlPgSqlAnalyzerPass, PlPgSqlStats};
+pub use plsql_analyzer::{PlSqlAnalyzerPass, PlSqlStats};
 pub use python_analyzer::{PythonAnalyzerPass, PythonStats};
 pub use requirements_analyzer::RequirementsAnalyzerPass;
 pub use route::{LlmRouter, RouteInfo, Wire};
 pub use rust_analyzer::{RustAnalyzerPass, RustStats};
+pub use schema_history::{SchemaHistoryPass, SchemaHistoryStats};
 pub use sql_analyzer::{SqlAnalyzerPass, parse_ddl_structural};
 pub use sql_dialect_registry::{
     DialectRegistry, DialectRule, GenericDialectParser, build_dialect_registry,
