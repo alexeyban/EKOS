@@ -1,0 +1,27 @@
+# Part I exit — git history and tickets (RFC 0219).
+version: 1
+category: idempiere-history
+scenarios:
+  - id: idh-001
+    question: "What was ticket IDEMPIERE-6349 about, who committed it and when?"
+    mode: reason
+    expected_facts:
+      - "M49"
+      - "Carlos Ruiz"
+      - "2024-12-27"
+    difficulty: medium
+
+  - id: idh-002
+    question: "Which ticket introduced YAML and JSON support for 2Pack PackOut?"
+    mode: reason
+    expected_facts:
+      - "IDEMPIERE-7016"
+    difficulty: medium
+
+  - id: idh-003
+    question: "Which ticket added a custom key to document sequences?"
+    mode: reason
+    expected_facts:
+      - "IDEMPIERE-6575"
+    expected_evidence_contains: ["custom-key-of-document-sequence.md"]
+    difficulty: medium

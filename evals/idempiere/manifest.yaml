@@ -1,0 +1,5 @@
+# Oracle/iDempiere plan, Part I exit eval: 25 questions with expected citations (RFC 0222).
+version: 1
+datasets:
+  idempiere-25:
+    files: [code.yaml, schema.yaml, history.yaml, docs.yaml, behaviour.yaml, adversarial.yaml]

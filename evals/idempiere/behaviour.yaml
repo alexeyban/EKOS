@@ -1,0 +1,26 @@
+# Part I exit — write behaviour (RFC 0212) and the live database (RFC 0211). The database
+# questions have no answer in files alone; without [[databases]] the right answer is to decline.
+version: 1
+category: idempiere-behaviour
+scenarios:
+  - id: idb-001
+    question: "How are C_Invoice rows deleted, and does iDempiere keep a change log for the table?"
+    mode: reason
+    expected_facts:
+      - "deleted_by_users"
+      - "recorded"
+    difficulty: hard
+
+  - id: idb-002
+    question: "How are C_OrderLine rows deleted?"
+    mode: reason
+    expected_facts:
+      - "deleted_by_app"
+    difficulty: hard
+
+  - id: idb-003
+    question: "How many rows does C_InvoiceLine have in the live database?"
+    mode: reason
+    expected_facts:
+      - "24"
+    difficulty: hard

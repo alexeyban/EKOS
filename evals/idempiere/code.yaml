@@ -1,0 +1,52 @@
+# Oracle/iDempiere plan, Part I exit — application code. Every expected fact was checked in the
+# iDempiere `release-13` source before it was written down (RFC 0222).
+version: 1
+category: idempiere-code
+scenarios:
+  - id: idc-001
+    question: "Which code computes the open amount of an invoice?"
+    mode: reason
+    expected_facts:
+      - any_of: ["getOpenAmt", "invoiceOpen"]
+    expected_evidence_contains: ["MInvoice.java"]
+    difficulty: medium
+
+  - id: idc-002
+    question: "Which method completes a sales order in iDempiere?"
+    mode: reason
+    expected_facts:
+      - "completeIt"
+    expected_evidence_contains: ["MOrder.java"]
+    difficulty: medium
+
+  - id: idc-003
+    question: "Which class sets C_Invoice.GrandTotal when invoice taxes are calculated?"
+    mode: reason
+    expected_facts:
+      - "StandardTaxProvider"
+    expected_evidence_contains: ["StandardTaxProvider.java"]
+    difficulty: hard
+
+  - id: idc-004
+    question: "What does the DocStatus value CO mean on a C_Order?"
+    mode: reason
+    expected_facts:
+      - "Completed"
+    expected_evidence_contains: ["X_C_Order.java"]
+    difficulty: medium
+
+  - id: idc-005
+    question: "Which Java class is the model for the C_BPartner table, and what does it extend?"
+    mode: reason
+    expected_facts:
+      - "MBPartner"
+      - "X_C_BPartner"
+    difficulty: easy
+
+  - id: idc-006
+    question: "Where does iDempiere write its change log when a persistent object is saved?"
+    mode: reason
+    expected_facts:
+      - "AD_ChangeLog"
+    expected_evidence_contains: ["PO.java"]
+    difficulty: medium

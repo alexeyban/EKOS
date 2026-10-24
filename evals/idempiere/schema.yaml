@@ -1,0 +1,35 @@
+# Part I exit — schema, migrations and stored code from files (no database needed).
+version: 1
+category: idempiere-schema
+scenarios:
+  - id: ids-001
+    question: "Which migration added the column ISOCountryCodeAlpha3 to C_Country, and for which ticket?"
+    mode: reason
+    expected_facts:
+      - "202412261358_IDEMPIERE-6349"
+      - "IDEMPIERE-6349"
+    difficulty: medium
+
+  - id: ids-002
+    question: "Which Oracle function returns the open amount of an invoice, and which tables does it read?"
+    mode: reason
+    expected_facts:
+      - "invoiceOpen"
+      - any_of: ["C_AllocationLine", "C_InvoicePaySchedule"]
+    expected_evidence_contains: ["C_Invoice_Open.sql"]
+    difficulty: hard
+
+  - id: ids-003
+    question: "What does the Oracle procedure M_Product_Delete do?"
+    mode: reason
+    expected_facts:
+      - any_of: ["delete", "M_Product"]
+    expected_evidence_contains: ["M_Product_Delete.sql"]
+    difficulty: medium
+
+  - id: ids-004
+    question: "Which column links C_InvoiceLine to its invoice?"
+    mode: reason
+    expected_facts:
+      - "C_Invoice_ID"
+    difficulty: easy

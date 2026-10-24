@@ -1,0 +1,25 @@
+# Part I exit — the documentation repository (RFC 0221).
+version: 1
+category: idempiere-docs
+scenarios:
+  - id: idd-001
+    question: "How do I run iDempiere with Docker?"
+    mode: reason
+    expected_evidence_contains: ["docker.md"]
+    expected_facts:
+      - any_of: ["Docker Compose", "docker compose"]
+    difficulty: easy
+
+  - id: idd-002
+    question: "Which new fields were added to the Country window in iDempiere 12?"
+    mode: reason
+    expected_facts:
+      - any_of: ["ISO Alpha-3", "ISOCountryCodeAlpha3", "M49"]
+    expected_evidence_contains: ["new-fields-in-country.md"]
+    difficulty: medium
+
+  - id: idd-003
+    question: "What is the syntax of a custom key in a document sequence?"
+    mode: reason
+    expected_evidence_contains: ["custom-key-of-document-sequence.md"]
+    difficulty: hard
