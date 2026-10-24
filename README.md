@@ -893,6 +893,14 @@ scripts/wiki-snapshot.py --xml export.xml --out ~/wiki-snapshot --licence "CC BY
 ekos source add wiki --path ~/wiki-snapshot
 ```
 
+### iDempiere eval (RFC 0222)
+
+`evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six
+with no grounded answer), graded with `ekos eval run --datasets-dir evals/idempiere --dataset idempiere-25`. Add
+`--evidence-only` to grade retrieval without calling a model. First results (code + docs, with and without the
+Oracle database, answers by Claude Haiku 5.5): 14 and 15 of 25 passed, no hallucination, about 2 US cents a run;
+the nine misses are retrieval, mostly documentation prose outranking the code that implements an answer.
+
 ### PL/pgSQL stored procedures (RFC 0163)
 
 A stored procedure is also *imperative* — ordered statements, branches, loops, exception handlers —

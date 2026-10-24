@@ -6814,7 +6814,14 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [ ] RFC 0220 follow-ups: run logs for extension commands (Part II steps); the 24 non-UTF-8 historic iDempiere
       migration scripts `recover` skips unread (decode Latin-1?); redaction pattern for `sk-ant-…` keys; check the
       Steps table in a browser on a live run
-- [ ] Part I exit: 25-question eval with expected citations, without and with the database
+- [x] Part I exit: 25-question eval with expected citations, without and with the database — RFC 0222, dataset
+      `evals/idempiere/` (`idempiere-25`): evidence shown for 9/18 in both projects; Claude Haiku 5.5 answers pass
+      14/25 (with DB) and 15/25 (without), 0% hallucination, all 6 adversarial declined; the database adds nothing
+      measurable yet (devlog_294)
+- [ ] RFC 0222 follow-ups: code over docs prose in ranking when a question names a table/class (idc-002/003/005/006);
+      excerpt window reaching the matched line (idc-004); `WriteBehaviour` and live profiles reachable by search
+      (idb-001..003); `table.column` → its `SchemaChange` (ids-001); a citation check/retry in `ask` (4 correct
+      answers uncited)
 
 ### Parts II–V (ekos-lakehouse, console) — not started
 - [ ] RFC 0213 step bar + review/sign-off · RFC 0214 source-estate docs + publish · RFC 0215 requirements → marts
