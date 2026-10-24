@@ -58,13 +58,16 @@ answers. Misses, by cause:
 | Scenario | Cause |
 |---|---|
 | idc-002 (completing an order) | `completeIt` exists in dozens of document classes; docs pages outrank `MOrder` |
-| idc-003 (who sets GrandTotal) | `StandardTaxProvider.calculateInvoiceTaxTotal` not retrieved; setter calls are not recorded as writes |
+| idc-003 (who sets GrandTotal) | `StandardTaxProvider` not retrieved; a docs page on the tax lookup interface and `C_Tax_Trl` lead the evidence |
 | idc-004 (DocStatus `CO`) | `doc/DocStatus.txt` retrieved, but its excerpt ends before the `CO Completed` line |
-| idc-005 (C_BPartner model class) | the `ModelTable` column list fills the evidence; the class objects are not shown |
-| idc-006 (change log) | `PO.java` not retrieved for "change log" |
+| idc-005 (C_BPartner model class) | `MBPartner` not retrieved; docs pages on event handlers and model factories lead the evidence |
+| idc-006 (change log) | `PO.java` not retrieved; docs pages (auto-save of tab changes) lead the evidence |
 | ids-001 (migration for a column) | the `C_Country` model's column map fills the evidence; the change set is not shown |
 | idb-001, idb-002 (deletes) | `WriteBehaviour` objects are not reached by search for "deleted" |
 | idb-003 (live row count) | the live table's profile is not surfaced for "how many rows" |
+
+In five of the nine misses documentation sections take the places the code would have had: with 2,520 docs
+sections in the project, prose that mentions a term outranks the class that implements it.
 
 **Not yet run:** the project without the database (its pipeline was stopped twice by the machine running out of
 memory) and both Ollama-answered gradings.
