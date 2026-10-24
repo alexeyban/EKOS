@@ -9,6 +9,7 @@
 use crate::llm::LlmError;
 use async_trait::async_trait;
 use ekos_common::redaction::{RedactionConfig, redact};
+use ekos_common::run_log;
 use ekos_kir::KirObject;
 use ekos_ledger::KnowledgeStore;
 use ekos_ledger::vector::VectorIndex;
@@ -184,6 +185,12 @@ impl EmbeddingProvider for OllamaEmbeddingProvider {
                 })
                 .send()
                 .await?;
+            run_log::model_call(
+                run_log::EMBEDDING,
+                "ollama",
+                &self.model,
+                resp.status().is_success(),
+            );
             if !resp.status().is_success() {
                 let status = resp.status().as_u16();
                 let body = resp.text().await.unwrap_or_default();
@@ -267,6 +274,12 @@ impl EmbeddingProvider for OpenAiEmbeddingProvider {
             })
             .send()
             .await?;
+        run_log::model_call(
+            run_log::EMBEDDING,
+            "openai",
+            &self.model,
+            resp.status().is_success(),
+        );
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let body = resp.text().await.unwrap_or_default();

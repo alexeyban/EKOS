@@ -211,7 +211,7 @@ class JobRunner:
                 code = await _proc.run_streaming(
                     argv,
                     cwd=cwd,
-                    env=envs.for_path(ws_path),
+                    env=with_run_log(envs.for_path(ws_path), log_path),
                     log_path=log_path,
                     register=register,
                     timeout_s=command.timeout,
@@ -256,7 +256,7 @@ class JobRunner:
             code = await _proc.run_streaming(
                 stage_argv,
                 cwd=cwd,
-                env=envs.for_path(ws_path),
+                env=with_run_log(envs.for_path(ws_path), log_path),
                 log_path=log_path,
                 register=register,
                 timeout_s=self._settings.run_stage_timeout_seconds,
@@ -270,6 +270,16 @@ class JobRunner:
                 models.update_run(run_id, stages=list(stages))
                 return _status_for(run_id, code, self._cancelled)
         return _status_for(run_id, 0, self._cancelled)
+
+
+def events_path(log_path: str | Path) -> Path:
+    """RFC 0220: where a run's structured log goes — next to its text log, `<run id>.jsonl`."""
+    return Path(log_path).with_suffix(".jsonl")
+
+
+def with_run_log(env: dict[str, str], log_path: str | Path) -> dict[str, str]:
+    """`env` plus `EKOS_RUN_LOG`, so every stage of a run appends to the run's one events file."""
+    return {**env, "EKOS_RUN_LOG": str(events_path(log_path))}
 
 
 def _status_for(run_id: str, code: int, cancelled: set[str]) -> str:

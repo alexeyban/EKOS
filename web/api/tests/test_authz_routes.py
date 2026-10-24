@@ -43,6 +43,7 @@ DYNAMIC = {
     ("GET", "/api/runs/{run_id}"),
     ("POST", "/api/runs/{run_id}/cancel"),
     ("GET", "/api/runs/{run_id}/logs"),
+    ("GET", "/api/runs/{run_id}/events"),  # RFC 0220: the same visibility as the run's log
     ("GET", "/api/schedules"),
     ("POST", "/api/schedules"),
     ("PATCH", "/api/schedules/{schedule_id}"),

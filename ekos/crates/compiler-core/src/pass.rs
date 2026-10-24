@@ -223,6 +223,7 @@ impl PassManager {
         use crate::scheduler::{ExecutionReport, FailureMode, PassOutcome};
 
         let order = self.execution_order()?;
+        let run_started = std::time::Instant::now();
         let mut report = ExecutionReport {
             outcomes: Vec::new(),
         };
@@ -245,8 +246,10 @@ impl PassManager {
             }
 
             tracing::info!(pass = %name, "running pass");
+            let started = std::time::Instant::now();
             let result = pass.run(ctx).await;
             let failed = result.is_err();
+            log_pass(name, started, failed);
 
             if !failed {
                 crate::cache::record_manifest(pass.as_ref(), &cfg_hash, &manifest_dir);
@@ -259,6 +262,7 @@ impl PassManager {
             }
         }
 
+        log_report(&report, run_started);
         Ok(report)
     }
 
@@ -347,6 +351,7 @@ impl PassManager {
         use crate::scheduler::{ExecutionReport, FailureMode, PassOutcome};
 
         let levels = self.execution_levels()?;
+        let run_started = std::time::Instant::now();
         let mut passes = std::mem::take(&mut self.passes);
         let mut report = ExecutionReport {
             outcomes: Vec::new(),
@@ -370,7 +375,9 @@ impl PassManager {
                 let mut pass_ctx = ctx.clone();
                 handles.push(tokio::spawn(async move {
                     tracing::info!(pass = %name, "running pass (parallel)");
+                    let started = std::time::Instant::now();
                     let result = pass.run(&mut pass_ctx).await;
+                    log_pass(&name, started, result.is_err());
                     (name, result)
                 }));
             }
@@ -385,8 +392,39 @@ impl PassManager {
             }
         }
 
+        log_report(&report, run_started);
         Ok(report)
     }
+}
+
+/// RFC 0220: a pass that ran gets its own run-log line only when it failed or took at least this
+/// long; the rest are counted on the summary line. A large estate runs tens of thousands of passes.
+const SLOW_PASS_MS: u64 = 1000;
+
+/// RFC 0220: the run-log line of a failed or slow pass.
+fn log_pass(name: &str, started: std::time::Instant, failed: bool) {
+    let ms = started.elapsed().as_millis() as u64;
+    if failed || ms >= SLOW_PASS_MS {
+        ekos_common::run_log::emit(
+            "pass",
+            if failed { "failed" } else { "slow" },
+            &serde_json::json!({ "pass": name, "ms": ms }),
+        );
+    }
+}
+
+/// RFC 0220: one line for a whole pass run — how many ran, were cached, failed.
+fn log_report(report: &crate::scheduler::ExecutionReport, started: std::time::Instant) {
+    ekos_common::run_log::emit(
+        "pass",
+        "passes",
+        &serde_json::json!({
+            "ran": report.passes_run(),
+            "cached": report.passes_skipped(),
+            "failed": report.error_count(),
+            "ms": started.elapsed().as_millis() as u64,
+        }),
+    );
 }
 
 impl Default for PassManager {

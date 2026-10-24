@@ -105,6 +105,16 @@ pub fn run(config: &EkosConfig, cwd: &Path, force: bool) -> Result<()> {
     }
 
     // ── Stats ─────────────────────────────────────────────────────────────
+    ekos_common::run_log::emit(
+        "identity.resolve",
+        "resolved",
+        &serde_json::json!({
+            "candidates": result.stats.candidates_evaluated,
+            "pairs": result.stats.pairs_compared,
+            "merges": result.stats.merges_proposed,
+            "conflicts": result.stats.conflicts_detected,
+        }),
+    );
     println!("\nStats:");
     println!(
         "  Candidates evaluated : {}",

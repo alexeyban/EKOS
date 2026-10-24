@@ -316,6 +316,17 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
         None
     };
 
+    ekos_common::run_log::emit(
+        "ledger.commit",
+        "facts written",
+        &serde_json::json!({
+            "objects": objects_written,
+            "objects_skipped": objects_skipped,
+            "relationships": rels_written,
+            "evidence": evidence_written,
+            "conflicts": conflict_stats.as_ref().map(|s| s.total()).unwrap_or(0),
+        }),
+    );
     println!("Commit complete.");
     println!("  Objects written:       {objects_written}");
     print_source_stats(&source_stats);
@@ -513,6 +524,7 @@ fn print_ticket_links(s: &ekos_semantic::tickets::TicketLinkStats) {
     if s.tickets == 0 {
         return;
     }
+    ekos_common::run_log::emit("tickets.link", "ticket links", s);
     let links = s
         .links
         .iter()
@@ -531,6 +543,7 @@ fn print_ticket_links(s: &ekos_semantic::tickets::TicketLinkStats) {
 /// RFC 0212: the summary line, when any table was classified.
 fn print_write_behaviour(s: &ekos_semantic::write_behaviour::WriteBehaviourStats) {
     if s.tables > 0 {
+        ekos_common::run_log::emit("write.behaviour", "tables classified", s);
         println!("  Write behaviour:       {}", write_behaviour_summary(s));
     }
 }

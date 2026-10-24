@@ -378,6 +378,16 @@ impl CompilerPass for GitAnalyzerPass {
             tickets = ticket_count,
             "git-analyzer complete"
         );
+        ekos_common::run_log::emit(
+            "git.history",
+            "commits read",
+            &serde_json::json!({
+                "pass": self.pass_id,
+                "commits": knowledge.content.kir.events.len(),
+                "contributors": contributor_ids.len(),
+                "tickets": ticket_count,
+            }),
+        );
         Ok(())
     }
 }

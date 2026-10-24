@@ -370,7 +370,22 @@ pub fn introspect(
     let mut results: BTreeMap<&'static str, Rows> = BTreeMap::new();
     source.begin_snapshot()?;
     let read = queries(family).into_iter().try_for_each(|q| {
-        results.insert(q.name, source.rows(&q, owner)?);
+        let started = std::time::Instant::now();
+        let rows = source.rows(&q, owner)?;
+        ekos_common::run_log::emit(
+            "oracle.catalog",
+            &format!(
+                "read {}",
+                source_view(&q.sql).unwrap_or_else(|| q.name.to_string())
+            ),
+            &serde_json::json!({
+                "owner": owner,
+                "query": q.name,
+                "rows": rows.len(),
+                "ms": started.elapsed().as_millis() as u64,
+            }),
+        );
+        results.insert(q.name, rows);
         Ok::<_, OraError>(())
     });
     let ended = source.end_snapshot();
@@ -515,7 +530,32 @@ pub fn introspect(
     }
 
     reconcile(&snapshot)?;
+    ekos_common::run_log::emit(
+        "oracle.catalog",
+        &format!(
+            "reconciled against {}_OBJECTS",
+            family.prefix().to_uppercase()
+        ),
+        &serde_json::json!({
+            "owner": owner,
+            "kinds": all_kinds().filter(|k| k.object_type().is_some()).count(),
+            "objects": snapshot.objects.len(),
+            "mismatches": 0,
+        }),
+    );
     Ok(snapshot)
+}
+
+/// The view a catalog query reads (`DBA_TAB_COLUMNS`), for the run log.
+fn source_view(sql: &str) -> Option<String> {
+    let upper = sql.to_uppercase();
+    let rest = &upper[upper.find(" FROM ")? + 6..];
+    let view: String = rest
+        .trim_start()
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '$')
+        .collect();
+    (!view.is_empty()).then_some(view)
 }
 
 type StatusMap = BTreeMap<(String, String), String>;
@@ -1201,6 +1241,17 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, OraError::UnknownObjectType(t) if t == "WIDGET"));
+    }
+
+    #[test]
+    fn the_run_log_names_the_view_each_query_reads() {
+        let views: Vec<_> = queries(ViewFamily::Dba)
+            .iter()
+            .map(|q| source_view(&q.sql))
+            .collect();
+        assert!(views.iter().all(Option::is_some), "{views:?}");
+        assert!(views.contains(&Some("DBA_TAB_COLUMNS".into())), "{views:?}");
+        assert_eq!(source_view("SELECT 1"), None);
     }
 
     #[test]

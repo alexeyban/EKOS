@@ -856,6 +856,23 @@ ekos commit   # … Ticket links: 4597 ticket(s) from commits; linked to 272 Jav
 ekos ekl "FIND Object WHERE kind = 'Ticket' AND name = 'IDEMPIERE-6349'"
 ```
 
+### Run logs: every pipeline step as JSON lines (RFC 0220)
+
+`build`, `recover`, `resolve`, `compile` and `commit` each write a JSON-lines run log next to their
+usual output: one line per step with its counts (each connector scanned, each Oracle dictionary
+query with rows and milliseconds, the reconciliation, a pass summary, analyzer stats, merges, facts
+written), the warnings any part logged (redacted; the first 200, the rest counted), and two closing
+lines — the model calls the command made, then its outcome. The file is `EKOS_RUN_LOG` when set,
+otherwise `.ekos/runs/<timestamp>-<command>.jsonl`; the console sets it per run and shows the lines as
+a steps table on the run page. On iDempiere every command logged zero model calls.
+
+```
+{"stage":"oracle.catalog","msg":"read DBA_TAB_COLUMNS","ms":687,"owner":"ADEMPIERE","query":"columns","rows":30457,"cmd":"build","t_ms":4889}
+{"stage":"oracle.catalog","msg":"reconciled against DBA_OBJECTS","kinds":13,"mismatches":0,"objects":10613,"owner":"ADEMPIERE","cmd":"build","t_ms":8985}
+{"stage":"llm","msg":"calls","count":0,"cache_hits":0,"embeddings":0,"cmd":"build","t_ms":19987}
+{"stage":"run","msg":"finished","ok":true,"ms":19987,"warnings":0,"cmd":"build","t_ms":19987}
+```
+
 ### PL/pgSQL stored procedures (RFC 0163)
 
 A stored procedure is also *imperative* — ordered statements, branches, loops, exception handlers —

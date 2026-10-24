@@ -2,6 +2,7 @@ use super::store::open_store;
 use crate::extension::Extensions;
 use anyhow::Result;
 use ekos_artifact::{ArtifactId, ArtifactStore, IndexArtifact, PackArtifactStore};
+use ekos_common::run_log;
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
 use ekos_observation_sdk::{Observer, ScanContext, fingerprint_of, source_manifest};
@@ -330,11 +331,21 @@ async fn read_databases(
             continue;
         }
         read += 1;
+        let started = std::time::Instant::now();
         let mut package = observer
             .scan(&ScanContext::new(cwd))
             .await
             .map_err(|e| anyhow::anyhow!("database {name}: {e}"))?;
         redact_package(&mut package, &redaction_config, "");
+        run_log::emit(
+            "observe",
+            "read database",
+            &serde_json::json!({
+                "database": name,
+                "artifacts": package.artifacts.len(),
+                "ms": started.elapsed().as_millis() as u64,
+            }),
+        );
         for artifact in &package.artifacts {
             let artifact_json = serde_json::to_value(artifact)?;
             let key = format!("{}/{}", observer.name(), artifact.content.target);
@@ -569,6 +580,18 @@ fn record_source_manifest(
 fn print_summary(files: (usize, usize, usize), connectors: (usize, usize), build_id: &str) {
     let (total_observed, total_skipped, total_objects) = files;
     let (connectors_rescanned, connectors_skipped_cached) = connectors;
+    run_log::emit(
+        "build",
+        "complete",
+        &serde_json::json!({
+            "files_new": total_observed,
+            "files_cached": total_skipped,
+            "ledger_objects": total_objects,
+            "connectors_scanned": connectors_rescanned,
+            "connectors_cached": connectors_skipped_cached,
+            "snapshot": build_id,
+        }),
+    );
     println!("Build complete.");
     println!("  Files observed (new): {total_observed}");
     if total_skipped > 0 {
@@ -715,12 +738,18 @@ pub async fn run_selected(
         );
         if !ledger_is_empty && fingerprints.get(&fp_key) == Some(&fp.0) {
             connectors_skipped_cached += observers.len();
+            run_log::emit(
+                "observe",
+                "unchanged (cached)",
+                &serde_json::json!({ "source": project_key, "connectors": observers.len() }),
+            );
             continue;
         }
         fingerprints.insert(fp_key, fp.0);
 
         for observer in &observers {
             connectors_rescanned += 1;
+            let started = std::time::Instant::now();
             let mut package = match observer.scan(&ctx).await {
                 Ok(p) => p,
                 Err(e) => {
@@ -730,6 +759,16 @@ pub async fn run_selected(
             };
 
             redact_package(&mut package, &redaction_config, &project_key);
+            run_log::emit(
+                "observe",
+                "scanned",
+                &serde_json::json!({
+                    "source": project_key,
+                    "connector": observer.name(),
+                    "artifacts": package.artifacts.len(),
+                    "ms": started.elapsed().as_millis() as u64,
+                }),
+            );
 
             for artifact in &package.artifacts {
                 let artifact_json = serde_json::to_value(artifact)?;

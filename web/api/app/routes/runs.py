@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -12,11 +13,14 @@ from fastapi.responses import StreamingResponse
 from .. import authz, models
 from ..auth import Principal
 from ..models import TERMINAL
+from ..runner import events_path
 from ._responses import NOT_FOUND
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 NO_SUCH_RUN = "no such run"
+# The newest lines a run's events answer holds (RFC 0220); a pipeline run writes a few hundred.
+MAX_EVENTS = 5000
 
 
 def _dump(run: models.Run, *, tail: int = 0) -> dict[str, Any]:
@@ -69,6 +73,31 @@ async def list_runs(
 @router.get("/{run_id}", responses={404: NOT_FOUND})
 async def get_run(run_id: str, principal: Principal = Depends(authz.authenticated)) -> dict:
     return _dump(_run_for(principal, run_id), tail=500)
+
+
+@router.get("/{run_id}/events", responses={404: NOT_FOUND})
+async def run_events(
+    run_id: str, principal: Principal = Depends(authz.authenticated)
+) -> list[dict]:
+    """RFC 0220: the run's structured log, one object per line, newest `MAX_EVENTS`."""
+    run = _run_for(principal, run_id)
+    return read_events(events_path(run.log_path))
+
+
+def read_events(path: Path) -> list[dict]:
+    """The JSON objects in `path`, one per line; a line that is not one (a write in progress, an
+    older binary's output) is skipped, never an error."""
+    if not path.is_file():
+        return []
+    events = []
+    for line in path.read_text(errors="replace").splitlines()[-MAX_EVENTS:]:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
 
 
 @router.post("/{run_id}/cancel", responses={404: NOT_FOUND})

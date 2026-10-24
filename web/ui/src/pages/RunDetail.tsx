@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
+import { type RunEvent, modelCalls, stepRows } from "./run-events";
 
 interface Me {
   role: "read" | "write";
@@ -33,6 +34,13 @@ export function RunDetail() {
     queryKey: ["run", runId],
     queryFn: () => api<RunOut>(`/runs/${runId}`),
     refetchInterval: (q) => (q.state.data && TERMINAL.has(q.state.data.status) ? false : 1000),
+  });
+
+  // RFC 0220: the CLI's structured log of this run, refreshed while it runs.
+  const events = useQuery({
+    queryKey: ["run-events", runId],
+    queryFn: () => api<RunEvent[]>(`/runs/${runId}/events`),
+    refetchInterval: () => (run.data && TERMINAL.has(run.data.status) ? false : 2000),
   });
 
   const [lines, setLines] = useState<string[]>([]);
@@ -98,10 +106,50 @@ export function RunDetail() {
           )}
           {live && <span className="muted">streaming…</span>}
         </div>
+        {events.data && events.data.length > 0 && <Steps events={events.data} />}
         <pre className="log" ref={preRef}>
           {lines.join("\n") || (run.data?.log_tail ?? []).join("\n")}
         </pre>
       </section>
+    </>
+  );
+}
+
+function Steps({ events }: { events: RunEvent[] }) {
+  const calls = modelCalls(events);
+  return (
+    <>
+      <h3>Steps</h3>
+      {calls && (
+        <p>
+          Model calls:{" "}
+          <span className={`chip ${calls.completions + calls.embeddings === 0 ? "ok" : "warn"}`}>
+            {calls.completions} completion(s), {calls.embeddings} embedding(s)
+          </span>
+        </p>
+      )}
+      <table className="lm-table">
+        <thead>
+          <tr>
+            <th>command</th>
+            <th>stage</th>
+            <th>what</th>
+            <th>counts</th>
+            <th>ms</th>
+          </tr>
+        </thead>
+        <tbody>
+          {stepRows(events).map((r, i) => (
+            <tr key={i}>
+              <td>{r.cmd}</td>
+              <td>{r.tone ? <span className={`chip ${r.tone}`}>{r.stage}</span> : r.stage}</td>
+              <td>{r.msg}</td>
+              <td className="small">{r.counts}</td>
+              <td className="small">{r.tMs ?? ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </>
   );
 }

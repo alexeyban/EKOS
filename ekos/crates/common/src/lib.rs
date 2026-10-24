@@ -2,6 +2,7 @@ pub mod compress;
 pub mod pii;
 pub mod project;
 pub mod redaction;
+pub mod run_log;
 pub mod tickets;
 
 use sha2::{Digest, Sha256};

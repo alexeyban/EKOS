@@ -109,6 +109,12 @@ impl<T: LlmProvider> LlmProvider for CachedLlmProvider<T> {
             } else {
                 tracing::debug!(key = %key[..8], "llm cache hit");
                 self.hits.fetch_add(1, Ordering::Relaxed);
+                ekos_common::run_log::model_call(
+                    ekos_common::run_log::CACHE_HIT,
+                    "cache",
+                    self.inner.model_name(),
+                    true,
+                );
                 return Ok(resp);
             }
         }

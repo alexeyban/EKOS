@@ -61,6 +61,22 @@ pub struct LiveReader {
     pub dictionary: Option<DictionaryKind>,
 }
 
+/// RFC 0220: one run-log line for a step over one owner, `counts` flattened into it.
+fn log_step(
+    stage: &str,
+    msg: &str,
+    owner: &str,
+    started: std::time::Instant,
+    counts: &impl serde::Serialize,
+) {
+    let mut line = serde_json::json!({ "owner": owner });
+    if let Ok(serde_json::Value::Object(map)) = serde_json::to_value(counts) {
+        line.as_object_mut().expect("an object").extend(map);
+    }
+    line["ms"] = (started.elapsed().as_millis() as u64).into();
+    ekos_common::run_log::emit(stage, msg, &line);
+}
+
 impl CatalogReader for LiveReader {
     fn read(&self) -> Result<DatabaseReading, OraError> {
         let source = OraSource::connect(&self.connection, &self.run_id, &self.policy)?;
@@ -71,15 +87,30 @@ impl CatalogReader for LiveReader {
         let mut dictionaries = Vec::new();
         for owner in &self.owners {
             let mut snapshot = ekos_ora_live::introspect(&source, owner, family, &self.redaction)?;
-            profiles.push(ekos_ora_live::profile::scan(
+            let started = std::time::Instant::now();
+            let profile = ekos_ora_live::profile::scan(
                 &source,
                 &mut snapshot,
                 self.profile,
                 &self.redaction,
-            )?);
+            )?;
+            log_step("oracle.profile", "profiled", owner, started, &profile);
+            profiles.push(profile);
             log_states.push(ekos_ora_live::profile::log_state(&source, owner));
             dictionaries.push(match self.dictionary {
-                Some(kind) => Some(ekos_ora_live::dictionary::read(&source, kind, owner)?),
+                Some(kind) => {
+                    let started = std::time::Instant::now();
+                    let flags = ekos_ora_live::dictionary::read(&source, kind, owner)?;
+                    let counts = serde_json::json!({ "tables": flags.len() });
+                    log_step(
+                        "oracle.dictionary",
+                        "read AD_Table flags",
+                        owner,
+                        started,
+                        &counts,
+                    );
+                    Some(flags)
+                }
                 None => None,
             });
             snapshots.push(snapshot);

@@ -181,6 +181,12 @@ impl<T: LlmProvider> MeteredLlmProvider<T> {
             Err(_) => Some(0.0),
         };
         self.budget.settle(reserved, cost.unwrap_or(0.0));
+        ekos_common::run_log::model_call(
+            ekos_common::run_log::COMPLETION,
+            &self.provider,
+            self.inner.model_name(),
+            result.is_ok(),
+        );
         let Some(path) = &self.log else { return };
         let rec = UsageRecord {
             at: chrono::Utc::now().to_rfc3339(),

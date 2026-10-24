@@ -1868,13 +1868,16 @@ where
     // The MCP server owns stdout for protocol frames; the machine-readable `--json` / graph-export
     // commands own stdout for the document a consumer parses. Both send logs to stderr so nothing
     // interleaves with what a program reads (RFC 0127 R1/R2, RFC 0129 R5/R6).
+    // RFC 0220: a pipeline command writes a structured run log.
+    let run_log = pipeline_command_name(&command)
+        .and_then(|name| crate::run_log::for_command(name, &config, &cwd));
     if matches!(command, Commands::Mcp { .. }) || emits_machine_output(&command) {
         crate::commands::init_logging_stderr(&config);
     } else {
-        crate::commands::init_logging(&config);
+        crate::commands::init_logging_with(&config, run_log.as_ref());
     }
 
-    match command {
+    let result = match command {
         Commands::Init {
             detect,
             dry_run,
@@ -2053,6 +2056,20 @@ where
         | Commands::Extensions { .. } => {
             unreachable!("handled before a config is loaded")
         }
+    };
+    crate::run_log::finish(run_log.as_ref(), &result);
+    result
+}
+
+/// The run-log name of a pipeline command (RFC 0220), `None` for every other command.
+fn pipeline_command_name(command: &Commands) -> Option<&'static str> {
+    match command {
+        Commands::Build { .. } => Some("build"),
+        Commands::Recover { .. } => Some("recover"),
+        Commands::Resolve { .. } => Some("resolve"),
+        Commands::Compile => Some("compile"),
+        Commands::Commit { .. } => Some("commit"),
+        _ => None,
     }
 }
 

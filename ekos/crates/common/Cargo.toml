@@ -19,3 +19,4 @@ hex.workspace = true
 zstd.workspace = true
 regex.workspace = true
 glob.workspace = true
+tracing.workspace = true

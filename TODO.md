@@ -6803,7 +6803,11 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] I.8 git ticket links — RFC 0219: `[tickets] keys` (detected from file names), `Ticket` objects from commits,
       `TicketFor` to change sets and Java code; `[observe] git-max-commits`; 4,597 tickets on 16,260 commits (devlog_291)
 - [ ] I.8 docs repository and wiki snapshot (licence check before republishing)
-- [ ] I.9 structured run logs (`run.log.jsonl`)
+- [x] I.9 structured run logs — RFC 0220: pipeline commands write JSON lines (`EKOS_RUN_LOG` or `.ekos/runs/`),
+      model calls counted (0 on iDempiere), warnings capped; console events route + Steps table (devlog_292)
+- [ ] RFC 0220 follow-ups: run logs for extension commands (Part II steps); the 24 non-UTF-8 historic iDempiere
+      migration scripts `recover` skips unread (decode Latin-1?); redaction pattern for `sk-ant-…` keys; check the
+      Steps table in a browser on a live run
 - [ ] Part I exit: 25-question eval with expected citations, without and with the database
 
 ### Parts II–V (ekos-lakehouse, console) — not started

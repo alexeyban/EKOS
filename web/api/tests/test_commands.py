@@ -116,3 +116,25 @@ def test_init_and_compile_needs_operate(client: TestClient) -> None:
     assert r.status_code == 200, r.text
     run = client.get(f"/api/runs/{r.json()['run_id']}", headers=R).json()
     assert [s["name"] for s in run["stages"]][:2] == ["init", "build"]
+
+
+def test_a_runs_events_are_its_structured_log_lines(client: TestClient) -> None:
+    """RFC 0220: `/runs/<id>/events` parses the CLI's run log; a torn or foreign line is skipped."""
+    from app import models
+    from app.runner import events_path
+
+    r = client.post("/api/workspaces/w/commands/build", headers=W)
+    run_id = r.json()["run_id"]
+    path = events_path(models.get_run(run_id).log_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        '{"stage":"run","msg":"started","cmd":"build","t_ms":0}\n'
+        "not json\n"
+        "[1, 2]\n"
+        '{"stage":"llm","msg":"calls","count":0,"cmd":"build","t_ms":5}\n'
+        '{"stage":"run","msg":"fini'
+    )
+    events = client.get(f"/api/runs/{run_id}/events", headers=R).json()
+    assert [e["stage"] for e in events] == ["run", "llm"]
+    assert events[1]["count"] == 0
+    assert client.get("/api/runs/nope/events", headers=R).status_code == 404

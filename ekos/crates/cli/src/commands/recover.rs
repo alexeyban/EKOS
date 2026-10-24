@@ -1,6 +1,7 @@
 use crate::extension::{Extensions, RecoverContext};
 use anyhow::Result;
 use ekos_artifact::{ArtifactId, ArtifactStore, PackArtifactStore};
+use ekos_common::run_log;
 use ekos_compiler_core::{
     EkosConfig,
     pass::{CompilerPass, PassContext},
@@ -20,6 +21,7 @@ use ekos_recovery::{
     TreasuryAnalyzerPass, TriggerAnalyzerPass, TriggerStats, ViewAnalyzerPass, ViewStats,
     build_dialect_registry, llm::LlmProvider, resolve_dialect_name,
 };
+use serde_json::json;
 use std::collections::HashMap;
 use std::{path::Path, sync::Arc};
 use walkdir::WalkDir;
@@ -30,6 +32,65 @@ pub async fn run(config: &EkosConfig, cwd: &Path, parallel: bool) -> Result<()> 
 
 /// [`run`] with RFC 0149 extensions: their passes run alongside the built-in analyzers and their
 /// report lines join the summary.
+/// RFC 0220: the Java analyzer's lines — parse, application model, embedded SQL, `PO` deletes.
+fn log_java(s: &JavaStats) {
+    // A pass served from cache fills no counters; zeros would read as a tree without Java.
+    if s.files_parsed + s.files_partial + s.files_skipped == 0 {
+        run_log::emit("java.parse", "unchanged (cached)", &json!({}));
+        return;
+    }
+    run_log::emit(
+        "java.parse",
+        "parsed",
+        &json!({
+            "files": s.files_parsed + s.files_partial + s.files_skipped,
+            "ok": s.files_parsed,
+            "partial": s.files_partial,
+            "skipped": s.files_skipped,
+            "unclassified_members": s.unclassified_members,
+            "types": s.types_total,
+            "generated_types": s.generated_types,
+            "methods": s.methods_total,
+        }),
+    );
+    if s.model_tables > 0 {
+        run_log::emit(
+            "java.model",
+            "application model",
+            &json!({
+                "tables": s.model_tables,
+                "columns": s.model_columns,
+                "references": s.model_references,
+            }),
+        );
+    }
+    if s.sql_statements > 0 {
+        run_log::emit(
+            "java.sql",
+            "embedded SQL",
+            &json!({
+                "statements": s.sql_statements,
+                "parsed": s.sql_parsed,
+                "partial": s.sql_partial,
+                "unparsed": s.sql_unparsed,
+                "table_links": s.sql_links,
+            }),
+        );
+    }
+    let po = s.po_deletes + s.po_deletes_unresolved + s.po_deletes_in_tests;
+    if po > 0 {
+        run_log::emit(
+            "java.po",
+            "PO deletes",
+            &json!({
+                "attributed": s.po_deletes,
+                "unresolved": s.po_deletes_unresolved,
+                "in_tests": s.po_deletes_in_tests,
+            }),
+        );
+    }
+}
+
 fn print_sql_transform_stats(handles: &[Arc<std::sync::Mutex<SqlTransformStats>>]) {
     if handles.is_empty() {
         return;
@@ -46,6 +107,11 @@ fn print_sql_transform_stats(handles: &[Arc<std::sync::Mutex<SqlTransformStats>>
     } else {
         100.0 * nodes_mapped as f32 / nodes_total as f32
     };
+    run_log::emit(
+        "sql.transform",
+        "transformation IR",
+        &json!({ "nodes": nodes_total, "mapped": nodes_mapped }),
+    );
     println!(
         "  Transformation IR nodes (SQL): {nodes_total} total, {coverage:.0}% mapped (non-Unmapped)"
     );
@@ -62,6 +128,11 @@ fn print_trigger_stats(handles: &[Arc<std::sync::Mutex<TriggerStats>>]) {
         parsed += s.parsed;
     }
     if triggers > 0 {
+        run_log::emit(
+            "sql.triggers",
+            "triggers",
+            &json!({ "triggers": triggers, "parsed": parsed }),
+        );
         println!(
             "  Triggers: {triggers} ({parsed} parsed, {} read from tokens) — classified at compile",
             triggers - parsed
@@ -80,6 +151,11 @@ fn print_view_stats(handles: &[Arc<std::sync::Mutex<ViewStats>>]) {
         parsed += s.parsed;
     }
     if views > 0 {
+        run_log::emit(
+            "sql.views",
+            "views",
+            &json!({ "views": views, "parsed": parsed }),
+        );
         println!(
             "  Views: {views} ({parsed} parsed, {} unparsed — still recorded)",
             views - parsed
@@ -104,6 +180,19 @@ fn print_plpgsql_stats(handles: &[Arc<std::sync::Mutex<PlPgSqlStats>>]) {
         unlexable += usize::from(s.lex_error.is_some());
     }
     if total.routines > 0 || unlexable > 0 {
+        run_log::emit(
+            "plpgsql.parse",
+            "routines",
+            &json!({
+                "routines": total.routines,
+                "plpgsql": total.plpgsql,
+                "complete": total.complete,
+                "partial": total.partial,
+                "statements": total.statements,
+                "unrecovered": total.unrecovered,
+                "files_not_lexed": unlexable,
+            }),
+        );
         println!(
             "  PL/pgSQL routines: {} ({} plpgsql: {} complete, {} partial), {} statements, {} unrecovered{}",
             total.routines,
@@ -138,6 +227,21 @@ fn print_plsql_stats(handles: &[Arc<std::sync::Mutex<PlSqlStats>>]) {
     if t.routines.routines == 0 && t.anonymous_blocks == 0 && t.skipped == 0 {
         return;
     }
+    run_log::emit(
+        "plsql.parse",
+        "routines",
+        &json!({
+            "routines": t.routines.routines,
+            "complete": t.routines.complete,
+            "partial": t.routines.partial,
+            "triggers": t.triggers,
+            "statements": t.routines.statements,
+            "unrecovered": t.routines.unrecovered,
+            "anonymous_blocks": t.anonymous_blocks,
+            "skipped": t.skipped,
+            "unterminated": t.unterminated,
+        }),
+    );
     println!(
         "  PL/SQL routines: {} ({} complete, {} partial, {} triggers), {} statements, {} unrecovered; \
          {} anonymous block(s) not recovered, {} unit(s) skipped, {} without a closing /",
@@ -161,10 +265,32 @@ fn print_oracle_catalog_stats(handle: Option<&Arc<std::sync::Mutex<OracleCatalog
     // A pass served from cache does not run, so it fills no counters; zeros would read as an
     // empty database.
     if s.catalogs == 0 {
+        run_log::emit("oracle.recover", "unchanged (cached)", &json!({}));
         println!("  Oracle catalog: unchanged since the last recover (cached)");
         return;
     }
     let r = &s.routines.routines;
+    run_log::emit(
+        "oracle.recover",
+        "catalog objects",
+        &json!({
+            "schemas": s.catalogs,
+            "tables": s.tables,
+            "foreign_keys": s.foreign_keys,
+            "foreign_keys_unresolved": s.foreign_keys_unresolved,
+            "views": s.views,
+            "views_unparsed": s.views_unparsed,
+            "routines": r.routines,
+            "routines_complete": r.complete,
+            "routines_partial": r.partial,
+            "statements": r.statements,
+            "invalid_objects": s.invalid_objects,
+            "tables_profiled": s.tables_profiled,
+            "tables_profile_failed": s.tables_profile_failed,
+            "stale_objects": s.stale_objects,
+            "dictionary_tables": s.dictionary_tables,
+        }),
+    );
     println!(
         "  Oracle catalog: {} schema(s), {} tables, {} foreign keys ({} unresolved), {} views \
          ({} unread), {} routines ({} complete, {} partial), {} statements, {} invalid object(s)",
@@ -206,6 +332,17 @@ fn print_history_stats(handles: &[Arc<std::sync::Mutex<SchemaHistoryStats>>]) {
     if t.change_sets == 0 {
         return;
     }
+    run_log::emit(
+        "schema.history",
+        "migration scripts",
+        &json!({
+            "change_sets": t.change_sets,
+            "changes": t.changes,
+            "data_statements": t.data_statements,
+            "unrecognized": t.unrecognized,
+            "by_operation": t.by_operation,
+        }),
+    );
     let top: Vec<String> = t
         .by_operation
         .iter()
@@ -323,6 +460,40 @@ struct RecoverSummary {
 }
 
 impl RecoverSummary {
+    /// RFC 0220: the run-log lines of the counts [`Self::print`] reports.
+    fn log(&self) {
+        let counts = [
+            ("sql_files", self.sql_count),
+            ("git_commits", self.git_count),
+            ("dependency_files", self.dep_file_count),
+            ("crypto_batches", self.crypto_batch_count),
+            ("github_items", self.github_item_count),
+            ("treasury_payments", self.treasury_payment_count),
+            ("governance_proposals", self.governance_proposal_count),
+            ("confluence_pages", self.confluence_page_count),
+            ("clickhouse_tables", self.clickhouse_table_count),
+            ("local_documents", self.localdocs_count),
+            ("pentaho_jobs", self.pentaho_count),
+            ("python_files", self.python_count),
+            ("rust_files", self.rust_count),
+            ("elixir_files", self.elixir_count),
+            ("perl_files", self.perl_count),
+            ("java_files", self.java_count),
+            ("javascript_files", self.javascript_count),
+            ("package_json", self.package_json_count),
+            ("requirements_txt", self.requirements_count),
+        ];
+        let analysed: serde_json::Map<String, serde_json::Value> = counts
+            .iter()
+            .filter(|(_, n)| *n > 0)
+            .map(|(k, n)| ((*k).to_string(), (*n).into()))
+            .collect();
+        run_log::emit("recover", "inputs analysed", &analysed);
+        if let Some(stats) = &self.java_stats {
+            log_java(&stats.lock().unwrap());
+        }
+    }
+
     /// Prints the report and the diagnostics summary. Fails when a pass reported an error.
     fn print(
         self,
@@ -1651,6 +1822,7 @@ pub async fn run_with(
         requirements_count,
         archreasoning_stats,
     };
+    summary.log();
     summary.print(config, cwd, parallel, &report, &ctx)
 }
 

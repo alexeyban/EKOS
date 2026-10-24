@@ -170,3 +170,31 @@ async def test_a_compile_chain_uses_the_stage_timeout_setting(_db, monkeypatch, 
     assert by_stage["commit"] == 7200 and by_stage["recover"] == 7200
     # A single command keeps its own limit.
     assert [t for s, t in seen if s == "build"][-1] == BY_NAME["build"].timeout
+
+
+async def test_every_stage_of_a_run_appends_to_the_runs_one_events_file(_db, monkeypatch, tmp_path):
+    """RFC 0220: the CLI writes its structured log where `EKOS_RUN_LOG` says; a chained run's
+    stages all name the same file, next to the run's text log."""
+    seen: list[str | None] = []
+
+    async def stream(argv, *, cwd, log_path, register, timeout_s, on_line=None, env=None):
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.touch()
+        seen.append((env or {}).get("EKOS_RUN_LOG"))
+        return 0
+
+    monkeypatch.setattr(_proc, "run_streaming", stream)
+    runner = JobRunner(_settings(tmp_path))
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    ids = []
+    for name in ("pipeline", "build"):
+        run_id = await runner.submit("w", str(ws), BY_NAME[name], {})
+        ids.append(run_id)
+        for _ in range(100):
+            if models.get_run(run_id).status in models.TERMINAL:
+                break
+            await asyncio.sleep(0.02)
+    await runner.aclose()
+    pipeline, build = (str(tmp_path / "runs" / f"{i}.jsonl") for i in ids)
+    assert seen == [pipeline] * 5 + [build]

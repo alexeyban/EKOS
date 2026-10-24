@@ -62,24 +62,34 @@ use ekos_compiler_core::EkosConfig;
 /// through, and `EKOS_LOG` overrides the whole filter — `EKOS_LOG=info,tantivy=info` restores the
 /// old behaviour for anyone debugging the index itself.
 fn default_filter(level: &str) -> String {
-    format!("{level},tantivy=warn")
+    // RFC 0220: run-log events go to the run log, not the terminal (stdout has its own summary).
+    format!("{level},tantivy=warn,ekos_run_log=off,ekos_model_call=off")
 }
 
 pub fn init_logging(config: &EkosConfig) {
+    init_logging_with(config, None);
+}
+
+/// [`init_logging`], plus the command's run log when it has one (RFC 0220).
+pub fn init_logging_with(config: &EkosConfig, run_log: Option<&crate::run_log::RunLog>) {
+    use tracing_subscriber::prelude::*;
     let level = &config.workspace.log_level;
     let format =
         std::env::var("EKOS_LOG_FORMAT").unwrap_or_else(|_| config.workspace.log_format.clone());
-
-    let builder = tracing_subscriber::fmt().with_env_filter(
-        tracing_subscriber::EnvFilter::try_from_env("EKOS_LOG")
-            .unwrap_or_else(|_| default_filter(level).into()),
-    );
-
-    if format == "json" {
-        builder.json().init();
+    let filter = tracing_subscriber::EnvFilter::try_from_env("EKOS_LOG")
+        .unwrap_or_else(|_| default_filter(level).into());
+    let terminal = if format == "json" {
+        tracing_subscriber::fmt::layer()
+            .json()
+            .with_filter(filter)
+            .boxed()
     } else {
-        builder.init();
-    }
+        tracing_subscriber::fmt::layer().with_filter(filter).boxed()
+    };
+    tracing_subscriber::registry()
+        .with(terminal)
+        .with(run_log.map(|log| log.layer()))
+        .init();
 }
 
 /// Logging for the MCP server: stdout carries JSON-RPC frames only, so all
@@ -109,7 +119,10 @@ mod tests {
     fn the_default_filter_is_a_valid_directive_that_quiets_tantivy() {
         for level in ["info", "debug", "warn"] {
             let f = default_filter(level);
-            assert_eq!(f, format!("{level},tantivy=warn"));
+            assert_eq!(
+                f,
+                format!("{level},tantivy=warn,ekos_run_log=off,ekos_model_call=off")
+            );
             tracing_subscriber::EnvFilter::builder()
                 .parse(&f)
                 .unwrap_or_else(|e| panic!("default filter {f:?} must parse strictly: {e}"));

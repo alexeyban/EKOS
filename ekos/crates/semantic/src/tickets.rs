@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, HashMap};
 const CITING_KINDS: &[&str] = &["SchemaChangeSet", "JavaType", "JavaMethod"];
 
 /// Links made, by the citing object's kind.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct TicketLinkStats {
     pub tickets: usize,
     pub links: BTreeMap<String, usize>,

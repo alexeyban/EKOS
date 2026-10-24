@@ -35,7 +35,7 @@ pub const SOFT_DELETE_ONLY: &str = "soft_delete_only";
 pub const NEVER_DELETED_IN_CODE: &str = "never_deleted_in_code";
 
 /// Counts by class, for the commit summary line.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct WriteBehaviourStats {
     pub tables: usize,
     pub update: BTreeMap<&'static str, usize>,

@@ -65,6 +65,11 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     let rel_count = model.relationships.len();
     let written_path = ekos_common::compress::resolve_auto(&model_path).unwrap_or(model_path);
 
+    ekos_common::run_log::emit(
+        "semantic.compile",
+        "model written",
+        &serde_json::json!({ "objects": obj_count, "relationships": rel_count }),
+    );
     println!("Compile complete.");
     println!("  Objects:       {obj_count}");
     println!("  Relationships: {rel_count}");
