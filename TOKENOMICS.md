@@ -64,8 +64,8 @@ and in the founder's personal wallet's case is mostly tokens bought back on the 
 | 2026-10-24 | 501,000 EKOS | Founder Personal Wallet (500,000) and a 3,000 EKOS test transfer, via the burn wallet | [500,000 burn](https://solscan.io/tx/4yWTR62nK7Wub9C845wcdDkiC4ghJ54PJGwq3bKhNR7gj3wnmoqWJhLtgLjtn9KRG4JErZPhzLmj1RJ3r3z4Tk1c) + a 1,000 test burn |
 
 Burn wallet: `Bd69TcCLGEorkT9NZjSEZyoGY9bqr9r3n1X2CN8pJdKa`, created on 2026-10-24 for burning; it
-holds the 2,000 EKOS left from the test transfer. The 2026-10-24 burn is a voluntary founder burn,
-not the proposed Buyback & Burn mechanism (see Implementation status).
+holds the 2,000 EKOS left from the test transfer. The 2026-10-24 burn is the first Buyback & Burn:
+EKOS bought on the open market by the founder and burned (see Implementation status).
 
 The two recorded burns add up to 33,091,000 EKOS; the mint's supply shows 33,124,716 burned. The
 other ~33,716 EKOS was burned outside the project's wallets.
@@ -328,8 +328,7 @@ Five items are live or completed; the rest are proposals.
 | Contributor vesting for larger rewards | Proposed |
 | Escrow for community-funded bounties | Proposed — not built |
 | Community voting system | Proposed — separate RFC |
-| Founder burn of 501,000 EKOS (2026-10-24) | Completed — voluntary, from the personal wallet |
-| Buyback & Burn | Proposed — mechanism not yet designed |
+| Buyback & Burn | Implemented — first burn 2026-10-24: 501,000 EKOS |
 
 Publishing this framework does not make any proposed item active. Each one will be announced when
 it goes live.
@@ -343,9 +342,10 @@ $EKOS is a community token used to reward contributions to the EKOS open-source 
   revenue or profits.
 - **No price commitments.** Nothing here is a promise about the token's price, liquidity or future
   value. Token prices are volatile and can fall to zero.
-- **Buyback & Burn is proposed but not designed.** No mechanism, schedule or amount has been
-  decided. Any such mechanism would need revenue, legal review and a separate public proposal.
-  Future investment agreements or enterprise contracts may restrict buybacks, or the public
+- **Buyback & Burn is implemented; future burns are not promised.** The first burn took place on
+  2026-10-24: 501,000 EKOS bought on the open market by the founder and burned. No schedule or
+  amount is committed for further burns, and each one is published with its transaction. Future
+  investment agreements or enterprise contracts may restrict buybacks, or the public
   disclosure of revenue, contract values or investment amounts; such restrictions take precedence.
 - **Proposals are not commitments.** Mechanisms marked proposed, planned or not committed are not
   active and may change or be dropped.
