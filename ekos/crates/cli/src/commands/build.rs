@@ -16,7 +16,9 @@ use ekos_plugin_governance::{DEFAULT_HUB_URL, SnapshotClient, SnapshotObserver};
 use ekos_plugin_java::JavaObserver;
 use ekos_plugin_javascript::JavaScriptObserver;
 use ekos_plugin_localdocs::{LocalDocsObserver, TesseractOcr};
-use ekos_plugin_oracle::{LiveReader as OracleLiveReader, OracleObserver, ProfileTier};
+use ekos_plugin_oracle::{
+    DictionaryKind, LiveReader as OracleLiveReader, OracleObserver, ProfileTier,
+};
 use ekos_plugin_pentaho::PentahoObserver;
 use ekos_plugin_perl::PerlObserver;
 use ekos_plugin_python::PythonObserver;
@@ -105,6 +107,15 @@ fn fingerprint_cache_key(
     )
 }
 
+/// Observer settings that change what a scan produces from the same files, appended to the
+/// fingerprint key — empty at their defaults, so existing keys (and caches) stay as they were.
+fn observer_settings_key(config: &EkosConfig) -> String {
+    match config.observe.git_max_commits {
+        500 => String::new(),
+        n => format!("+git{n}"),
+    }
+}
+
 /// Load the `.ekos/fingerprints.json` map of observe-path cache key → last-seen source
 /// fingerprint (see [`fingerprint_cache_key`] for the key shape).
 fn load_fingerprints(path: &Path) -> HashMap<String, String> {
@@ -131,7 +142,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
 fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Observer>> {
     let mut observers: Vec<Box<dyn Observer>> = vec![
         Box::new(FileObserver::new()),
-        Box::new(GitObserver::new()),
+        Box::new(GitObserver::new().with_max_commits(config.observe.git_max_commits)),
         // RFC 0023: local files, no credential to gate on — runs
         // unconditionally, same as FileObserver/GitObserver.
         Box::new(LocalDocsObserver::with_defaults(Arc::new(TesseractOcr))),
@@ -289,6 +300,11 @@ fn database_observers(config: &EkosConfig) -> Vec<(String, Box<dyn Observer>)> {
                             ekos_compiler_core::DatabaseProfile::P1 => ProfileTier::P1,
                             ekos_compiler_core::DatabaseProfile::P2 => ProfileTier::P2,
                         },
+                        dictionary: d.dictionary.map(|k| match k {
+                            ekos_compiler_core::DatabaseDictionary::Idempiere => {
+                                DictionaryKind::Idempiere
+                            }
+                        }),
                     }),
                 )),
             };
@@ -692,7 +708,11 @@ pub async fn run_selected(
         let stamps = source_manifest(&ctx);
         let fp = fingerprint_of(&stamps);
         built_stamps.push((ob.clone(), stamps));
-        let fp_key = fingerprint_cache_key(base, logic_version, &redaction_config);
+        let fp_key = format!(
+            "{}{}",
+            fingerprint_cache_key(base, logic_version, &redaction_config),
+            observer_settings_key(config)
+        );
         if !ledger_is_empty && fingerprints.get(&fp_key) == Some(&fp.0) {
             connectors_skipped_cached += observers.len();
             continue;
@@ -859,6 +879,7 @@ mod tests {
             password_env: "EKOS_TEST_UNSET_PASSWORD".into(),
             owners: vec!["ADEMPIERE".into()],
             profile: Default::default(),
+            dictionary: None,
         });
         // The file tree is unchanged, so the fingerprint matches; the database is read anyway.
         let err = run(&config, dir.path()).await.unwrap_err().to_string();
@@ -988,6 +1009,15 @@ mod tests {
             "a freshly, correctly re-redacted artifact must exist after the pattern addition — \
              got: {second:?}"
         );
+    }
+
+    /// RFC 0219: a changed commit cap re-reads git history; the default leaves keys unchanged.
+    #[test]
+    fn the_git_commit_cap_is_part_of_the_cache_key_only_when_changed() {
+        let mut config = EkosConfig::default();
+        assert_eq!(observer_settings_key(&config), "");
+        config.observe.git_max_commits = 20_000;
+        assert_eq!(observer_settings_key(&config), "+git20000");
     }
 
     #[test]

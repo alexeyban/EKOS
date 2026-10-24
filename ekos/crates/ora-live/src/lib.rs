@@ -6,6 +6,7 @@
 //! recorded rows ([`catalog::CatalogSource`]).
 
 pub mod catalog;
+pub mod dictionary;
 pub mod profile;
 pub mod session;
 
@@ -13,6 +14,7 @@ pub use catalog::{
     CatalogObject, CatalogSnapshot, CatalogSource, Census, ObjectKind, ViewFamily, introspect,
     reconcile,
 };
+pub use dictionary::{DictionaryKind, TableFlags};
 pub use profile::{ProfileStats, ProfileTier, ScanSource};
 pub use session::{OraConnection, OraSource, SessionPolicy, WriteCheck};
 

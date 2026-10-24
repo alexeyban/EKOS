@@ -267,6 +267,12 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     } else {
         None
     };
+    // RFC 0212: how each table is updated and deleted — after the conflicts step, from the same
+    // whole-ledger read of code, routines, live catalog and dictionary.
+    ledger.set_write_context(Some(write_ctx("commit:write-behaviour")));
+    let step = phase_note("deriving write behaviour");
+    let (write_behaviour, ticket_links) = commit_write_behaviour(&*ledger)?;
+    step.done();
     ledger.set_write_context(Some(write_ctx("commit:llm-description")));
 
     // RFC 0088: real, evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` for every
@@ -370,6 +376,8 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     {
         println!("  Code ↔ database:       {}", live_summary(l));
     }
+    print_write_behaviour(&write_behaviour);
+    print_ticket_links(&ticket_links);
     if let Some(stats) = &embed_stats {
         println!(
             "  Vector embeddings:     {} embedded, {} already indexed, {} error(s) ({}-dim {})",
@@ -450,6 +458,103 @@ fn commit_data_lineage(ledger: &dyn KnowledgeStore) -> Result<usize> {
     }
 
     Ok(written)
+}
+
+/// RFC 0212: derive and append each table's write behaviour. Java method paths come from each
+/// method's first evidence record, read only for methods that write. RFC 0219's ticket links use
+/// the same whole-ledger read.
+fn commit_write_behaviour(
+    ledger: &dyn KnowledgeStore,
+) -> Result<(
+    ekos_semantic::write_behaviour::WriteBehaviourStats,
+    ekos_semantic::tickets::TicketLinkStats,
+)> {
+    let objects = ledger.all_objects()?;
+    let (ticket_links, ticket_stats) = ekos_semantic::tickets::link(&objects);
+    for r in &ticket_links {
+        ledger.append_relationship(r)?;
+    }
+    let relationships = ledger.all_relationships()?;
+    let po_methods: std::collections::HashSet<ekos_kir::KirId> = relationships
+        .iter()
+        .filter(|r| r.properties.get("via") == Some(&serde_json::json!("po")))
+        .map(|r| r.from)
+        .collect();
+    let mut paths: std::collections::HashMap<ekos_kir::KirId, String> =
+        std::collections::HashMap::new();
+    for o in &objects {
+        let writes = o
+            .properties
+            .get("sql")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|sql| {
+                sql.iter()
+                    .any(|st| st.get("updates").is_some() || st.get("deletes").is_some())
+            });
+        if (writes || po_methods.contains(&o.id))
+            && let Some(ev) = o.evidence.first()
+            && let Some(e) = ledger.get_evidence(ev)?
+        {
+            paths.insert(o.id, e.location.path);
+        }
+    }
+    let (g, stats) = ekos_semantic::write_behaviour::derive(&objects, &relationships, &paths);
+    for o in &g.objects {
+        ledger.append_object(o)?;
+    }
+    for r in &g.relationships {
+        ledger.append_relationship(r)?;
+    }
+    Ok((stats, ticket_stats))
+}
+
+/// RFC 0219: the ticket line, when commits named any ticket.
+fn print_ticket_links(s: &ekos_semantic::tickets::TicketLinkStats) {
+    if s.tickets == 0 {
+        return;
+    }
+    let links = s
+        .links
+        .iter()
+        .map(|(k, n)| format!("{n} {k}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!(
+        "  Ticket links:          {} ticket(s) from commits; linked to {}; {} cited ticket(s) no \
+         commit names",
+        s.tickets,
+        if links.is_empty() { "nothing" } else { &links },
+        s.cited_without_commits
+    );
+}
+
+/// RFC 0212: the summary line, when any table was classified.
+fn print_write_behaviour(s: &ekos_semantic::write_behaviour::WriteBehaviourStats) {
+    if s.tables > 0 {
+        println!("  Write behaviour:       {}", write_behaviour_summary(s));
+    }
+}
+
+/// RFC 0212: one line of class counts.
+fn write_behaviour_summary(s: &ekos_semantic::write_behaviour::WriteBehaviourStats) -> String {
+    let join = |m: &std::collections::BTreeMap<&str, usize>| {
+        m.iter()
+            .map(|(k, n)| format!("{k} {n}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        "{} table(s); update: {}; delete: {}; change log: {}{}",
+        s.tables,
+        join(&s.update),
+        join(&s.delete),
+        join(&s.change_log),
+        if s.dictionary {
+            ""
+        } else {
+            " (dictionary not read: user deletes and change logging unknown)"
+        }
+    )
 }
 
 /// RFC 0211: one line on what the code ↔ database comparison found.

@@ -30,7 +30,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bump when the mapping's output changes.
-pub const LOGIC_VERSION: &str = "oracle-catalog/3";
+pub const LOGIC_VERSION: &str = "oracle-catalog/4";
 
 /// The custom kind of the per-owner summary object.
 pub const CATALOG_KIND: &str = "OracleCatalog";
@@ -55,6 +55,8 @@ pub struct OracleCatalogStats {
     /// Object artifacts left from an earlier read that the newest catalog no longer lists: an
     /// object dropped from the database. Not recovered.
     pub stale_objects: usize,
+    /// RFC 0212: tables the application dictionary listed (0 when it was not read).
+    pub dictionary_tables: usize,
 }
 
 fn live_id(prefix: &str, key: &str) -> KirId {
@@ -126,49 +128,26 @@ pub fn recover_catalog(artifacts: &[(String, Value)]) -> (KirGraph, OracleCatalo
     // The objects each newest catalog read lists, by its target. The artifact store keeps every
     // version of every object, so an object dropped from the database would otherwise live on.
     let mut listed: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    // RFC 0212: (database, owner, TABLE) → the application dictionary's flags.
+    let mut dictionary: Dictionary = BTreeMap::new();
     for (target, data) in artifacts {
         match data.get("kind").and_then(Value::as_str) {
             Some("catalog") => {
                 add_catalog(&mut graph, target, data);
-                stats.catalogs += 1;
                 if let Some(objects) = data.get("objects").and_then(Value::as_array) {
                     listed.insert(
                         target.as_str(),
                         objects.iter().filter_map(Value::as_str).collect(),
                     );
                 }
-                let p = &data["profile"];
-                stats
-                    .profile_tiers
-                    .push(p["tier"].as_str().unwrap_or("p0").to_string());
-                stats.tables_profiled += p["tables_profiled"].as_u64().unwrap_or(0) as usize;
-                stats.tables_profile_failed += (p["tables_failed"].as_u64().unwrap_or(0)
-                    + p["tables_skipped"].as_u64().unwrap_or(0))
-                    as usize;
-                stats.log_modes.push(
-                    data["log_state"]["log_mode"]
-                        .as_str()
-                        .unwrap_or("unknown")
-                        .to_string(),
-                );
+                count_catalog(&mut stats, data);
             }
             Some("object") => items.extend(item(target, data)),
+            Some("dictionary") => read_dictionary(&mut dictionary, &mut stats, data),
             _ => {}
         }
     }
-    let before = items.len();
-    items.retain(|i| {
-        let catalog = format!("oracle://{}/{}", i.database, i.owner);
-        match listed.get(catalog.as_str()) {
-            Some(objects) => i
-                .target
-                .strip_prefix(&format!("{catalog}/"))
-                .is_some_and(|entry| objects.contains(entry)),
-            // A catalog written before the list existed: keep everything, as before.
-            None => true,
-        }
-    });
-    stats.stale_objects = before - items.len();
+    stats.stale_objects = drop_stale(&mut items, &listed);
     items.sort_by(|a, b| a.target.cmp(&b.target));
     stats.invalid_objects = items
         .iter()
@@ -233,7 +212,90 @@ pub fn recover_catalog(artifacts: &[(String, Value)]) -> (KirGraph, OracleCatalo
             t.unterminated += s.unterminated;
         }
     }
+    apply_dictionary(&mut graph, &dictionary);
     (graph, stats)
+}
+
+/// (database, owner, TABLE) → the application dictionary's flags (RFC 0212).
+type Dictionary = BTreeMap<(String, String, String), Value>;
+
+/// One catalog artifact's counts: the profile tier and scans, and the log mode.
+fn count_catalog(stats: &mut OracleCatalogStats, data: &Value) {
+    stats.catalogs += 1;
+    let p = &data["profile"];
+    let n = |k: &str| p[k].as_u64().unwrap_or(0) as usize;
+    stats
+        .profile_tiers
+        .push(p["tier"].as_str().unwrap_or("p0").to_string());
+    stats.tables_profiled += n("tables_profiled");
+    stats.tables_profile_failed += n("tables_failed") + n("tables_skipped");
+    stats.log_modes.push(
+        data["log_state"]["log_mode"]
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string(),
+    );
+}
+
+/// RFC 0212: one dictionary artifact's table flags.
+fn read_dictionary(dictionary: &mut Dictionary, stats: &mut OracleCatalogStats, data: &Value) {
+    let database = data["database"].as_str().unwrap_or_default();
+    let owner = data["owner"].as_str().unwrap_or_default();
+    let tables = data["tables"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    stats.dictionary_tables += tables.len();
+    for f in tables {
+        if let Some(name) = f["table_name"].as_str() {
+            dictionary.insert(
+                (database.to_string(), owner.to_string(), name.to_uppercase()),
+                json!({ "deleteable": f["deleteable"], "change_log": f["change_log"],
+                        "table_name": name }),
+            );
+        }
+    }
+}
+
+/// Drop objects an earlier read left behind that the newest catalog no longer lists; how many.
+fn drop_stale(items: &mut Vec<Item>, listed: &BTreeMap<&str, BTreeSet<&str>>) -> usize {
+    let before = items.len();
+    items.retain(|i| {
+        let catalog = format!("oracle://{}/{}", i.database, i.owner);
+        match listed.get(catalog.as_str()) {
+            Some(objects) => i
+                .target
+                .strip_prefix(&format!("{catalog}/"))
+                .is_some_and(|entry| objects.contains(entry)),
+            // A catalog written before the list existed: keep everything, as before.
+            None => true,
+        }
+    });
+    before - items.len()
+}
+
+/// RFC 0212: put each live table's dictionary flags on it, by name.
+fn apply_dictionary(graph: &mut KirGraph, dictionary: &Dictionary) {
+    if dictionary.is_empty() {
+        return;
+    }
+    for o in graph
+        .objects
+        .iter_mut()
+        .filter(|o| o.kind == ObjectKind::Table)
+    {
+        let key = |k: &str| {
+            o.properties
+                .get(k)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let k = (key("database"), key("owner"), o.name.to_uppercase());
+        if let Some(flags) = dictionary.get(&k) {
+            o.properties.insert("dictionary".into(), flags.clone());
+        }
+    }
 }
 
 fn check_sites(table: &str, expression: &str) -> Option<Vec<ekos_kir::predicates::PredicateSite>> {
@@ -676,6 +738,24 @@ mod tests {
         // Without a list (a catalog written before it existed) everything is kept.
         let (_, old) = recover_catalog(&catalog());
         assert_eq!(old.stale_objects, 0);
+    }
+
+    /// RFC 0212: the dictionary's flags land on the live table of the same name.
+    #[test]
+    fn dictionary_flags_land_on_the_table() {
+        let mut artifacts = catalog();
+        artifacts.push((
+            "oracle://erp/ADEMPIERE/dictionary".into(),
+            json!({ "kind": "dictionary", "database": "erp", "owner": "ADEMPIERE",
+                    "tables": [{ "table_name": "C_Invoice", "deleteable": true, "change_log": false }] }),
+        ));
+        let (g, stats) = recover_catalog(&artifacts);
+        assert_eq!(stats.dictionary_tables, 1);
+        let t = g.objects.iter().find(|o| o.name == "C_INVOICE").unwrap();
+        assert_eq!(t.properties["dictionary"]["deleteable"], true);
+        assert_eq!(t.properties["dictionary"]["change_log"], false);
+        let other = g.objects.iter().find(|o| o.name == "C_BPARTNER").unwrap();
+        assert!(!other.properties.contains_key("dictionary"));
     }
 
     #[test]

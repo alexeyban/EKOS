@@ -311,6 +311,9 @@ pub struct Detection {
     pub sql_dialect: Option<DialectGuess>,
     pub engine_directories: Vec<EngineDirectory>,
     pub suggestions: Vec<Suggestion>,
+    /// RFC 0219: issue-tracker keys that name many files (`IDEMPIERE` in
+    /// `202409031411_IDEMPIERE-6203.sql`), with how many.
+    pub ticket_keys: Vec<(String, usize)>,
 }
 
 impl Detection {
@@ -674,6 +677,7 @@ pub fn detect_workspace(cwd: &Path, config: &EkosConfig) -> Result<Detection> {
 
     let sql_dialect = guess_dialect(&sql_samples);
     let engine_directories = detect_engine_directories(&clean);
+    let ticket_keys = detect_ticket_keys(&clean);
     let suggestions = build_suggestions(cwd, &sources, &sql_samples);
 
     Ok(Detection {
@@ -682,7 +686,64 @@ pub fn detect_workspace(cwd: &Path, config: &EkosConfig) -> Result<Detection> {
         sql_dialect,
         engine_directories,
         suggestions,
+        ticket_keys,
     })
+}
+
+/// A key must name at least this many files to be proposed: a ticket convention, not a stray
+/// `UTF-8` in a file name.
+const TICKET_KEY_MIN_FILES: usize = 20;
+
+/// RFC 0219: `KEY-<digits>` tokens in file names, by key, for keys naming enough files.
+pub fn detect_ticket_keys(paths: &[String]) -> Vec<(String, usize)> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for raw in paths {
+        let path = normalize(raw);
+        let file = path.rsplit('/').next().unwrap_or(&path);
+        let mut keys: BTreeSet<String> = BTreeSet::new();
+        for part in file.split(|c: char| !(c.is_ascii_alphanumeric() || c == '-')) {
+            let Some((key, num)) = part.split_once('-') else {
+                continue;
+            };
+            let num = num.split('-').next().unwrap_or_default();
+            if key.len() >= 2
+                && key
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+                && key.starts_with(|c: char| c.is_ascii_uppercase())
+                && !num.is_empty()
+                && num.chars().all(|c| c.is_ascii_digit())
+            {
+                keys.insert(key.to_string());
+            }
+        }
+        for k in keys {
+            *counts.entry(k).or_default() += 1;
+        }
+    }
+    let mut out: Vec<(String, usize)> = counts
+        .into_iter()
+        .filter(|(_, n)| *n >= TICKET_KEY_MIN_FILES)
+        .collect();
+    out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    out
+}
+
+/// `[tickets]`, when detection found ticket keys in file names.
+fn render_ticket_keys(out: &mut String, keys: &[(String, usize)]) {
+    if keys.is_empty() {
+        return;
+    }
+    out.push_str("[tickets]\n");
+    out.push_str(
+        "# Issue-tracker keys found in file names. Ticket ids with these keys join commits,\n\
+         # migration scripts and code comments (RFC 0219). Exact keys only.\n",
+    );
+    for (k, n) in keys {
+        out.push_str(&format!("# {k}: {n} file name(s)\n"));
+    }
+    let list: Vec<String> = keys.iter().map(|(k, _)| format!("\"{k}\"")).collect();
+    out.push_str(&format!("keys = [{}]\n\n", list.join(", ")));
 }
 
 /// Things detection noticed but must not act on by itself.
@@ -821,6 +882,7 @@ pub fn render_config(detection: &Detection) -> String {
     }
     render_engine_rules(&mut out, &detection.engine_directories);
     out.push('\n');
+    render_ticket_keys(&mut out, &detection.ticket_keys);
 
     out.push_str("# ── Detected inputs ──────────────────────────────────────────────────────\n");
     if detection.sources.is_empty() {
@@ -1138,6 +1200,7 @@ mod tests {
                 headline: "GitHub remote detected".into(),
                 detail: "a".repeat(200),
             }],
+            ticket_keys: Vec::new(),
         };
 
         let rendered = render_config(&detection);
@@ -1271,5 +1334,22 @@ mod tests {
         let rendered = render_config(&Detection::default());
         let parsed: EkosConfig = toml::from_str(&rendered).expect("must parse");
         assert_eq!(parsed.recover.sql.default_dialect, "generic");
+    }
+    /// RFC 0219: a key naming enough files is proposed, and the rendered `[tickets]` parses.
+    #[test]
+    fn ticket_keys_in_file_names_are_proposed() {
+        let mut paths: Vec<String> = (0..25)
+            .map(|i| format!("migration/iD12/oracle/2024010{i}_IDEMPIERE-{i}.sql"))
+            .collect();
+        paths.push("docs/UTF-8.txt".into());
+        paths.push("x/AP2-671.sql".into());
+        let keys = detect_ticket_keys(&paths);
+        assert_eq!(keys, vec![("IDEMPIERE".to_string(), 25)]);
+        let rendered = render_config(&Detection {
+            ticket_keys: keys,
+            ..Detection::default()
+        });
+        let parsed: EkosConfig = toml::from_str(&rendered).expect("valid ekos.toml");
+        assert_eq!(parsed.tickets.keys, ["IDEMPIERE"]);
     }
 }

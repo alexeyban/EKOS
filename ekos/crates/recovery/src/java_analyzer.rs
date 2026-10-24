@@ -42,7 +42,7 @@ pub const JAVA_METHOD_KIND: &str = "JavaMethod";
 pub const MODEL_TABLE_KIND: &str = "ModelTable";
 
 /// Bump when the pass's output for the same sources changes.
-const LOGIC_VERSION: &str = "java-analyzer/2";
+const LOGIC_VERSION: &str = "java-analyzer/3";
 
 #[derive(Debug, Deserialize)]
 struct JavaArtifactData {
@@ -73,6 +73,11 @@ pub struct JavaStats {
     pub sql_unparsed: usize,
     /// `ReadsFrom` / `WritesTo` edges from a method to a `ModelTable`.
     pub sql_links: usize,
+    /// RFC 0212: `PO` delete calls attributed to a table, whose receiver type the method does not
+    /// declare (or is not a model class), and those in test code (never attributed).
+    pub po_deletes: usize,
+    pub po_deletes_unresolved: usize,
+    pub po_deletes_in_tests: usize,
 }
 
 pub struct JavaAnalyzerPass {
@@ -203,27 +208,7 @@ const TICKET_KEYS: &[&str] = &["IDEMPIERE", "ADEMPIERE"];
 
 /// `IDEMPIERE-1234` style ids in a comment, exact matches only.
 fn tickets_in(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    for key in TICKET_KEYS {
-        let needle = format!("{key}-");
-        let mut from = 0;
-        while let Some(pos) = text[from..].find(&needle) {
-            let start = from + pos;
-            let digits: String = text[start + needle.len()..]
-                .chars()
-                .take_while(char::is_ascii_digit)
-                .collect();
-            let boundary_before = text[..start]
-                .chars()
-                .next_back()
-                .is_none_or(|c| !c.is_ascii_alphanumeric());
-            if !digits.is_empty() && boundary_before {
-                out.push(format!("{needle}{digits}"));
-            }
-            from = start + needle.len();
-        }
-    }
-    out
+    ekos_common::tickets::find(text, TICKET_KEYS)
 }
 
 /// Ticket ids by the line their comment ends on.
@@ -315,6 +300,30 @@ struct Context {
     supers: HashMap<TypeKey, Vec<String>>,
     /// `(project, lower-cased table name)` → the `ModelTable`'s name, for embedded SQL.
     tables: HashMap<TypeKey, String>,
+    /// RFC 0212: `(project, qualified class)` → the `ModelTable` the class persists: the generated
+    /// class, the business classes, and any subclass of either.
+    class_tables: HashMap<TypeKey, String>,
+}
+
+impl Context {
+    /// The table `qualified` (or one of its supertypes) persists.
+    fn class_table(&self, project: &Option<String>, qualified: &str) -> Option<&String> {
+        let mut queue: VecDeque<String> = VecDeque::from([qualified.to_string()]);
+        let mut seen = HashSet::new();
+        while let Some(q) = queue.pop_front() {
+            if !seen.insert(q.clone()) {
+                continue;
+            }
+            let key = (project.clone(), q);
+            if let Some(t) = self.class_tables.get(&key) {
+                return Some(t);
+            }
+            if let Some(s) = self.supers.get(&key) {
+                queue.extend(s.iter().cloned());
+            }
+        }
+        None
+    }
 }
 
 /// Constant lookup for the methods of one type: its own constants, then its enclosing types', then
@@ -462,6 +471,7 @@ fn compile(parsed: &[Parsed]) -> (KirGraph, JavaStats) {
         constants: HashMap::new(),
         supers: HashMap::new(),
         tables: HashMap::new(),
+        class_tables: HashMap::new(),
     };
     for p in parsed {
         for (idx, t) in p.file.types.iter().enumerate() {
@@ -501,9 +511,13 @@ fn compile(parsed: &[Parsed]) -> (KirGraph, JavaStats) {
             })
             .collect();
         let model = app_model::recognize(&files);
-        for name in model.tables.keys() {
+        for (name, t) in &model.tables {
             ctx.tables
                 .insert((project.clone(), name.to_ascii_lowercase()), name.clone());
+            for class in t.model_class.iter().chain(&t.business_classes) {
+                ctx.class_tables
+                    .insert((project.clone(), class.clone()), name.clone());
+            }
         }
         models.push((project, model));
     }
@@ -832,6 +846,8 @@ fn add_methods(
                 obj.properties
                     .insert("sql".into(), serde_json::json!(statements));
             }
+            let po = crate::java_po::delete_calls(&p.file.tokens, body, &m.params);
+            link_po_deletes(&po, (p, &lookup.chain, t), id, ctx, graph, stats);
         }
         crate::source_evidence::attach(&mut obj, &p.source, &p.path, graph);
         graph.add_object(obj);
@@ -844,8 +860,63 @@ fn add_methods(
     }
 }
 
-/// The operations and lines behind one method → table edge.
-type Link<'a> = (BTreeSet<&'a str>, BTreeSet<u32>);
+/// RFC 0212: one `WritesTo {via: "po"}` edge per table a method deletes through `PO`.
+fn link_po_deletes(
+    po: &crate::java_po::PoCalls,
+    (p, chain, t): (&Parsed, &[&TypeDecl], &TypeDecl),
+    method_id: KirId,
+    ctx: &Context,
+    graph: &mut KirGraph,
+    stats: &mut JavaStats,
+) {
+    let total = po.resolved.len() + po.unresolved.len();
+    if total == 0 {
+        return;
+    }
+    if crate::java_po::is_test_path(&p.path) {
+        stats.po_deletes_in_tests += total;
+        return;
+    }
+    stats.po_deletes_unresolved += po.unresolved.len();
+    let mut by_table: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+    for d in &po.resolved {
+        let class = match &d.receiver_type {
+            None => Some(t.qualified.clone()),
+            Some(ty) => resolve(ty, &p.file, chain, &p.project, &ctx.index),
+        };
+        match class.and_then(|c| ctx.class_table(&p.project, &c)) {
+            Some(table) => {
+                stats.po_deletes += 1;
+                by_table.entry(table.clone()).or_default().insert(d.line);
+            }
+            None => stats.po_deletes_unresolved += 1,
+        }
+    }
+    for (table, lines) in by_table {
+        let mut rel = KirRelationship::deterministic(
+            RelationshipKind::Custom("WritesTo".into()),
+            method_id,
+            model_table_kir_id(&table, p.project.as_deref()),
+            "po",
+        );
+        let statements: Vec<serde_json::Value> = lines
+            .iter()
+            .map(|l| serde_json::json!({ "op": "delete", "line": l, "via": "po" }))
+            .collect();
+        for (k, v) in [
+            ("operations", serde_json::json!(["delete"])),
+            ("lines", serde_json::json!(lines)),
+            ("via", serde_json::json!("po")),
+            ("statements", serde_json::json!(statements)),
+        ] {
+            rel.properties.insert(k.into(), v);
+        }
+        graph.add_relationship(rel);
+    }
+}
+
+/// The operations, lines and (RFC 0212) per-statement write shapes behind one method → table edge.
+type Link<'a> = (BTreeSet<&'a str>, BTreeSet<u32>, Vec<serde_json::Value>);
 
 /// Count a method's statements and link it to the `ModelTable`s they name: `ReadsFrom` for
 /// reads, `WritesTo` (with the operations) for inserts, updates and deletes. A table name with no
@@ -880,11 +951,22 @@ fn link_sql(
                     let e = links.entry((kind, table.clone())).or_default();
                     e.0.insert(op);
                     e.1.insert(st.line);
+                    match op {
+                        "update" => e.2.push(serde_json::json!({
+                            "op": "update", "line": st.line,
+                            "sets": st.update_sets.get(name).cloned().unwrap_or_default(),
+                        })),
+                        "delete" => e.2.push(serde_json::json!({
+                            "op": "delete", "line": st.line,
+                            "shapes": st.delete_shapes.get(name).cloned().unwrap_or_default(),
+                        })),
+                        _ => {}
+                    }
                 }
             }
         }
     }
-    for ((kind, table), (ops, lines)) in links {
+    for ((kind, table), (ops, lines, writes)) in links {
         stats.sql_links += 1;
         let mut rel = KirRelationship::deterministic(
             RelationshipKind::Custom(kind.into()),
@@ -896,6 +978,10 @@ fn link_sql(
             .insert("operations".into(), serde_json::json!(ops));
         rel.properties
             .insert("lines".into(), serde_json::json!(lines));
+        if !writes.is_empty() {
+            rel.properties
+                .insert("statements".into(), serde_json::json!(writes));
+        }
         rel.properties
             .insert("via".into(), serde_json::json!("embedded_sql"));
         graph.add_relationship(rel);
@@ -1188,6 +1274,51 @@ mod tests {
             v
         };
         assert_eq!(ids(&compile(&a).0), ids(&compile(&b).0));
+    }
+
+    /// RFC 0212: a `PO` delete on a declared model object becomes a `WritesTo {via: "po"}` edge to
+    /// that object's table; a subclass resolves through its supertype; test code never links.
+    #[test]
+    fn po_deletes_link_to_the_receivers_table() {
+        let i = "package org.compiere.model;\npublic interface I_C_OrderLine {\n\
+            public static final String Table_Name = \"C_OrderLine\";\n}\n";
+        let x = "/** Generated Model - DO NOT CHANGE */\npackage org.compiere.model;\n\
+            @org.adempiere.base.Model(table=\"C_OrderLine\")\n\
+            public class X_C_OrderLine extends PO implements I_C_OrderLine {\n}\n";
+        let m = "package org.compiere.model;\npublic class MOrderLine extends X_C_OrderLine {\n\
+            boolean drop() { return delete(true); }\n}\n";
+        let user = "package org.compiere.process;\nimport org.compiere.model.MOrderLine;\n\
+            public class Purge {\n void run(MOrderLine line) { line.deleteEx(true); unknown.delete(true); }\n}\n";
+        let test = "package org.idempiere.test;\nimport org.compiere.model.MOrderLine;\n\
+            public class MOrderLineTest {\n void t(MOrderLine l) { l.deleteEx(true); }\n}\n";
+        let files = vec![
+            parsed("I_C_OrderLine.java", i),
+            parsed("MOrderLine.java", m),
+            parsed("Purge.java", user),
+            parsed("org.idempiere.test/src/MOrderLineTest.java", test),
+            parsed("X_C_OrderLine.java", x),
+        ];
+        let (g, stats) = compile(&files);
+        assert_eq!(
+            (
+                stats.po_deletes,
+                stats.po_deletes_unresolved,
+                stats.po_deletes_in_tests
+            ),
+            (2, 1, 1)
+        );
+        let table = model_table_kir_id("C_OrderLine", None);
+        let po_edges: Vec<&KirRelationship> = g
+            .relationships
+            .iter()
+            .filter(|r| r.to == table && r.properties.get("via") == Some(&serde_json::json!("po")))
+            .collect();
+        assert_eq!(po_edges.len(), 2, "MOrderLine.drop and Purge.run");
+        assert!(
+            po_edges
+                .iter()
+                .all(|r| r.properties["operations"] == serde_json::json!(["delete"]))
+        );
     }
 
     #[test]

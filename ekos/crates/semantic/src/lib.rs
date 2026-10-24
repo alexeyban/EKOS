@@ -15,8 +15,10 @@ pub mod rollup;
 pub mod schema_history;
 pub mod semantics_review;
 pub mod sources;
+pub mod tickets;
 pub mod transform_ir;
 pub mod triggers;
+pub mod write_behaviour;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};

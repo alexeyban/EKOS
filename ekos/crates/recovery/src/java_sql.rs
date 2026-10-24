@@ -21,7 +21,7 @@
 use crate::java_syntax::{TokKind, Token};
 use crate::plpgsql_footprint::{Footprint, statement_footprint_in};
 use sqlparser::dialect::GenericDialect;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Stands in for a fragment that is not a literal or a known constant.
 pub const PLACEHOLDER: &str = "ekos_expr";
@@ -82,6 +82,12 @@ pub struct EmbeddedSql {
     pub updates: BTreeSet<String>,
     #[serde(skip_serializing_if = "BTreeSet::is_empty")]
     pub deletes: BTreeSet<String>,
+    /// RFC 0212: the columns each updated table's `SET` names.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub update_sets: BTreeMap<String, BTreeSet<String>>,
+    /// RFC 0212: how each deleted table's rows are chosen (`all_rows`, `age`, `selective`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub delete_shapes: BTreeMap<String, BTreeSet<&'static str>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -487,6 +493,16 @@ fn statement(line: u32, call: String, f: Folded) -> EmbeddedSql {
         inserts: clean(fp.inserts),
         updates: clean(fp.updates),
         deletes: clean(fp.deletes),
+        update_sets: fp
+            .update_sets
+            .into_iter()
+            .filter(|(t, _)| !t.eq_ignore_ascii_case(PLACEHOLDER))
+            .collect(),
+        delete_shapes: fp
+            .delete_shapes
+            .into_iter()
+            .filter(|(t, _)| !t.eq_ignore_ascii_case(PLACEHOLDER))
+            .collect(),
         error,
     }
 }

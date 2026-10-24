@@ -19,11 +19,12 @@ use ekos_artifact::ObservationArtifact;
 use ekos_common::redaction::RedactionConfig;
 use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
 use ekos_ora_live::{
-    CatalogSnapshot, ObjectKind, OraError, OraSource, ProfileStats, SessionPolicy, WriteCheck,
+    CatalogSnapshot, ObjectKind, OraError, OraSource, ProfileStats, SessionPolicy, TableFlags,
+    WriteCheck,
 };
 use std::sync::Arc;
 
-pub use ekos_ora_live::{OraConnection, ProfileTier};
+pub use ekos_ora_live::{DictionaryKind, OraConnection, ProfileTier};
 
 /// The observer's name, and the `source_kind` its artifacts carry.
 pub const OBSERVER: &str = "oracle";
@@ -40,6 +41,8 @@ pub struct DatabaseReading {
     pub profiles: Vec<ProfileStats>,
     /// Archive-log and supplemental-logging state, per owner in snapshot order.
     pub log_states: Vec<serde_json::Value>,
+    /// RFC 0212: the dictionary's table flags per owner, when `[[databases]] dictionary` asks.
+    pub dictionaries: Vec<Option<Vec<TableFlags>>>,
 }
 
 /// Where a reading comes from: the live database, or a fixed reading in tests.
@@ -55,6 +58,7 @@ pub struct LiveReader {
     pub policy: SessionPolicy,
     pub redaction: RedactionConfig,
     pub profile: ProfileTier,
+    pub dictionary: Option<DictionaryKind>,
 }
 
 impl CatalogReader for LiveReader {
@@ -64,6 +68,7 @@ impl CatalogReader for LiveReader {
         let mut snapshots = Vec::new();
         let mut profiles = Vec::new();
         let mut log_states = Vec::new();
+        let mut dictionaries = Vec::new();
         for owner in &self.owners {
             let mut snapshot = ekos_ora_live::introspect(&source, owner, family, &self.redaction)?;
             profiles.push(ekos_ora_live::profile::scan(
@@ -73,6 +78,10 @@ impl CatalogReader for LiveReader {
                 &self.redaction,
             )?);
             log_states.push(ekos_ora_live::profile::log_state(&source, owner));
+            dictionaries.push(match self.dictionary {
+                Some(kind) => Some(ekos_ora_live::dictionary::read(&source, kind, owner)?),
+                None => None,
+            });
             snapshots.push(snapshot);
         }
         let probe = snapshots.iter().find_map(|s| {
@@ -95,6 +104,7 @@ impl CatalogReader for LiveReader {
             any_privileges,
             profiles,
             log_states,
+            dictionaries,
         })
     }
 }
@@ -161,6 +171,22 @@ pub fn artifacts(database: &str, reading: &DatabaseReading) -> Vec<ObservationAr
             ObservationArtifact::new(OBSERVER, catalog_target(database, &s.owner), data)
                 .with_producer("ekos-plugin-oracle"),
         );
+        if let Some(Some(flags)) = reading.dictionaries.get(n) {
+            let data = serde_json::json!({
+                "kind": "dictionary",
+                "database": database,
+                "owner": s.owner,
+                "tables": flags,
+            });
+            out.push(
+                ObservationArtifact::new(
+                    OBSERVER,
+                    format!("{}/dictionary", catalog_target(database, &s.owner)),
+                    data,
+                )
+                .with_producer("ekos-plugin-oracle"),
+            );
+        }
         for o in &s.objects {
             let data = serde_json::json!({
                 "kind": "object",
@@ -270,6 +296,7 @@ mod tests {
             any_privileges: vec![],
             profiles: vec![],
             log_states: vec![],
+            dictionaries: vec![],
         }
     }
 

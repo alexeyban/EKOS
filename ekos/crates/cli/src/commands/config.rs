@@ -263,6 +263,7 @@ mod tests {
                 .iter()
                 .map(std::string::ToString::to_string)
                 .collect(),
+            ..ObserveConfig::default()
         }
     }
 

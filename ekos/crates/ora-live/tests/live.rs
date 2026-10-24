@@ -284,3 +284,30 @@ fn a_p2_profile_holds_no_text_value_of_a_seeded_row() {
     assert_eq!(stats.tables_failed, 0);
     assert_eq!(log["log_mode"], "NOARCHIVELOG");
 }
+
+/// RFC 0212: the dictionary reader's flags agree with a direct count, as the read-only user.
+#[test]
+fn the_dictionary_flags_match_a_direct_count() {
+    if !live() {
+        return;
+    }
+    let s = read_only();
+    let flags =
+        ekos_ora_live::dictionary::read(&s, ekos_ora_live::DictionaryKind::Idempiere, "ADEMPIERE")
+            .unwrap();
+    let direct = s
+        .rows_of(
+            "SELECT COUNT(*), SUM(CASE WHEN IsDeleteable = 'Y' THEN 1 ELSE 0 END), \
+             SUM(CASE WHEN IsChangeLog = 'Y' THEN 1 ELSE 0 END) FROM ADEMPIERE.AD_Table",
+            &[],
+        )
+        .unwrap();
+    let n = |i: usize| -> usize { direct[0][i].as_deref().unwrap().parse().unwrap() };
+    let deleteable = flags.iter().filter(|f| f.deleteable == Some(true)).count();
+    let logged = flags.iter().filter(|f| f.change_log == Some(true)).count();
+    println!(
+        "dictionary: {} tables, {deleteable} deletable, {logged} change-logged",
+        flags.len()
+    );
+    assert_eq!((flags.len(), deleteable, logged), (n(0), n(1), n(2)));
+}

@@ -450,6 +450,13 @@ impl RecoverSummary {
                     s.sql_statements, s.sql_parsed, s.sql_partial, s.sql_unparsed, s.sql_links
                 );
             }
+            let po = s.po_deletes + s.po_deletes_unresolved + s.po_deletes_in_tests;
+            if po > 0 {
+                println!(
+                    "  PO deletes (RFC 0212): {} attributed to a table, {} receiver not resolved, {} in test code",
+                    s.po_deletes, s.po_deletes_unresolved, s.po_deletes_in_tests
+                );
+            }
         }
         for report in extension_reports {
             for line in report() {
@@ -1257,7 +1264,8 @@ pub async fn run_with(
                 .as_ref(),
             commit_ids,
             repo_id,
-        );
+        )
+        .with_ticket_keys(config.tickets.keys.clone());
         pass_manager.register(Box::new(git_pass));
     }
 

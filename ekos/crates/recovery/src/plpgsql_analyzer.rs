@@ -40,7 +40,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bumped whenever this pass's output changes for the same input, so a cached run is not reused.
-pub(crate) const LOGIC_VERSION: &str = "plpgsql-analyzer/7";
+pub(crate) const LOGIC_VERSION: &str = "plpgsql-analyzer/8";
 
 /// The most source text one statement's evidence carries. A statement longer than this is rare;
 /// its exact byte span is always recorded, so the full text stays recoverable from the file.
@@ -656,6 +656,13 @@ fn set_footprint(props: &mut std::collections::HashMap<String, Value>, fp: &Foot
     props.insert("updates".into(), json!(fp.updates));
     props.insert("deletes".into(), json!(fp.deletes));
     props.insert("calls".into(), json!(fp.calls));
+    // RFC 0212: what each update sets and how each delete chooses rows.
+    if !fp.update_sets.is_empty() {
+        props.insert("update_sets".into(), json!(fp.update_sets));
+    }
+    if !fp.delete_shapes.is_empty() {
+        props.insert("delete_shapes".into(), json!(fp.delete_shapes));
+    }
     props.insert("footprint".into(), json!(fp.status()));
     if !fp.errors.is_empty() {
         props.insert("footprint_errors".into(), json!(fp.errors));

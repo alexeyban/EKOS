@@ -46,6 +46,9 @@ pub struct EkosConfig {
     pub freshness: FreshnessConfig,
     #[serde(default)]
     pub conflicts: ConflictsConfig,
+    /// RFC 0219: issue-tracker keys whose ticket ids join commits, change sets and code.
+    #[serde(default)]
+    pub tickets: TicketsConfig,
     /// RFC 0178 Part 2: the project's named inputs (`[[sources]]`). Empty = one unnamed source,
     /// the directories of `[observe] paths`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -114,6 +117,14 @@ pub struct ObserveConfig {
     pub paths: Vec<PathBuf>,
     #[serde(default = "default_ignore_patterns")]
     pub ignore_patterns: Vec<String>,
+    /// How many of the newest commits `ekos build` reads from git history (RFC 0219: ticket
+    /// links need the history that cites them; a long-lived estate has tens of thousands).
+    #[serde(default = "default_git_max_commits")]
+    pub git_max_commits: usize,
+}
+
+fn default_git_max_commits() -> usize {
+    500
 }
 
 impl Default for ObserveConfig {
@@ -121,6 +132,7 @@ impl Default for ObserveConfig {
         Self {
             paths: Vec::new(),
             ignore_patterns: default_ignore_patterns(),
+            git_max_commits: default_git_max_commits(),
         }
     }
 }
@@ -940,6 +952,16 @@ impl StorageConfig {
     }
 }
 
+/// RFC 0219: `[tickets]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TicketsConfig {
+    /// Issue-tracker project keys (`IDEMPIERE` for `IDEMPIERE-6203`). Exact keys only — a generic
+    /// `ABC-123` pattern would also match `UTF-8`. Empty: commits are not linked to tickets.
+    #[serde(default)]
+    pub keys: Vec<String>,
+}
+
 /// RFC 0211: one live database whose catalog `ekos build` reads, read-only.
 ///
 /// The password is named by an environment variable; the value is never in this file, the ledger
@@ -962,6 +984,18 @@ pub struct DatabaseConfig {
     /// counts, number and date bounds and text lengths. No tier stores a text value.
     #[serde(default)]
     pub profile: DatabaseProfile,
+    /// RFC 0212: also read the application dictionary's table flags (`idempiere`: whether users
+    /// may delete a table's rows and whether deletes are change-logged). Off by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dictionary: Option<DatabaseDictionary>,
+}
+
+/// RFC 0212 §3.3: which application dictionary `[[databases]] dictionary` reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum DatabaseDictionary {
+    /// iDempiere / ADempiere: `AD_Table.IsDeleteable`, `IsChangeLog`.
+    Idempiere,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -1096,6 +1130,7 @@ impl Default for EkosConfig {
             semantics: SemanticsConfig::default(),
             freshness: FreshnessConfig::default(),
             conflicts: ConflictsConfig::default(),
+            tickets: TicketsConfig::default(),
             sources: Vec::new(),
             databases: Vec::new(),
             extensions: std::collections::BTreeMap::new(),
@@ -1533,6 +1568,15 @@ path = "/tmp/ekos-containers/b"
         );
         let p2: EkosConfig = toml::from_str(&format!("{db}profile = \"p2\"\n")).unwrap();
         assert_eq!(p2.databases[0].profile, DatabaseProfile::P2);
+        assert_eq!(
+            cfg.databases[0].dictionary, None,
+            "the dictionary is opt-in"
+        );
+        let d: EkosConfig = toml::from_str(&format!("{db}dictionary = \"idempiere\"\n")).unwrap();
+        assert_eq!(
+            d.databases[0].dictionary,
+            Some(DatabaseDictionary::Idempiere)
+        );
 
         let clash: EkosConfig = toml::from_str(&format!(
             "[[sources]]\nname = \"erp\"\npath = \"x\"\n\n{db}"

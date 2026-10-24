@@ -6795,8 +6795,15 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       accumulation first
 - [ ] RFC 0211 follow-ups: `change_not_applied` (opt-in `AD_MigrationScript` read, decision D3); compare the
       37 ambiguous routine names; `ekos doctor` names a missing Instant Client
-- [ ] RFC 0212 — write behaviour: update/delete evidence per table
-- [ ] I.8 docs/wiki snapshot, git ticket links; I.9 structured run logs (`run.log.jsonl`)
+- [x] RFC 0212 — write behaviour per table: update class (144 tables skip `Updated`), delete classes (users
+      754, cascade 298, app 107, purged 12), change log; `PO` delete receivers; opt-in `AD_Table` dictionary
+      flags (devlog_290)
+- [ ] RFC 0212 follow-ups: the 63 unresolved `PO` delete receivers (fields, return types); the dictionary read
+      for `AD_MigrationScript` (`change_not_applied`, RFC 0211)
+- [x] I.8 git ticket links — RFC 0219: `[tickets] keys` (detected from file names), `Ticket` objects from commits,
+      `TicketFor` to change sets and Java code; `[observe] git-max-commits`; 4,597 tickets on 16,260 commits (devlog_291)
+- [ ] I.8 docs repository and wiki snapshot (licence check before republishing)
+- [ ] I.9 structured run logs (`run.log.jsonl`)
 - [ ] Part I exit: 25-question eval with expected citations, without and with the database
 
 ### Parts II–V (ekos-lakehouse, console) — not started

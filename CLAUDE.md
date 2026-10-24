@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
 Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
-`devlog_289.md` as of this writing) before starting non-trivial work: they are the project's
+`devlog_291.md` as of this writing) before starting non-trivial work: they are the project's
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
-`ekos/docs/rfcs/` has `0025`+ (highest: `0211`). **Check both directories for the highest existing number before
+`ekos/docs/rfcs/` has `0025`+ (highest: `0219`; 0213–0218 are reserved by the Oracle/iDempiere plan for Parts II–V). **Check both directories for the highest existing number before
 picking one for a new RFC** — two RFCs have already collided on the same number once (0027) from
 sessions that only checked one location.
 
@@ -169,7 +169,17 @@ build fingerprint** (`build.rs::read_databases`, once per build, failure fatal);
 output sets `KnowledgeContent::supersedes_earlier_runs`, so `compile` keeps only its newest read
 (multi-input passes otherwise accumulate every past output and merge them), and each catalog
 artifact lists the objects it read so a dropped table leaves. A pass that calls another analyzer's
-functions must fold that analyzer's `LOGIC_VERSION` into its cache key (two stale-cache bugs). Testbed: `docker-compose.oracle.yml` +
+functions must fold that analyzer's `LOGIC_VERSION` into its cache key (two stale-cache bugs).
+RFC 0212: `semantic/src/write_behaviour.rs` derives one keyed `Custom("WriteBehaviour")` per table at
+commit (update class, delete classes, change log, `citations` — not `evidence`, which EKL reserves) from
+footprint `update_sets` / `delete_shapes`, `recovery/src/java_po.rs` `PO` delete receivers (method-local
+declarations only; test code counted apart), live cascading FKs and the opt-in `[[databases]] dictionary`
+(`ora-live/src/dictionary.rs`, `AD_Table` flags); statements in migration scripts are ignored.
+RFC 0219: `ekos_common::tickets::find` (exact `[tickets] keys` only — never a generic `ABC-123`); the git
+analyzer emits keyed `Custom("Ticket")` objects + `Touches` and sets `supersedes_earlier_runs` (any pass that
+reads "all of X" should); `semantic/src/tickets.rs` adds `TicketFor` at commit. `[observe] git-max-commits`
+(default 500) joins the build fingerprint key only when changed (`build.rs::observer_settings_key`) — an
+observer setting that changes output must invalidate the cache. `File` objects live in the ledger, not the CKM. Testbed: `docker-compose.oracle.yml` +
 `deploy/fixtures/idempiere-oracle.sh`; live suite `EKOS_ORACLE_LIVE=1`. `SqlAnalyzerPass` stamps `dialect` on
 every `Table`, and `conflicts` compares claims only within one dialect (`generic` = unknown, compared
 with all) — engine twins of one script are two databases, not a dispute. `init --detect` writes one

@@ -816,6 +816,46 @@ ekos conflicts list --type model_column_missing
 
 The testbed is `docker-compose.oracle.yml` + `deploy/fixtures/idempiere-oracle.sh`.
 
+### Write behaviour: how each table is updated and deleted (RFC 0212)
+
+Before copying a table incrementally you need to know whether every change moves its timestamp
+column and whether rows ever disappear. `ekos commit` writes one `WriteBehaviour` per table with
+both, each class citing where it came from:
+
+- **update:** `po_only`, `raw_sql_sets_updated`, `raw_sql_skips_updated` (a raw `UPDATE` that leaves
+  `Updated` alone — a watermark misses it), `no_updated_column`;
+- **delete** (a set): `deleted_by_app` (a raw `DELETE` or a `PO` delete in code), `deleted_by_users`,
+  `deleted_by_cascade`, `purged` (age-based or whole-table deletes), `soft_delete_only`,
+  `never_deleted_in_code`;
+- **change log:** whether the application records deletes of the table.
+
+Users' deletes and change logging live in the application's dictionary, not its code; for
+iDempiere-family schemas `[[databases]] dictionary = "idempiere"` reads those two flags of
+`AD_Table` (opt-in). On iDempiere: 144 of 903 tables have a raw `UPDATE` that skips `Updated`, and
+754 are deletable by users — something no source file says. No model calls.
+
+```bash
+ekos commit   # … Write behaviour: 903 table(s); update: po_only 737, raw_sql_skips_updated 144, …
+ekos ekl "FIND Object WHERE kind = 'WriteBehaviour' AND update_class = 'raw_sql_skips_updated'"
+```
+
+### Tickets: commits, migrations and code joined by ticket key (RFC 0219)
+
+Legacy estates cite their issue tracker in file names, comments and commit messages. With
+`[tickets] keys = ["IDEMPIERE"]` (`ekos init --detect` proposes keys found in file names), every
+ticket a commit names becomes a `Ticket` — its commits, dates, authors, a title taken from the first
+commit's subject, and the files it touched — linked at `ekos commit` to the migration change sets
+and code that cite it. A schema question then reaches when, why and who: on iDempiere,
+`C_Country.ISOCountryCodeAlpha3` → change set `202412261358_IDEMPIERE-6349` → one commit,
+2024-12-27, "Add M49 country codes to the C_Country table". Ticket ids are matched by exact key
+only. `[observe] git-max-commits` raises the default of 500 commits read from history (the
+iDempiere history has 16,260; read in full: 4,597 tickets).
+
+```bash
+ekos commit   # … Ticket links: 4597 ticket(s) from commits; linked to 272 JavaMethod, 154 JavaType, 3074 SchemaChangeSet …
+ekos ekl "FIND Object WHERE kind = 'Ticket' AND name = 'IDEMPIERE-6349'"
+```
+
 ### PL/pgSQL stored procedures (RFC 0163)
 
 A stored procedure is also *imperative* — ordered statements, branches, loops, exception handlers —

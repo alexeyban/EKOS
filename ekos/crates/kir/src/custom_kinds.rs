@@ -194,6 +194,16 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(database, owner) — RFC 0211; one live catalog summary per schema read",
     },
     CustomKind {
+        name: "WriteBehaviour",
+        structurally_keyed: true,
+        note: "the table it describes — RFC 0212; one per table, derived at commit",
+    },
+    CustomKind {
+        name: "Ticket",
+        structurally_keyed: true,
+        note: "the ticket key (`IDEMPIERE-6203`) — RFC 0219; from commit messages",
+    },
+    CustomKind {
         name: "SchemaChangeSet",
         structurally_keyed: true,
         note: "migration script path — RFC 0210; twin engines' scripts share a name and are two change sets",
@@ -495,6 +505,8 @@ mod tests {
             "SchemaChangeSet",
             "SchemaChange",
             "OracleCatalog",
+            "WriteBehaviour",
+            "Ticket",
             "JsModule",
             "JsSymbol",
             "Document",

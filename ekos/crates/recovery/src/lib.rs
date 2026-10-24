@@ -25,6 +25,7 @@ pub mod github_analyzer;
 pub mod glossary;
 pub mod governance_analyzer;
 pub mod java_analyzer;
+pub mod java_po;
 pub mod java_sql;
 pub mod java_syntax;
 pub mod javascript_analyzer;

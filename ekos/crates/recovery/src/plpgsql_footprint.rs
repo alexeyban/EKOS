@@ -18,11 +18,12 @@
 
 use crate::sql_predicates::{PredicateSite, query_predicates, statement_predicates};
 use sqlparser::ast::{
-    Expr, FromTable, ObjectName, Query, Statement, TableFactor, TableWithJoins, Visit, Visitor,
+    Assignment, AssignmentTarget, BinaryOperator, Delete, Expr, FromTable, ObjectName, Query,
+    Statement, TableFactor, TableWithJoins, Visit, Visitor,
 };
 use sqlparser::dialect::{Dialect, PostgreSqlDialect};
 use sqlparser::parser::Parser;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::ControlFlow;
 
 /// What a fragment of SQL touches. Names are as written, unquoted parts lower-cased the way
@@ -43,7 +44,20 @@ pub struct Footprint {
     pub fragments: usize,
     /// RFC 0170: every column-vs-literal predicate, lines relative to the fragment it came from.
     pub predicates: Vec<PredicateSite>,
+    /// RFC 0212: the columns each `UPDATE` sets, by table (lower-cased). An incremental copy
+    /// needs to know whether an update moves the table's timestamp column.
+    pub update_sets: BTreeMap<String, BTreeSet<String>>,
+    /// RFC 0212: how each `DELETE` / `TRUNCATE` chooses its rows, by table — [`ALL_ROWS`],
+    /// [`AGE`] or [`SELECTIVE`].
+    pub delete_shapes: BTreeMap<String, BTreeSet<&'static str>>,
 }
+
+/// A delete without a `WHERE`, or a `TRUNCATE`.
+pub const ALL_ROWS: &str = "all_rows";
+/// A delete whose `WHERE` compares something to the current time (`Created < SysDate - 7`).
+pub const AGE: &str = "age";
+/// Any other delete.
+pub const SELECTIVE: &str = "selective";
 
 impl Footprint {
     /// `none` (nothing to parse), `parsed`, `partial` (some fragments failed) or `unparsed`.
@@ -66,6 +80,12 @@ impl Footprint {
         self.errors.extend(other.errors);
         self.fragments += other.fragments;
         self.predicates.extend(other.predicates);
+        for (t, cols) in other.update_sets {
+            self.update_sets.entry(t).or_default().extend(cols);
+        }
+        for (t, shapes) in other.delete_shapes {
+            self.delete_shapes.entry(t).or_default().extend(shapes);
+        }
     }
 }
 
@@ -143,6 +163,8 @@ struct Collector {
     ctes: BTreeSet<String>,
     /// The next relation the visitor reports is a table function's name, already counted as a call.
     skip_relation: Option<String>,
+    update_sets: BTreeMap<String, BTreeSet<String>>,
+    delete_shapes: BTreeMap<String, BTreeSet<&'static str>>,
 }
 
 impl Collector {
@@ -164,13 +186,138 @@ impl Collector {
                 .filter(|r| !self.ctes.contains(r)),
         );
         fp.calls.extend(self.calls);
-    }
-
-    fn write_target(&mut self, op: Op, t: &TableWithJoins) {
-        if let TableFactor::Table { name: n, .. } = &t.relation {
-            self.writes.push((op, name(n)));
+        for (t, cols) in self.update_sets {
+            fp.update_sets.entry(t).or_default().extend(cols);
+        }
+        for (t, shapes) in self.delete_shapes {
+            fp.delete_shapes.entry(t).or_default().extend(shapes);
         }
     }
+
+    fn write_target(&mut self, op: Op, t: &TableWithJoins) -> Option<String> {
+        if let TableFactor::Table { name: n, .. } = &t.relation {
+            let n = name(n);
+            self.writes.push((op, n.clone()));
+            return Some(n);
+        }
+        None
+    }
+
+    /// An `UPDATE`: its target, and (RFC 0212) the columns its `SET` names.
+    fn update(&mut self, table: &TableWithJoins, assignments: &[Assignment]) {
+        let Some(t) = self.write_target(Op::Update, table) else {
+            return;
+        };
+        let cols = self.update_sets.entry(t).or_default();
+        for a in assignments {
+            let targets = match &a.target {
+                AssignmentTarget::ColumnName(c) => std::slice::from_ref(c),
+                AssignmentTarget::Tuple(cs) => cs.as_slice(),
+            };
+            // `SET t.col = …`: the column is the last part.
+            cols.extend(
+                targets
+                    .iter()
+                    .filter_map(|c| c.0.last())
+                    .map(|last| last.value.to_ascii_lowercase()),
+            );
+        }
+    }
+
+    /// A `DELETE`: its targets, and (RFC 0212) how it chooses rows.
+    fn delete(&mut self, d: &Delete) {
+        let mut targets = Vec::new();
+        if d.tables.is_empty() {
+            let (FromTable::WithFromKeyword(from) | FromTable::WithoutKeyword(from)) = &d.from;
+            for t in from {
+                targets.extend(self.write_target(Op::Delete, t));
+            }
+        } else {
+            for t in &d.tables {
+                let n = name(t);
+                self.writes.push((Op::Delete, n.clone()));
+                targets.push(n);
+            }
+        }
+        for t in targets {
+            self.delete_shape(t, d.selection.as_ref());
+        }
+    }
+
+    fn delete_shape(&mut self, table: String, selection: Option<&Expr>) {
+        let shape = match selection {
+            None => ALL_ROWS,
+            Some(e) if compares_to_now(e) => AGE,
+            Some(_) => SELECTIVE,
+        };
+        self.delete_shapes.entry(table).or_default().insert(shape);
+    }
+}
+
+/// The current-time spellings of the engines EKOS reads.
+const NOW: &[&str] = &[
+    "sysdate",
+    "systimestamp",
+    "current_date",
+    "current_timestamp",
+    "localtimestamp",
+    "now",
+    "getdate",
+    "statement_timestamp",
+    "clock_timestamp",
+    "transaction_timestamp",
+];
+
+fn mentions_now(e: &Expr) -> bool {
+    struct Finder(bool);
+    impl Visitor for Finder {
+        type Break = ();
+        fn pre_visit_expr(&mut self, e: &Expr) -> ControlFlow<()> {
+            let hit = match e {
+                Expr::Identifier(i) => NOW.contains(&i.value.to_ascii_lowercase().as_str()),
+                Expr::Function(f) => {
+                    let n = name(&f.name);
+                    NOW.contains(&n.rsplit('.').next().unwrap_or_default())
+                }
+                _ => false,
+            };
+            if hit {
+                self.0 = true;
+                return ControlFlow::Break(());
+            }
+            ControlFlow::Continue(())
+        }
+    }
+    let mut f = Finder(false);
+    let _ = e.visit(&mut f);
+    f.0
+}
+
+/// A `WHERE` with an ordering comparison one side of which is the current time.
+fn compares_to_now(e: &Expr) -> bool {
+    struct Finder(bool);
+    impl Visitor for Finder {
+        type Break = ();
+        fn pre_visit_expr(&mut self, e: &Expr) -> ControlFlow<()> {
+            if let Expr::BinaryOp { left, op, right } = e
+                && matches!(
+                    op,
+                    BinaryOperator::Lt
+                        | BinaryOperator::LtEq
+                        | BinaryOperator::Gt
+                        | BinaryOperator::GtEq
+                )
+                && (mentions_now(left) || mentions_now(right))
+            {
+                self.0 = true;
+                return ControlFlow::Break(());
+            }
+            ControlFlow::Continue(())
+        }
+    }
+    let mut f = Finder(false);
+    let _ = e.visit(&mut f);
+    f.0
 }
 
 impl Visitor for Collector {
@@ -222,22 +369,16 @@ impl Visitor for Collector {
     fn pre_visit_statement(&mut self, s: &Statement) -> ControlFlow<()> {
         match s {
             Statement::Insert(i) => self.writes.push((Op::Insert, name(&i.table_name))),
-            Statement::Update { table, .. } => self.write_target(Op::Update, table),
-            Statement::Delete(d) => {
-                if d.tables.is_empty() {
-                    let (FromTable::WithFromKeyword(from) | FromTable::WithoutKeyword(from)) =
-                        &d.from;
-                    for t in from {
-                        self.write_target(Op::Delete, t);
-                    }
-                } else {
-                    self.writes
-                        .extend(d.tables.iter().map(|t| (Op::Delete, name(t))));
-                }
-            }
+            Statement::Update {
+                table, assignments, ..
+            } => self.update(table, assignments),
+            Statement::Delete(d) => self.delete(d),
             Statement::Truncate { table_names, .. } => {
-                self.writes
-                    .extend(table_names.iter().map(|t| (Op::Delete, name(&t.name))));
+                for t in table_names {
+                    let n = name(&t.name);
+                    self.writes.push((Op::Delete, n.clone()));
+                    self.delete_shape(n, None);
+                }
             }
             Statement::Merge {
                 table: TableFactor::Table { name: n, .. },
@@ -252,6 +393,48 @@ impl Visitor for Collector {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 0212: delete shapes and the columns each update sets.
+    #[test]
+    fn deletes_are_shaped_and_updates_name_their_set_columns() {
+        let g = sqlparser::dialect::GenericDialect {};
+        let shape = |sql: &str| {
+            let fp = statement_footprint_in(&g, sql);
+            fp.delete_shapes.into_iter().collect::<Vec<_>>()
+        };
+        let one = |t: &str, s: &'static str| vec![(t.to_string(), [s].into_iter().collect())];
+        assert_eq!(shape("DELETE FROM AD_Find"), one("ad_find", ALL_ROWS));
+        assert_eq!(shape("TRUNCATE TABLE t_report"), one("t_report", ALL_ROWS));
+        assert_eq!(
+            shape("DELETE FROM AD_Session WHERE Created < SysDate-7"),
+            one("ad_session", AGE)
+        );
+        assert_eq!(
+            shape("DELETE FROM ad_note WHERE Processed='Y' AND Updated < SysDate-7"),
+            one("ad_note", AGE)
+        );
+        assert_eq!(
+            shape("DELETE FROM log WHERE created < now() - interval '30 days'"),
+            one("log", AGE)
+        );
+        assert_eq!(
+            shape("DELETE FROM C_InvoiceLine WHERE C_Invoice_ID=1"),
+            one("c_invoiceline", SELECTIVE)
+        );
+        // A date column compared with a literal is not "older than now".
+        assert_eq!(
+            shape("DELETE FROM x WHERE created < DATE '2020-01-01'"),
+            one("x", SELECTIVE)
+        );
+
+        let fp = statement_footprint_in(
+            &g,
+            "UPDATE C_Order o SET o.IsActive='N', Updated=SysDate WHERE C_Order_ID=1",
+        );
+        assert_eq!(fp.update_sets["c_order"], set(&["isactive", "updated"]));
+        let tuple = statement_footprint_in(&g, "UPDATE t SET (a, b) = (SELECT 1, 2 FROM dual)");
+        assert_eq!(tuple.update_sets["t"], set(&["a", "b"]));
+    }
 
     fn set(v: &[&str]) -> BTreeSet<String> {
         v.iter().map(std::string::ToString::to_string).collect()

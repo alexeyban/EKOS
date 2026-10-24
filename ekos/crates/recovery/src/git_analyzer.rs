@@ -4,8 +4,10 @@
 //! - `KirObject(kind=Person)` per unique contributor
 //! - `KirEvent(kind=Modified)` per commit
 //! - `KirRelationship(kind=CoupledWith)` for files changed together in ≥2 commits
+//! - RFC 0219: `KirObject(kind=Custom("Ticket"))` per ticket id its commit messages name (for the
+//!   configured `[tickets] keys`), with `Touches` edges to the files those commits changed
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use async_trait::async_trait;
 use ekos_artifact::ArtifactId;
@@ -31,6 +33,30 @@ const DEFAULT_MAX_COUPLING_COMMIT_FILES: usize = 50;
 /// How many commit SHAs a `CoupledWith` edge's evidence names as examples.
 const COUPLING_EVIDENCE_SHAS: usize = 3;
 
+/// RFC 0219: the custom kind of a ticket.
+pub const TICKET_KIND: &str = "Ticket";
+
+/// Commits listed on one ticket, newest first.
+const TICKET_COMMITS: usize = 50;
+
+/// RFC 0219: the stable id of a ticket object.
+pub fn ticket_kir_id(key: &str) -> KirId {
+    KirId(Uuid::new_v5(
+        &Uuid::NAMESPACE_URL,
+        format!("ticket:{key}").as_bytes(),
+    ))
+}
+
+/// What the commits say about one ticket.
+#[derive(Default)]
+struct TicketCommits {
+    /// (date, sha, author, subject)
+    commits: Vec<(String, String, String, String)>,
+    files: BTreeSet<String>,
+    /// Commits too large to link their files (the coupling limit).
+    bulk_commits: usize,
+}
+
 pub struct GitAnalyzerPass {
     pass_id: String,
     /// Git commit ObservationArtifact IDs to process.
@@ -39,6 +65,8 @@ pub struct GitAnalyzerPass {
     repo_artifact_id: Option<ArtifactId>,
     min_coupling: usize,
     max_coupling_commit_files: usize,
+    /// RFC 0219: `[tickets] keys`.
+    ticket_keys: Vec<String>,
 }
 
 impl GitAnalyzerPass {
@@ -54,7 +82,44 @@ impl GitAnalyzerPass {
             repo_artifact_id,
             min_coupling: DEFAULT_MIN_COUPLING,
             max_coupling_commit_files: DEFAULT_MAX_COUPLING_COMMIT_FILES,
+            ticket_keys: Vec::new(),
         }
+    }
+
+    /// RFC 0219: add one commit to every ticket its message names. Files are linked only for a
+    /// commit within the coupling limit (a sweep says nothing about the ticket).
+    fn record_tickets(
+        &self,
+        tickets: &mut BTreeMap<String, TicketCommits>,
+        (sha, author, date, message): (&str, &str, &str, &str),
+        files_changed: &[String],
+        project: Option<&str>,
+    ) {
+        let subject = message.lines().next().unwrap_or_default().trim();
+        for key in ekos_common::tickets::find(message, &self.ticket_keys) {
+            let t = tickets.entry(key).or_default();
+            t.commits.push((
+                date.to_string(),
+                sha.to_string(),
+                author.to_string(),
+                subject.to_string(),
+            ));
+            if files_changed.len() <= self.max_coupling_commit_files {
+                t.files.extend(
+                    files_changed
+                        .iter()
+                        .map(|p| ekos_common::project::project_qualify(p, project)),
+                );
+            } else {
+                t.bulk_commits += 1;
+            }
+        }
+    }
+
+    /// RFC 0219: the issue-tracker keys whose ticket ids become `Ticket` objects.
+    pub fn with_ticket_keys(mut self, keys: Vec<String>) -> Self {
+        self.ticket_keys = keys;
+        self
     }
 
     pub fn with_min_coupling(mut self, n: usize) -> Self {
@@ -77,8 +142,9 @@ impl CompilerPass for GitAnalyzerPass {
     // v2: bulk commits excluded from coupling analysis — bumping the version
     // invalidates cached v1 outputs so the fix actually re-runs.
     // v3: evidence on the `OwnedBy` and `CoupledWith` edges.
+    // v4: RFC 0219 `Ticket` objects; output supersedes earlier runs.
     fn version(&self) -> &str {
-        "v3"
+        "v4"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -91,6 +157,7 @@ impl CompilerPass for GitAnalyzerPass {
         if let Some(repo_id) = &self.repo_artifact_id {
             ids.push(repo_id.to_string());
         }
+        ids.push(format!("tickets:{}", self.ticket_keys.join(",")));
         ids
     }
 
@@ -130,6 +197,7 @@ impl CompilerPass for GitAnalyzerPass {
         // Per file pair: how many commits changed both, and the first few of their SHAs (what
         // the `CoupledWith` edge's evidence cites).
         let mut file_co_changes: HashMap<(String, String), (usize, Vec<String>)> = HashMap::new();
+        let mut tickets: BTreeMap<String, TicketCommits> = BTreeMap::new();
 
         for artifact_id in &self.commit_artifact_ids {
             let json = match ctx.artifact_store.read(artifact_id) {
@@ -177,6 +245,14 @@ impl CompilerPass for GitAnalyzerPass {
 
             // Stable subject KirId from commit SHA.
             let subject_id = KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, sha.as_bytes()));
+
+            // RFC 0219: the tickets this commit names.
+            self.record_tickets(
+                &mut tickets,
+                (&sha, &author, &date, &message),
+                &files_changed,
+                data["project"].as_str(),
+            );
 
             let ev = KirEvidence::new(
                 SourceLocation::file(format!("git:commit:{sha}")),
@@ -278,12 +354,17 @@ impl CompilerPass for GitAnalyzerPass {
             graph.add_relationship(rel);
         }
 
+        let ticket_count = add_tickets(&mut graph, tickets);
+
         // ── Write KnowledgeArtifact ─────────────────────────────────────────
+        // Every run reads every commit, so its output replaces the earlier runs' (RFC 0211):
+        // otherwise a ticket from an older run, with fewer commits, could win the merge.
         let knowledge = ekos_artifact::KnowledgeArtifact::new(
             &self.pass_id,
             self.commit_artifact_ids.clone(),
             graph,
-        );
+        )
+        .superseding_earlier_runs();
         let json = serde_json::to_value(&knowledge)
             .map_err(|e| PassError::failed(format!("serialize: {e}")))?;
         ctx.artifact_store
@@ -294,9 +375,70 @@ impl CompilerPass for GitAnalyzerPass {
             pass = %self.pass_id,
             events = knowledge.content.kir.events.len(),
             contributors = contributor_ids.len(),
+            tickets = ticket_count,
             "git-analyzer complete"
         );
         Ok(())
+    }
+}
+
+/// RFC 0219: every ticket's object and edges; how many tickets.
+fn add_tickets(graph: &mut KirGraph, tickets: BTreeMap<String, TicketCommits>) -> usize {
+    let n = tickets.len();
+    for (key, t) in tickets {
+        add_ticket(graph, &key, t);
+    }
+    n
+}
+
+/// RFC 0219: one `Ticket` object, its commits newest first, and `Touches` edges to its files.
+fn add_ticket(graph: &mut KirGraph, key: &str, mut t: TicketCommits) {
+    t.commits.sort_by(|a, b| (&b.0, &b.1).cmp(&(&a.0, &a.1)));
+    let first = t.commits.last().cloned().unwrap_or_default();
+    let last = t.commits.first().cloned().unwrap_or_default();
+    // The earliest commit's subject, without the key: the commit says it, not the tracker.
+    let title = first
+        .3
+        .replacen(key, "", 1)
+        .trim_matches(|c: char| c.is_whitespace() || matches!(c, ':' | '-' | '#' | '[' | ']'))
+        .to_string();
+    let ev = graph.add_evidence(KirEvidence::new(
+        SourceLocation::file(format!("git:commit:{}", first.1)),
+        format!("{}: {}", first.1, first.3),
+    ));
+    let listed: Vec<serde_json::Value> = t
+        .commits
+        .iter()
+        .take(TICKET_COMMITS)
+        .map(|(date, sha, author, subject)| {
+            serde_json::json!({ "sha": sha, "date": date, "author": author, "subject": subject })
+        })
+        .collect();
+    let mut o = KirObject::new(key, ObjectKind::Custom(TICKET_KIND.into())).with_evidence(ev);
+    o.id = ticket_kir_id(key);
+    for (k, v) in [
+        ("key", serde_json::json!(key)),
+        ("title", serde_json::json!(title)),
+        ("title_source", serde_json::json!("first_commit_subject")),
+        ("commit_count", serde_json::json!(t.commits.len())),
+        ("first_commit_at", serde_json::json!(first.0)),
+        ("last_commit_at", serde_json::json!(last.0)),
+        ("commits", serde_json::json!(listed)),
+        ("files_touched", serde_json::json!(t.files.len())),
+        ("bulk_commits", serde_json::json!(t.bulk_commits)),
+    ] {
+        o.properties.insert(k.into(), v);
+    }
+    graph.objects.push(o);
+    for f in &t.files {
+        let mut rel = KirRelationship::deterministic(
+            RelationshipKind::Custom("Touches".into()),
+            ticket_kir_id(key),
+            KirId(Uuid::new_v5(&Uuid::NAMESPACE_URL, f.as_bytes())),
+            "",
+        );
+        rel.evidence.push(ev);
+        graph.add_relationship(rel);
     }
 }
 
@@ -418,6 +560,78 @@ mod tests {
         // 55 pairs are excluded. All four commits still produced events.
         assert_eq!(coupled.len(), 1, "only the small-commit pair may couple");
         assert_eq!(graph.events.len(), 4, "bulk commits still produce events");
+    }
+
+    /// RFC 0219: one `Ticket` per configured key a message names, commits newest first, the
+    /// earliest commit's subject as its title, `Touches` to the files of non-bulk commits.
+    #[tokio::test]
+    async fn commits_naming_a_ticket_become_one_ticket_object() {
+        let dir = TempDir::new().unwrap();
+        let ctx = make_ctx_with_store(&dir);
+        let store = FileSystemArtifactStore::new(dir.path().join(".ekos/artifacts"));
+        let commit = |sha: &str, date: &str, msg: &str, files: &[&str]| {
+            ObservationArtifact::new(
+                "git",
+                sha,
+                serde_json::json!({ "sha": sha, "author_name": "alice", "date": date,
+                                    "message": msg, "files_changed": files }),
+            )
+        };
+        let big: Vec<String> = (0..11).map(|i| format!("f{i}.java")).collect();
+        let big: Vec<&str> = big.iter().map(String::as_str).collect();
+        let ids = vec![
+            seed_artifact(
+                &store,
+                &commit(
+                    "a1",
+                    "2024-08-05T10:00:00Z",
+                    "IDEMPIERE-6203 Back-date costing\n\nlong text",
+                    &["X_M_CostDetail.java"],
+                ),
+            ),
+            seed_artifact(
+                &store,
+                &commit(
+                    "b2",
+                    "2024-09-03T10:00:00Z",
+                    "IDEMPIERE-6203 follow-up, see UTF-8 note",
+                    &["MCost.java"],
+                ),
+            ),
+            seed_artifact(
+                &store,
+                &commit("c3", "2024-10-01T10:00:00Z", "IDEMPIERE-6203 sweep", &big),
+            ),
+            seed_artifact(
+                &store,
+                &commit("d4", "2024-10-02T10:00:00Z", "no ticket here", &["a.java"]),
+            ),
+        ];
+        let mut pass = GitAnalyzerPass::new("ws", ids, None)
+            .with_max_coupling_commit_files(10)
+            .with_ticket_keys(vec!["IDEMPIERE".into()]);
+        let mut ctx = ctx;
+        pass.run(&mut ctx).await.unwrap();
+        let graph = read_knowledge_graph(ctx.artifact_store.as_ref());
+        let tickets: Vec<&KirObject> = graph
+            .objects
+            .iter()
+            .filter(|o| matches!(&o.kind, ObjectKind::Custom(k) if k == TICKET_KIND))
+            .collect();
+        assert_eq!(tickets.len(), 1, "UTF-8 is not a configured key");
+        let t = tickets[0];
+        assert_eq!(t.id, ticket_kir_id("IDEMPIERE-6203"));
+        assert_eq!(t.properties["commit_count"], 3);
+        assert_eq!(t.properties["title"], "Back-date costing");
+        assert_eq!(t.properties["first_commit_at"], "2024-08-05T10:00:00Z");
+        assert_eq!(t.properties["commits"][0]["sha"], "c3", "newest first");
+        assert_eq!(t.properties["bulk_commits"], 1);
+        let touches = graph
+            .relationships
+            .iter()
+            .filter(|r| matches!(&r.kind, RelationshipKind::Custom(k) if k == "Touches"))
+            .count();
+        assert_eq!(touches, 2, "the sweep's files are not linked");
     }
 
     #[tokio::test]
