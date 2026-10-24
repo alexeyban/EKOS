@@ -40,6 +40,7 @@ impl DocumentParser for HtmlParser {
             tables: Vec::new(),
             images: Vec::new(),
             sections,
+            front_matter: Default::default(),
         })
     }
 }

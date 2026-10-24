@@ -97,6 +97,7 @@ impl PdfParser {
             tables,
             images,
             sections,
+            front_matter: Default::default(),
         })
     }
 }

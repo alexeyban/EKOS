@@ -93,6 +93,7 @@ impl DocumentParser for DocxParser {
             tables,
             images,
             sections,
+            front_matter: Default::default(),
         })
     }
 }

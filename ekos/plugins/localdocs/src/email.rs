@@ -53,6 +53,7 @@ impl DocumentParser for EmailParser {
             tables: Vec::new(),
             images: Vec::new(),
             sections,
+            front_matter: Default::default(),
         })
     }
 }

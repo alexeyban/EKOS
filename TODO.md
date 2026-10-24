@@ -6802,7 +6802,12 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       for `AD_MigrationScript` (`change_not_applied`, RFC 0211)
 - [x] I.8 git ticket links — RFC 0219: `[tickets] keys` (detected from file names), `Ticket` objects from commits,
       `TicketFor` to change sets and Java code; `[observe] git-max-commits`; 4,597 tickets on 16,260 commits (devlog_291)
-- [ ] I.8 docs repository and wiki snapshot (licence check before republishing)
+- [ ] I.8 docs repository and wiki snapshot — RFC 0221 Phases 1–2 built: Markdown front matter → `Document`
+      properties (iDempiere docs: 3,016 → 2,520 sections, 499 descriptions), section `tickets` + `TicketFor`
+      (860 sections cite a ticket), `scripts/wiki-snapshot.py` (Special:Export XML or API; stops on a block).
+      Open: Phase 3 counts on the code + docs project; a real wiki export (wiki.idempiere.org answers scripts with
+      a Cloudflare challenge — needs a browser Special:Export) and its licence; neither source is licensed for
+      republishing (docs repo has no licence file)
 - [x] I.9 structured run logs — RFC 0220: pipeline commands write JSON lines (`EKOS_RUN_LOG` or `.ekos/runs/`),
       model calls counted (0 on iDempiere), warnings capped; console events route + Steps table (devlog_292)
 - [ ] RFC 0220 follow-ups: run logs for extension commands (Part II steps); the 24 non-UTF-8 historic iDempiere

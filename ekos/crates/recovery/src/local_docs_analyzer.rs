@@ -141,7 +141,22 @@ struct DocumentData {
     #[serde(default)]
     ocr_text: Option<String>,
     artifact_id: Option<String>,
+    /// RFC 0221: Markdown front matter; absent from every older artifact and other format.
+    #[serde(default)]
+    front_matter: serde_json::Map<String, serde_json::Value>,
 }
+
+/// RFC 0221: front-matter keys promoted to `Document` properties.
+const PROMOTED_TO_DOCUMENT: &[&str] = &[
+    "title",
+    "description",
+    "source_url",
+    "source_revision",
+    "revision_timestamp",
+    "licence",
+];
+/// RFC 0221: the subset also copied to every section, so a cited section shows its provenance.
+const PROMOTED_TO_SECTIONS: &[&str] = &["title", "source_url", "source_revision", "licence"];
 
 /// Deterministic id for a document object — stable across passes and
 /// `ekos recover` runs.
@@ -174,6 +189,8 @@ pub struct LocalDocAnalyzerPass {
     pass_id: String,
     /// Local-document ObservationArtifact IDs to process.
     doc_artifact_ids: Vec<ArtifactId>,
+    /// RFC 0221: `[tickets] keys` — the tickets a section names are recorded on it.
+    ticket_keys: Vec<String>,
 }
 
 impl LocalDocAnalyzerPass {
@@ -181,14 +198,21 @@ impl LocalDocAnalyzerPass {
         Self {
             pass_id: format!("local-docs-analyzer:{}", workspace_name.into()),
             doc_artifact_ids,
+            ticket_keys: Vec::new(),
         }
+    }
+
+    /// RFC 0221: record on each section the tickets of these keys its text names.
+    pub fn with_ticket_keys(mut self, keys: Vec<String>) -> Self {
+        self.ticket_keys = keys;
+        self
     }
 }
 
 type DocAttrs<'a> = [(&'a str, serde_json::Value)];
 
 /// One observed document: its `Document` object, then its tables and sections.
-fn add_document(data: &DocumentData, graph: &mut KirGraph) {
+fn add_document(data: &DocumentData, ticket_keys: &[String], graph: &mut KirGraph) {
     // RFC 0079: id hashing only — `data.path` (display name, evidence text, properties)
     // stays the bare, human-readable path everywhere below.
     let id_path = ekos_common::project::project_qualify(&data.path, data.project.as_deref());
@@ -232,6 +256,25 @@ fn add_document(data: &DocumentData, graph: &mut KirGraph) {
     if let Some(st) = &rfc.status {
         doc_attrs.push(("rfc_status", serde_json::json!(st)));
     }
+    // RFC 0221: the page's own metadata. Promoted keys never overwrite a computed attribute.
+    if !data.front_matter.is_empty() {
+        obj.properties.insert(
+            "front_matter".into(),
+            serde_json::Value::Object(data.front_matter.clone()),
+        );
+        for key in PROMOTED_TO_DOCUMENT {
+            if let Some(v) = data.front_matter.get(*key) {
+                obj.properties
+                    .entry((*key).to_string())
+                    .or_insert(v.clone());
+            }
+        }
+        for key in PROMOTED_TO_SECTIONS {
+            if let Some(v) = data.front_matter.get(*key) {
+                doc_attrs.push((*key, v.clone()));
+            }
+        }
+    }
     for (k, v) in &doc_attrs {
         obj.properties.insert((*k).into(), v.clone());
     }
@@ -255,7 +298,7 @@ fn add_document(data: &DocumentData, graph: &mut KirGraph) {
     graph.objects.push(obj);
 
     add_tables(data, &id_path, doc_id, graph);
-    add_sections(data, &id_path, doc_id, &doc_attrs, graph);
+    add_sections(data, &id_path, doc_id, &doc_attrs, ticket_keys, graph);
 }
 
 /// One `Table` per table extracted from the document, each contained in it.
@@ -304,6 +347,7 @@ fn add_sections(
     id_path: &str,
     doc_id: KirId,
     doc_attrs: &DocAttrs<'_>,
+    ticket_keys: &[String],
     graph: &mut KirGraph,
 ) {
     let mut previous_path: Option<&[String]> = None;
@@ -340,6 +384,15 @@ fn add_sections(
             sec_obj.properties.insert((*k).into(), v.clone());
         }
         add_glossary(&mut sec_obj, &data.path, section);
+        // RFC 0221: the tickets the section names; `ekos commit` links each to its `Ticket`.
+        let mut tickets = ekos_common::tickets::find(&section.text, ticket_keys);
+        tickets.sort();
+        tickets.dedup();
+        if !tickets.is_empty() {
+            sec_obj
+                .properties
+                .insert("tickets".into(), serde_json::json!(tickets));
+        }
         // RFC 0172: sentences that name one column — candidates for a documentation
         // claim `ekos migrate assess` can check against the data.
         let mentions =
@@ -448,8 +501,9 @@ impl CompilerPass for LocalDocAnalyzerPass {
 
     /// `v2` = RFC 0170: glossary sections/pages carry their entries (`glossary`).
     /// `v3` = RFC 0172: sections carry the sentences that name one column (`column_mentions`).
+    /// `v4` = RFC 0221: front matter on documents and sections; section `tickets`.
     fn version(&self) -> &str {
-        "v3"
+        "v4"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -459,6 +513,9 @@ impl CompilerPass for LocalDocAnalyzerPass {
             .map(std::string::ToString::to_string)
             .collect();
         ids.sort();
+        if !self.ticket_keys.is_empty() {
+            ids.push(format!("ticket-keys:{}", self.ticket_keys.join(",")));
+        }
         ids
     }
 
@@ -488,7 +545,7 @@ impl CompilerPass for LocalDocAnalyzerPass {
                 }
             };
 
-            add_document(&data, &mut graph);
+            add_document(&data, &self.ticket_keys, &mut graph);
         }
 
         if graph.objects.is_empty() {
@@ -825,6 +882,95 @@ mod tests {
         assert_eq!(h.number.as_deref(), Some("0001"));
         assert_eq!(h.status.as_deref(), Some("Accepted"));
         assert_eq!(parse_rfc_header("# Just a doc\n"), RfcHeader::default());
+    }
+
+    #[tokio::test]
+    async fn front_matter_is_promoted_and_sections_record_their_tickets() {
+        let (mut c, _dir) = ctx();
+        let path = "wiki/main/Sessions.md";
+        let data = serde_json::json!({
+            "path": path,
+            "doc_format": "md",
+            "excerpt": "# Sessions",
+            "sections": [
+                { "index": 0, "page": null, "heading": "Sessions", "heading_path": ["Sessions"],
+                  "text": "# Sessions\nSince IDEMPIERE-6203 and (IDEMPIERE-1); not UTF-8, ABC-12.",
+                  "line_start": 8, "line_end": 9 },
+                { "index": 1, "page": null, "text": "IDEMPIERE-1 again" }
+            ],
+            "front_matter": {
+                "title": "Sessions",
+                "source_url": "https://wiki.example.org/en/Sessions",
+                "source_revision": "4242",
+                "licence": "CC BY-SA 4.0",
+                "sidebar_position": "36"
+            }
+        });
+        let artifact = ekos_artifact::ObservationArtifact::new("localdocs", path, data);
+        c.artifact_store
+            .write(&artifact.id, &serde_json::to_value(&artifact).unwrap())
+            .unwrap();
+        let mut pass = LocalDocAnalyzerPass::new("test", vec![artifact.id])
+            .with_ticket_keys(vec!["IDEMPIERE".into()]);
+        assert!(pass.cache_inputs().last().unwrap().contains("IDEMPIERE"));
+        pass.run(&mut c).await.unwrap();
+        let ids = c.artifact_store.list().unwrap();
+        let kir = ids
+            .iter()
+            .filter_map(|id| c.artifact_store.read(id).unwrap())
+            .find(|j| j.get("kir").is_some())
+            .map(|j| serde_json::from_value::<ekos_artifact::KnowledgeArtifact>(j).unwrap())
+            .unwrap()
+            .content
+            .kir;
+
+        let doc = kir
+            .objects
+            .iter()
+            .find(|o| o.id == document_kir_id(path))
+            .unwrap();
+        assert_eq!(doc.properties["title"], "Sessions");
+        assert_eq!(doc.properties["source_revision"], "4242");
+        assert_eq!(doc.properties["front_matter"]["sidebar_position"], "36");
+        assert!(!doc.properties.contains_key("sidebar_position"));
+        let first = kir
+            .objects
+            .iter()
+            .find(|o| o.id == section_kir_id(path, 0))
+            .unwrap();
+        assert_eq!(
+            first.properties["source_url"],
+            "https://wiki.example.org/en/Sessions"
+        );
+        assert_eq!(first.properties["licence"], "CC BY-SA 4.0");
+        assert!(!first.properties.contains_key("description"));
+        assert_eq!(
+            first.properties["tickets"],
+            serde_json::json!(["IDEMPIERE-1", "IDEMPIERE-6203"])
+        );
+        let second = kir
+            .objects
+            .iter()
+            .find(|o| o.id == section_kir_id(path, 1))
+            .unwrap();
+        assert_eq!(
+            second.properties["tickets"],
+            serde_json::json!(["IDEMPIERE-1"])
+        );
+    }
+
+    #[tokio::test]
+    async fn without_ticket_keys_no_section_records_tickets() {
+        let (c, _dir) = ctx();
+        let sections = serde_json::json!([{ "index": 0, "page": null, "text": "IDEMPIERE-6203" }]);
+        let id = seed_doc_with_sections(&c, "a.md", "md", "", serde_json::json!([]), sections);
+        let graph = run_pass(vec![id], c).await;
+        assert!(
+            graph
+                .objects
+                .iter()
+                .all(|o| !o.properties.contains_key("tickets"))
+        );
     }
 
     #[tokio::test]

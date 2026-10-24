@@ -37,7 +37,9 @@ use sha2::{Digest, Sha256};
 ///   longer claims in-memory `System.Data` / `System.IO.Path` calls.
 /// - **v4** (RFC 0200, 2026-10-18): redaction drops Kettle `Encrypted <hex>` passwords and the
 ///   text of XML password elements, which `.ktr`/`.kjb` artifacts used to carry.
-pub const PIPELINE_LOGIC_VERSION: u32 = 4;
+/// - **v5** (RFC 0221, 2026-10-24): `ekos-plugin-localdocs` lifts Markdown front matter out of the
+///   text into a `front_matter` field.
+pub const PIPELINE_LOGIC_VERSION: u32 = 5;
 
 /// SHA-256 content hash used to address artifacts and ledger entries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

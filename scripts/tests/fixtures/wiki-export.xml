@@ -1,0 +1,49 @@
+<mediawiki xmlns="http://www.mediawiki.org/xml/export-0.11/" version="0.11" xml:lang="en">
+  <siteinfo>
+    <sitename>Example Wiki</sitename>
+    <base>https://wiki.example.org/en/Main_Page</base>
+    <namespaces>
+      <namespace key="0" case="first-letter" />
+      <namespace key="14" case="first-letter">Category</namespace>
+    </namespaces>
+  </siteinfo>
+  <page>
+    <title>Sales Order Process</title>
+    <ns>0</ns>
+    <id>10</id>
+    <revision>
+      <id>100</id>
+      <timestamp>2020-01-01T00:00:00Z</timestamp>
+      <text xml:space="preserve">old text</text>
+    </revision>
+    <revision>
+      <id>4242</id>
+      <timestamp>2024-05-06T07:08:09Z</timestamp>
+      <text xml:space="preserve">== Completing ==
+Completing an order writes '''C_Order.DocStatus''' (see [[IDEMPIERE-6203]]).
+* reserves stock
+* creates a shipment</text>
+    </revision>
+  </page>
+  <page>
+    <title>SO</title>
+    <ns>0</ns>
+    <id>11</id>
+    <redirect title="Sales Order Process" />
+    <revision>
+      <id>101</id>
+      <timestamp>2020-01-01T00:00:00Z</timestamp>
+      <text xml:space="preserve">#REDIRECT [[Sales Order Process]]</text>
+    </revision>
+  </page>
+  <page>
+    <title>Category:Workflows/Order</title>
+    <ns>14</ns>
+    <id>12</id>
+    <revision>
+      <id>102</id>
+      <timestamp>2021-02-03T04:05:06Z</timestamp>
+      <text xml:space="preserve">Pages about order workflows.</text>
+    </revision>
+  </page>
+</mediawiki>

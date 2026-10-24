@@ -1,7 +1,7 @@
 //! RFC 0219 §3.3 — link each `Ticket` to the objects that cite it.
 //!
-//! RFC 0210's `SchemaChangeSet`s and RFC 0209's `JavaType` / `JavaMethod` anchors record the
-//! tickets they name in a `tickets` property; the git analyzer makes one `Ticket` per ticket its
+//! RFC 0210's `SchemaChangeSet`s, RFC 0209's `JavaType` / `JavaMethod` anchors and RFC 0221's
+//! document `Section`s record the tickets they name in a `tickets` property; the git analyzer makes one `Ticket` per ticket its
 //! commits name. A `TicketFor` edge joins them, by exact key, only when the ticket exists — so a
 //! question about a schema change reaches the commits, dates and subject that explain it.
 
@@ -10,7 +10,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
 /// The kinds whose `tickets` property is linked.
-const CITING_KINDS: &[&str] = &["SchemaChangeSet", "JavaType", "JavaMethod"];
+const CITING_KINDS: &[&str] = &["SchemaChangeSet", "JavaType", "JavaMethod", "Section"];
 
 /// Links made, by the citing object's kind.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
@@ -84,12 +84,14 @@ mod tests {
             ticket.clone(),
             obj("set", "SchemaChangeSet", json!(["IDEMPIERE-6203"])),
             obj("m", "JavaMethod", json!(["IDEMPIERE-6203", "IDEMPIERE-1"])),
+            obj("doc", "Section", json!(["IDEMPIERE-6203"])),
             obj("c", "SchemaChange", json!(["IDEMPIERE-6203"])),
         ];
         let (rels, stats) = link(&objects);
-        assert_eq!(rels.len(), 2, "a SchemaChange is reached through its set");
+        assert_eq!(rels.len(), 3, "a SchemaChange is reached through its set");
         assert!(rels.iter().all(|r| r.from == ticket.id));
         assert_eq!(stats.links["SchemaChangeSet"], 1);
+        assert_eq!(stats.links["Section"], 1);
         assert_eq!(stats.cited_without_commits, 1);
     }
 }

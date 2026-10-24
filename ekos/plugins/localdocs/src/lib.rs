@@ -16,6 +16,7 @@ use walkdir::WalkDir;
 
 mod docx;
 mod email;
+mod front_matter;
 mod html;
 mod ocr;
 mod pdf;
@@ -81,6 +82,9 @@ pub struct ParsedDocument {
     pub tables: Vec<ExtractedTable>,
     pub images: Vec<EmbeddedImage>,
     pub sections: Vec<DocumentSection>,
+    /// RFC 0221: a Markdown file's front matter, top-level scalar and list-of-scalar keys only.
+    /// Empty for every other format.
+    pub front_matter: std::collections::BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Error)]
@@ -282,6 +286,35 @@ fn tables_json(tables: &[ExtractedTable], sanitized_count: &mut usize) -> Vec<se
         .collect()
 }
 
+/// RFC 0221: front matter as JSON, every string sanitized like section text.
+fn front_matter_json(
+    fields: &std::collections::BTreeMap<String, serde_json::Value>,
+    sanitized_count: &mut usize,
+) -> serde_json::Value {
+    let mut clean = |s: &str| {
+        let c = sanitize_text(s);
+        *sanitized_count += c.removed;
+        serde_json::Value::String(c.text)
+    };
+    let map: serde_json::Map<String, serde_json::Value> = fields
+        .iter()
+        .map(|(k, v)| {
+            let v = match v {
+                serde_json::Value::String(s) => clean(s),
+                serde_json::Value::Array(items) => serde_json::Value::Array(
+                    items
+                        .iter()
+                        .map(|i| clean(i.as_str().unwrap_or_default()))
+                        .collect(),
+                ),
+                other => other.clone(),
+            };
+            (k.clone(), v)
+        })
+        .collect();
+    serde_json::Value::Object(map)
+}
+
 /// A document's sections as JSON, capped and sanitized.
 fn sections_json(
     sections: &[DocumentSection],
@@ -431,6 +464,11 @@ impl Observer for LocalDocsObserver {
             if !ocr_text.is_empty() {
                 data["ocr_text"] = serde_json::Value::String(ocr_text);
             }
+            // RFC 0221: only when present, so other documents' artifacts stay byte-identical.
+            if !parsed.front_matter.is_empty() {
+                data["front_matter"] =
+                    front_matter_json(&parsed.front_matter, &mut sanitized_count);
+            }
             if sanitized_count > 0 {
                 data["sanitized_chars_removed"] = serde_json::json!(sanitized_count);
             }
@@ -547,6 +585,7 @@ mod tests {
                 tables: vec![],
                 images: vec![],
                 sections: vec![],
+                front_matter: Default::default(),
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -594,6 +633,7 @@ mod tests {
                 }],
                 images: vec![],
                 sections: vec![],
+                front_matter: Default::default(),
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -623,6 +663,7 @@ mod tests {
                     format: ImageFormat::Jpeg,
                 }],
                 sections: vec![],
+                front_matter: Default::default(),
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -652,6 +693,7 @@ mod tests {
                     format: ImageFormat::Jpeg,
                 }],
                 sections: vec![],
+                front_matter: Default::default(),
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(UnavailableOcr);
@@ -690,6 +732,7 @@ mod tests {
                 tables: vec![],
                 images: vec![],
                 sections: vec![],
+                front_matter: Default::default(),
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -732,6 +775,7 @@ mod tests {
                     format: ImageFormat::Jpeg,
                 }],
                 sections: vec![],
+                front_matter: Default::default(),
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -768,6 +812,7 @@ mod tests {
                     format: ImageFormat::Jpeg,
                 }],
                 sections: vec![],
+                front_matter: Default::default(),
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -799,6 +844,7 @@ mod tests {
                 tables: vec![],
                 images: vec![],
                 sections: vec![],
+                front_matter: Default::default(),
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -836,6 +882,7 @@ mod tests {
                 tables: vec![],
                 images: vec![],
                 sections,
+                front_matter: Default::default(),
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -867,6 +914,7 @@ mod tests {
                     text: "page three content".into(),
                     ..Default::default()
                 }],
+                front_matter: Default::default(),
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {
@@ -899,6 +947,7 @@ mod tests {
                     text: long_text,
                     ..Default::default()
                 }],
+                front_matter: Default::default(),
             },
         });
         let ocr: Arc<dyn OcrEngine> = Arc::new(RecordingMockOcr {

@@ -1278,7 +1278,8 @@ fn register_localdocs(
             .to_string_lossy()
             .as_ref(),
         localdocs_artifact_ids,
-    );
+    )
+    .with_ticket_keys(config.tickets.keys.clone());
 
     // ── LLM document-semantics extraction (RFC 0026) ─────────────────
     // Opt-in: one LLM call per document section, so it stays off unless

@@ -7,7 +7,7 @@
 
 use crate::{
     DocumentParser, DocumentSection, ParseError, ParsedDocument, SECTION_TEXT_MAX_CHARS,
-    SECTIONS_MAX, TEXT_CHUNK_CHAR_BUDGET,
+    SECTIONS_MAX, TEXT_CHUNK_CHAR_BUDGET, front_matter,
 };
 
 pub struct TextParser {
@@ -29,18 +29,35 @@ impl DocumentParser for TextParser {
     /// invalid bytes become replacement characters rather than a parse
     /// failure that would silently drop the whole file.
     fn parse(&self, bytes: &[u8]) -> Result<ParsedDocument, ParseError> {
-        let text = String::from_utf8_lossy(bytes).into_owned();
-        let sections = if self.extension.eq_ignore_ascii_case("md") {
+        let mut text = String::from_utf8_lossy(bytes).into_owned();
+        let markdown = self.extension.eq_ignore_ascii_case("md");
+        // RFC 0221: front matter is metadata, not a section. Its lines are blanked rather than
+        // removed, so every section keeps its real line numbers.
+        let front_matter = markdown.then(|| front_matter::split(&text)).flatten();
+        if let Some(fm) = &front_matter {
+            let blanked: String = text
+                .lines()
+                .enumerate()
+                .map(|(i, l)| if i < fm.lines { "" } else { l })
+                .collect::<Vec<_>>()
+                .join("\n");
+            text = blanked;
+        }
+        let sections = if markdown {
             chunk_markdown(&text, TEXT_CHUNK_CHAR_BUDGET)
         } else {
             chunk_text(&text, TEXT_CHUNK_CHAR_BUDGET)
         };
+        if front_matter.is_some() {
+            text = text.trim_start_matches('\n').to_string();
+        }
         Ok(ParsedDocument {
             page_count: None,
             text,
             tables: Vec::new(),
             images: Vec::new(),
             sections,
+            front_matter: front_matter.map(|fm| fm.fields).unwrap_or_default(),
         })
     }
 }
@@ -445,6 +462,22 @@ mod tests {
                 .all(|s| s.text.chars().count() <= TEXT_CHUNK_CHAR_BUDGET)
         );
         assert_eq!(motivation.last().unwrap().line_end, Some(402));
+    }
+
+    #[test]
+    fn front_matter_becomes_fields_and_no_section_while_line_numbers_hold() {
+        let md = "---\ntitle: Sessions\ntags: [technical]\n---\n# Sessions\nbody\n";
+        let doc = TextParser::new("md").parse(md.as_bytes()).unwrap();
+        assert_eq!(doc.front_matter["title"], serde_json::json!("Sessions"));
+        assert_eq!(doc.sections.len(), 1);
+        assert_eq!(doc.sections[0].heading.as_deref(), Some("Sessions"));
+        assert_eq!(doc.sections[0].line_start, Some(5));
+        assert_eq!(doc.sections[0].index, 0);
+        assert!(doc.text.starts_with("# Sessions"), "{:?}", doc.text);
+        // Not Markdown: the same bytes are plain text, front matter included.
+        let txt = TextParser::new("txt").parse(md.as_bytes()).unwrap();
+        assert!(txt.front_matter.is_empty());
+        assert!(txt.text.starts_with("---"));
     }
 
     #[test]

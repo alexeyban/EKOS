@@ -10,7 +10,7 @@ Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered fi
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
-`ekos/docs/rfcs/` has `0025`+ (highest: `0220`; 0213–0218 are reserved by the Oracle/iDempiere plan for Parts II–V). **Check both directories for the highest existing number before
+`ekos/docs/rfcs/` has `0025`+ (highest: `0221`; 0213–0218 are reserved by the Oracle/iDempiere plan for Parts II–V). **Check both directories for the highest existing number before
 picking one for a new RFC** — two RFCs have already collided on the same number once (0027) from
 sessions that only checked one location.
 
