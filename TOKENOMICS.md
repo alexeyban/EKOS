@@ -106,7 +106,7 @@ reward budget is not counted: it is paid out to stakers. Neither is the burn wal
 - **Community Rewards, 5M → 2M → 1.5M:** 3M moved to fund the staking pool's reward budget, and a
   further 500,000 on 2026-10-23 ([deposit](https://solscan.io/tx/5Q7CiYwMwZ99Mn2WNAFK78Ltz1TaUYCBSpNk6NhpdbexNdYg4k6bJbRgtNeU7qq5Zs2CMWe8ZYzrAcxZouqjnUGq)).
 - **Founder Personal Wallet, 3.55M → 2.55M → ~2.99M:** 1M staked by the founder in the staking
-  pool; on 2026-10-23/24, +935,279 EKOS added (212,521 + 349,576 + 373,182) and 500,000 sent to the
+  pool; on 2026-10-23/24, +935,279 EKOS bought on the open market (212,521 + 349,576 + 373,182) and 500,000 sent to the
   burn wallet and burned.
 - **Bounty Fund:** bounty #1 (3.6M EKOS) was paid in full to 9 winners. The current 2.5M is
   bounty #2, funded from the founder's personal wallet; it expired and its refund returns to the
