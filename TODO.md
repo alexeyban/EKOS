@@ -6805,7 +6805,8 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [ ] I.8 docs repository and wiki snapshot — RFC 0221 Phases 1–2 built: Markdown front matter → `Document`
       properties (iDempiere docs: 3,016 → 2,520 sections, 499 descriptions), section `tickets` + `TicketFor`
       (860 sections cite a ticket), `scripts/wiki-snapshot.py` (Special:Export XML or API; stops on a block).
-      Open: Phase 3 counts on the code + docs project; a real wiki export (wiki.idempiere.org answers scripts with
+      Phase 3 (code + docs project): 1,743 sections linked to tickets; schema → ticket → docs page chains (devlog_293).
+      Open: a real wiki export (wiki.idempiere.org answers scripts with
       a Cloudflare challenge — needs a browser Special:Export) and its licence; neither source is licensed for
       republishing (docs repo has no licence file)
 - [x] I.9 structured run logs — RFC 0220: pipeline commands write JSON lines (`EKOS_RUN_LOG` or `.ekos/runs/`),

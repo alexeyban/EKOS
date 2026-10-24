@@ -129,4 +129,15 @@ skipped, identical output on a re-run; a 403 stops API mode after one request. N
 wiki: wiki.idempiere.org answers every scripted request with a Cloudflare challenge, so a snapshot needs a
 `Special:Export` file saved in a browser.
 
-**Phase 3.** Not yet measured.
+**Phase 3.** A fresh project with two `[[sources]]` — `idempiere` (code, git) and `docs` (the docs repository,
+git) — and the live Oracle database, every stage uncached: 16,589 commits read (16,260 + 329), 655 local documents,
+4,606 tickets. `TicketFor` links: **1,743 Section**, 3,074 SchemaChangeSet, 154 JavaType, 272 JavaMethod; 55 cited
+tickets are named by no commit. Model calls 0 in all five commands. Time: build 407 s, recover 246 s, resolve 7 s,
+compile 20 s, commit 2,220 s (a first commit writes all 144,073 objects and 218,350 relationships; steady state was
+367 s on the single-source project).
+
+A question answered from docs and code together: `C_Country.ISOCountryCodeAlpha3` → change set
+`202412261358_IDEMPIERE-6349` → `Ticket IDEMPIERE-6349` (one commit, 2024-12-27) → the docs sections
+`docs/new-features/v12/new-fields-in-country.md § New Fields in Country` and the v12 changelog's 2024-12-27 entry.
+
+The wiki source is not in this run (no export yet).

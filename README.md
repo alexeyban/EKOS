@@ -873,6 +873,26 @@ a steps table on the run page. On iDempiere every command logged zero model call
 {"stage":"run","msg":"finished","ok":true,"ms":19987,"warnings":0,"cmd":"build","t_ms":19987}
 ```
 
+### Documentation repositories and wiki snapshots (RFC 0221)
+
+A documentation site kept as Markdown (Docusaurus, MkDocs, a `docs/` folder) is a source like code: add it to a
+project's `[[sources]]`. Front matter becomes the document's properties (`title`, `description`, and for a wiki
+snapshot `source_url`, `source_revision`, `licence`) instead of the text of a section, and each section records the
+tickets it names, so `ekos commit` links a ticket to the docs pages that describe it as well as to the commits,
+migrations and code. On iDempiere (code + docs repository): 1,743 docs sections linked to tickets, e.g.
+`C_Country.ISOCountryCodeAlpha3` → change set `202412261358_IDEMPIERE-6349` → `IDEMPIERE-6349` → the page "New
+Fields in Country".
+
+`scripts/wiki-snapshot.py` turns MediaWiki pages into such a directory — from a `Special:Export` file saved in a
+browser, or from the API (one request a second; it stops at a 403 or a bot challenge rather than working around
+it). Each page keeps its URL, revision id and licence. Snapshots are for analysis; check the licence before
+republishing anything derived from them.
+
+```bash
+scripts/wiki-snapshot.py --xml export.xml --out ~/wiki-snapshot --licence "CC BY-SA 4.0"
+ekos source add wiki --path ~/wiki-snapshot
+```
+
 ### PL/pgSQL stored procedures (RFC 0163)
 
 A stored procedure is also *imperative* — ordered statements, branches, loops, exception handlers —
