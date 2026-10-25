@@ -816,6 +816,12 @@ ekos conflicts list --type model_column_missing
 
 The testbed is `docker-compose.oracle.yml` + `deploy/fixtures/idempiere-oracle.sh`.
 
+
+`ekos database add|list|test|remove` (RFC 0223) manage `[[databases]]` without editing `ekos.toml`; `ekos database
+test <name>` connects read-only, checks a write is refused, and puts the census (tables, views, routines, triggers) next
+to what was compiled. In the web console, a project's **Sources** tab does the same: add directories and databases (the
+password goes to the server's keychain, never to `ekos.toml`), test, and analyse with Init & compile. On iDempiere,
+from an empty project in a browser: census and compiled counts equal for every kind.
 ### Write behaviour: how each table is updated and deleted (RFC 0212)
 
 Before copying a table incrementally you need to know whether every change moves its timestamp

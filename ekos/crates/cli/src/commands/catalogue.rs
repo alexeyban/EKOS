@@ -50,6 +50,11 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("source add", Class::Write, false),
     ("source list", Class::Read, false),
     ("source remove", Class::Admin, false),
+    ("database add", Class::Write, false),
+    ("database list", Class::Read, false),
+    // Connects to the live database.
+    ("database test", Class::External, false),
+    ("database remove", Class::Admin, false),
     ("build", Class::Write, false),
     ("recover", Class::Write, true),
     ("resolve", Class::Write, false),

@@ -143,6 +143,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: SourceCommands,
     },
+    /// Live databases whose catalog `ekos build` reads: add, list, test, remove (RFC 0211/0223)
+    Database {
+        #[command(subcommand)]
+        subcommand: DatabaseCommands,
+    },
     /// Run observation passes and write knowledge to the ledger
     Build {
         /// Re-observe one named source only; the others keep what the last build recorded
@@ -1018,6 +1023,47 @@ enum SourceCommands {
         json: bool,
     },
     /// Remove a source from the project's config. Compiled objects and the directory stay
+    Remove { name: String },
+}
+
+#[derive(Subcommand)]
+enum DatabaseCommands {
+    /// Add an Oracle database; its password stays in an environment variable named here
+    Add {
+        /// Database name: lowercase letters, digits, `-` and `_`
+        name: String,
+        /// Easy Connect string: host:port/service
+        #[arg(long)]
+        connect: String,
+        /// A read-only user (EKOS refuses nothing else, but reports a user that can write)
+        #[arg(long)]
+        user: String,
+        /// The NAME of the environment variable holding the password, never the password
+        #[arg(long, value_name = "VAR")]
+        password_env: String,
+        /// A schema (owner) to read; repeat for several
+        #[arg(long = "owner", required = true)]
+        owners: Vec<String>,
+        /// What `ekos build` may measure: p0 (statistics), p1 (row counts), p2 (one scan per table)
+        #[arg(long)]
+        profile: Option<String>,
+        /// Also read an application dictionary's table flags: idempiere
+        #[arg(long)]
+        dictionary: Option<String>,
+    },
+    /// The project's databases (never a password; whether its variable is set)
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Connect read-only, read the catalog, check writes are refused, and compare the census with
+    /// what was compiled
+    Test {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a database from the project's config. Compiled objects stay
     Remove { name: String },
 }
 
@@ -2048,6 +2094,34 @@ where
         }
         Commands::Source { subcommand } => {
             dispatch_source(subcommand, &config, &cwd, &config_path, &invoked_from)
+        }
+        Commands::Database { subcommand } => {
+            use crate::commands::database;
+            match subcommand {
+                DatabaseCommands::Add {
+                    name,
+                    connect,
+                    user,
+                    password_env,
+                    owners,
+                    profile,
+                    dictionary,
+                } => database::add(
+                    &config_path,
+                    database::AddArgs {
+                        name,
+                        connect,
+                        user,
+                        password_env,
+                        owners,
+                        profile,
+                        dictionary,
+                    },
+                ),
+                DatabaseCommands::List { json } => database::list(&config, json),
+                DatabaseCommands::Test { name, json } => database::test(&config, &cwd, &name, json),
+                DatabaseCommands::Remove { name } => database::remove(&config_path, &name),
+            }
         }
         Commands::Recover { parallel } => {
             crate::commands::recover::run_with(&config, &cwd, parallel, &extensions).await

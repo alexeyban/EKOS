@@ -42,6 +42,9 @@ _ALLOWED: dict[tuple[str, ...], frozenset[str]] = {
     # RFC 0213 review and the workflow bar — read only.
     ("review", "list", "--json"): frozenset(),
     ("workflow", "status", "--json"): frozenset(),
+    # RFC 0223 a project's sources and databases (names and variable names only).
+    ("source", "list", "--json"): frozenset(),
+    ("database", "list", "--json"): frozenset(),
 }
 
 # RFC 0213: `review show <subject> --json [--undecided] [--limit <n>]` — the subject is one of a

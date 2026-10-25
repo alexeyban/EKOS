@@ -54,6 +54,9 @@ class Tenant(SQLModel, table=True):
     # and whether they receive them at all. Names only; a value is never stored.
     model_env: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     allow_metered: bool = False
+    # RFC 0223: names of the variables holding source credentials (a database password). Unlike
+    # `model_env`, always in the tenant's environment: reading a source is not a metered call.
+    source_env: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -225,7 +228,14 @@ def _migration_3(conn) -> None:
         conn.execute(text("ALTER TABLE tenant ADD COLUMN allow_metered BOOLEAN NOT NULL DEFAULT 0"))
 
 
-MIGRATIONS = [_migration_1, _migration_2, _migration_3]
+def _migration_4(conn) -> None:
+    """RFC 0223: per-tenant source credentials by variable name."""
+    columns = {c["name"] for c in inspect(conn).get_columns("tenant")}
+    if "source_env" not in columns:
+        conn.execute(text("ALTER TABLE tenant ADD COLUMN source_env JSON"))
+
+
+MIGRATIONS = [_migration_1, _migration_2, _migration_3, _migration_4]
 
 
 def _migrate(engine) -> None:

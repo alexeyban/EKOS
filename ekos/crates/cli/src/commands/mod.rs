@@ -13,6 +13,7 @@ pub mod config;
 pub mod conflicts;
 pub mod console;
 pub mod coverage;
+pub mod database;
 pub mod dbt;
 pub mod diagnostics_log;
 pub mod diff;

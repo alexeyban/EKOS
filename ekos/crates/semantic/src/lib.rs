@@ -675,8 +675,11 @@ impl CompilerPass for SemanticCompilerPass {
     ///
     /// `v2` = RFC 0140: `EvidenceRecord` gained `line`, so a CKM compiled by `v1` carries no line
     /// on any evidence record and must be recompiled rather than reused.
+    ///
+    /// `v3-identity3` = RFC 0224: the identity resolver this pass runs proposes different
+    /// candidates; the suffix is `ekos_identity::SCORING_VERSION`.
     fn version(&self) -> &str {
-        "v2"
+        "v3-identity3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -860,6 +863,16 @@ impl CompilerPass for SemanticCompilerPass {
 
 #[cfg(test)]
 mod tests {
+    /// The pass runs the identity resolver, and its cache is keyed by input and this version only.
+    #[test]
+    fn the_pass_version_carries_the_identity_scoring_version() {
+        let v = SemanticCompilerPass::new("ckm").version().to_string();
+        assert!(
+            v.ends_with(&format!("-identity{}", ekos_identity::SCORING_VERSION)),
+            "bump SemanticCompilerPass::version with ekos_identity::SCORING_VERSION: {v}"
+        );
+    }
+
     use super::*;
     use ekos_kir::{
         KirEvidence, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,

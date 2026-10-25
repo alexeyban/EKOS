@@ -100,6 +100,90 @@ pub fn normalize(name: &str) -> String {
         .to_string()
 }
 
+/// RFC 0224: a name's words — split on anything that is not a letter or digit and at camelCase
+/// boundaries, lower-cased. `HR_ListType` → `hr list type`, `@docusaurus/core` → `docusaurus core`.
+pub fn tokens(name: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut prev_lower = false;
+    for c in name.chars() {
+        if !c.is_alphanumeric() {
+            if !cur.is_empty() {
+                out.push(std::mem::take(&mut cur));
+            }
+            prev_lower = false;
+            continue;
+        }
+        if c.is_uppercase() && prev_lower && !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+        }
+        prev_lower = c.is_lowercase() || c.is_ascii_digit();
+        cur.extend(c.to_lowercase());
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// RFC 0224: whether two names can name the same thing word for word. Names that differ by a
+/// whole word are a parent and its child or two siblings — `ASP_PROCESS` / `ASP_PROCESS_PARA`,
+/// `HR_ListType` / `HR_ListLine`, `react` / `react-dom`, `@docusaurus/core` / `@docusaurus/utils` —
+/// however much of the spelling they share. Compatible: the same words; the same letters split
+/// differently (`anozimada` / `Anozi Mada`); or words that differ only as spelling variants of one
+/// another (`customer` / `customers`, `cust` / `customer`).
+pub fn token_compatible(a: &str, b: &str) -> bool {
+    let ta = significant(tokens(a));
+    let tb = significant(tokens(b));
+    if ta.concat() == tb.concat() {
+        return true;
+    }
+    let mut only_b = tb.clone();
+    let mut only_a = Vec::new();
+    for t in ta {
+        match only_b.iter().position(|x| *x == t) {
+            Some(i) => {
+                only_b.remove(i);
+            }
+            None => only_a.push(t),
+        }
+    }
+    if only_a.len() != only_b.len() {
+        return false;
+    }
+    // Pair each remaining word with a close variant, best first.
+    for t in only_a {
+        let best = only_b
+            .iter()
+            .enumerate()
+            .map(|(i, x)| (i, jaro_winkler(&t, x)))
+            .max_by(|x, y| x.1.total_cmp(&y.1));
+        match best {
+            Some((i, score)) if score >= TOKEN_VARIANT => {
+                only_b.remove(i);
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// Without the words [`normalize`] also drops: `customer_table` is `customer`.
+fn significant(mut t: Vec<String>) -> Vec<String> {
+    const AFFIXES: [&str; 4] = ["table", "tbl", "dim", "fact"];
+    if t.len() > 1 && AFFIXES.contains(&t[t.len() - 1].as_str()) {
+        t.pop();
+    }
+    if t.len() > 1 && AFFIXES.contains(&t[0].as_str()) {
+        t.remove(0);
+    }
+    t
+}
+
+/// The Jaro-Winkler score above which two words are spelling variants of each other
+/// (`customer`/`customers` 0.98, `cust`/`customer` 0.90; `input`/`output` 0.73, `type`/`line` 0.5).
+pub const TOKEN_VARIANT: f32 = 0.9;
+
 /// Jaro similarity between two strings (0.0 = no similarity, 1.0 = identical).
 pub fn jaro(s1: &str, s2: &str) -> f32 {
     if s1 == s2 {
@@ -197,6 +281,35 @@ mod tests {
     fn jaro_winkler_dissimilar() {
         let score = jaro_winkler("orders", "products");
         assert!(score < 0.85, "expected <0.85, got {score}");
+    }
+
+    #[test]
+    fn names_that_differ_by_a_whole_word_are_not_compatible() {
+        for (a, b) in [
+            ("ASP_PROCESS", "ASP_PROCESS_PARA"),
+            ("HR_ListType", "HR_ListLine"),
+            ("HR_ListType", "HR_List"),
+            ("react", "react-dom"),
+            ("@docusaurus/core", "@docusaurus/utils"),
+            ("docusaurus-lunr-search", "docusaurus-plugin-llms"),
+            ("WS_WebServiceFieldInput", "WS_WebServiceFieldOutput"),
+            ("PP_Order_Node_Trl", "PP_Order_BOM_Trl"),
+            ("Build Private Images GHCR", "Build Public Images GHCR"),
+        ] {
+            assert!(!token_compatible(a, b), "{a} / {b}");
+        }
+        for (a, b) in [
+            ("anozimada", "Anozi Mada"),
+            ("customer", "customers"),
+            ("C_BPartner", "c_bpartner"),
+            ("cust_mstr", "customer_master"),
+            ("orders", "Orders"),
+            ("customer_table", "customer"),
+        ] {
+            assert!(token_compatible(a, b), "{a} / {b}");
+        }
+        assert_eq!(tokens("HR_ListType"), ["hr", "list", "type"]);
+        assert_eq!(tokens("@docusaurus/core"), ["docusaurus", "core"]);
     }
 
     #[test]

@@ -275,3 +275,18 @@ def test_a_windows_process_gets_what_it_needs_to_start() -> None:
     }
     env = envs.for_tenant(None, environ=environ)
     assert env == {k: v for k, v in environ.items() if k != "OPENAI_API_KEY"}
+
+
+def test_a_source_credential_is_granted_with_metered_calls_off(memory_keyring) -> None:
+    """RFC 0223: a database password is not a metered call."""
+    from app import keychain
+
+    models.update_tenant("globex", source_env=["EKOS_DB_GLOBEX_SHOP_ERP"])
+    keychain.put_env("EKOS_DB_GLOBEX_SHOP_ERP", "pw")
+    for production in (False, True):
+        env = env_of("globex", production=production)
+        assert env["EKOS_DB_GLOBEX_SHOP_ERP"] == "pw", production
+        assert "GLOBEX_OPENAI_KEY" not in env
+    # Another tenant never gets it.
+    assert "EKOS_DB_GLOBEX_SHOP_ERP" not in env_of("acme")
+    assert "EKOS_DB_GLOBEX_SHOP_ERP" not in env_of("default")

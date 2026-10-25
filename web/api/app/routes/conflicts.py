@@ -42,7 +42,10 @@ async def conflicts(
     if type:
         argv += ["--type", type]
     try:
-        return await readproc.read_json(settings.ekos_bin, ws.path, argv, max_output=_BIG)
+        # Reads the whole ledger: on a large project (iDempiere) longer than the default limit.
+        return await readproc.read_json(
+            settings.ekos_bin, ws.path, argv, max_output=_BIG, time_limit=300.0
+        )
     except readproc.ReadProcError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

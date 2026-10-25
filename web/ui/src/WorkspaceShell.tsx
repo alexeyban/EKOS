@@ -42,6 +42,7 @@ export const extensionTabs = (pages?: { extension: string; id: string; title: st
 
 const TABS: { to: string; label: string; end?: boolean }[] = [
   { to: "", label: "Dashboard", end: true },
+  { to: "sources", label: "Sources" },
   { to: "graph", label: "Graph" },
   { to: "chat", label: "Chat" },
   { to: "run", label: "Run" },

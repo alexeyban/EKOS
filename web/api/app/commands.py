@@ -117,16 +117,19 @@ COMMAND_ALLOWLIST: list[Command] = [
         "init-and-compile",
         (),
         is_write=True,
-        stages=("init", *_PIPELINE_STAGES, "coverage"),
+        # RFC 0213/0223: `workflow` last — it computes the review once and caches it, so the step
+        # bar and the Review page open fast after an analysis.
+        stages=("init", *_PIPELINE_STAGES, "coverage", "workflow"),
         stage_args={
             "init": ("init", "--detect"),
+            "workflow": ("workflow", "status", "--json"),
             # Identity conflicts are listed in the log and stay open for review; they do not
             # stop the one-button run.
             "resolve": ("resolve", "--force"),
             "commit": ("commit", "--yes"),
         },
         summary="Make the project queryable: init → build → recover → resolve (conflicts "
-        "reported) → compile → commit → coverage",
+        "reported) → compile → commit → coverage → workflow (the review, cached)",
     ),
     Command("clean", ("clean",), is_write=True, summary="Clear the artifact cache"),
     Command("ledger-repair", ("ledger", "repair"), is_write=True, summary="Verify sealed segments"),

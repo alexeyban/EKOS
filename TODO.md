@@ -6832,10 +6832,14 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       4–7 and with `require-signoff = true` refuses `generate`/`sync`/`gold draft` (devlog_296, lakehouse devlog_13)
 - [x] RFC 0213 Phase 3 — console step bar + Review page (decisions, typed sign-off, digest), `ekos review identity`,
       full item cache refreshed by every review write; browser walk-through on iDempiere 18/18 (devlog_297)
-- [ ] RFC 0213 follow-ups: 195 open conflicts and 25 identity candidates still block a full iDempiere sign-off (a
-      person's work; many identity candidates are name-prefix pairs like `@docusaurus/core = @docusaurus/utils` —
-      worth a look at the fuzzy candidate rule); the first review read after a compile takes ~25 s (warm the cache at
-      commit?); add the Review page to `deploy/e2e/s8_browser.py`
+- [x] RFC 0223 — `ekos database add|list|test|remove`, console Sources tab, source credentials in the keychain
+      (`Tenant.source_env`, independent of metered calls), `LD_LIBRARY_PATH`/`TNS_ADMIN`/`ORACLE_HOME` in the base
+      environment; browser run from an empty project: census = compiled for every kind (devlog_299)
+- [x] RFC 0224 — identity candidates must agree word for word; `identity/current.json`; iDempiere 25 → 1 (devlog_299)
+- [x] Console: Init & compile ends with `workflow status` (review cached); Conflicts list 300 s limit; Review table
+      no longer overflows
+- [ ] RFC 0213 follow-ups: 195 open conflicts still block a full iDempiere sign-off (a person's work); add the Review and
+      Sources pages to `deploy/e2e/s8_browser.py`
 - [x] RFC 0214 Phase 1 — `ekos docs generate --layout estate`: 1,060 iDempiere pages (areas, tables, glossary,
       DocAction index, routines, history, findings) from the ledger, scope from the review, no values, licence gate;
       GitHub wiki dry run 1,061 files / 0 broken links (devlog_298)

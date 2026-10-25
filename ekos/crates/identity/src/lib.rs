@@ -31,6 +31,12 @@ pub struct SimilarityScore {
     pub combined: f32,
 }
 
+/// Bump when `DefaultResolver`'s scoring changes what it proposes. `ekos compile`'s semantic pass
+/// runs the resolver and caches its output by input only, so its version string carries this
+/// number (a test there checks it): otherwise a scoring change is served from the cache.
+/// `2` = RFC 0224 (word-level candidates); `3` = equal columns no longer outweigh the words.
+pub const SCORING_VERSION: u32 = 3;
+
 /// A proposed merge of two or more `KirObject`s into one canonical identity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MergeProposal {
@@ -202,10 +208,27 @@ impl DefaultResolver {
     }
 
     fn score(&self, a: &KirObject, b: &KirObject) -> SimilarityScore {
-        let na = similarity::normalize(name_for_similarity(a));
-        let nb = similarity::normalize(name_for_similarity(b));
-        let name = similarity::jaro_winkler(&na, &nb);
+        let (ra, rb) = (name_for_similarity(a), name_for_similarity(b));
+        let na = similarity::normalize(ra);
+        let nb = similarity::normalize(rb);
+        // RFC 0224: names that differ by a whole word are a parent and its child or two siblings,
+        // not two spellings of one thing — except people, whose short and full names do match
+        // (`Robert` / `RobertJoonas`, RFC 0060).
+        // Identical table rows (one PDF table extracted twice) still outweigh the words. Identical
+        // columns do not: tables of one application share their audit columns (iDempiere's
+        // `AD_Client_ID`, `Created`, … — and a migration script may state only those), so equal
+        // column sets are common between tables that are not the same.
         let structural = structural_score(a, b);
+        let same_content = structural >= 0.99 && has_rows(a) && has_rows(b);
+        let words_differ = a.kind != ObjectKind::Person
+            && b.kind != ObjectKind::Person
+            && !same_content
+            && !similarity::token_compatible(ra, rb);
+        let name = if words_differ {
+            0.0
+        } else {
+            similarity::jaro_winkler(&na, &nb)
+        };
         let combined = 0.7 * name + 0.3 * structural;
         SimilarityScore {
             name,
@@ -643,6 +666,11 @@ impl IdentityResolver for DefaultResolver {
 /// database-style `schema.table` dot, and where the fix already came from the threshold change).
 /// Compares only the portion after the last `.` for `Table` objects with a qualifier; every other
 /// kind, and unqualified table names, are unaffected.
+/// Whether an object carries table rows to compare (a table read from a document).
+fn has_rows(o: &KirObject) -> bool {
+    similarity::row_cell_tokens(o).is_some()
+}
+
 pub(crate) fn name_for_similarity(obj: &KirObject) -> &str {
     if obj.kind == ObjectKind::Table
         && !obj.name.contains('/')
@@ -1058,15 +1086,15 @@ mod tests {
         ] {
             let g = make_graph(&[(name_a, kind.clone()), (name_b, kind.clone())]);
             let result = DefaultResolver::new().resolve(&g);
-            assert_eq!(
-                result.proposals.len(),
-                1,
-                "'{name_a}'/'{name_b}' expected to still be proposed (RFC 0060's documented \
-                 residual, unchanged by this fix)"
+            // RFC 0224: they differ by a whole word (private/public, CI/script update, ua/ref),
+            // so they are no longer proposed at all — and never as an exact match.
+            assert!(
+                result.proposals.iter().all(|p| !p.exact_name_match),
+                "'{name_a}'/'{name_b}' must not be flagged as an exact match"
             );
             assert!(
-                !result.proposals[0].exact_name_match,
-                "'{name_a}'/'{name_b}' must not be flagged as an exact match"
+                result.proposals.is_empty(),
+                "'{name_a}'/'{name_b}' differ by a whole word and are not a candidate (RFC 0224)"
             );
         }
     }
@@ -2065,5 +2093,24 @@ mod tests {
              ekos_kir::custom_kinds::REGISTRY — add each with structurally_keyed set correctly: \
              {missing:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod rfc0224 {
+    use super::*;
+
+    /// Found on iDempiere: DDL tables named as parent and child, each stating only the same
+    /// audit columns, were proposed as one thing (structural score 1.0).
+    #[test]
+    fn equal_columns_do_not_outweigh_a_different_word() {
+        let mut g = KirGraph::new();
+        for n in ["HR_ListType", "HR_ListLine"] {
+            g.add_object(KirObject::new(n, ObjectKind::Table).with_property(
+                "columns",
+                serde_json::json!([{"name": "AD_Client_ID"}, {"name": "Created"}]),
+            ));
+        }
+        assert!(DefaultResolver::new().resolve(&g).proposals.is_empty());
     }
 }

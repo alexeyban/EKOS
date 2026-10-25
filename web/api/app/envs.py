@@ -44,6 +44,11 @@ BASE = frozenset(
         "OLLAMA_HOST",
         "EKOS_HOME",
         "RUST_BACKTRACE",
+        # RFC 0223: where the Oracle driver finds Instant Client and its network files. Runtime
+        # configuration, not secrets: without them `ekos build` cannot read a configured database.
+        "LD_LIBRARY_PATH",
+        "TNS_ADMIN",
+        "ORACLE_HOME",
         # Windows (RFC 0184 §4): without SYSTEMROOT a child process fails before `main`; the
         # rest is where a program finds its user's files and how it resolves a command name.
         "SYSTEMROOT",
@@ -79,9 +84,14 @@ def _granted(tenant: models.Tenant) -> set[str]:
     return {name for name in tenant.model_env or [] if is_valid_name(name)}
 
 
+def _source_names(tenant: models.Tenant) -> set[str]:
+    """RFC 0223: source credentials, granted whatever `allow_metered` says."""
+    return {name for name in tenant.source_env or [] if is_valid_name(name)}
+
+
 def _with_keychain(env: dict[str, str], tenant: models.Tenant) -> dict[str, str]:
     """RFC 0184 §2: a granted variable the environment lacks is filled from the keychain."""
-    for name in _granted(tenant):
+    for name in _granted(tenant) | _source_names(tenant):
         if name not in env:
             value = keychain.get_env(name)
             if value:
@@ -117,7 +127,7 @@ def for_tenant(
         others: set[str] = set()
         for other in models.list_tenants():
             if other.id != tenant.id:
-                others |= set(other.model_env or [])
+                others |= set(other.model_env or []) | set(other.source_env or [])
         env = {
             k: v
             for k, v in environ.items()
@@ -125,7 +135,7 @@ def for_tenant(
         }
         return _with_keychain(env, tenant)
 
-    granted = _granted(tenant)
+    granted = _granted(tenant) | _source_names(tenant)
     env = {k: v for k, v in environ.items() if in_base(k) or k in granted}
     return _with_keychain(env, tenant)
 

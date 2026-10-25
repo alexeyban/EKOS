@@ -208,6 +208,10 @@ pub struct Inputs<'a> {
     pub conflicts_current: Option<&'a BTreeSet<String>>,
     /// The ids of the current semantics items (`.ekos/semantics/current.json`); `None` = all.
     pub semantics_current: Option<&'a BTreeSet<String>>,
+    /// RFC 0224: the `SameAs` candidates the latest compile proposed
+    /// (`.ekos/identity/current.json`); `None` = all. A compile candidate no longer proposed is
+    /// not shown while undecided; a decided one, or a cross-system one (`ekos identity scan`), is.
+    pub identity_current: Option<&'a BTreeSet<String>>,
     pub rules: &'a ScopeRules,
 }
 
@@ -533,6 +537,19 @@ fn identity_items(inputs: &Inputs<'_>) -> Vec<Item> {
         .relationships
         .iter()
         .filter(|r| matches!(&r.kind, RelationshipKind::Custom(k) if k == "SameAs"))
+        .filter(|r| {
+            let undecided = r
+                .properties
+                .get("status")
+                .and_then(Value::as_str)
+                .is_none_or(|s| s == "unconfirmed");
+            let from_compile = !r.properties.contains_key("name_pattern");
+            !(undecided
+                && from_compile
+                && inputs
+                    .identity_current
+                    .is_some_and(|c| !c.contains(&r.id.to_string())))
+        })
         .map(|r| {
             let status = r
                 .properties
@@ -972,6 +989,72 @@ mod tests {
         ]
     }
 
+    /// RFC 0224: an undecided compile candidate the latest compile no longer proposes leaves the
+    /// review; a decided one and a cross-system one stay.
+    #[test]
+    fn identity_shows_only_current_or_decided_candidates() {
+        let a = KirObject::new("C_ORDER", ObjectKind::Table);
+        let b = KirObject::new("C_ORDERLINE", ObjectKind::Table);
+        let c = KirObject::new("cust", ObjectKind::Table);
+        let same =
+            |from: &KirObject, to: &KirObject, status: &str, extra: Option<(&str, Value)>| {
+                let mut r = KirRelationship::deterministic(
+                    RelationshipKind::Custom("SameAs".into()),
+                    from.id,
+                    to.id,
+                    status,
+                );
+                r.properties.insert("status".into(), json!(status));
+                if let Some((k, v)) = extra {
+                    r.properties.insert(k.into(), v);
+                }
+                r
+            };
+        let stale = same(&a, &b, "unconfirmed", None);
+        let current = same(&a, &c, "unconfirmed", None);
+        let decided = same(&b, &c, "rejected", None);
+        let scanned = same(&c, &a, "unconfirmed", Some(("name_pattern", json!(0.9))));
+        let rels = vec![
+            stale.clone(),
+            current.clone(),
+            decided.clone(),
+            scanned.clone(),
+        ];
+        let objects = vec![a, b, c];
+        let ids_of = |current_ids: Option<&BTreeSet<String>>| {
+            let rules = ScopeRules::default();
+            let mut ids: Vec<String> = items(
+                Subject::Identity,
+                &Inputs {
+                    objects: &objects,
+                    relationships: &rels,
+                    conflicts_current: None,
+                    semantics_current: None,
+                    identity_current: current_ids,
+                    rules: &rules,
+                },
+            )
+            .into_iter()
+            .map(|i| i.id)
+            .collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(
+            ids_of(None).len(),
+            4,
+            "without the file, every candidate shows"
+        );
+        let only: BTreeSet<String> = [current.id.to_string()].into();
+        let mut want = vec![
+            current.id.to_string(),
+            decided.id.to_string(),
+            scanned.id.to_string(),
+        ];
+        want.sort();
+        assert_eq!(ids_of(Some(&only)), want);
+    }
+
     fn run(objects: &[KirObject], subject: Subject) -> Vec<Item> {
         let rules = ScopeRules::default();
         items(
@@ -981,6 +1064,7 @@ mod tests {
                 relationships: &[],
                 conflicts_current: None,
                 semantics_current: None,
+                identity_current: None,
                 rules: &rules,
             },
         )

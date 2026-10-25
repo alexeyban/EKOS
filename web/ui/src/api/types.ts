@@ -384,3 +384,48 @@ export interface ReviewItem {
 export interface ReviewSubjectDetail extends SubjectStatus {
   rows: ReviewItem[];
 }
+
+// ── RFC 0223 sources and databases ───────────────────────────────────────────────────────────
+
+export interface DirSource {
+  name: string;
+  kind: string;
+  path: string;
+  exists: boolean;
+  git: boolean;
+}
+
+export interface DatabaseSource {
+  name: string;
+  kind: string;
+  connect: string;
+  user: string;
+  password_env: string;
+  /** The console keeps a password for it (never the password itself). */
+  password_stored: boolean;
+  owners: string[];
+  profile: string;
+  dictionary: string | null;
+}
+
+export interface CensusRow {
+  what: string;
+  census: number;
+  compiled: number | null;
+  equal: boolean | null;
+}
+
+export interface DatabaseTest {
+  database: string;
+  ok: boolean;
+  ms: number;
+  read_only: boolean | null;
+  invalid_objects: number;
+  test: {
+    label: string;
+    family: string;
+    owners: { owner: string; columns: number; census: Record<string, { valid: number; invalid: number }> }[];
+    any_privileges: string[];
+  };
+  census_vs_compiled: CensusRow[];
+}

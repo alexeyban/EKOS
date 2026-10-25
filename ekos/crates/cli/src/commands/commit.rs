@@ -86,6 +86,27 @@ fn write_relationships(
     Ok(rels_written)
 }
 
+/// RFC 0224: the `SameAs` candidates this compile proposed. The ledger keeps every candidate an
+/// earlier compile made (append-only); the review shows an undecided one only while it is here.
+fn write_identity_current(config: &EkosConfig, cwd: &Path, model: &CkModel) -> Result<()> {
+    let ids: Vec<String> = model
+        .relationships
+        .iter()
+        .map(ckm_rel_to_kir)
+        .filter(|r| matches!(&r.kind, ekos_kir::RelationshipKind::Custom(k) if k == "SameAs"))
+        .map(|r| r.id.to_string())
+        .collect();
+    let path = crate::commands::review::identity_current_path(config, cwd);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&serde_json::json!({ "ids": ids }))?,
+    )?;
+    Ok(())
+}
+
 /// RFC 0171 — the ledger now reflects what `ekos build` observed.
 /// RFC 0178 Part 2: the files each `[[sources]]` entry held at the last build. Empty when the
 /// project names no sources, and then nothing is attributed.
@@ -209,6 +230,7 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
 
     // Write canonical relationships.
     let rels_written = write_relationships(&*ledger, &model, &per_source_ctx)?;
+    write_identity_current(config, cwd, &model)?;
 
     ledger.set_write_context(Some(write_ctx("commit:rollup")));
 

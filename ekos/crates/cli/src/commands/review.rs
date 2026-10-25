@@ -22,6 +22,7 @@ struct Loaded {
     relationships: Vec<KirRelationship>,
     conflicts: Option<BTreeSet<String>>,
     semantics: Option<BTreeSet<String>>,
+    identity: Option<BTreeSet<String>>,
     rules: ScopeRules,
 }
 
@@ -32,6 +33,7 @@ impl Loaded {
             relationships: ledger.all_relationships()?,
             conflicts: super::conflicts::current_ids(config, cwd),
             semantics: ids_in(&config.ekos_dir(cwd).join("semantics").join("current.json")),
+            identity: ids_in(&identity_current_path(config, cwd)),
             rules: ScopeRules::from_config(&config.review.scope),
         })
     }
@@ -44,6 +46,7 @@ impl Loaded {
                 relationships: &self.relationships,
                 conflicts_current: self.conflicts.as_ref(),
                 semantics_current: self.semantics.as_ref(),
+                identity_current: self.identity.as_ref(),
                 rules: &self.rules,
             },
         )
@@ -53,6 +56,11 @@ impl Loaded {
         let signed = review::signoffs(&self.objects);
         review::signoff_state(subject, signed.get(subject.as_str()).copied(), items)
     }
+}
+
+/// RFC 0224: the `SameAs` candidates the latest commit's compile proposed.
+pub fn identity_current_path(config: &EkosConfig, cwd: &Path) -> std::path::PathBuf {
+    config.ekos_dir(cwd).join("identity").join("current.json")
 }
 
 fn ids_in(path: &Path) -> Option<BTreeSet<String>> {
@@ -145,6 +153,7 @@ fn cache_path(config: &EkosConfig, cwd: &Path) -> std::path::PathBuf {
 fn cache_key(config: &EkosConfig, cwd: &Path, ledger: &dyn KnowledgeReader) -> Result<String> {
     let conflicts = super::conflicts::current_ids(config, cwd);
     let semantics = ids_in(&config.ekos_dir(cwd).join("semantics").join("current.json"));
+    let identity = ids_in(&identity_current_path(config, cwd));
     Ok(ekos_common::ContentHash::of_str(&review::canonical(&json!([
         CACHE_VERSION,
         review::REVIEW_VERSION,
@@ -153,6 +162,7 @@ fn cache_key(config: &EkosConfig, cwd: &Path, ledger: &dyn KnowledgeReader) -> R
         ledger.relationship_count()?,
         conflicts,
         semantics,
+        identity,
         serde_json::to_value(&config.review)?,
     ])))
     .0)

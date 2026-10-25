@@ -1311,8 +1311,13 @@ details.cfg-sub {
   border-collapse: collapse;
   font-size: 0.85rem;
 }
+.sem-list:has(.review-table),
+.card:has(> .review-table) {
+  overflow-x: auto;
+}
 .review-table td,
 .review-table th {
+  overflow-wrap: anywhere;
   border-bottom: 1px solid var(--rule);
   padding: 0.2rem 0.4rem;
   text-align: left;
@@ -1322,4 +1327,11 @@ details.cfg-sub {
   font-family: var(--mono, monospace);
   font-size: 0.8rem;
   word-break: break-all;
+}
+
+/* RFC 0223 — Sources page */
+.sources-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 0.3rem 1rem;
 }

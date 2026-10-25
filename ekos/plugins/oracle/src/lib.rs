@@ -140,6 +140,76 @@ impl CatalogReader for LiveReader {
     }
 }
 
+/// RFC 0223: what `ekos database test` found — the census and what the connector listed, per owner.
+/// Counts and names of object types only: never a password, never a row value.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ConnectionTest {
+    /// `oracle:<user>@<connect>`.
+    pub label: String,
+    /// `dba` with `SELECT_CATALOG_ROLE`, else `all` (a read-only user then sees fewer routines).
+    pub family: String,
+    pub owners: Vec<OwnerCensus>,
+    /// The zero-row insert probe: refused by the server is what EKOS wants.
+    pub write_check: Option<WriteCheck>,
+    /// `… ANY …` privileges the session holds (a finding: they reach beyond the owners listed).
+    pub any_privileges: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct OwnerCensus {
+    pub owner: String,
+    /// `*_OBJECTS` by `OBJECT_TYPE`: valid and invalid.
+    pub census: std::collections::BTreeMap<String, ekos_ora_live::Census>,
+    /// What the connector lists, by kind (equal to the census after reconciliation).
+    pub listed: std::collections::BTreeMap<ObjectKind, usize>,
+    pub columns: usize,
+}
+
+/// RFC 0223: connect read-only, read each owner's catalog (no profiling), reconcile it with
+/// `*_OBJECTS`, and check that a write is refused. Blocking: call it off an async runtime.
+pub fn test_connection(
+    connection: &OraConnection,
+    owners: &[String],
+    run_id: &str,
+    redaction: &RedactionConfig,
+) -> Result<ConnectionTest, OraError> {
+    let source = OraSource::connect(connection, run_id, &SessionPolicy::default())?;
+    let family = source.family();
+    let mut out = Vec::new();
+    let mut probe = None;
+    for owner in owners {
+        let snapshot = ekos_ora_live::introspect(&source, owner, family, redaction)?;
+        if probe.is_none() {
+            probe = snapshot
+                .of_kind(ObjectKind::Table)
+                .next()
+                .map(|t| (owner.clone(), t.name.clone()));
+        }
+        out.push(OwnerCensus {
+            owner: owner.clone(),
+            listed: snapshot.counts(),
+            census: snapshot.census,
+            columns: snapshot.columns,
+        });
+    }
+    let write_check = match probe {
+        Some((owner, table)) => Some(source.check_write_refused(&owner, &table)?),
+        None => None,
+    };
+    let any_privileges = source
+        .session_privileges()?
+        .into_iter()
+        .filter(|p| p.contains(" ANY "))
+        .collect();
+    Ok(ConnectionTest {
+        label: connection.label(),
+        family: format!("{family:?}").to_ascii_lowercase(),
+        owners: out,
+        write_check,
+        any_privileges,
+    })
+}
+
 /// One `[[databases]]` entry of kind `oracle`.
 pub struct OracleObserver {
     /// The `[[databases]] name`: it keys every artifact and object of this database.

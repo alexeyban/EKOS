@@ -7,7 +7,7 @@ import { api } from "./api/client";
 import type { WorkflowStep } from "./api/types";
 import { stepChip } from "./pages/review-shared";
 
-const LINKS: Record<string, string> = { analyse: "", review: "review" };
+const LINKS: Record<string, string> = { analyse: "sources", review: "review" };
 
 export function StepBar({ workspace }: { workspace: string }) {
   const bar = useQuery({

@@ -86,8 +86,10 @@ def test_init_and_compile_stages_and_arguments(tmp_path) -> None:
         "compile",
         "commit",
         "coverage",
+        "workflow",
     )
     assert c.stage_argv("init") == ["init", "--detect"]
+    assert c.stage_argv("workflow") == ["workflow", "status", "--json"]
     assert c.stage_argv("resolve") == ["resolve", "--force"]
     assert c.stage_argv("commit") == ["commit", "--yes"]
     assert c.stage_argv("build") == ["build"]
@@ -107,7 +109,7 @@ def test_a_home_project_skips_init(
     (project / "ekos.toml").write_text("[workspace]\n")
     monkeypatch.setenv("EKOS_HOME", str(home))
     stages = BY_NAME["init-and-compile"].stages_for(str(project))
-    assert "init" not in stages and stages[0] == "build" and stages[-1] == "coverage"
+    assert "init" not in stages and stages[0] == "build" and stages[-1] == "workflow"
 
 
 def test_init_and_compile_needs_operate(client: TestClient) -> None:
