@@ -265,7 +265,7 @@ pub fn open_about(items: &[KirObject], subject: &KirId) -> Vec<Value> {
 
 /// What is current: the commit's conflicts plus Migrate's. `None` when neither manifest exists yet
 /// (then every conflict in the ledger counts).
-fn current_ids(config: &EkosConfig, cwd: &Path) -> Option<BTreeSet<String>> {
+pub(crate) fn current_ids(config: &EkosConfig, cwd: &Path) -> Option<BTreeSet<String>> {
     let migrate = migrate_ids(config, cwd);
     match commit_ids(config, cwd) {
         Some(mut c) => {

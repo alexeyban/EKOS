@@ -285,6 +285,16 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ConflictsCommands,
     },
+    /// The source-model review: scope, PII, conflicts, identity, write behaviour, glossary (RFC 0213)
+    Review {
+        #[command(subcommand)]
+        subcommand: ReviewCommands,
+    },
+    /// Sign a review subject off on the digest you were shown; stale when a signed fact changes (RFC 0213)
+    Signoff {
+        #[command(subcommand)]
+        subcommand: SignoffCommands,
+    },
     /// Export compiled knowledge to other formats (RFC 0170: LinkML)
     Export {
         #[command(subcommand)]
@@ -1129,6 +1139,103 @@ enum ClickHouseCommands {
 }
 
 #[derive(Subcommand)]
+enum ReviewCommands {
+    /// Every subject with item, decided, outdated and blocking counts and its sign-off state
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// One subject's items, the facts shown, decisions and the digest a sign-off needs
+    Show {
+        /// scope, pii, conflicts, identity, write-behaviour or glossary
+        subject: String,
+        /// Only items without a current decision
+        #[arg(long)]
+        undecided: bool,
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Put tables in or out of scope (human-only; never via MCP)
+    Scope {
+        /// Table names
+        #[arg(required = true)]
+        tables: Vec<String>,
+        #[arg(long = "in", conflicts_with = "out", required_unless_present = "out")]
+        r#in: bool,
+        #[arg(long)]
+        out: bool,
+        #[arg(long)]
+        reason: Option<String>,
+        /// Who is deciding (default: $USER)
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
+    /// Confirm or reject PII candidates (human-only; never via MCP)
+    Pii {
+        /// `table.column` names
+        #[arg(required = true)]
+        columns: Vec<String>,
+        #[arg(long, conflicts_with = "reject", required_unless_present = "reject")]
+        confirm: bool,
+        #[arg(long)]
+        reject: bool,
+        /// How a confirmed column is masked downstream: hash, redact (default) or none
+        #[arg(long, requires = "confirm")]
+        mask: Option<String>,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
+    /// Confirm a table's write behaviour, or override fields with a reason (human-only)
+    WriteBehaviour {
+        /// Table names
+        #[arg(required = true)]
+        tables: Vec<String>,
+        #[arg(long, conflicts_with = "set", required_unless_present = "set")]
+        confirm: bool,
+        /// `field=value` (update_class, delete_classes as a comma list, change_log true/false)
+        #[arg(long = "set")]
+        set: Vec<String>,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SignoffCommands {
+    /// A subject's digest and whether its sign-off is valid, stale or missing
+    Show {
+        subject: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Sign a subject off on the digest `show` printed (human-only; never via MCP)
+    Approve {
+        subject: String,
+        /// The digest you reviewed; refused if the review changed since
+        #[arg(long)]
+        digest: String,
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
+    /// Withdraw a subject's sign-off (human-only)
+    Revoke {
+        subject: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum ConflictsCommands {
     /// The current conflicts: duplicate definitions, merge losses, label mismatches, code ↔ database
     List {
@@ -1918,6 +2025,8 @@ where
         }
         Commands::Resolve { force } => crate::commands::resolve::run(&config, &cwd, force),
         Commands::Conflicts { subcommand } => dispatch_conflicts(subcommand, &config, &cwd),
+        Commands::Review { subcommand } => dispatch_review(subcommand, &config, &cwd),
+        Commands::Signoff { subcommand } => dispatch_signoff(subcommand, &config, &cwd),
         Commands::Semantics { subcommand } => dispatch_semantics(subcommand, &config, &cwd),
         Commands::Export { subcommand } => dispatch_export(subcommand, &config, &cwd),
         Commands::Import { subcommand } => dispatch_import(subcommand, &config, &cwd),
@@ -2125,6 +2234,114 @@ async fn run_setup(
 }
 
 /// `ekos conflicts …`
+fn dispatch_review(
+    subcommand: ReviewCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    use crate::commands::review;
+    use ekos_semantic::review::Subject;
+    use serde_json::json;
+    match subcommand {
+        ReviewCommands::List { json } => review::list(config, cwd, json),
+        ReviewCommands::Show {
+            subject,
+            undecided,
+            limit,
+            json,
+        } => review::show(config, cwd, &subject, undecided, limit, json),
+        ReviewCommands::Scope {
+            tables,
+            r#in,
+            reason,
+            by,
+            ..
+        } => {
+            let d = json!({ "scope": if r#in { "in" } else { "out" } });
+            review::decide(config, cwd, Subject::Scope, &tables, d, reason, by)
+        }
+        ReviewCommands::Pii {
+            columns,
+            confirm,
+            mask,
+            reason,
+            by,
+            ..
+        } => {
+            let d = if confirm {
+                json!({ "pii": "confirm", "mask": mask })
+            } else {
+                json!({ "pii": "reject" })
+            };
+            review::decide(config, cwd, Subject::Pii, &columns, d, reason, by)
+        }
+        ReviewCommands::WriteBehaviour {
+            tables,
+            confirm,
+            set,
+            reason,
+            by,
+        } => {
+            let d = if confirm {
+                json!({ "behaviour": "confirm" })
+            } else {
+                json!({ "behaviour": "override", "fields": overrides(&set)? })
+            };
+            review::decide(config, cwd, Subject::WriteBehaviour, &tables, d, reason, by)
+        }
+    }
+}
+
+/// `--set field=value` pairs → the override's fields.
+fn overrides(set: &[String]) -> Result<serde_json::Map<String, serde_json::Value>> {
+    use serde_json::json;
+    let mut out = serde_json::Map::new();
+    for s in set {
+        let (k, v) = s
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("--set takes field=value, got `{s}`"))?;
+        let value = match k {
+            "change_log" => json!(
+                v.parse::<bool>()
+                    .map_err(|_| anyhow::anyhow!("change_log is true or false"))?
+            ),
+            "delete_classes" => json!(
+                v.split(',')
+                    .map(str::trim)
+                    .filter(|x| !x.is_empty())
+                    .collect::<Vec<_>>()
+            ),
+            _ => json!(v),
+        };
+        out.insert(k.to_string(), value);
+    }
+    Ok(out)
+}
+
+fn dispatch_signoff(
+    subcommand: SignoffCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    use crate::commands::review;
+    match subcommand {
+        SignoffCommands::Show { subject, json } => {
+            review::signoff_show(config, cwd, &subject, json)
+        }
+        SignoffCommands::Approve {
+            subject,
+            digest,
+            note,
+            by,
+        } => review::approve(config, cwd, &subject, &digest, note, by),
+        SignoffCommands::Revoke {
+            subject,
+            reason,
+            by,
+        } => review::revoke(config, cwd, &subject, &reason, by),
+    }
+}
+
 fn dispatch_conflicts(
     subcommand: ConflictsCommands,
     config: &ekos_compiler_core::EkosConfig,

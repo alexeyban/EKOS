@@ -199,6 +199,16 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "the table it describes — RFC 0212; one per table, derived at commit",
     },
     CustomKind {
+        name: "ReviewDecision",
+        structurally_keyed: true,
+        note: "(subject, item) — RFC 0213; a person's decision on one review item, last wins",
+    },
+    CustomKind {
+        name: "SignOff",
+        structurally_keyed: true,
+        note: "the review subject — RFC 0213; approved on a digest, valid while it still matches",
+    },
+    CustomKind {
         name: "Ticket",
         structurally_keyed: true,
         note: "the ticket key (`IDEMPIERE-6203`) — RFC 0219; from commit messages",

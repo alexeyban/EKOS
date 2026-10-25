@@ -893,6 +893,26 @@ scripts/wiki-snapshot.py --xml export.xml --out ~/wiki-snapshot --licence "CC BY
 ekos source add wiki --path ~/wiki-snapshot
 ```
 
+### Review and sign-off (RFC 0213)
+
+Before a lakehouse is built from a source estate, a person agrees to its source model. `ekos review list` shows six
+subjects — the tables in scope (classed by name: `T_*` transient, `I_*` import, `*_Trl` translation, `*Log*` log,
+`AD_*` config; `[review.scope]` adds rules), PII candidates, code ↔ database conflicts, identity matches, each table's
+write behaviour, and the glossary — with what is decided and what still blocks. Decide items with `ekos review scope`,
+`ekos review pii` and `ekos review write-behaviour` (conflicts, identity and glossary keep their own commands), then
+sign a subject off on the digest you were shown:
+
+```bash
+ekos review show pii --undecided
+ekos review pii C_BPARTNER.EMAIL --confirm --mask hash
+ekos signoff show pii                      # prints the digest
+ekos signoff approve pii --digest <digest>
+```
+
+A sign-off is valid only while the facts it covered are unchanged; after a compile that changes one, `signoff show`
+says **stale** and names the items added, removed or changed. Row and null counts are shown but not signed, so a fresh
+profile alone does not invalidate anything. Decisions and sign-offs are human-only: no MCP tool can make them.
+
 ### iDempiere eval (RFC 0222)
 
 `evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six

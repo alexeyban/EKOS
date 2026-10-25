@@ -40,6 +40,7 @@ pub mod query_log;
 pub mod recover;
 pub mod replay;
 pub mod resolve;
+pub mod review;
 pub mod semantics;
 pub mod session;
 pub mod setup;

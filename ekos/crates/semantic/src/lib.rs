@@ -11,6 +11,7 @@ pub mod doc_links;
 pub mod live_conflicts;
 pub mod ontology;
 pub mod procedure_lineage;
+pub mod review;
 pub mod rollup;
 pub mod schema_history;
 pub mod semantics_review;

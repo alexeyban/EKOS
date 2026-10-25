@@ -30,6 +30,36 @@ struct HumanOnly {
 
 const HUMAN_ONLY: &[HumanOnly] = &[
     HumanOnly {
+        path: &["review", "decide"],
+        defined_in: include_str!("review.rs"),
+        definition: "pub fn decide(",
+        why: "RFC 0213: a review decision is a human decision",
+    },
+    HumanOnly {
+        path: &["review", "approve"],
+        defined_in: include_str!("review.rs"),
+        definition: "pub fn approve(",
+        why: "RFC 0213: signing the source model off is a human decision",
+    },
+    HumanOnly {
+        path: &["review", "revoke"],
+        defined_in: include_str!("review.rs"),
+        definition: "pub fn revoke(",
+        why: "RFC 0213: withdrawing a sign-off is a human decision",
+    },
+    HumanOnly {
+        path: &["review", "decision_object"],
+        defined_in: include_str!("../../../semantic/src/review.rs"),
+        definition: "pub fn decision_object(",
+        why: "RFC 0213: a review decision is a human decision",
+    },
+    HumanOnly {
+        path: &["review", "signoff_object"],
+        defined_in: include_str!("../../../semantic/src/review.rs"),
+        definition: "pub fn signoff_object(",
+        why: "RFC 0213: signing the source model off is a human decision",
+    },
+    HumanOnly {
         path: &["semantics_review"],
         defined_in: include_str!("../../../semantic/src/semantics_review.rs"),
         definition: "pub fn apply_review(",

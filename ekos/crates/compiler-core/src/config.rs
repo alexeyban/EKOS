@@ -49,6 +49,9 @@ pub struct EkosConfig {
     /// RFC 0219: issue-tracker keys whose ticket ids join commits, change sets and code.
     #[serde(default)]
     pub tickets: TicketsConfig,
+    /// RFC 0213: `[review]` — how the review subjects are computed.
+    #[serde(default)]
+    pub review: ReviewConfig,
     /// RFC 0178 Part 2: the project's named inputs (`[[sources]]`). Empty = one unnamed source,
     /// the directories of `[observe] paths`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -962,6 +965,39 @@ pub struct TicketsConfig {
     pub keys: Vec<String>,
 }
 
+/// RFC 0213: `[review]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ReviewConfig {
+    #[serde(default)]
+    pub scope: ReviewScopeConfig,
+}
+
+/// RFC 0213: `[review.scope]` — table classes by name, first match wins. Unset fields keep the
+/// built-in defaults (`T_*` transient, `I_*` import, `*_Trl` translation, `*Log*` log, `AD_*`
+/// config; transient, import and log proposed out of scope).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ReviewScopeConfig {
+    /// Rules tried before the built-in ones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub classes: Vec<ScopeClassRule>,
+    /// Replace the built-in rules instead of extending them.
+    #[serde(default)]
+    pub replace_defaults: bool,
+    /// Classes proposed out of scope; unset keeps the built-in list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_out: Option<Vec<String>>,
+}
+
+/// One `[[review.scope.classes]]` rule: `*` matches any run of characters, case-insensitive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScopeClassRule {
+    pub pattern: String,
+    pub class: String,
+}
+
 /// RFC 0211: one live database whose catalog `ekos build` reads, read-only.
 ///
 /// The password is named by an environment variable; the value is never in this file, the ledger
@@ -1131,6 +1167,7 @@ impl Default for EkosConfig {
             freshness: FreshnessConfig::default(),
             conflicts: ConflictsConfig::default(),
             tickets: TicketsConfig::default(),
+            review: ReviewConfig::default(),
             sources: Vec::new(),
             databases: Vec::new(),
             extensions: std::collections::BTreeMap::new(),
@@ -1349,6 +1386,25 @@ log-level = "debug"
         assert!(EkosConfig::default().conflicts.enabled);
         let cfg: EkosConfig = toml::from_str("[conflicts]\nenabled = false\n").unwrap();
         assert!(!cfg.conflicts.enabled);
+    }
+
+    #[test]
+    fn review_scope_rules_parse_and_reject_unknown_keys() {
+        let cfg: EkosConfig = toml::from_str("[workspace]\n").unwrap();
+        assert!(cfg.review.scope.classes.is_empty());
+        assert!(cfg.review.scope.default_out.is_none());
+        let cfg: EkosConfig = toml::from_str(
+            "[review.scope]\ndefault-out = [\"log\"]\nreplace-defaults = true\n\n\
+             [[review.scope.classes]]\npattern = \"HR_*\"\nclass = \"personnel\"\n",
+        )
+        .unwrap();
+        assert!(cfg.review.scope.replace_defaults);
+        assert_eq!(
+            cfg.review.scope.default_out.as_deref(),
+            Some(&["log".to_string()][..])
+        );
+        assert_eq!(cfg.review.scope.classes[0].class, "personnel");
+        assert!(toml::from_str::<EkosConfig>("[review.scope]\nrules = []\n").is_err());
     }
 
     /// RFC 0026: document-semantics extraction is opt-in, so a config that never
