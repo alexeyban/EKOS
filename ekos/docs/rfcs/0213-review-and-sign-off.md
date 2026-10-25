@@ -207,3 +207,23 @@ stayed **valid** (a column count is shown, not signed). The column was dropped a
 Each `review`/`signoff` command reads every object and relationship of the ledger: about 25 s and 2.5 GB peak on this
 project (144k objects, 218k relationships). Fine for an operator's command; the console will want a cached summary
 (Phase 2).
+
+**Phase 2** (2026-10-25, same testbed, release build):
+
+- `ekos workflow status --json` → 1 `done` (fresh, committed 09:49 UTC), 2 `todo`, 3 `stale` ("1 of 6 subjects signed,
+  1 stale, 220 blocking item(s)"; `scope` valid, `pii` stale since the Phase 1 column), 4–7 `blocked`.
+- The subject summary is cached in `<state>/review/summary.json` under a key over the ledger's entry, object and
+  relationship counts (append-only: every write moves the entry count), the current conflict and semantics ids and
+  `[review]`: 24.5 s / 2.5 GB to compute, 1.8 s / 333 MB cached (`review list`, `signoff show`, `workflow status`,
+  `ekos_signoff_status`). `approve`, `decide` and `revoke` never read it.
+- `ekos_signoff_status` over `mcp serve`: `signed_off: false`, the refusal naming five subjects, seven steps. In
+  `SCOPE_REFUSED_TOOLS` (it summarises the whole project).
+- ekos-lakehouse (`27ed7c0`) reports steps 2 and 4–7 from its ledger facts (marts drafted, tables synced, latest run per
+  table and layer); with `[extensions.lakehouse] require-signoff = true`, `lakehouse sync` refused before reading the
+  source: "the source model is not signed off — pii: sign-off is stale (its facts changed); conflicts: not signed
+  off; …". Its counts are cached the same way (12.1 s → 2.2 s).
+- The gate is off by default in the extension: existing PostgreSQL projects have never been reviewed.
+
+Step 1 is source **file** freshness: the Oracle column dropped after Phase 1 does not make it stale, because a live
+database is read every build and is not in the manifest (RFC 0211). The `pii` sign-off still names the column because
+the ledger has not been rebuilt since.

@@ -913,6 +913,13 @@ A sign-off is valid only while the facts it covered are unchanged; after a compi
 says **stale** and names the items added, removed or changed. Row and null counts are shown but not signed, so a fresh
 profile alone does not invalidate anything. Decisions and sign-offs are human-only: no MCP tool can make them.
 
+`ekos workflow status [--json]` is the step bar of the seven-step operator workflow (analyse, documentation, review
+and sign-off, requirements, extraction, bronze/silver, marts): step 1 from source freshness, step 3 from the six
+subjects' sign-offs, the others from an extension such as ekos-lakehouse. Steps 4–7 show `blocked` until every subject
+is validly signed, and an extension's step commands call the same gate before writing anything. Agents read the same
+state, without being able to change it, through the `ekos_signoff_status` MCP tool. The subject summary is cached
+beside the ledger under a key that every write moves (iDempiere: 24.5 s to compute, 1.8 s cached).
+
 ### iDempiere eval (RFC 0222)
 
 `evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six

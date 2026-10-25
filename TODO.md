@@ -6827,9 +6827,10 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] RFC 0213 Phase 1 — review subjects (scope, pii, conflicts, identity, write-behaviour, glossary), item decisions,
       digest-bound sign-off; `ekos review` / `ekos signoff`; iDempiere: a schema change made the `pii` sign-off stale
       naming the new column (devlog_295)
-- [ ] RFC 0213 Phase 2 — `ekos workflow status` step bar, `EkosExtension::workflow_steps()`, `ekos_signoff_status` MCP
-      tool, the gate for steps 4–7, a cached review summary (each command reads the whole ledger: 25 s / 2.5 GB);
-      Phase 3 — console step bar + Review page; identity review from the CLI (today only the MCP tool)
+- [x] RFC 0213 Phase 2 — `ekos workflow status` step bar, `EkosExtension::workflow_steps()`, `ekos_signoff_status` MCP
+      tool, `workflow::require_signoff` gate, cached review summary (24.5 s → 1.8 s); ekos-lakehouse reports steps 2,
+      4–7 and with `require-signoff = true` refuses `generate`/`sync`/`gold draft` (devlog_296, lakehouse devlog_13)
+- [ ] RFC 0213 Phase 3 — console step bar + Review page; identity review from the CLI (today only the MCP tool)
 - [ ] RFC 0214 source-estate docs + publish · RFC 0215 requirements → marts
       - RFC 0214 GitHub wiki target: the EKOS repository's own wiki, github.com/alexeyban/EKOS/wiki (maintainer,
         2026-10-25; a git repo at `alexeyban/EKOS.wiki.git`, today only `Home.md`). The wiki is public: check each
