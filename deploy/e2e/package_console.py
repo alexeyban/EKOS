@@ -125,7 +125,8 @@ else:
                     "ekos_state", "ekos_dependents", "ekos_impact", "ekos_diff", "ekos_status",
                     "ekos_conflicts", "ekos_transformation_explain", "ekos_transformation_diff",
                     "ekos_architecture_evaluate", "ekos_architecture_drift",
-                    "ekos_architecture_diff", "ekos_graph_export", "ekos_audit"} for n in calls),
+                    "ekos_architecture_diff", "ekos_graph_export", "ekos_audit",
+                    "ekos_signoff_status"} for n in calls),
           "only reading tools", str(calls))
     texts = [e["text"] for e in events if e["type"] == "text"]
     check(bool(texts) and bool(texts[-1].strip()), "and answered", str(events[-3:])[:300])

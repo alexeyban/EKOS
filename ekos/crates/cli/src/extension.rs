@@ -126,6 +126,23 @@ pub trait EkosExtension: Send + Sync {
     fn java_decompiler(&self) -> Option<Arc<dyn JavaDecompiler>> {
         None
     }
+
+    /// RFC 0213: this extension's steps of the operator workflow (2 and 4–7; any other number is
+    /// ignored), shown by `ekos workflow status`. Steps 4–7 are shown `blocked` while the review
+    /// is not signed off whatever is returned here, and their commands must also refuse to write:
+    /// call [`crate::commands::workflow::require_signoff`] first.
+    fn workflow_steps(&self, _ctx: &WorkflowContext<'_>) -> Vec<ekos_semantic::workflow::Step> {
+        Vec::new()
+    }
+}
+
+/// What [`EkosExtension::workflow_steps`] is given.
+pub struct WorkflowContext<'a> {
+    pub config: &'a EkosConfig,
+    pub cwd: &'a Path,
+    pub ledger: &'a dyn ekos_ledger::KnowledgeReader,
+    /// Every review subject's counts and sign-off state.
+    pub subjects: &'a [ekos_semantic::workflow::SubjectStatus],
 }
 
 /// RFC 0200: turns a compiled JVM class into Java-like source, one method at a time. The public
@@ -411,6 +428,11 @@ impl Extensions {
     }
 
     /// RFC 0200: the first [`JavaDecompiler`] an extension offers.
+    /// Every extension's workflow steps, in extension order.
+    pub fn workflow_steps(&self, ctx: &WorkflowContext<'_>) -> Vec<ekos_semantic::workflow::Step> {
+        self.iter().flat_map(|e| e.workflow_steps(ctx)).collect()
+    }
+
     pub fn java_decompiler(&self) -> Option<Arc<dyn JavaDecompiler>> {
         self.0.iter().find_map(|e| e.java_decompiler())
     }

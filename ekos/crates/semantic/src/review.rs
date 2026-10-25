@@ -16,7 +16,7 @@
 
 use ekos_common::ContentHash;
 use ekos_kir::{KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use uuid::Uuid;
@@ -812,7 +812,7 @@ pub fn signoff_object(
 }
 
 /// Where a subject's sign-off stands.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SignState {
     /// Never signed.

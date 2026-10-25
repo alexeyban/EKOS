@@ -19,6 +19,7 @@ pub mod sources;
 pub mod tickets;
 pub mod transform_ir;
 pub mod triggers;
+pub mod workflow;
 pub mod write_behaviour;
 
 use async_trait::async_trait;

@@ -155,6 +155,10 @@ pub const SCOPE_REFUSED_TOOLS: &[(&str, &str)] = &[
     ),
     ("ekos_architecture_evaluate", "scores the whole project"),
     (
+        "ekos_signoff_status",
+        "summarises the review of the whole project",
+    ),
+    (
         "ekos_architecture_drift",
         "compares the whole project against its history",
     ),
@@ -1075,6 +1079,7 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     if config.conflicts.enabled {
         tools.push(conflicts_tool_definition());
     }
+    tools.push(signoff_status_tool_definition());
     for e in ext.iter() {
         tools.extend(e.mcp_tools(config));
     }
@@ -1086,6 +1091,16 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
 /// a hypothesis recovered from code is never handed over as a fact. There is deliberately no MCP
 /// tool that confirms, rejects or edits one — that is `ekos semantics confirm|reject|edit` /
 /// `ekos import linkml`, human-only (a source-scan test in `semantics.rs` enforces it).
+/// RFC 0213 — read-only. Deciding an item or signing a subject off is `ekos review …` /
+/// `ekos signoff approve`, human-only (`review_guard::HUMAN_ONLY`); no MCP tool reaches either.
+fn signoff_status_tool_definition() -> Value {
+    json!({
+        "name": "ekos_signoff_status",
+        "description": "Where the project stands in the seven-step operator workflow (analyse, documentation, review and sign-off, requirements, extraction, bronze/silver, marts), and whether a person has signed off each review subject (scope, pii, conflicts, identity, write-behaviour, glossary): valid, stale (a signed fact changed since), revoked or none, with item and blocking counts. `signed_off` is false until every subject is validly signed; steps 4-7 refuse to run until then. Read-only: only a person can sign off, on the CLI or in the console.",
+        "inputSchema": { "type": "object", "properties": {} }
+    })
+}
+
 /// RFC 0172 — read-only; settling a conflict is CLI-only.
 fn conflicts_tool_definition() -> Value {
     json!({
@@ -1710,6 +1725,17 @@ fn call_tool(
             args.get("status").and_then(Value::as_str).unwrap_or("open"),
             limit,
         );
+    }
+
+    if name == "ekos_signoff_status" {
+        let ledger = cache.get(config, workspace)?;
+        let (steps, subjects) = super::workflow::steps(config, workspace, ledger, ext)?;
+        let gate = ekos_semantic::workflow::gate(&subjects, &ekos_semantic::review::Subject::ALL);
+        return Ok(json!({
+            "signed_off": gate.is_ok(),
+            "refusal": gate.err(),
+            "steps": steps,
+        }));
     }
 
     if matches!(name, "ekos_semantics_lookup" | "ekos_semantics_gaps") {
@@ -3332,7 +3358,9 @@ mod tests {
                 "ekos_identity_review",
                 "ekos_architecture_review",
                 // RFC 0172 — on by default, read-only.
-                "ekos_conflicts"
+                "ekos_conflicts",
+                // RFC 0213 — read-only.
+                "ekos_signoff_status"
             ]
         );
         for tool in tools {
@@ -5864,6 +5892,27 @@ mod tests {
 
     fn tool_json(resp: &Value) -> Value {
         serde_json::from_str(resp["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+    }
+
+    /// RFC 0213 — the sign-off status tool reads; nothing unsigned is reported as signed.
+    #[test]
+    fn signoff_status_reports_an_unsigned_project_with_seven_steps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let v = tool_json(&call(
+            &EkosConfig::default(),
+            tmp.path(),
+            "ekos_signoff_status",
+            json!({}),
+        ));
+        assert_eq!(v["signed_off"], false);
+        assert!(
+            v["refusal"]
+                .as_str()
+                .unwrap()
+                .contains("scope: not signed off")
+        );
+        assert_eq!(v["steps"].as_array().unwrap().len(), 7);
+        assert_eq!(v["steps"][2]["subjects"].as_array().unwrap().len(), 6);
     }
 
     #[test]

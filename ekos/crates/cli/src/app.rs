@@ -295,6 +295,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: SignoffCommands,
     },
+    /// The seven-step operator workflow: where the project is and what is signed off (RFC 0213)
+    Workflow {
+        #[command(subcommand)]
+        subcommand: WorkflowCommands,
+    },
     /// Export compiled knowledge to other formats (RFC 0170: LinkML)
     Export {
         #[command(subcommand)]
@@ -1207,6 +1212,15 @@ enum ReviewCommands {
 }
 
 #[derive(Subcommand)]
+enum WorkflowCommands {
+    /// The step bar: each step's state, and every review subject's sign-off
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum SignoffCommands {
     /// A subject's digest and whether its sign-off is valid, stale or missing
     Show {
@@ -2027,6 +2041,9 @@ where
         Commands::Conflicts { subcommand } => dispatch_conflicts(subcommand, &config, &cwd),
         Commands::Review { subcommand } => dispatch_review(subcommand, &config, &cwd),
         Commands::Signoff { subcommand } => dispatch_signoff(subcommand, &config, &cwd),
+        Commands::Workflow {
+            subcommand: WorkflowCommands::Status { json },
+        } => crate::commands::workflow::status(&config, &cwd, &extensions, json),
         Commands::Semantics { subcommand } => dispatch_semantics(subcommand, &config, &cwd),
         Commands::Export { subcommand } => dispatch_export(subcommand, &config, &cwd),
         Commands::Import { subcommand } => dispatch_import(subcommand, &config, &cwd),

@@ -52,6 +52,7 @@ pub mod source;
 pub mod store;
 pub mod treasury;
 pub mod uninstall_server;
+pub mod workflow;
 
 use ekos_compiler_core::EkosConfig;
 

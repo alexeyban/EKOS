@@ -11,6 +11,7 @@ use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirObject, KirRelationship};
 use ekos_ledger::KnowledgeReader;
 use ekos_semantic::review::{self, Inputs, Item, ScopeRules, SignState, Subject};
+use ekos_semantic::workflow::SubjectStatus;
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -89,21 +90,76 @@ fn counts(items: &[Item]) -> Value {
     })
 }
 
-fn summary(l: &Loaded, s: Subject) -> Value {
+fn status(l: &Loaded, s: Subject) -> SubjectStatus {
     let items = l.items(s);
-    let state = l.state(s, &items);
-    let mut v = counts(&items);
-    v["subject"] = json!(s.as_str());
-    v["digest"] = json!(review::subject_digest(s, &items));
-    v["signoff"] = serde_json::to_value(&state).unwrap_or(Value::Null);
-    v
+    SubjectStatus {
+        subject: s.as_str().into(),
+        items: items.len(),
+        decided: items.iter().filter(|i| i.decision.is_some()).count(),
+        outdated: items.iter().filter(|i| i.outdated).count(),
+        blocking: items.iter().filter(|i| i.blocking).count(),
+        digest: review::subject_digest(s, &items),
+        signoff: l.state(s, &items),
+    }
+}
+
+/// Version of the cached summary's layout; part of its key.
+const SUMMARY_VERSION: u32 = 1;
+
+/// Every review subject's counts and sign-off state, in [`Subject::ALL`] order.
+///
+/// Computing them reads the whole ledger (about 25 s on the iDempiere testbed), so the result is
+/// cached in `<state>/review/summary.json` under a key over everything it is computed from: the
+/// ledger's entry and object/relationship counts (the ledger is append-only, so any write moves
+/// the entry count), the current conflict and semantics ids, and `[review]`. A cache is a memo,
+/// not stored validity: a different input is a different key, and the summary is recomputed.
+/// Writing the cache is best-effort; [`approve`] never reads it.
+pub fn subject_statuses(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeReader,
+) -> Result<Vec<SubjectStatus>> {
+    let conflicts = super::conflicts::current_ids(config, cwd);
+    let semantics = ids_in(&config.ekos_dir(cwd).join("semantics").join("current.json"));
+    let key = ekos_common::ContentHash::of_str(&review::canonical(&json!([
+        SUMMARY_VERSION,
+        review::REVIEW_VERSION,
+        ledger.entry_count()?,
+        ledger.object_count()?,
+        ledger.relationship_count()?,
+        conflicts,
+        semantics,
+        serde_json::to_value(&config.review)?,
+    ])))
+    .0;
+    let path = config.ekos_dir(cwd).join("review").join("summary.json");
+    if let Some(cached) = std::fs::read(&path)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .filter(|v| v["key"] == key.as_str())
+        .and_then(|v| serde_json::from_value::<Vec<SubjectStatus>>(v["subjects"].clone()).ok())
+    {
+        return Ok(cached);
+    }
+    let l = Loaded::read(config, cwd, ledger)?;
+    let out: Vec<SubjectStatus> = Subject::ALL.iter().map(|s| status(&l, *s)).collect();
+    let body = json!({ "key": key, "subjects": out });
+    let _ = std::fs::create_dir_all(path.parent().unwrap_or(cwd))
+        .and_then(|()| std::fs::write(&path, serde_json::to_vec_pretty(&body).unwrap_or_default()));
+    Ok(out)
+}
+
+fn status_json(s: &SubjectStatus) -> Value {
+    serde_json::to_value(s).unwrap_or(Value::Null)
 }
 
 /// `ekos review list`
 pub fn list(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
     let ledger = open_store_read_only(config, cwd)?;
-    let l = Loaded::read(config, cwd, &*ledger)?;
-    let rows: Vec<Value> = Subject::ALL.iter().map(|s| summary(&l, *s)).collect();
+    let rows: Vec<Value> = subject_statuses(config, cwd, &*ledger)?
+        .iter()
+        .map(status_json)
+        .collect();
     if json_out {
         println!(
             "{}",
@@ -282,20 +338,21 @@ pub fn decide(
 pub fn signoff_show(config: &EkosConfig, cwd: &Path, name: &str, json_out: bool) -> Result<()> {
     let s = subject(name)?;
     let ledger = open_store_read_only(config, cwd)?;
-    let l = Loaded::read(config, cwd, &*ledger)?;
-    let v = summary(&l, s);
+    let st = subject_statuses(config, cwd, &*ledger)?
+        .into_iter()
+        .find(|x| x.subject == s.as_str())
+        .ok_or_else(|| anyhow!("no status for {}", s.as_str()))?;
     if json_out {
-        println!("{}", serde_json::to_string_pretty(&v)?);
+        println!("{}", serde_json::to_string_pretty(&status_json(&st))?);
         return Ok(());
     }
-    let items = l.items(s);
     println!(
         "{}: {} item(s), {} blocking\ndigest {}\nsign-off: {}",
         s.as_str(),
-        v["items"],
-        v["blocking"],
-        v["digest"].as_str().unwrap_or(""),
-        state_line(&l.state(s, &items))
+        st.items,
+        st.blocking,
+        st.digest,
+        state_line(&st.signoff)
     );
     Ok(())
 }
