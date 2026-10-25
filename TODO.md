@@ -6836,9 +6836,14 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       person's work; many identity candidates are name-prefix pairs like `@docusaurus/core = @docusaurus/utils` —
       worth a look at the fuzzy candidate rule); the first review read after a compile takes ~25 s (warm the cache at
       commit?); add the Review page to `deploy/e2e/s8_browser.py`
-- [ ] RFC 0214 source-estate docs + publish · RFC 0215 requirements → marts
-      - RFC 0214 GitHub wiki target: the EKOS repository's own wiki, github.com/alexeyban/EKOS/wiki (maintainer,
-        2026-10-25; a git repo at `alexeyban/EKOS.wiki.git`, today only `Home.md`). The wiki is public: check each
-        source's `licence` before publishing (the iDempiere docs repository has none)
+- [x] RFC 0214 Phase 1 — `ekos docs generate --layout estate`: 1,060 iDempiere pages (areas, tables, glossary,
+      DocAction index, routines, history, findings) from the ledger, scope from the review, no values, licence gate;
+      GitHub wiki dry run 1,061 files / 0 broken links (devlog_298)
+- [ ] RFC 0214 publish to github.com/alexeyban/EKOS/wiki — **waits for the maintainer's confirmation** (public;
+      `--prefix iDempiere --sidebar keep`; the wiki has only `Home.md`)
+- [ ] RFC 0214 Phase 2 — `lakehouse docs generate --scope source|pipeline` / `lakehouse docs publish`, the console's
+      Documentation page and step 2 on the bar; which statuses each DocAction method sets; routine flowcharts;
+      Confluence / Azure DevOps runs (dry-run only without sandbox credentials)
+- [ ] RFC 0215 requirements → marts
 - [ ] RFC 0216 `SourceEngine` seam + Oracle · RFC 0212 lakehouse delete handling · RFC 0217 optional CDC
 - [ ] RFC 0218 generated demo book

@@ -16,6 +16,7 @@
 use ekos_kir::{KirEvidence, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+pub mod estate;
 mod layer_classification;
 pub use layer_classification::{Layer, LayerOverride, classify_path};
 

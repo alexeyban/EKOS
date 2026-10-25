@@ -900,7 +900,8 @@ enum DocsCommands {
         /// Output layout: "objects" (default, one page per compiled object), "curated"
         /// (README.md/Architecture.md/API.md/SequenceDiagrams.md — RFC 0037, Markdown only), or
         /// "solution-architect" (DependencyRiskReport.md/OnboardingGuide.md/FindingsMemo.md —
-        /// RFC 0090, Markdown only)
+        /// RFC 0090, Markdown only), or "estate" (a database estate: areas, tables, glossary,
+        /// lifecycles, logic, history, findings — RFC 0214, publishable to a wiki)
         #[arg(long, default_value = "objects")]
         layout: String,
         /// Opt-in: add an LLM-written "Overview" to each page, grounded and citation-validated

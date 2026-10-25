@@ -69,6 +69,8 @@ pub enum Layout {
     Objects,
     Curated,
     SolutionArchitect,
+    /// RFC 0214: a database estate — areas, tables, logic, history, findings.
+    Estate,
 }
 
 impl Layout {
@@ -77,9 +79,10 @@ impl Layout {
             "objects" => Ok(Layout::Objects),
             "curated" => Ok(Layout::Curated),
             "solution-architect" => Ok(Layout::SolutionArchitect),
+            "estate" => Ok(Layout::Estate),
             other => Err(anyhow::anyhow!(
-                "unknown --layout '{other}' — expected 'objects', 'curated', or \
-                 'solution-architect'"
+                "unknown --layout '{other}' — expected 'objects', 'curated', \
+                 'solution-architect' or 'estate'"
             )),
         }
     }
@@ -173,6 +176,12 @@ pub async fn generate(
             );
         }
         return generate_curated(config, cwd, output);
+    }
+    if layout == Layout::Estate {
+        if format != Format::Markdown || prose {
+            anyhow::bail!("--layout estate writes Markdown only, without --prose (RFC 0214)");
+        }
+        return super::docs_estate::generate(config, cwd, output);
     }
     if layout == Layout::SolutionArchitect {
         if format != Format::Markdown {

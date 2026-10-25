@@ -52,6 +52,9 @@ pub struct EkosConfig {
     /// RFC 0213: `[review]` — how the review subjects are computed.
     #[serde(default)]
     pub review: ReviewConfig,
+    /// RFC 0214: `[docs-estate]` — source-estate documentation (`ekos docs generate --layout estate`).
+    #[serde(default)]
+    pub docs_estate: DocsEstateConfig,
     /// RFC 0178 Part 2: the project's named inputs (`[[sources]]`). Empty = one unnamed source,
     /// the directories of `[observe] paths`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -965,6 +968,20 @@ pub struct TicketsConfig {
     pub keys: Vec<String>,
 }
 
+/// RFC 0214: `[docs-estate]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct DocsEstateConfig {
+    /// Source or database name → SPDX licence id, or `none` to leave its text out. Overrides the
+    /// licence file found at a source's root; a database has none, so its text (comments, check
+    /// expressions, routine conditions) is left out unless named here.
+    #[serde(default)]
+    pub licences: std::collections::BTreeMap<String, String>,
+    /// The most tables one ER diagram draws (default 30); the most connected are drawn.
+    #[serde(default)]
+    pub max_er_tables: Option<usize>,
+}
+
 /// RFC 0213: `[review]`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -1168,6 +1185,7 @@ impl Default for EkosConfig {
             conflicts: ConflictsConfig::default(),
             tickets: TicketsConfig::default(),
             review: ReviewConfig::default(),
+            docs_estate: DocsEstateConfig::default(),
             sources: Vec::new(),
             databases: Vec::new(),
             extensions: std::collections::BTreeMap::new(),

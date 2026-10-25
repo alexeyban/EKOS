@@ -1104,6 +1104,7 @@ dependencies = [
  "ekos-kir",
  "glob",
  "serde_json",
+ "uuid",
 ]
 
 [[package]]

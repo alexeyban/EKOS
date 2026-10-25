@@ -926,6 +926,19 @@ write behaviour, identity matches — `ekos review identity` on the CLI), and a 
 what changed since a stale sign-off and signs only after the subject's name is typed. Conflicts and the glossary are
 decided on their own tabs. Deciding and signing need the reviewer role; no API token holds it.
 
+### Source-estate documentation (RFC 0214)
+
+`ekos docs generate --layout estate --output docs/estate` writes a database estate's documentation from the ledger:
+functional areas with ER diagrams, one page per in-scope table (columns with business names, the database's foreign
+keys next to the application model's references, check constraints, who reads and writes it, write behaviour, schema
+history, open conflicts), a glossary of business terms, where each document type's `DocAction` methods start,
+routines with their nested statements, schema history by release, and findings. The pages use the lakehouse-docs page
+format, so `publish_github_wiki.py`, `publish_confluence.py` and `publish_azure_devops_wiki.py` publish them; manual
+"notes" sections survive regeneration. Tables follow the review's scope (RFC 0213). Two gates are built in: a column
+profile contributes counts only, never a value, and text is used only from sources with a known licence (detected from
+a source's `LICENSE` file, or set in `[docs-estate] licences`; a database has none until you set one). On iDempiere:
+1,060 pages in 26 s.
+
 ### iDempiere eval (RFC 0222)
 
 `evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six

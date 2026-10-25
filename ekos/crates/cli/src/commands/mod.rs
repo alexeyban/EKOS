@@ -17,6 +17,7 @@ pub mod dbt;
 pub mod diagnostics_log;
 pub mod diff;
 pub mod docs;
+pub mod docs_estate;
 pub mod doctor;
 pub mod ekl;
 pub mod eval;
