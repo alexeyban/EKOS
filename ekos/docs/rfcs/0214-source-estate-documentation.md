@@ -125,3 +125,6 @@ implements all eleven methods (it is a Java interface), so the lifecycle table i
 difference between document types. The live catalog declares fewer foreign keys than the application model implies
 (`C_ORDER` → `C_BPARTNER` only via `BILL_BPARTNER_ID`); table pages show the code's `references` next to the
 database's constraints.
+
+The iDempiere output is published, with a walkthrough of steps 1–3, at
+https://github.com/alexeyban/ekos-lakehouse-oracle (GPL-2.0, as the pages derive from iDempiere's code).

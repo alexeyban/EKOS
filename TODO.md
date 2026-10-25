@@ -6839,8 +6839,11 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] RFC 0214 Phase 1 — `ekos docs generate --layout estate`: 1,060 iDempiere pages (areas, tables, glossary,
       DocAction index, routines, history, findings) from the ledger, scope from the review, no values, licence gate;
       GitHub wiki dry run 1,061 files / 0 broken links (devlog_298)
-- [ ] RFC 0214 publish to github.com/alexeyban/EKOS/wiki — **waits for the maintainer's confirmation** (public;
-      `--prefix iDempiere --sidebar keep`; the wiki has only `Home.md`)
+- [x] RFC 0214 demo published (maintainer's request, 2026-10-25): public repository
+      https://github.com/alexeyban/ekos-lakehouse-oracle — the 1,060 generated pages (`docs/estate`), a step-by-step
+      walkthrough of steps 1–3, testbed, project config, run logs, review state, eval summary; GPL-2.0
+- [ ] RFC 0214 EKOS wiki publish (github.com/alexeyban/EKOS/wiki) — not done; the demo repository took its place
+      unless the maintainer still wants it (`--prefix iDempiere --sidebar keep`)
 - [ ] RFC 0214 Phase 2 — `lakehouse docs generate --scope source|pipeline` / `lakehouse docs publish`, the console's
       Documentation page and step 2 on the bar; which statuses each DocAction method sets; routine flowcharts;
       Confluence / Azure DevOps runs (dry-run only without sandbox credentials)

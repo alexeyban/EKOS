@@ -937,7 +937,8 @@ format, so `publish_github_wiki.py`, `publish_confluence.py` and `publish_azure_
 "notes" sections survive regeneration. Tables follow the review's scope (RFC 0213). Two gates are built in: a column
 profile contributes counts only, never a value, and text is used only from sources with a known licence (detected from
 a source's `LICENSE` file, or set in `[docs-estate] licences`; a database has none until you set one). On iDempiere:
-1,060 pages in 26 s.
+1,060 pages in 26 s — published with a walkthrough of the first three workflow steps at
+[alexeyban/ekos-lakehouse-oracle](https://github.com/alexeyban/ekos-lakehouse-oracle).
 
 ### iDempiere eval (RFC 0222)
 
