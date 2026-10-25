@@ -6825,5 +6825,8 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 
 ### Parts II–V (ekos-lakehouse, console) — not started
 - [ ] RFC 0213 step bar + review/sign-off · RFC 0214 source-estate docs + publish · RFC 0215 requirements → marts
+      - RFC 0214 GitHub wiki target: the EKOS repository's own wiki, github.com/alexeyban/EKOS/wiki (maintainer,
+        2026-10-25; a git repo at `alexeyban/EKOS.wiki.git`, today only `Home.md`). The wiki is public: check each
+        source's `licence` before publishing (the iDempiere docs repository has none)
 - [ ] RFC 0216 `SourceEngine` seam + Oracle · RFC 0212 lakehouse delete handling · RFC 0217 optional CDC
 - [ ] RFC 0218 generated demo book
