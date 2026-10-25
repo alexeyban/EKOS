@@ -957,6 +957,13 @@ canonical form in Oracle SQL (`Dialect::Oracle`; the database must be AL32UTF8) 
 digests, since an Oracle string stops at 4000 bytes. On the iDempiere testbed: 901 of 903 tables planned, 12 business
 and dictionary tables loaded and reconciled green with the planted control firing.
 
+With `application-watermark = "UPDATED"` (RFC 0225) the lakehouse reads EKOS's write-behaviour facts (RFC 0212): a
+table whose code always sets `Updated` loads incrementally on it, and gets a delete plan from how it is deleted —
+checked every run, or audited weekly where the code never hard-deletes. `lakehouse deletes` finds hard deletes by a
+bucketed key diff (only buckets whose key counts or hashes differ are read key by key) and applies nothing when more
+than 5 % of a table's keys vanish at once, until a person accepts it. On iDempiere 739 of 901 tables load
+incrementally.
+
 ### iDempiere eval (RFC 0222)
 
 `evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six

@@ -6859,5 +6859,12 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [ ] RFC 0216 follow-ups: a Dagster run of the whole `ADEMPIERE` pipeline; silver over Oracle names (step 6); the same
       no-rounding guard for PostgreSQL's decimal rule; `lakehouse install --source` for Oracle; LedgerSMB gate (its
       database is gone from the sandbox)
-- [ ] RFC 0212 lakehouse delete handling · RFC 0217 optional CDC
+- [x] RFC 0225 — step 5 behind the scenes: application watermark from write-behaviour facts (iDempiere 739/901
+      incremental), delete plans by class, `lakehouse deletes` (bucketed key diff, mass-delete guard, tombstones,
+      retained purges), Dagster step; live single/re-insert/mass/purge green; a home project's pipeline no longer lands
+      in its sources (devlog_301, lakehouse devlog_15)
+- [ ] RFC 0225 follow-ups: the console's Extraction page (step 5 UI, approve the plan); silver flag for retained purges +
+      SCD2 close (step 6); a found delete that contradicts the code as an EKOS conflict; cascade + real purge routine
+      planted on the testbed; a Dagster run of the whole iDempiere pipeline
+- [ ] RFC 0217 optional CDC
 - [ ] RFC 0218 generated demo book
