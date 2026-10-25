@@ -416,6 +416,7 @@ fn the_tiers_run_over_the_real_driver() {
         source_columns: cols.clone(),
         target_columns: cols,
         buckets: 16,
+        digest_columns: false,
     };
 
     // A table compared with itself must be silent at every tier. If the driver mangled a value —

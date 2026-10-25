@@ -6852,5 +6852,12 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       Documentation page and step 2 on the bar; which statuses each DocAction method sets; routine flowcharts;
       Confluence / Azure DevOps runs (dry-run only without sandbox credentials)
 - [ ] RFC 0215 requirements → marts
-- [ ] RFC 0216 `SourceEngine` seam + Oracle · RFC 0212 lakehouse delete handling · RFC 0217 optional CDC
+- [x] RFC 0216 — lakehouse `Source` trait (Pagila pipeline byte-identical), Oracle source over `[[databases]]`, Oracle →
+      Iceberg type map, `Dialect::Oracle` + `UnitPlan::digest_columns`; iDempiere 901/903 tables planned, 12 loaded and
+      reconciled green with the control; fixed: decimal reconciliation could agree over rounding (Oracle), Trino row SQL
+      overflowed the read guard's stack on wide tables (devlog_300, lakehouse devlog_14)
+- [ ] RFC 0216 follow-ups: a Dagster run of the whole `ADEMPIERE` pipeline; silver over Oracle names (step 6); the same
+      no-rounding guard for PostgreSQL's decimal rule; `lakehouse install --source` for Oracle; LedgerSMB gate (its
+      database is gone from the sandbox)
+- [ ] RFC 0212 lakehouse delete handling · RFC 0217 optional CDC
 - [ ] RFC 0218 generated demo book

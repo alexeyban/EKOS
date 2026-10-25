@@ -20,6 +20,11 @@ pub enum Dialect {
     /// hashes and bucket checksums is proven live in the `ekos-lakehouse` repository, which has
     /// the Trino client (`EKOS_LAKEHOUSE_LIVE=1`; 31/31 on Trino 483, 2026-10-16).
     Trino,
+    /// RFC 0216: Oracle as a lakehouse source (EKOS Lakehouse, source ↔ bronze reconciliation).
+    /// Every expression assumes the session `ekos-ora-live` opens: NLS settings pinned (numeric
+    /// characters `.,`, binary comparison), time zone UTC, and a database character set of
+    /// AL32UTF8, because `STANDARD_HASH` hashes a string's bytes in the database character set.
+    Oracle,
 }
 
 /// The source column type an expression is generated for. Deliberately coarse: it names the
@@ -55,7 +60,7 @@ fn null_literal(d: Dialect) -> &'static str {
     match d {
         // Trino string literals have no backslash escapes, as PostgreSQL's with
         // `standard_conforming_strings`.
-        Dialect::Postgres | Dialect::Trino => "'\\N'",
+        Dialect::Postgres | Dialect::Trino | Dialect::Oracle => "'\\N'",
         Dialect::ClickHouse => "'\\\\N'",
     }
 }
@@ -82,6 +87,8 @@ fn escape_sql(d: Dialect, inner: &str) -> String {
         Dialect::ClickHouse => {
             format!("replaceAll(replaceAll({inner}, '\\\\', '\\\\\\\\'), char(31), '\\\\x1f')")
         }
+        // Oracle literals take a backslash literally too.
+        Dialect::Oracle => format!("REPLACE(REPLACE({inner}, '\\', '\\\\'), CHR(31), '\\x1f')"),
     }
 }
 
@@ -164,6 +171,37 @@ pub fn canon_expr_of(d: Dialect, expr: &str, rule: ColumnRule) -> String {
         (Dialect::ClickHouse, ColumnRule::Uuid) => format!("lower(toString({c}))"),
         (Dialect::Postgres, ColumnRule::Bytes) => format!("encode({c}, 'hex')"),
         (Dialect::ClickHouse, ColumnRule::Bytes) => format!("lower(hex({c}))"),
+        // `TO_CHAR` brings an NVARCHAR2 into the database character set, so its bytes hash as
+        // UTF-8 like every other text.
+        (Dialect::Oracle, ColumnRule::Text | ColumnRule::Char | ColumnRule::Inet) => {
+            escape_sql(d, &format!("TO_CHAR({c})"))
+        }
+        // Oracle tables have no boolean before 23ai: a NUMBER(1) flag.
+        (Dialect::Oracle, ColumnRule::Bool) => format!("(CASE WHEN {c} = 1 THEN 't' ELSE 'f' END)"),
+        (Dialect::Oracle, ColumnRule::Int) => format!("TO_CHAR({c})"),
+        // `FM` drops the padding; the `0` before the point keeps `0.05`'s leading zero. A value
+        // with more digits than the scale renders unrounded, so it cannot match the target's
+        // fixed-scale form: `TO_CHAR` would round it exactly as a lossy load's cast does, and the
+        // two sides would agree over the lost digits.
+        (Dialect::Oracle, ColumnRule::Decimal(s)) => format!(
+            "(CASE WHEN {c} <> ROUND({c}, {s}) THEN TO_CHAR({c}) ELSE TO_CHAR({c}, '{}') END)",
+            oracle_decimal_format(s)
+        ),
+        // A DATE holds a time to the second; the cast gives it the six fraction digits.
+        (Dialect::Oracle, ColumnRule::TimestampUtc) => {
+            format!(
+                "TO_CHAR(CAST(SYS_EXTRACT_UTC({c}) AS TIMESTAMP(6)), 'YYYY-MM-DD\"T\"HH24:MI:SS.FF6')"
+            )
+        }
+        (Dialect::Oracle, ColumnRule::TimestampNaive) => {
+            format!("TO_CHAR(CAST({c} AS TIMESTAMP(6)), 'YYYY-MM-DD\"T\"HH24:MI:SS.FF6')")
+        }
+        (Dialect::Oracle, ColumnRule::Date) => format!("TO_CHAR({c}, 'YYYY-MM-DD')"),
+        (Dialect::Oracle, ColumnRule::Time) => {
+            format!("TO_CHAR(CAST({c} AS TIMESTAMP(6)), 'HH24:MI:SS.FF6')")
+        }
+        (Dialect::Oracle, ColumnRule::Uuid) => format!("LOWER(TO_CHAR({c}))"),
+        (Dialect::Oracle, ColumnRule::Bytes) => format!("LOWER(RAWTOHEX({c}))"),
     };
     // NULL is decided on the **column**, not on the rendered value, and the same way on both
     // sides. `coalesce(body, …)` on PostgreSQL only fired when the *rendering* was NULL — and the
@@ -175,7 +213,32 @@ pub fn canon_expr_of(d: Dialect, expr: &str, rule: ColumnRule) -> String {
     match d {
         Dialect::Postgres => format!("(case when {c} is null then {null} else {body} end)"),
         Dialect::ClickHouse => format!("if(isNull({c}), {null}, {body})"),
-        Dialect::Trino => format!("(CASE WHEN {c} IS NULL THEN {null} ELSE {body} END)"),
+        Dialect::Trino | Dialect::Oracle => {
+            format!("(CASE WHEN {c} IS NULL THEN {null} ELSE {body} END)")
+        }
+    }
+}
+
+/// `FM` + 38 digit positions, `s` of them after the point: `FM999…990.00`. No point at scale 0.
+fn oracle_decimal_format(s: u32) -> String {
+    let int = 38usize.saturating_sub(s as usize).max(1);
+    let mut f = format!("FM{}0", "9".repeat(int - 1));
+    if s > 0 {
+        f.push('.');
+        f.push_str(&"0".repeat(s as usize));
+    }
+    f
+}
+
+/// RFC 0216: a column's digest — the first 16 hex digits of its canonical form's hash. A row
+/// hashed over digests has a bounded length whatever its columns hold (see
+/// [`crate::tiers::UnitPlan::digest_columns`]).
+pub fn column_digest_expr(d: Dialect, column_expr: &str) -> String {
+    let h = hash_hex_expr(d, column_expr);
+    match d {
+        Dialect::ClickHouse => format!("substring({h}, 1, 16)"),
+        Dialect::Oracle => format!("SUBSTR({h}, 1, 16)"),
+        Dialect::Postgres | Dialect::Trino => format!("substr({h}, 1, 16)"),
     }
 }
 
@@ -184,8 +247,39 @@ pub fn row_hash_expr(d: Dialect, column_exprs: &[String]) -> String {
     let sep = match d {
         Dialect::Postgres | Dialect::Trino => format!("chr({})", UNIT_SEPARATOR as u32),
         Dialect::ClickHouse => "char(31)".to_string(),
+        Dialect::Oracle => format!("CHR({})", UNIT_SEPARATOR as u32),
     };
+    if d == Dialect::Trino {
+        let mut parts = Vec::with_capacity(column_exprs.len() * 2);
+        for (i, e) in column_exprs.iter().enumerate() {
+            if i > 0 {
+                parts.push(sep.clone());
+            }
+            parts.push(e.clone());
+        }
+        return hash_hex_expr(d, &flat_concat(parts));
+    }
     hash_hex_expr(d, &column_exprs.join(&format!(" || {sep} || ")))
+}
+
+/// Trino's arguments to `concat` per call: well under its limit on a function's arity.
+const CONCAT_ARITY: usize = 64;
+
+/// `concat(…)` over `parts`, nested in chunks: the same string as `a || b || …`, but as a flat call
+/// rather than a left-deep chain of operators. The Trino read path parses every query and prints it
+/// back (the RFC 0160 classifier), and printing a chain recurses once per operator — a row of 92
+/// columns overflowed a test thread's stack (RFC 0216, iDempiere `C_ORDER`).
+fn flat_concat(mut parts: Vec<String>) -> String {
+    while parts.len() > 1 {
+        parts = parts
+            .chunks(CONCAT_ARITY)
+            .map(|c| match c {
+                [one] => one.clone(),
+                many => format!("concat({})", many.join(", ")),
+            })
+            .collect();
+    }
+    parts.pop().unwrap_or_else(|| "''".into())
 }
 
 /// SHA-256 of a text expression, as lowercase hex — the engine-side twin of [`crate::row_hash`].
@@ -198,6 +292,9 @@ pub fn hash_hex_expr(d: Dialect, text_expr: &str) -> String {
         Dialect::ClickHouse => format!("lower(hex(SHA256({text_expr})))"),
         // `sha256` takes `varbinary`; `to_utf8` gives the text's UTF-8 bytes.
         Dialect::Trino => format!("lower(to_hex(sha256(to_utf8({text_expr}))))"),
+        // The bytes of the text in the database character set, AL32UTF8 by the dialect's
+        // contract. Not `UTL_I18N.STRING_TO_RAW`: a SQL `RAW` stops at 2000 bytes.
+        Dialect::Oracle => format!("LOWER(RAWTOHEX(STANDARD_HASH({text_expr}, 'SHA256')))"),
     }
 }
 
@@ -222,6 +319,8 @@ pub fn prefix60_expr(d: Dialect, hash_expr: &str) -> String {
         ),
         // `from_base` reads the digits as a human does, big-endian; 15 hex digits fit a bigint.
         Dialect::Trino => format!("from_base(substr({hash_expr}, 1, 15), 16)"),
+        // A hex format model reads big-endian too, into an exact NUMBER.
+        Dialect::Oracle => format!("TO_NUMBER(SUBSTR({hash_expr}, 1, 15), 'XXXXXXXXXXXXXXX')"),
     }
 }
 
@@ -232,7 +331,26 @@ fn exact_sum(d: Dialect, prefix: &str) -> String {
         Dialect::Postgres => format!("sum(({prefix})::numeric)"),
         Dialect::ClickHouse => format!("sum(toDecimal128({prefix}, 0))"),
         Dialect::Trino => format!("sum(CAST({prefix} AS decimal(38, 0)))"),
+        // NUMBER arithmetic is exact to 38 digits.
+        Dialect::Oracle => format!("SUM({prefix})"),
     }
+}
+
+/// `a % n`; Oracle has no `%` operator.
+fn modulo(d: Dialect, a: &str, n: u32) -> String {
+    match d {
+        Dialect::Oracle => format!("MOD({a}, {n})"),
+        Dialect::Postgres | Dialect::ClickHouse | Dialect::Trino => format!("{a} % {n}"),
+    }
+}
+
+/// Oracle cannot `GROUP BY` an alias or a position: the bucket is computed in a subquery.
+fn oracle_buckets(bucket: &str, row_prefix: &str, table: &str, filter: &str) -> String {
+    format!(
+        "SELECT bucket, COUNT(*) AS row_count, SUM(h) AS hash_sum FROM \
+         (SELECT {bucket} AS bucket, {row_prefix} AS h FROM {table}{filter}) \
+         GROUP BY bucket ORDER BY bucket"
+    )
 }
 
 /// Trino cannot `GROUP BY` an output alias; the position means the same.
@@ -240,6 +358,7 @@ fn group_and_order(d: Dialect) -> &'static str {
     match d {
         Dialect::Trino => "GROUP BY 1 ORDER BY 1",
         Dialect::Postgres | Dialect::ClickHouse => "GROUP BY bucket ORDER BY bucket",
+        Dialect::Oracle => unreachable!("Oracle groups a subquery: oracle_buckets"),
     }
 }
 
@@ -257,7 +376,10 @@ pub fn bucket_checksum_query(
 ) -> String {
     let row = row_hash_expr(d, column_exprs);
     let pk_hash = hash_hex_expr(d, pk_expr);
-    let bucket = format!("{} % {buckets}", prefix60_expr(d, &pk_hash));
+    let bucket = modulo(d, &prefix60_expr(d, &pk_hash), buckets);
+    if d == Dialect::Oracle {
+        return oracle_buckets(&bucket, &prefix60_expr(d, &row), table, "");
+    }
     let sum = exact_sum(d, &prefix60_expr(d, &row));
     let group = group_and_order(d);
     format!(
@@ -269,7 +391,7 @@ pub fn bucket_checksum_query(
 /// The bucket expression on its own, so bisect can both group by it and filter on it.
 pub fn bucket_expr(d: Dialect, pk_expr: &str, buckets: u32) -> String {
     let pk_hash = hash_hex_expr(d, pk_expr);
-    format!("{} % {buckets}", prefix60_expr(d, &pk_hash))
+    modulo(d, &prefix60_expr(d, &pk_hash), buckets)
 }
 
 /// RFC 0156 bisect step: re-bucket one coarse bucket's rows at a finer fan-out.
@@ -288,6 +410,10 @@ pub fn sub_bucket_checksum_query(
     let row = row_hash_expr(d, column_exprs);
     let coarse = bucket_expr(d, pk_expr, coarse_buckets);
     let fine = bucket_expr(d, pk_expr, fine_buckets);
+    if d == Dialect::Oracle {
+        let filter = format!(" WHERE {coarse} = {coarse_bucket}");
+        return oracle_buckets(&fine, &prefix60_expr(d, &row), table, &filter);
+    }
     let sum = exact_sum(d, &prefix60_expr(d, &row));
     let group = group_and_order(d);
     format!(
@@ -346,6 +472,8 @@ pub fn aggregate_query(d: Dialect, table: &str, column_exprs: &[String]) -> Stri
             Dialect::ClickHouse => format!("length({e})"),
             // Trino's `length` counts characters, as PostgreSQL's does.
             Dialect::Trino => format!("length(to_utf8({e}))"),
+            // Bytes in the database character set: UTF-8, by the dialect's contract.
+            Dialect::Oracle => format!("LENGTHB({e})"),
         };
         parts.push(format!("sum({len}) AS len_{i}"));
     }
@@ -353,7 +481,7 @@ pub fn aggregate_query(d: Dialect, table: &str, column_exprs: &[String]) -> Stri
     // both, so one form serves both dialects and there is one less place to diverge.
     match d {
         // Trino answers NULL over an empty table, as PostgreSQL does.
-        Dialect::Postgres | Dialect::Trino => {
+        Dialect::Postgres | Dialect::Trino | Dialect::Oracle => {
             format!("SELECT {} FROM {table}", parts.join(", "))
         }
         // Over an empty table PostgreSQL's min/max/sum are NULL and ClickHouse's are type defaults
@@ -369,6 +497,127 @@ pub fn aggregate_query(d: Dialect, table: &str, column_exprs: &[String]) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oracle_renders_the_canonical_forms_in_its_own_functions() {
+        let o = |r| canon_expr(Dialect::Oracle, "C", r);
+        assert_eq!(
+            o(ColumnRule::Text),
+            "(CASE WHEN \"C\" IS NULL THEN '\\N' ELSE \
+             REPLACE(REPLACE(TO_CHAR(\"C\"), '\\', '\\\\'), CHR(31), '\\x1f') END)"
+        );
+        assert!(o(ColumnRule::Int).contains("ELSE TO_CHAR(\"C\") END"));
+        assert!(
+            o(ColumnRule::Decimal(2))
+                .contains(&format!("TO_CHAR(\"C\", 'FM{}0.00')", "9".repeat(35))),
+            "{}",
+            o(ColumnRule::Decimal(2))
+        );
+        assert!(
+            o(ColumnRule::Decimal(0)).contains(&format!("'FM{}0')", "9".repeat(37))),
+            "no point at scale 0: {}",
+            o(ColumnRule::Decimal(0))
+        );
+        assert!(
+            o(ColumnRule::TimestampNaive)
+                .contains("TO_CHAR(CAST(\"C\" AS TIMESTAMP(6)), 'YYYY-MM-DD\"T\"HH24:MI:SS.FF6')")
+        );
+        assert!(o(ColumnRule::TimestampUtc).contains("SYS_EXTRACT_UTC(\"C\")"));
+        assert!(o(ColumnRule::Bytes).contains("LOWER(RAWTOHEX(\"C\"))"));
+    }
+
+    #[test]
+    fn oracle_hashes_big_endian_and_groups_a_subquery() {
+        assert_eq!(
+            hash_hex_expr(Dialect::Oracle, "x"),
+            "LOWER(RAWTOHEX(STANDARD_HASH(x, 'SHA256')))"
+        );
+        assert_eq!(
+            prefix60_expr(Dialect::Oracle, "h"),
+            "TO_NUMBER(SUBSTR(h, 1, 15), 'XXXXXXXXXXXXXXX')"
+        );
+        let q = bucket_checksum_query(Dialect::Oracle, "\"S\".\"T\"", "pk", &["a".into()], 64);
+        assert!(
+            q.starts_with(
+                "SELECT bucket, COUNT(*) AS row_count, SUM(h) AS hash_sum FROM (SELECT MOD("
+            ),
+            "{q}"
+        );
+        assert!(
+            q.ends_with("FROM \"S\".\"T\") GROUP BY bucket ORDER BY bucket"),
+            "{q}"
+        );
+        assert!(!q.contains(" % "), "Oracle has no % operator: {q}");
+        let sub = sub_bucket_checksum_query(Dialect::Oracle, "t", "pk", &["a".into()], 16, 3, 256);
+        assert!(sub.contains(", 256) AS bucket"), "{sub}");
+        assert!(
+            sub.contains(", 16) = 3)"),
+            "the coarse filter is inside the subquery: {sub}"
+        );
+        assert!(key_hash_query(Dialect::Oracle, "t", "pk", &["a".into()], 16, 3).contains("MOD("));
+        assert!(aggregate_query(Dialect::Oracle, "t", &["e".into()]).contains("sum(LENGTHB(e))"));
+    }
+
+    #[test]
+    fn a_column_digest_is_sixteen_hex_digits_of_the_columns_hash_on_every_engine() {
+        for d in [
+            Dialect::Postgres,
+            Dialect::ClickHouse,
+            Dialect::Trino,
+            Dialect::Oracle,
+        ] {
+            let e = column_digest_expr(d, "x");
+            assert!(e.contains(&hash_hex_expr(d, "x")), "{e}");
+            assert!(e.ends_with(", 1, 16)"), "{e}");
+        }
+    }
+
+    /// A wide row is a flat `concat`, not a chain of `||` a parser nests one level per column.
+    #[test]
+    fn a_trino_row_of_any_width_stays_shallow() {
+        let cols: Vec<String> = (0..300).map(|i| format!("c{i}")).collect();
+        let e = row_hash_expr(Dialect::Trino, &cols);
+        assert!(!e.contains("||"), "{e}");
+        let (mut depth, mut deepest) = (0i32, 0i32);
+        for ch in e.chars() {
+            match ch {
+                '(' => depth += 1,
+                ')' => depth -= 1,
+                _ => {}
+            }
+            deepest = deepest.max(depth);
+        }
+        assert!(deepest < 12, "nesting {deepest}");
+        let order: Vec<usize> = cols
+            .iter()
+            .map(|c| {
+                e.find(&format!("{c},"))
+                    .or_else(|| e.find(&format!("{c})")))
+                    .unwrap()
+            })
+            .collect();
+        assert!(
+            order.windows(2).all(|w| w[0] < w[1]),
+            "the columns keep their order"
+        );
+        assert_eq!(
+            row_hash_expr(Dialect::Trino, &["a".into()]),
+            hash_hex_expr(Dialect::Trino, "a")
+        );
+    }
+
+    /// The other engines' SQL is unchanged by Oracle's modulo and grouping.
+    #[test]
+    fn the_other_engines_keep_their_bucket_sql() {
+        let pg = bucket_checksum_query(Dialect::Postgres, "t", "pk", &["a".into()], 64);
+        assert!(pg.contains("::bigint % 64 AS bucket"), "{pg}");
+        assert!(
+            pg.ends_with("FROM t GROUP BY bucket ORDER BY bucket"),
+            "{pg}"
+        );
+        let trino = bucket_checksum_query(Dialect::Trino, "t", "pk", &["a".into()], 64);
+        assert!(trino.ends_with("FROM t GROUP BY 1 ORDER BY 1"), "{trino}");
+    }
 
     /// A NULL boolean must render as the NULL sentinel on **both** engines. PostgreSQL used to
     /// coalesce the *rendered* value, and the boolean rule renders NULL as 'f'.

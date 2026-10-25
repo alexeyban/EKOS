@@ -946,6 +946,17 @@ a source's `LICENSE` file, or set in `[docs-estate] licences`; a database has no
 1,060 pages in 26 s — published with a walkthrough of the first three workflow steps at
 [alexeyban/ekos-lakehouse-oracle](https://github.com/alexeyban/ekos-lakehouse-oracle).
 
+### Oracle as a lakehouse source (RFC 0216)
+
+[EKOS Lakehouse](https://github.com/alexeyban/ekos-lakehouse) reads Oracle as well as PostgreSQL. In
+`[extensions.lakehouse]`, `source-engine = "oracle"` and `source-database = "<a [[databases]] entry>"` reuse the
+connection steps 1–3 already use; `lakehouse plan` maps every column with an Oracle → Iceberg type map (a `DATE`
+lands as `timestamp(6)` because it carries a time, an unconstrained `NUMBER` at the scale its data uses), and
+`lakehouse reconcile` checks bronze against Oracle directly at V1–V3. For that, `migrate-validate` renders the
+canonical form in Oracle SQL (`Dialect::Oracle`; the database must be AL32UTF8) and hashes a wide row over column
+digests, since an Oracle string stops at 4000 bytes. On the iDempiere testbed: 901 of 903 tables planned, 12 business
+and dictionary tables loaded and reconciled green with the planted control firing.
+
 ### iDempiere eval (RFC 0222)
 
 `evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six

@@ -92,6 +92,12 @@ fn trino_sql_is_pinned() {
     check("trino.sql.txt", &render(Dialect::Trino));
 }
 
+/// RFC 0216; proven live in the `ekos-lakehouse` repository (`oracle_live.rs`, iDempiere testbed).
+#[test]
+fn oracle_sql_is_pinned() {
+    check("oracle.sql.txt", &render(Dialect::Oracle));
+}
+
 /// Every `ColumnRule` variant appears above. A new rule with no pinned SQL would otherwise ship
 /// unreviewed.
 #[test]

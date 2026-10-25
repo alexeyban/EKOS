@@ -1,7 +1,7 @@
 //! RFC 0156 — the validation tiers, and the rule that a tier which misses its control does not get
 //! to report green.
 
-use crate::dialect;
+use crate::dialect::{self, Dialect};
 use crate::divergence::{Class, Divergence};
 use crate::hash::BucketChecksum;
 use crate::reader::{EngineReader, ReadError};
@@ -130,6 +130,34 @@ pub struct UnitPlan {
     pub source_columns: Vec<String>,
     pub target_columns: Vec<String>,
     pub buckets: u32,
+    /// RFC 0216: V3 and bisect hash each row over its **column digests** (the first 16 hex digits
+    /// of each column's canonical hash) instead of its column texts, on both sides. Oracle cannot
+    /// build a row string past 4000 bytes, and a wide table's row reaches that; a digest is 16
+    /// bytes whatever the column holds. V1 and V2 are unaffected.
+    pub digest_columns: bool,
+}
+
+impl UnitPlan {
+    /// The expressions V3 and bisect hash a row over, on the source side.
+    pub fn source_row(&self, d: Dialect) -> Vec<String> {
+        self.row(d, &self.source_columns)
+    }
+
+    /// The expressions V3 and bisect hash a row over, on the target side.
+    pub fn target_row(&self, d: Dialect) -> Vec<String> {
+        self.row(d, &self.target_columns)
+    }
+
+    fn row(&self, d: Dialect, columns: &[String]) -> Vec<String> {
+        if self.digest_columns {
+            columns
+                .iter()
+                .map(|c| dialect::column_digest_expr(d, c))
+                .collect()
+        } else {
+            columns.to_vec()
+        }
+    }
 }
 
 /// V1 — row counts.
@@ -261,14 +289,14 @@ pub fn run_v3(
         source.dialect(),
         &plan.source_table,
         &plan.source_pk,
-        &plan.source_columns,
+        &plan.source_row(source.dialect()),
         plan.buckets,
     ))?)?;
     let t = parse_buckets(target.query(&dialect::bucket_checksum_query(
         target.dialect(),
         &plan.target_table,
         &plan.target_pk,
-        &plan.target_columns,
+        &plan.target_row(target.dialect()),
         plan.buckets,
     ))?)?;
 
@@ -322,6 +350,7 @@ mod tests {
             target_pk: "pk".into(),
             source_columns: vec!["a".into()],
             target_columns: vec!["a".into()],
+            digest_columns: false,
             buckets: 4,
         }
     }

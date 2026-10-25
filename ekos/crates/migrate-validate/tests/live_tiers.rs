@@ -209,6 +209,7 @@ fn plan(suffix: &str) -> UnitPlan {
         source_columns: cols(Dialect::Postgres),
         target_columns: cols(Dialect::ClickHouse),
         buckets: BUCKETS,
+        digest_columns: false,
     }
 }
 

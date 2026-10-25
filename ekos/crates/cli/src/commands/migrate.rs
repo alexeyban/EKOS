@@ -1905,6 +1905,7 @@ pub fn validate(
             source_columns,
             target_columns,
             buckets: 64,
+            digest_columns: false,
         };
 
         let mut outcomes = Vec::new();

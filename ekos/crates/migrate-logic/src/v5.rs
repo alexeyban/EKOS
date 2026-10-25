@@ -104,6 +104,13 @@ impl Family {
             (Self::Bool, Dialect::Trino) => "boolean".into(),
             (Self::Date, Dialect::Trino) => "date".into(),
             (Self::Timestamp, Dialect::Trino) => "timestamp(6)".into(),
+            // Never run either: Oracle is a lakehouse source (RFC 0216), not a V5 engine.
+            (Self::Int, Dialect::Oracle) => "NUMBER(19)".into(),
+            (Self::Decimal, Dialect::Oracle) => format!("NUMBER(30,{DECIMAL_SCALE})"),
+            (Self::Text, Dialect::Oracle) => "VARCHAR2(4000)".into(),
+            (Self::Bool, Dialect::Oracle) => "NUMBER(1)".into(),
+            (Self::Date, Dialect::Oracle) => "DATE".into(),
+            (Self::Timestamp, Dialect::Oracle) => "TIMESTAMP(6)".into(),
         }
     }
 
@@ -589,7 +596,7 @@ impl Plan {
                 .map(|(c, f)| format!("{} {}", ident(c), f.column_type(d)))
                 .collect();
             let engine = match d {
-                Dialect::Postgres | Dialect::Trino => "",
+                Dialect::Postgres | Dialect::Trino | Dialect::Oracle => "",
                 Dialect::ClickHouse => " ENGINE = Memory",
             };
             out.push(format!(
@@ -616,7 +623,7 @@ impl Plan {
         out.push(match d {
             Dialect::Postgres => self.source_view.clone(),
             // There is no lowering to Trino; `run` refuses it before setting anything up.
-            Dialect::ClickHouse | Dialect::Trino => self.lowered_view.clone(),
+            Dialect::ClickHouse | Dialect::Trino | Dialect::Oracle => self.lowered_view.clone(),
         });
         out
     }
@@ -1079,6 +1086,7 @@ mod tests {
                 Dialect::Postgres => "fake:postgres",
                 Dialect::ClickHouse => "fake:clickhouse",
                 Dialect::Trino => "fake:trino",
+                Dialect::Oracle => "fake:oracle",
             }
         }
         fn run(
