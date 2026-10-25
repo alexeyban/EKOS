@@ -93,6 +93,7 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("review show", Class::Read, false),
     ("review scope", Class::Review, false),
     ("review pii", Class::Review, false),
+    ("review identity", Class::Review, false),
     ("review write-behaviour", Class::Review, false),
     ("signoff show", Class::Read, false),
     ("workflow status", Class::Read, false),

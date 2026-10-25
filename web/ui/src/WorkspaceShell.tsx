@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet, useLocation, useOutletContext, useParams } from "react-router-dom";
 import { api } from "./api/client";
 import { InitAndCompile } from "./InitAndCompile";
+import { StepBar } from "./StepBar";
 
 export interface Me {
   mode: "oidc" | "token";
@@ -49,6 +50,7 @@ const TABS: { to: string; label: string; end?: boolean }[] = [
   { to: "evals", label: "Evals" },
   { to: "semantics", label: "Semantics" },
   { to: "conflicts", label: "Conflicts" },
+  { to: "review", label: "Review" },
   { to: "config", label: "ekos.toml" },
 ];
 
@@ -110,13 +112,16 @@ export function WorkspaceShell() {
           <strong>Restricted access</strong>
           <p className="muted">
             You can see part of this project. The graph and its search show what you have access
-            to; the dashboard, run history, configuration, semantics and conflicts are for people
-            who see all of it.
+            to; the dashboard, run history, configuration, semantics, conflicts and the review
+            are for people who see all of it.
           </p>
           <NavLink to={`/w/${id}/graph`}>Open the graph</NavLink>
         </section>
       ) : (
-        <Outlet context={scoped} />
+        <>
+          {!restricted && <StepBar workspace={id} />}
+          <Outlet context={scoped} />
+        </>
       )}
     </>
   );

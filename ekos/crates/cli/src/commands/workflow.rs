@@ -148,10 +148,10 @@ mod tests {
         assert_eq!(first[0].items, 1);
 
         // Tamper with the cached body, keep its key: the tampered value is what comes back.
-        let path = config.ekos_dir(cwd).join("review").join("summary.json");
+        let path = config.ekos_dir(cwd).join("review").join("state.json");
         let mut v: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        v["subjects"][0]["items"] = serde_json::json!(999);
+        v["statuses"][0]["items"] = serde_json::json!(999);
         std::fs::write(&path, serde_json::to_vec(&v).unwrap()).unwrap();
         let cached = super::super::review::subject_statuses(&config, cwd, &*ledger).unwrap();
         assert_eq!(cached[0].items, 999);

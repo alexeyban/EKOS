@@ -227,3 +227,22 @@ project (144k objects, 218k relationships). Fine for an operator's command; the 
 Step 1 is source **file** freshness: the Oracle column dropped after Phase 1 does not make it stale, because a live
 database is read every build and is not in the manifest (RFC 0211). The `pii` sign-off still names the column because
 the ledger has not been rebuilt since.
+
+**Phase 3** (2026-10-25, same testbed, console in token mode, `evals/oracle-idempiere/part2-review/`):
+
+- Console: the step bar on every project page (`GET /workspaces/{id}/workflow`), and a **Review** tab
+  (`GET /review`, `GET /review/{subject}`, `POST /review/{subject}/decide|signoff|revoke`). Reads need `read`;
+  writes need `review`, which no API token holds, run the human-only CLI commands (targets after `--`), and record
+  the signed-in person. Sign-off posts the digest the page showed and needs the subject's name typed.
+- `ekos review identity <match…> --confirm|--reject [--note]` (human-only, `HUMAN_ONLY`): a new version of the
+  `SameAs` relationship with `status`, `reviewed_by`, `reviewed_at`, plus an event citing evidence — what
+  `ekos_identity_review` writes, made by a person.
+- The cache now holds every subject's items (`<state>/review/state.json`, ~1 MB on iDempiere), so `review show` is
+  cached too, and every review write recomputes it from the objects it loaded plus what it wrote; a test holds that
+  equal to a fresh read, including a scope decision that changes other subjects.
+- Browser walk-through, 18/18: a scope decision turned the scope sign-off stale naming the item; scope, PII, write
+  behaviour and glossary signed; identity and conflicts refused while items block. The console's read and write
+  time limits for these routes are 300 s (the first read after a compile takes ~25 s).
+
+Not done: a full iDempiere sign-off (195 conflicts and 25 identity candidates for a person to decide); the review page
+in `deploy/e2e/s8_browser.py`.

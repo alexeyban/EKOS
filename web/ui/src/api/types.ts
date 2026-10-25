@@ -331,3 +331,56 @@ export interface Conflict {
   review_note: string | null;
   measured: { violating_rows?: number; query?: string; measured_at?: string } | null;
 }
+
+// ── RFC 0213 workflow bar, review and sign-off ──────────────────────────────────────────────
+
+export type StepState = "todo" | "partial" | "done" | "stale" | "blocked";
+
+/** A subject's sign-off as `ekos review list --json` prints it; validity is recomputed per read. */
+export type SignOff =
+  | { state: "none" }
+  | { state: "valid"; signed_by: string; signed_at: string }
+  | {
+      state: "stale";
+      signed_by: string;
+      signed_at: string;
+      added: string[];
+      removed: string[];
+      changed: string[];
+    }
+  | { state: "revoked"; signed_by: string; signed_at: string; reason: string };
+
+export interface SubjectStatus {
+  subject: string;
+  items: number;
+  decided: number;
+  outdated: number;
+  blocking: number;
+  digest: string;
+  signoff: SignOff;
+}
+
+export interface WorkflowStep {
+  n: number;
+  id: string;
+  title: string;
+  state: StepState;
+  detail: string;
+  subjects?: SubjectStatus[];
+}
+
+/** One item of `ekos review show <subject> --json`: `facts` are signed, `info` only shown. */
+export interface ReviewItem {
+  id: string;
+  label: string;
+  facts: Record<string, unknown>;
+  info: Record<string, unknown>;
+  proposed: string | null;
+  decision: Record<string, unknown> | null;
+  outdated: boolean;
+  blocking: boolean;
+}
+
+export interface ReviewSubjectDetail extends SubjectStatus {
+  rows: ReviewItem[];
+}

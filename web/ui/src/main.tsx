@@ -76,6 +76,10 @@ const router = createBrowserRouter([
             lazy: () => import("./pages/Conflicts").then((m) => ({ Component: m.Conflicts })),
           },
           {
+            path: "review",
+            lazy: () => import("./pages/Review").then((m) => ({ Component: m.Review })),
+          },
+          {
             path: "config",
             lazy: () => import("./pages/Config").then((m) => ({ Component: m.Config })),
           },

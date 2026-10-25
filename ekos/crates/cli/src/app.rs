@@ -1194,6 +1194,20 @@ enum ReviewCommands {
         #[arg(long = "as")]
         by: Option<String>,
     },
+    /// Confirm or reject identity matches (`SameAs` candidates) by id or `A = B` label (human-only)
+    Identity {
+        #[arg(required = true)]
+        matches: Vec<String>,
+        #[arg(long, conflicts_with = "reject", required_unless_present = "reject")]
+        confirm: bool,
+        #[arg(long)]
+        reject: bool,
+        /// Why (required to reject)
+        #[arg(long)]
+        note: Option<String>,
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
     /// Confirm a table's write behaviour, or override fields with a reason (human-only)
     WriteBehaviour {
         /// Table names
@@ -2292,6 +2306,13 @@ fn dispatch_review(
             };
             review::decide(config, cwd, Subject::Pii, &columns, d, reason, by)
         }
+        ReviewCommands::Identity {
+            matches,
+            confirm,
+            reject: _,
+            note,
+            by,
+        } => review::decide_identity(config, cwd, &matches, confirm, note, by),
         ReviewCommands::WriteBehaviour {
             tables,
             confirm,

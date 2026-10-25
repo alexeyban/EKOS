@@ -90,39 +90,63 @@ fn counts(items: &[Item]) -> Value {
     })
 }
 
-fn status(l: &Loaded, s: Subject) -> SubjectStatus {
-    let items = l.items(s);
+fn status(s: Subject, items: &[Item], signoff: SignState) -> SubjectStatus {
     SubjectStatus {
         subject: s.as_str().into(),
         items: items.len(),
         decided: items.iter().filter(|i| i.decision.is_some()).count(),
         outdated: items.iter().filter(|i| i.outdated).count(),
         blocking: items.iter().filter(|i| i.blocking).count(),
-        digest: review::subject_digest(s, &items),
-        signoff: l.state(s, &items),
+        digest: review::subject_digest(s, items),
+        signoff,
     }
 }
 
-/// Version of the cached summary's layout; part of its key.
-const SUMMARY_VERSION: u32 = 1;
+/// Version of the cache's layout; part of its key.
+const CACHE_VERSION: u32 = 2;
 
-/// Every review subject's counts and sign-off state, in [`Subject::ALL`] order.
-///
-/// Computing them reads the whole ledger (about 25 s on the iDempiere testbed), so the result is
-/// cached in `<state>/review/summary.json` under a key over everything it is computed from: the
-/// ledger's entry and object/relationship counts (the ledger is append-only, so any write moves
-/// the entry count), the current conflict and semantics ids, and `[review]`. A cache is a memo,
-/// not stored validity: a different input is a different key, and the summary is recomputed.
-/// Writing the cache is best-effort; [`approve`] never reads it.
-pub fn subject_statuses(
-    config: &EkosConfig,
-    cwd: &Path,
-    ledger: &dyn KnowledgeReader,
-) -> Result<Vec<SubjectStatus>> {
+/// Every subject's items and status, as computed from one state of the ledger.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct ReviewState {
+    key: String,
+    /// In [`Subject::ALL`] order.
+    pub statuses: Vec<SubjectStatus>,
+    pub items: std::collections::BTreeMap<String, Vec<Item>>,
+}
+
+impl ReviewState {
+    fn compute(l: &Loaded, key: String) -> Self {
+        let mut statuses = Vec::new();
+        let mut items = std::collections::BTreeMap::new();
+        for s in Subject::ALL {
+            let it = l.items(s);
+            statuses.push(status(s, &it, l.state(s, &it)));
+            items.insert(s.as_str().to_string(), it);
+        }
+        Self {
+            key,
+            statuses,
+            items,
+        }
+    }
+
+    pub fn items(&self, s: Subject) -> &[Item] {
+        self.items.get(s.as_str()).map_or(&[], Vec::as_slice)
+    }
+}
+
+fn cache_path(config: &EkosConfig, cwd: &Path) -> std::path::PathBuf {
+    config.ekos_dir(cwd).join("review").join("state.json")
+}
+
+/// The key over everything a [`ReviewState`] is computed from: the ledger's entry and
+/// object/relationship counts (the ledger is append-only, so any write moves the entry count),
+/// the current conflict and semantics ids, and `[review]`.
+fn cache_key(config: &EkosConfig, cwd: &Path, ledger: &dyn KnowledgeReader) -> Result<String> {
     let conflicts = super::conflicts::current_ids(config, cwd);
     let semantics = ids_in(&config.ekos_dir(cwd).join("semantics").join("current.json"));
-    let key = ekos_common::ContentHash::of_str(&review::canonical(&json!([
-        SUMMARY_VERSION,
+    Ok(ekos_common::ContentHash::of_str(&review::canonical(&json!([
+        CACHE_VERSION,
         review::REVIEW_VERSION,
         ledger.entry_count()?,
         ledger.object_count()?,
@@ -131,22 +155,89 @@ pub fn subject_statuses(
         semantics,
         serde_json::to_value(&config.review)?,
     ])))
-    .0;
-    let path = config.ekos_dir(cwd).join("review").join("summary.json");
-    if let Some(cached) = std::fs::read(&path)
+    .0)
+}
+
+/// Best-effort: a failed write only means the next read computes again.
+fn store_cache(config: &EkosConfig, cwd: &Path, state: &ReviewState) {
+    let path = cache_path(config, cwd);
+    let _ = std::fs::create_dir_all(path.parent().unwrap_or(cwd)).and_then(|()| {
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec(state).unwrap_or_default())?;
+        std::fs::rename(&tmp, &path)
+    });
+}
+
+/// Every subject's items and status for the ledger as it is now.
+///
+/// Computing them reads the whole ledger (about 25 s on the iDempiere testbed), so the result is
+/// cached in `<state>/review/state.json` under [`cache_key`]. A cache is a memo, not stored
+/// validity: a different input is a different key, and the state is recomputed. [`approve`] never
+/// reads it; [`decide`], [`approve`] and [`revoke`] write it afresh after their own write.
+pub fn review_state(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeReader,
+) -> Result<ReviewState> {
+    let key = cache_key(config, cwd, ledger)?;
+    if let Some(cached) = std::fs::read(cache_path(config, cwd))
         .ok()
-        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-        .filter(|v| v["key"] == key.as_str())
-        .and_then(|v| serde_json::from_value::<Vec<SubjectStatus>>(v["subjects"].clone()).ok())
+        .and_then(|b| serde_json::from_slice::<ReviewState>(&b).ok())
+        .filter(|c| c.key == key)
     {
         return Ok(cached);
     }
-    let l = Loaded::read(config, cwd, ledger)?;
-    let out: Vec<SubjectStatus> = Subject::ALL.iter().map(|s| status(&l, *s)).collect();
-    let body = json!({ "key": key, "subjects": out });
-    let _ = std::fs::create_dir_all(path.parent().unwrap_or(cwd))
-        .and_then(|()| std::fs::write(&path, serde_json::to_vec_pretty(&body).unwrap_or_default()));
-    Ok(out)
+    let state = ReviewState::compute(&Loaded::read(config, cwd, ledger)?, key);
+    store_cache(config, cwd, &state);
+    Ok(state)
+}
+
+/// Every review subject's counts and sign-off state, in [`Subject::ALL`] order ([`review_state`]).
+pub fn subject_statuses(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeReader,
+) -> Result<Vec<SubjectStatus>> {
+    Ok(review_state(config, cwd, ledger)?.statuses)
+}
+
+/// After a write of `written`: the loaded objects with those versions in place, recomputed and
+/// cached under the ledger's new key — so the page that shows the result does not read the ledger
+/// again. Same function as a fresh read: `all_objects` returns the latest version of each id.
+fn refresh_after_write(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeReader,
+    mut l: Loaded,
+    written: &[KirObject],
+) -> Result<()> {
+    refresh_with(config, cwd, ledger, &mut l, written, &[])
+}
+
+fn refresh_with(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeReader,
+    l: &mut Loaded,
+    objects: &[KirObject],
+    relationships: &[KirRelationship],
+) -> Result<()> {
+    for o in objects {
+        match l.objects.iter_mut().find(|x| x.id == o.id) {
+            Some(slot) => *slot = o.clone(),
+            None => l.objects.push(o.clone()),
+        }
+    }
+    for r in relationships {
+        match l.relationships.iter_mut().find(|x| x.id == r.id) {
+            Some(slot) => *slot = r.clone(),
+            None => l.relationships.push(r.clone()),
+        }
+    }
+    let l = &*l;
+    let state = ReviewState::compute(l, cache_key(config, cwd, ledger)?);
+    store_cache(config, cwd, &state);
+    Ok(())
 }
 
 fn status_json(s: &SubjectStatus) -> Value {
@@ -196,17 +287,22 @@ pub fn show(
 ) -> Result<()> {
     let s = subject(name)?;
     let ledger = open_store_read_only(config, cwd)?;
-    let l = Loaded::read(config, cwd, &*ledger)?;
-    let items = l.items(s);
-    let digest = review::subject_digest(s, &items);
-    let state = l.state(s, &items);
+    let rs = review_state(config, cwd, &*ledger)?;
+    let items = rs.items(s);
+    let st = rs
+        .statuses
+        .iter()
+        .find(|x| x.subject == s.as_str())
+        .ok_or_else(|| anyhow!("no status for {}", s.as_str()))?;
+    let digest = st.digest.clone();
+    let state = st.signoff.clone();
     let shown: Vec<&Item> = items
         .iter()
         .filter(|i| !undecided || i.decision.is_none())
         .take(limit.unwrap_or(usize::MAX))
         .collect();
     if json_out {
-        let mut v = counts(&items);
+        let mut v = counts(items);
         v["subject"] = json!(s.as_str());
         v["digest"] = json!(digest);
         v["signoff"] = serde_json::to_value(&state)?;
@@ -325,12 +421,108 @@ pub fn decide(
     for o in &next {
         ledger.append_object(o)?;
     }
+    refresh_after_write(config, cwd, &*ledger, l, &next)?;
     println!(
         "{} {} decision(s) by {by}: {}",
         next.len(),
         s.as_str(),
         review::canonical(&decision)
     );
+    Ok(())
+}
+
+/// `ekos review identity <match…> --confirm|--reject` — human-only. A match is a `SameAs`
+/// candidate, named by its relationship id or its label (`A = B`). The relationship gets a new
+/// version with `status`, `reviewed_by`, `reviewed_at` and the note, and an event cites evidence
+/// for the decision — the same record `ekos_identity_review` writes, made by a person here.
+pub fn decide_identity(
+    config: &EkosConfig,
+    cwd: &Path,
+    targets: &[String],
+    confirm: bool,
+    note: Option<String>,
+    by: Option<String>,
+) -> Result<()> {
+    let by = reviewer(by)?;
+    let decision = if confirm { "confirmed" } else { "rejected" };
+    let redaction = config.redaction_config();
+    let note = note
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+        .map(|n| ekos_common::redaction::redact(&n, &redaction));
+    if !confirm && note.is_none() {
+        bail!("say why it is not the same thing: --note");
+    }
+    let ledger = open_store(config, cwd)?;
+    let mut l = Loaded::read(config, cwd, &*ledger)?;
+    let items = l.items(Subject::Identity);
+    let at = chrono::Utc::now();
+    let mut next = Vec::new();
+    for t in targets {
+        let item = find(&items, t)?;
+        let id = item
+            .id
+            .parse::<ekos_kir::KirId>()
+            .map_err(|_| anyhow!("{t}: not a relationship id"))?;
+        let mut rel = l
+            .relationships
+            .iter()
+            .find(|r| r.id == id)
+            .cloned()
+            .ok_or_else(|| anyhow!("{t}: relationship not found"))?;
+        rel.properties.insert("status".into(), json!(decision));
+        rel.properties.insert("reviewed_by".into(), json!(by));
+        rel.properties
+            .insert("reviewed_at".into(), json!(at.to_rfc3339()));
+        rel.properties.insert("review_note".into(), json!(note));
+        next.push((item.label.clone(), rel));
+    }
+    ledger.set_write_context(Some(ekos_ledger::provenance::WriteContext {
+        run_id: ekos_ledger::provenance::new_run_id(),
+        stage: "review".into(),
+        source_artifact_id: None,
+    }));
+    for (label, rel) in &next {
+        ledger.append_relationship(rel)?;
+        let mut fragment = format!("ekos review identity: {decision} {label} by {by}");
+        if let Some(n) = &note {
+            fragment.push_str(&format!(" — {n}"));
+        }
+        let evidence = ekos_kir::KirEvidence::new(
+            ekos_kir::SourceLocation::file("cli:ekos review identity"),
+            fragment,
+        );
+        ledger.append_evidence(&evidence)?;
+        ledger.append_event(&ekos_kir::KirEvent {
+            id: ekos_kir::KirId(uuid::Uuid::new_v5(
+                &uuid::Uuid::NAMESPACE_OID,
+                format!(
+                    "review-identity:{}:{decision}:{by}:{}",
+                    rel.id,
+                    at.to_rfc3339()
+                )
+                .as_bytes(),
+            )),
+            kind: if confirm {
+                ekos_kir::EventKind::Merged
+            } else {
+                ekos_kir::EventKind::Modified
+            },
+            subject: rel.id,
+            payload: json!({
+                "decision": decision,
+                "relationship_id": rel.id.to_string(),
+                "reviewer": by,
+                "note": note,
+                "via": "cli",
+            }),
+            evidence: vec![evidence.id],
+            occurred_at: at,
+        })?;
+    }
+    let rels: Vec<KirRelationship> = next.iter().map(|(_, r)| r.clone()).collect();
+    refresh_with(config, cwd, &*ledger, &mut l, &[], &rels)?;
+    println!("{} identity match(es) {decision} by {by}", next.len());
     Ok(())
 }
 
@@ -376,10 +568,11 @@ pub fn approve(
     let o = review::signoff_object(s, &digest, &items, &by, &at, note.as_deref(), None)
         .map_err(|e| anyhow!(e))?;
     write_signoff(&*ledger, &o)?;
+    let n = items.len();
+    refresh_after_write(config, cwd, &*ledger, l, std::slice::from_ref(&o))?;
     println!(
-        "{} signed off by {by} on {} item(s), digest {digest}",
+        "{} signed off by {by} on {n} item(s), digest {digest}",
         s.as_str(),
-        items.len()
     );
     Ok(())
 }
@@ -408,6 +601,7 @@ pub fn revoke(
     let o = review::signoff_object(s, &digest, &items, &by, &at, None, Some(reason))
         .map_err(|e| anyhow!(e))?;
     write_signoff(&*ledger, &o)?;
+    refresh_after_write(config, cwd, &*ledger, l, std::slice::from_ref(&o))?;
     println!("{} sign-off revoked by {by}: {reason}", s.as_str());
     Ok(())
 }
@@ -424,6 +618,121 @@ fn write_signoff(ledger: &dyn ekos_ledger::KnowledgeStore, o: &KirObject) -> Res
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn fresh(config: &EkosConfig, cwd: &Path) -> ReviewState {
+        let ledger = open_store_read_only(config, cwd).unwrap();
+        let _ = std::fs::remove_file(cache_path(config, cwd));
+        review_state(config, cwd, &*ledger).unwrap()
+    }
+
+    fn cached(config: &EkosConfig, cwd: &Path) -> ReviewState {
+        serde_json::from_slice(&std::fs::read(cache_path(config, cwd)).unwrap()).unwrap()
+    }
+
+    /// The state a decision, a sign-off or a revocation caches after its write is exactly what a
+    /// fresh read of the ledger computes — including a scope decision that changes other subjects.
+    #[test]
+    fn identity_review_from_the_cli_unblocks_the_match_and_records_who() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path();
+        let config = EkosConfig::default();
+        let rel_id;
+        {
+            let ledger = open_store(&config, cwd).unwrap();
+            let a = KirObject::new("customers", ekos_kir::ObjectKind::Table);
+            let b = KirObject::new("cust_mstr", ekos_kir::ObjectKind::Table);
+            ledger.append_object(&a).unwrap();
+            ledger.append_object(&b).unwrap();
+            let mut r = KirRelationship::new(
+                ekos_kir::RelationshipKind::Custom("SameAs".into()),
+                a.id,
+                b.id,
+            );
+            r.properties.insert("status".into(), json!("unconfirmed"));
+            ledger.append_relationship(&r).unwrap();
+            rel_id = r.id;
+        }
+        let before = fresh(&config, cwd);
+        let identity = |st: &ReviewState| {
+            st.statuses
+                .iter()
+                .find(|x| x.subject == "identity")
+                .unwrap()
+                .blocking
+        };
+        assert_eq!(identity(&before), 1);
+        assert!(
+            decide_identity(
+                &config,
+                cwd,
+                &["customers = cust_mstr".into()],
+                false,
+                None,
+                Some("ann".into())
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("--note")
+        );
+        decide_identity(
+            &config,
+            cwd,
+            &["customers = cust_mstr".into()],
+            true,
+            None,
+            Some("ann".into()),
+        )
+        .unwrap();
+        let after = cached(&config, cwd);
+        assert_eq!(identity(&after), 0);
+        let again = fresh(&config, cwd);
+        assert_eq!(after.items, again.items);
+        assert_eq!(after.key, again.key);
+        let ledger = open_store_read_only(&config, cwd).unwrap();
+        let r = ledger.get_relationship(&rel_id).unwrap().unwrap();
+        assert_eq!(r.properties["status"], "confirmed");
+        assert_eq!(r.properties["reviewed_by"], "ann");
+    }
+
+    #[test]
+    fn the_state_cached_after_a_write_equals_a_fresh_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let cwd = dir.path();
+        let config = EkosConfig::default();
+        {
+            let ledger = open_store(&config, cwd).unwrap();
+            for name in ["C_ORDER", "T_REPORT"] {
+                let mut o = KirObject::new(name, ekos_kir::ObjectKind::Table);
+                o.properties.insert("dialect".into(), json!("oracle"));
+                ledger.append_object(&o).unwrap();
+            }
+        }
+        let check = |what: &str| {
+            let after = cached(&config, cwd);
+            let again = fresh(&config, cwd);
+            assert_eq!(after.key, again.key, "{what}: key");
+            assert_eq!(after.statuses, again.statuses, "{what}: statuses");
+            assert_eq!(after.items, again.items, "{what}: items");
+        };
+        decide(
+            &config,
+            cwd,
+            Subject::Scope,
+            &["T_REPORT".into()],
+            json!({"scope": "in"}),
+            Some("needed".into()),
+            Some("ann".into()),
+        )
+        .unwrap();
+        check("decide");
+        let digest = fresh(&config, cwd).statuses[0].digest.clone();
+        approve(&config, cwd, "scope", &digest, None, Some("ann".into())).unwrap();
+        check("approve");
+        assert_eq!(cached(&config, cwd).statuses[0].signoff.name(), "valid");
+        revoke(&config, cwd, "scope", "redo", Some("ann".into())).unwrap();
+        check("revoke");
+    }
     #[test]
     fn no_mcp_code_can_reach_the_decision_or_sign_off_paths() {
         let mcp = include_str!("mcp.rs");

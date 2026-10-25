@@ -142,14 +142,16 @@ def bulk_argv(
     return argv
 
 
-async def _run(ekos_bin: str, workspace_path: str, argv: list[str]) -> tuple[int, str, str]:
+async def _run(
+    ekos_bin: str, workspace_path: str, argv: list[str], *, time_limit: float = _TIMEOUT
+) -> tuple[int, str, str]:
     root = Path(workspace_path).resolve()
     if not root.is_dir():
         raise ReviewError(f"workspace path is not a directory: {root}")
     cmd, cwd = home.command(ekos_bin, str(root), argv)
     proc = await _proc.spawn(cmd, cwd=cwd, env=envs.for_path(str(root)))
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=_TIMEOUT)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=time_limit)
     except TimeoutError:
         await _proc.terminate(proc)
         raise CliFailed(f"`ekos {argv[0]} {argv[1]}` timed out") from None
@@ -166,8 +168,10 @@ def _raise_for(code: int, stderr: str) -> None:
     raise CliFailed(text[-800:] or f"exited {code}")
 
 
-async def review(ekos_bin: str, workspace_path: str, argv: list[str]) -> str:
-    code, out, err = await _run(ekos_bin, workspace_path, argv)
+async def review(
+    ekos_bin: str, workspace_path: str, argv: list[str], *, time_limit: float = _TIMEOUT
+) -> str:
+    code, out, err = await _run(ekos_bin, workspace_path, argv, time_limit=time_limit)
     _raise_for(code, err)
     return out.strip()
 

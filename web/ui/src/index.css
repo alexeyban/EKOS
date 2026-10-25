@@ -1255,3 +1255,71 @@ details.cfg-sub {
 .ext-markdown table { margin: 0.5rem 0; }
 .ext-markdown code { font-size: 0.85em; }
 .ext-lane { fill: var(--ink-soft, currentColor); font-size: 0.7rem; }
+
+/* RFC 0213 — workflow step bar and the Review page */
+.step-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  list-style: none;
+  margin: 0 0 0.8rem;
+  padding: 0;
+}
+.step {
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+}
+.step a {
+  color: inherit;
+  text-decoration: none;
+}
+.step-n {
+  font-weight: 600;
+  margin-right: 0.2rem;
+}
+.review-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+}
+.review-tabs button {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.88rem;
+  font-weight: 550;
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+.review-tabs button:hover {
+  color: var(--ink);
+  background: var(--ground-raised);
+}
+.review-tabs button[aria-pressed="true"] {
+  color: var(--accent-a);
+  background: var(--ground-raised);
+  border-color: var(--accent-a);
+}
+.review-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.review-table td,
+.review-table th {
+  border-bottom: 1px solid var(--rule);
+  padding: 0.2rem 0.4rem;
+  text-align: left;
+  vertical-align: top;
+}
+.review-digest {
+  font-family: var(--mono, monospace);
+  font-size: 0.8rem;
+  word-break: break-all;
+}

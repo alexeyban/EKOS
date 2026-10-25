@@ -153,7 +153,7 @@ sign-in with that address.
 | Role | May |
 |---|---|
 | `viewer` | read everything in a project, including runs and logs |
-| `reviewer` | also decide business semantics and conflicts |
+| `reviewer` | also decide business semantics, conflicts and the source-model review, and sign it off (RFC 0213) |
 | `operator` | also run the pipeline, manage schedules, edit the project config |
 | `admin` | everything in the tenant: projects, members, groups, tokens, audit log |
 

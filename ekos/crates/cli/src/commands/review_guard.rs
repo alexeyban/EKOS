@@ -48,6 +48,12 @@ const HUMAN_ONLY: &[HumanOnly] = &[
         why: "RFC 0213: withdrawing a sign-off is a human decision",
     },
     HumanOnly {
+        path: &["review", "decide_identity"],
+        defined_in: include_str!("review.rs"),
+        definition: "pub fn decide_identity(",
+        why: "RFC 0213: confirming an identity match from the review is a human decision",
+    },
+    HumanOnly {
         path: &["review", "decision_object"],
         defined_in: include_str!("../../../semantic/src/review.rs"),
         definition: "pub fn decision_object(",

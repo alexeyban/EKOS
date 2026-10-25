@@ -39,7 +39,32 @@ _ALLOWED: dict[tuple[str, ...], frozenset[str]] = {
     ("export", "linkml", "--yaml"): frozenset({"--status"}),
     # RFC 0172 conflicting evidence — read only.
     ("conflicts", "list", "--json"): frozenset({"--status", "--type"}),
+    # RFC 0213 review and the workflow bar — read only.
+    ("review", "list", "--json"): frozenset(),
+    ("workflow", "status", "--json"): frozenset(),
 }
+
+# RFC 0213: `review show <subject> --json [--undecided] [--limit <n>]` — the subject is one of a
+# fixed set, the limit digits only.
+REVIEW_SUBJECTS = ("scope", "pii", "conflicts", "identity", "write-behaviour", "glossary")
+_DIGITS = re.compile(r"^[0-9]{1,6}$")
+
+
+def _check_review_show(extra: list[str]) -> None:
+    if not extra or extra[0] not in REVIEW_SUBJECTS:
+        raise ReadProcError(f"unknown review subject {extra[:1]!r}")
+    rest = extra[1:]
+    if rest[:1] != ["--json"]:
+        raise ReadProcError("review show needs --json")
+    i = 1
+    while i < len(rest):
+        if rest[i] == "--undecided":
+            i += 1
+        elif rest[i] == "--limit" and i + 1 < len(rest) and _DIGITS.match(rest[i + 1]):
+            i += 2
+        else:
+            raise ReadProcError(f"disallowed argument {rest[i]!r}")
+
 
 # Shapes that end in exactly one positional argument, which must match the pattern. The only one
 # is an item id — a UUID, never a name, so nothing user-typed reaches the argv beyond 36 hex/dash
@@ -55,6 +80,9 @@ class ReadProcError(RuntimeError):
 
 
 def _check_allowed(argv: list[str]) -> None:
+    if argv[:2] == ["review", "show"]:
+        _check_review_show(argv[2:])
+        return
     for prefix, pattern in _POSITIONAL.items():
         if tuple(argv[: len(prefix)]) == prefix:
             extra = argv[len(prefix) :]
@@ -101,7 +129,12 @@ async def read_text(
 
 
 async def read_json(
-    ekos_bin: str, workspace_path: str, argv: list[str], *, max_output: int = _MAX_OUTPUT
+    ekos_bin: str,
+    workspace_path: str,
+    argv: list[str],
+    *,
+    max_output: int = _MAX_OUTPUT,
+    time_limit: float = _TIMEOUT,
 ) -> Any:
     """Run `<ekos_bin> <argv...>` in the workspace directory and parse stdout as JSON.
 
@@ -111,7 +144,9 @@ async def read_json(
     shapes; the caller has already confirmed `workspace_path` is a registered workspace root.
     """
     _check_allowed(argv)
-    return await _run_json(ekos_bin, workspace_path, argv, max_output=max_output)
+    return await _run_json(
+        ekos_bin, workspace_path, argv, max_output=max_output, time_limit=time_limit
+    )
 
 
 async def read_checked_json(
@@ -123,7 +158,14 @@ async def read_checked_json(
     return await _run_json(ekos_bin, workspace_path, argv, max_output=max_output)
 
 
-async def _run_json(ekos_bin: str, workspace_path: str, argv: list[str], *, max_output: int) -> Any:
+async def _run_json(
+    ekos_bin: str,
+    workspace_path: str,
+    argv: list[str],
+    *,
+    max_output: int,
+    time_limit: float = _TIMEOUT,
+) -> Any:
     root = Path(workspace_path).resolve()
     if not root.is_dir():
         raise ReadProcError(f"workspace path is not a directory: {root}")
@@ -131,11 +173,11 @@ async def _run_json(ekos_bin: str, workspace_path: str, argv: list[str], *, max_
     cmd, cwd = home.command(ekos_bin, str(root), argv)
     proc = await _proc.spawn(cmd, cwd=cwd, env=envs.for_path(str(root)))
     try:
-        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=_TIMEOUT)
+        stdout, _stderr = await asyncio.wait_for(proc.communicate(), timeout=time_limit)
     except TimeoutError:
         proc.kill()
         await proc.wait()
-        raise ReadProcError(f"`ekos {' '.join(argv)}` timed out after {_TIMEOUT}s") from None
+        raise ReadProcError(f"`ekos {' '.join(argv)}` timed out after {time_limit}s") from None
 
     if proc.returncode != 0:
         tail = _stderr[:500].decode(errors="replace")

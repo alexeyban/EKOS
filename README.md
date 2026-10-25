@@ -920,6 +920,12 @@ is validly signed, and an extension's step commands call the same gate before wr
 state, without being able to change it, through the `ekos_signoff_status` MCP tool. The subject summary is cached
 beside the ledger under a key that every write moves (iDempiere: 24.5 s to compute, 1.8 s cached).
 
+In the web console, every project page shows the step bar, and the **Review** tab has one tab per subject: a filterable
+table of items (signed facts and shown-only measurements apart), decisions for selected items (scope, PII with a mask,
+write behaviour, identity matches — `ekos review identity` on the CLI), and a sign-off box that shows the digest and
+what changed since a stale sign-off and signs only after the subject's name is typed. Conflicts and the glossary are
+decided on their own tabs. Deciding and signing need the reviewer role; no API token holds it.
+
 ### iDempiere eval (RFC 0222)
 
 `evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six

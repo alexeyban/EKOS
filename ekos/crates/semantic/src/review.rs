@@ -154,7 +154,7 @@ fn glob(pattern: &str, text: &str) -> bool {
 }
 
 /// One reviewable item.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Item {
     pub id: String,
     pub label: String,

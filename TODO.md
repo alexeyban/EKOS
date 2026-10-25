@@ -6830,7 +6830,12 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] RFC 0213 Phase 2 — `ekos workflow status` step bar, `EkosExtension::workflow_steps()`, `ekos_signoff_status` MCP
       tool, `workflow::require_signoff` gate, cached review summary (24.5 s → 1.8 s); ekos-lakehouse reports steps 2,
       4–7 and with `require-signoff = true` refuses `generate`/`sync`/`gold draft` (devlog_296, lakehouse devlog_13)
-- [ ] RFC 0213 Phase 3 — console step bar + Review page; identity review from the CLI (today only the MCP tool)
+- [x] RFC 0213 Phase 3 — console step bar + Review page (decisions, typed sign-off, digest), `ekos review identity`,
+      full item cache refreshed by every review write; browser walk-through on iDempiere 18/18 (devlog_297)
+- [ ] RFC 0213 follow-ups: 195 open conflicts and 25 identity candidates still block a full iDempiere sign-off (a
+      person's work; many identity candidates are name-prefix pairs like `@docusaurus/core = @docusaurus/utils` —
+      worth a look at the fuzzy candidate rule); the first review read after a compile takes ~25 s (warm the cache at
+      commit?); add the Review page to `deploy/e2e/s8_browser.py`
 - [ ] RFC 0214 source-estate docs + publish · RFC 0215 requirements → marts
       - RFC 0214 GitHub wiki target: the EKOS repository's own wiki, github.com/alexeyban/EKOS/wiki (maintainer,
         2026-10-25; a git repo at `alexeyban/EKOS.wiki.git`, today only `Home.md`). The wiki is public: check each
