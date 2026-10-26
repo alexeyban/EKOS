@@ -6880,6 +6880,12 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       approval commits `marts/<mart>.md` + `LakehouseApproval` `mart:<name>`; `gold draft` gated by
       require-plan-approval; step 4 on the bar. iDempiere: hand-written spec → gold; llama3 draft → 9 edits →
       approved → gold, nothing invented; browser 14/14 (devlog_304, lakehouse devlog_18)
+- [x] RFC 0228 — step 7: `lakehouse marts show|propose|merge|build|reconcile` + the Marts page; `run --asset` with a
+      code-location reload; merge = `LakehouseApproval` `gold:<mart>`; reconciliation totals as `mart_reconcile`
+      metrics; step 7 on the bar. iDempiere: 4 marts approved → reconciled, every total equal; browser 8/8
+      (devlog_305, lakehouse devlog_19)
+- [ ] RFC 0228 follow-ups: Build waits on the page (it returns once launched); generated Dagster schedules default to
+      running — an install-time choice; marts not described by a requirement
 - [ ] RFC 0215 follow-ups: relative dates in a requirement (`last two years`); a draft from text attributed to the
       signed-in person (class *external* gets no reviewer); several marts from one request
 - [ ] RFC 0225–0227 follow-ups: a found delete that contradicts the code as an EKOS conflict; cascade + real purge

@@ -22,7 +22,7 @@ decisions are in the RFCs named in each section (`ekos/docs/rfcs/`); what happen
 | 4 Requirements | describes the marts wanted, in plain words or as metadata | a model drafts the metadata; EKOS resolves every term | **yes, only here** | built |
 | 5 Extraction and landing | reviews how each table lands in bronze, changes it, approves the plan | the planner, from write behaviour and step 3 | none | built |
 | 6 Bronze and silver | generates the pipeline and runs it | SQL, dbt-trino silver, Dagster, reconciliation | none | built; run on a 165-table subset |
-| 7 Marts | builds the approved marts | dbt gold from approved requirements | none¹ | gold drafting built; the Marts page is not |
+| 7 Marts | proposes, merges, builds and reconciles each mart | dbt gold from approved requirements, Dagster, Trino | none¹ | built |
 
 ¹ RFC 0195's gold drafter can ask a local model for a measure written as prose; such a draft is checked by the
 anti-invention test and the engine before it is used.
@@ -387,19 +387,52 @@ What the generator does for you:
 
 ## Step 7 — Marts
 
-What exists is RFC 0195's gold drafter, now fed by step 4. Running
+Each approved requirement becomes a gold table: proposed as a dbt model, merged by a person, built through Dagster,
+and reconciled with silver (RFC 0195, 0228).
+
+**Console:** the **Marts** page lists every mart with its state. The selected mart shows the approved requirement
+beside the generated SQL, each term as `exact` (compiled from a pattern) or `drafted` (written by a model; read it),
+the tests, each measure's mart and silver totals, and the lineage graph. Actions: **Propose**, **Merge** (a
+confirmation), **Build** and **Reconcile**. **CLI:**
 
 ```bash
-ekos-lakehouse lakehouse gold draft pipeline/marts/category_region_sales.md
+ekos-lakehouse lakehouse marts show --mart category_region_sales
+ekos-lakehouse lakehouse marts propose --mart category_region_sales     # a branch ekos/gold/<mart>/<id>
+ekos-lakehouse lakehouse marts merge --mart category_region_sales --note "agreed with finance"
+ekos-lakehouse lakehouse marts build --mart category_region_sales --wait
+ekos-lakehouse lakehouse marts reconcile --mart category_region_sales
 ```
 
-compiles an approved requirement into a dbt model over silver, with joins along the resolved paths. It checks the
-whole statement against the description's own atoms (anti-invention), plans it on Trino with `EXPLAIN`, adds grain
-uniqueness and per-measure reconciliation tests, and proposes it on a branch `ekos/gold/<mart>/<id>` with
-`proposals/gold-<mart>.md`. Merging is the approval, and the Dagster job builds the `gold` group.
+| State | Meaning |
+|---|---|
+| `requirement` | the requirement is not approved, or no longer valid |
+| `to propose` | approved; no proposal carries it |
+| `proposed` | a branch carries the approved description |
+| `merged` | the model is on the pipeline's branch; not built since |
+| `failed` | the latest build failed (its message names the failed tests) |
+| `built` | the latest build passed; not reconciled since |
+| `reconciled` / `diverged` | every measure's totals equal, or one differs |
 
-**Not built yet (plan II.7):** the **Marts** page, building a mart from the console, measure reconciliation results
-per mart, and the lineage view.
+- **Propose** runs the gold drafter on the committed requirement. It checks the whole statement against the
+  requirement's own atoms (anti-invention), plans it on Trino with `EXPLAIN`, adds a grain-uniqueness test and one
+  reconciliation test per additive measure, and opens a branch with `proposals/gold-<mart>.md`.
+- **Merge** is the approval of the generated model. It refuses a branch whose description is not the approved one,
+  and leaves nothing half-merged. It records a `LakehouseApproval` fact (`gold:<mart>`).
+- **Build** launches the Dagster job with only the mart's asset. When Dagster loaded its code before the merge, Build
+  reloads the code location first. From the console it returns once the run is launched; the page shows `built` when
+  the run ends.
+- **Reconcile** reads, through the read-only Trino reader, each additive measure's total in the mart and the same
+  aggregate over silver under the mart's joins and filters, and records both (`mart_reconcile` metrics).
+
+The SQL is a template: a term marked `drafted` needs a person to read it, and a generated mart may need tuning.
+
+**On iDempiere:** four marts went from approved to reconciled, the fourth entirely on the page; every total was
+equal (for example 379.90 = 379.90 and 3 = 3 orders for `sales_by_month`). Each build of one mart took about 50 s.
+A browser run passed 8/8.
+
+> Starting Dagster for a project turns on its generated schedules, which are on by default: if the hourly tick has
+> passed, the whole job starts at once. Decide whether the schedules should run before starting Dagster on a test
+> machine.
 
 ---
 
@@ -411,7 +444,7 @@ per mart, and the lineage view.
   are in config. Profiles keep counts and bounds of numbers and dates, never text values. Run logs and estate pages
   carry no value. The redaction baseline (RFC 0043) runs at every raw-content entry point.
 - **Human-only decisions.** Review decisions, sign-offs, step-5 changes and approvals, and requirement changes and
-  approvals are commands of class *review*. The console runs them as the signed-in person, refuses them to API tokens,
+  approvals, and merging a mart are commands of class *review*. The console runs them as the signed-in person, refuses them to API tokens,
   and no MCP tool reaches them.
 - **No metered model call without consent.** Steps 1–3 make none; step 4 refuses a metered route without
   `--allow-metered` (and the tenant's permission in the console).
@@ -428,6 +461,7 @@ per mart, and the lineage view.
 | review cache | `<state>/review/state.json` |
 | step 5 proposal, changes, approval | `<state>/lakehouse/extraction/{proposed,changes,approved}.json` |
 | step 4 drafts and approvals | `<state>/lakehouse/requirements/<mart>.{md,json,approved.json}` |
+| step 7 latest build and reconciliation | `<state>/lakehouse/marts/<mart>.{run,reconcile}.json` |
 | the pipeline repository | `<project>/pipeline/` (`pipeline-dir`): `lakehouse.lock.json`, `bronze/`, `dbt/`, `dagster/`, `marts/` |
 | reload requests | `<pipeline>/.lakehouse/reload/<schema.table>` |
 | proposals | branches `ekos/gold/…` and `ekos/change/…` in the pipeline repository (`lakehouse proposals`) |
@@ -459,7 +493,7 @@ per mart, and the lineage view.
 | Step 4 | 0215 requirements · 0197 model routing · 0195 gold |
 | Step 5 | 0225 extraction plan and deletes · 0226 the Extraction page |
 | Step 6 | 0216 Oracle source · 0227 silver from the source model · 0192–0194, 0196 bronze, silver, schema changes, monitoring |
-| Step 7 | 0195 gold (the Marts page is plan II.7) |
+| Step 7 | 0195 gold · 0228 marts: propose, merge, build, reconcile |
 
 ---
 
@@ -469,5 +503,5 @@ per mart, and the lineage view.
 - A complete step-3 sign-off on iDempiere (195 conflicts for a person to settle).
 - A relative date in a requirement ("last two years"), several marts from one request, and attributing a draft from
   text to the signed-in person.
-- Step 7's Marts page, measure reconciliation results per mart, and lineage (plan II.7).
+- In step 7: Build following the run on the page, and marts not described by a requirement.
 - Optional CDC with Debezium (RFC 0217), and the generated demo book (RFC 0218).

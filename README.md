@@ -992,6 +992,13 @@ never by the model. An approval commits `marts/<mart>.md` and is a ledger fact; 
 answered by nine edits (three `via` choices among 3, 36 and 19 key paths) and approved, and the gold mart was proposed
 with nothing invented.
 
+Step 7 builds the marts (RFC 0228). On the console's **Marts** page (or `lakehouse marts
+show|propose|merge|build|reconcile`) each approved requirement is proposed as a dbt model on a branch, merged (the
+approval, recorded in the ledger), built through Dagster on its own, and reconciled. Reconciliation shows each
+measure's total in the mart next to the same aggregate over silver. The page shows the SQL beside the requirement,
+which terms were compiled exactly and which a model drafted, the tests, and the lineage. On iDempiere four marts went
+from approved to reconciled, every total equal.
+
 ### iDempiere eval (RFC 0222)
 
 `evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six
