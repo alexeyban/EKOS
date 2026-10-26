@@ -375,6 +375,9 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 ## Where things are
 
+The seven-step operator workflow (sources → review → requirements → extraction → bronze, silver and gold) is
+described in [operator-workflow.md](operator-workflow.md).
+
 | | |
 |---|---|
 | A project | `/var/lib/ekos/data/<tenant>/<project>/` (`ekos.toml`, `state/`) |

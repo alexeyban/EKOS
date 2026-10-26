@@ -978,6 +978,9 @@ lists and logical foreign keys are tested as warnings, since the database does n
 flagged, and history closes rows deleted at the source. `lakehouse run` starts the Dagster job (the console's
 **Run the pipeline**). On the iDempiere testbed a closed 165-table subset ran in Dagster: all bronze tables reconciled, 165 silver models built, 3,664 of 3,667 tests passing and 3 warnings on real data outside the application's lists. The full 849-table run was dropped.
 
+The whole workflow, step by step with its commands, settings and results, is in
+[docs/operator-workflow.md](docs/operator-workflow.md).
+
 Step 4 turns a request into an approved mart requirement (RFC 0215). On the console's **Requirements** page (or
 `lakehouse requirements draft|edit|show|approve`) an operator describes a mart in plain words. The model routed to
 the `requirements` task (local Ollama unless a metered route is allowed) drafts its header from a catalogue excerpt
