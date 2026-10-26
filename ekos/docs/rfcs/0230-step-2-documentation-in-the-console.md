@@ -94,5 +94,10 @@ Found on the way:
   changes 1,060 pages and not the sidebar.
 - **The console's Markdown view shows raw HTML as text**, so the Home panel strips the manual-section markers.
 
-**Not done:** the real publish (the maintainer's decision), Azure DevOps and Confluence against real services (no
+**Published** at the maintainer's request (2026-10-26), to the demo repository's wiki rather than EKOS's: the project's
+store was set to `alexeyban/ekos-lakehouse-oracle` (no prefix; GitHub's default Home page removed first, since the
+publisher refuses to overwrite a page it did not write), and `lakehouse docs publish` pushed 1,060 pages and the
+sidebar; step 2 reads *done*. The demo book went to the same wiki under the prefix `Book`.
+
+**Not done:** Azure DevOps and Confluence against real services (no
 credentials here; their publishers are tested in lakehouse-docs).

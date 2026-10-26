@@ -192,7 +192,7 @@ Step 2 on the bar: *todo* until something is generated (`<state>/docs/estate.jso
 generation is published, *done* after that — a preview never completes it, and a new generation reopens it.
 
 **On iDempiere:** 1,060 pages; a preview against this repository's GitHub wiki: 1,060 pages changed, 0 removed, the
-wiki's own sidebar kept; browser run 17/17. **Not done:** the real publish, which waits for the maintainer.
+wiki's own sidebar kept; browser run 17/17. Then published by the maintainer's request on 2026-10-26 to the demo repository's wiki (github.com/alexeyban/ekos-lakehouse-oracle/wiki): `lakehouse docs publish`, 1,060 pages and the sidebar; step 2 *done*.
 
 ---
 
@@ -544,7 +544,6 @@ repository, [`book/`](https://github.com/alexeyban/ekos-lakehouse-oracle/tree/ma
 
 ## Not done
 
-- Step 2's publish to a wiki (waits for the maintainer).
 - A complete step-3 sign-off on iDempiere (195 conflicts for a person to settle).
 - A relative date in a requirement ("last two years"), several marts from one request, and attributing a draft from
   text to the signed-in person.

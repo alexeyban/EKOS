@@ -87,6 +87,6 @@ Only current versions were read; earlier versions in the append-only ledger are 
 ## Not in the gates, for the record
 
 - RFC 0217 (CDC) is not built: the plan builds it only when an operator asks.
-- Step 2's publish to a wiki waits for the maintainer.
+- Step 2 was published afterwards, at the maintainer's request, to the demo repository's wiki (RFC 0230).
 - Generated Dagster schedules start switched on; on a test machine that launched the full run once (cancelled before
   any step, RFC 0228).

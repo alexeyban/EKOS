@@ -6901,7 +6901,9 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       permissions loss on the testbed and check each is handled as designed (RFC 0225, plan III.5)
 - [ ] Exit: run logs for steps 3 and 6 on the testbed (the next sign-off and the next load print them)
 - [x] RFC 0230 step 2 in the console (devlog_309): `lakehouse docs show|generate|publish`, `[extensions.lakehouse.docs]`,
-      the Documentation page; preview against the EKOS GitHub wiki; the real publish waits for the maintainer
+      the Documentation page; published to github.com/alexeyban/ekos-lakehouse-oracle/wiki (with the demo book)
+- [x] Demo repository ekos-lakehouse-oracle: the full result (submodules at the exact commits, the generated pipeline,
+      containers, guide, results, book, presentation, wiki) — 734eccd
 - [ ] RFC 0217 optional CDC
 - [x] RFC 0218 generated demo book (devlog_306): run logs for every write/review/admin/external command, lakehouse
       stage lines, step 2 from `<state>/docs/estate.json`, ekos-lakehouse `tools/demo-book` (tour + render + PDF), the
