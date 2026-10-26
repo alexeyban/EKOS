@@ -157,9 +157,11 @@ async def test_init_and_compile_makes_a_project_queryable(runner_client) -> None
         "compile",
         "commit",
         "coverage",
+        "workflow",
     ]
     assert body["status"] == "succeeded", body["log_tail"]
-    # `coverage`, the last stage, reports what each input kind produced.
+    # `coverage` reports what each input kind produced; `workflow` (RFC 0223) then refreshes the
+    # step bar.
     log = "\n".join(body["log_tail"])
     assert "=== stage: coverage ===" in log, log
     assert "every input kind produced objects" in log, log
