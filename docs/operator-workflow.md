@@ -160,21 +160,39 @@ and 754 deletable by users; 4,597 tickets linked to 3,074 change sets; 1,743 doc
 
 ## Step 2 — Documentation
 
+On the console's **Documentation** page: **Generate**, **Preview publish**, **Publish** (RFC 0230). From a terminal:
+
 ```bash
-ekos docs generate --layout estate --output wiki/
+ekos-lakehouse lakehouse docs generate             # = ekos docs generate --layout estate --output <project>/docs/estate
+ekos-lakehouse lakehouse docs publish --dry-run    # what would change in the store; nothing is sent
+ekos-lakehouse lakehouse docs publish
 ```
 
-writes the database estate as wiki pages (1,060 for iDempiere, in 26 s), in the page format the lakehouse-docs
+Generating writes the database estate as wiki pages (1,060 for iDempiere, in 26 s), in the page format the lakehouse-docs
 publishers already read (GitHub wiki, Confluence, Azure DevOps). Two gates are built into the renderer: no data value
 ever reaches a page (a column profile gives counts only), and text is used only from sources whose licence is known
 (`[docs-estate] licences`). A re-run keeps manual sections and deletes only pages it generated (RFC 0214).
 
-Each run records where it wrote and how many pages in `<state>/docs/estate.json`; the bar shows step 2 *partial*
-with that line ("1060 page(s) generated … into …") until the pages are published. From the console, run it on the
-**Commands** page (`docs generate`, layout `estate`, an output folder inside the project).
+The store is set once per project:
 
-**Not done:** publishing from the console. A dry run against this repository's GitHub wiki produced 1,061 files with
-no broken links; the real publish waits for the maintainer.
+```toml
+[extensions.lakehouse.docs]
+target = "github"          # github | azure-devops | confluence
+repo = "owner/name"        # github; prefix = "iDempiere" to share a wiki, sidebar = "keep" to leave its sidebar
+# azure-devops: org-url, project, wiki, root-path · confluence: space, parent-id, title-prefix
+# output = "docs/estate" (relative to the project), python = "python3"
+```
+
+Credentials are the publishers' own variables (`GITHUB_TOKEN`; `AZDO_PAT`; `CONFLUENCE_URL` with `CONFLUENCE_PAT` or
+`CONFLUENCE_USER` + `CONFLUENCE_API_TOKEN`); in the console, an owner grants them to the tenant. The publishers come
+compiled into `ekos-lakehouse` and run with `python` (PyYAML; `requests` for Azure DevOps and Confluence). The page
+checks the interpreter and modules before a publish.
+
+Step 2 on the bar: *todo* until something is generated (`<state>/docs/estate.json`), *partial* until the latest
+generation is published, *done* after that — a preview never completes it, and a new generation reopens it.
+
+**On iDempiere:** 1,060 pages; a preview against this repository's GitHub wiki: 1,060 pages changed, 0 removed, the
+wiki's own sidebar kept; browser run 17/17. **Not done:** the real publish, which waits for the maintainer.
 
 ---
 
@@ -483,6 +501,7 @@ repository, [`book/`](https://github.com/alexeyban/ekos-lakehouse-oracle/tree/ma
 | a project's config and state | `<EKOS_HOME>/data/<tenant>/<project>/{ekos.toml,state/}` |
 | run logs | `<state>/runs/<stamp>-<command path with dashes>.jsonl` (`…-lakehouse-marts-build.jsonl`) |
 | the latest estate documentation | `<state>/docs/estate.json` (where, pages, when) |
+| the latest publish and preview | `<state>/lakehouse/docs/{publish,dry-run}.json` |
 | review cache | `<state>/review/state.json` |
 | step 5 proposal, changes, approval | `<state>/lakehouse/extraction/{proposed,changes,approved}.json` |
 | step 4 drafts and approvals | `<state>/lakehouse/requirements/<mart>.{md,json,approved.json}` |
@@ -513,7 +532,7 @@ repository, [`book/`](https://github.com/alexeyban/ekos-lakehouse-oracle/tree/ma
 | Part | RFCs |
 |---|---|
 | Step 1 | 0209 Java and the application model · 0210 Oracle SQL, PL/SQL, schema history · 0211 live Oracle and conflicts · 0212 write behaviour · 0219 tickets · 0220 run logs · 0221 docs · 0222 eval · 0223 Sources tab · 0224 identity |
-| Step 2 | 0214 estate documentation |
+| Step 2 | 0214 estate documentation · 0230 the Documentation page, publishing |
 | Step 3 | 0213 review, sign-off, the step bar |
 | Step 4 | 0215 requirements · 0197 model routing · 0195 gold |
 | Step 5 | 0225 extraction plan and deletes · 0226 the Extraction page |

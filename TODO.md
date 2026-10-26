@@ -6895,13 +6895,17 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] RFC 0229 zstd advisories (RUSTSEC-2026-0391/0403/0410): zstd 0.14.3, parquet 60, tantivy 0.27 (devlog_307);
       the extensions' lockfiles follow
 - [x] Plan exit report against VI.4's gates (`evals/oracle-idempiere/exit/`, devlog_308): 8 met, 2 partial, 2 BLOCKERS
-- [ ] Exit BLOCKER: 195 code ↔ database conflicts (and 1 identity match) to settle in step 3 — a person's work
-- [ ] Exit BLOCKER: plant a cascade delete, a keyless table and a permissions loss on the testbed (RFC 0225 III.5)
+- [ ] Exit BLOCKER (deferred by the maintainer 2026-10-26, solve later): 195 code ↔ database conflicts (and 1 identity
+      match) to settle in step 3 — a person's work
+- [ ] Exit BLOCKER (deferred by the maintainer 2026-10-26, solve later): plant a cascade delete, a keyless table and a
+      permissions loss on the testbed and check each is handled as designed (RFC 0225, plan III.5)
 - [ ] Exit: run logs for steps 3 and 6 on the testbed (the next sign-off and the next load print them)
+- [x] RFC 0230 step 2 in the console (devlog_309): `lakehouse docs show|generate|publish`, `[extensions.lakehouse.docs]`,
+      the Documentation page; preview against the EKOS GitHub wiki; the real publish waits for the maintainer
 - [ ] RFC 0217 optional CDC
 - [x] RFC 0218 generated demo book (devlog_306): run logs for every write/review/admin/external command, lakehouse
       stage lines, step 2 from `<state>/docs/estate.json`, ekos-lakehouse `tools/demo-book` (tour + render + PDF), the
       iDempiere book in the demo repo `book/`
 - [ ] RFC 0218 follow-ups: the review page runs `review`/`signoff` outside the run queue, so their logs land in
       `<state>/runs/` (the book finds them there) rather than on a console run page;
-      a console Publish for step 2 (RFC 0214 Phase 2); a step-6 run from the console on the testbed
+      a step-6 run from the console on the testbed (step 2's Publish: RFC 0230)

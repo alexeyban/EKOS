@@ -28,6 +28,12 @@ python tools/lakehouse-docs/publish/publish_github_wiki.py --docs <dir> --repo a
   comments and routines come from iDempiere's migration scripts). Without that line, 2,001 database texts were left
   out and the home page said so.
 
+**From the console (RFC 0230, 2026-10-26):** `docs_tour.py` drives the Documentation page: the store, its destination,
+the credential variable's name and the publisher check are shown, the Home page is rendered, **Generate** and
+**Preview publish** run (their run logs: pages written, the dry run's result, 0 model calls) and a preview leaves step
+2 *partial*. **17 passed, 0 failed.** The preview with `sidebar = "keep"`: 1,060 pages changed, 0 removed, the wiki's
+`_Sidebar.md` untouched. Screenshot: `documentation-page.png`.
+
 **BLOCKER for the public publish:** the maintainer's confirmation. The EKOS wiki has one page (`Home.md`); the
 publisher writes `iDempiere-*` pages next to it and, by default, replaces `_Sidebar.md` with the iDempiere tree —
 pass `--sidebar keep` to leave the wiki's sidebar alone.
