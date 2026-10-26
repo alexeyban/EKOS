@@ -6899,7 +6899,8 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       match) to settle in step 3 — a person's work
 - [ ] Exit BLOCKER (deferred by the maintainer 2026-10-26, solve later): plant a cascade delete, a keyless table and a
       permissions loss on the testbed and check each is handled as designed (RFC 0225, plan III.5)
-- [ ] Exit: run logs for steps 3 and 6 on the testbed (the next sign-off and the next load print them)
+- [x] Exit: run logs for steps 3 and 6 on the testbed — `idemsales` (devlog_310): sign-offs, conflict decisions and
+      identity in `<state>/runs/`, the load as a console run
 - [x] RFC 0230 step 2 in the console (devlog_309): `lakehouse docs show|generate|publish`, `[extensions.lakehouse.docs]`,
       the Documentation page; published to github.com/alexeyban/ekos-lakehouse-oracle/wiki (with the demo book)
 - [x] Demo repository ekos-lakehouse-oracle: the full result (submodules at the exact commits, the generated pipeline,
@@ -6910,4 +6911,16 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       iDempiere book in the demo repo `book/`
 - [ ] RFC 0218 follow-ups: the review page runs `review`/`signoff` outside the run queue, so their logs land in
       `<state>/runs/` (the book finds them there) rather than on a console run page;
-      a step-6 run from the console on the testbed (step 2's Publish: RFC 0230)
+      ~~a step-6 run from the console on the testbed~~ done on `idemsales` (devlog_310)
+- [x] RFC 0231 each lakehouse project's own silver and gold schemas (`silver_<tag><schema>`, `gold_<tag>`), and
+      lakehouse-docs column lineage for upper-case Oracle names (devlog_310, lakehouse devlog_22)
+- [x] End-to-end video demo: new project `idemsales` (iDempiere order-to-invoice slice, 33 tables), steps 1–7 from the
+      console, 3 marts reconciled; narrated MP4 + screenshots + diagrams + runbook in the demo repo `video/` (devlog_310)
+- [ ] Workflow order: step 4 needs the deployed plan (`requirements draft`: "no deployed plan"), so steps 5 and
+      generate must come first, but the bar offers step 4 next. Either the bar orders 5 before 4, or requirements
+      resolve against the approved plan before generate (found recording the video, devlog_310)
+- [ ] Dashboard growth chart: `ekos ledger timeline --json --bucket day` exceeds the console's 20 s on a 676k-entry
+      ledger (`idemsales`); precompute at commit or cache by ledger count
+- [ ] Silver accepted-values warnings on iDempiere: `C_DOCTYPE.DOCBASETYPE` and `C_PAYMENT.TRXTYPE` hold codes the
+      application's code list does not declare — settle in step 3 (glossary) or widen the generated test
+- [ ] Column lineage: a `count(*)` measure has no upstream column, so a mart's count shows no path to the source
