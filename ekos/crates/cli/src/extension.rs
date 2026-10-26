@@ -309,7 +309,7 @@ impl Column {
 }
 
 /// A button that runs a catalogue command as a job. Its arguments come only from the page's
-/// selections (`binds`) and fixed flags (RFC 0207).
+/// selections (`binds`), fixed flags (RFC 0207) and text the person types (`inputs`, RFC 0226).
 #[derive(Debug, Clone, PartialEq, Default, serde::Serialize)]
 pub struct Action {
     pub label: &'static str,
@@ -321,6 +321,9 @@ pub struct Action {
     pub flags: Vec<&'static str>,
     /// RFC 0207: a sentence the person acknowledges before the run (cost, effect).
     pub confirm: Option<&'static str>,
+    /// RFC 0226: `(argument id, label)` — a value argument the person types before the run (a
+    /// reason, a note). Sent like any other value through the catalogue, which checks it again.
+    pub inputs: Vec<(&'static str, &'static str)>,
 }
 
 /// What an extension command gets: the same setup a built-in command has once `main_with` has

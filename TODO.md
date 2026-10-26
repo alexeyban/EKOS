@@ -6863,8 +6863,13 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       incremental), delete plans by class, `lakehouse deletes` (bucketed key diff, mass-delete guard, tombstones,
       retained purges), Dagster step; live single/re-insert/mass/purge green; a home project's pipeline no longer lands
       in its sources (devlog_301, lakehouse devlog_15)
-- [ ] RFC 0225 follow-ups: the console's Extraction page (step 5 UI, approve the plan); silver flag for retained purges +
-      SCD2 close (step 6); a found delete that contradicts the code as an EKOS conflict; cascade + real purge routine
-      planted on the testbed; a Dagster run of the whole iDempiere pipeline
+- [x] RFC 0226 — step 5 UI: step 3's signed decisions in the plan (scope, PII masks, write-behaviour overrides), the
+      proposal in the state dir, `lakehouse extraction show|change|approve`, the plan digest + `LakehouseApproval`
+      fact, `require-plan-approval` gate in `generate`, step 5 on the bar, the console's Extraction page; EKOS
+      `Action::inputs` (typed text on page actions). iDempiere 849 planned / 53 out of scope / 1 mask; browser 11/11
+      (devlog_302, lakehouse devlog_16)
+- [ ] RFC 0225/0226 follow-ups: silver flag for retained purges + SCD2 close + step 3 labels (step 6); a found delete
+      that contradicts the code as an EKOS conflict; cascade + real purge routine planted on the testbed; a Dagster run
+      of the whole iDempiere pipeline; a filter on the Extraction page's table list
 - [ ] RFC 0217 optional CDC
 - [ ] RFC 0218 generated demo book

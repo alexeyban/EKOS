@@ -7,7 +7,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as client from "../api/client";
 import type { Me } from "../WorkspaceShell";
 import { ExtensionPage } from "./ExtensionPage";
-import { actionArgs, dependents, layoutGraph, missingParams, selectionQuery, type ExtPage } from "./extension-view";
+import {
+  actionArgs,
+  dependents,
+  layoutGraph,
+  missingParams,
+  selectionQuery,
+  withInputs,
+  type ExtPage,
+} from "./extension-view";
 import { parseMarkdown } from "./markdown";
 
 const PAGE: ExtPage = {
@@ -143,6 +151,16 @@ describe("RFC 0207 helpers", () => {
     expect(dependents(PAGE, "package")).toEqual(["step"]);
     expect(actionArgs(PAGE.actions[0], {})).toBeNull();
     expect(actionArgs(PAGE.actions[0], { package: "etl" })).toEqual({ package: "etl", "allow-metered": true });
+  });
+
+  it("adds what was typed for an action's inputs, leaving blank ones out (RFC 0226)", () => {
+    const action = { label: "Change", command: ["lakehouse", "x"], inputs: [["reason", "Why"]] as [string, string][] };
+    expect(withInputs(action, { table: "T" }, { reason: "  a migration  " })).toEqual({
+      table: "T",
+      reason: "a migration",
+    });
+    expect(withInputs(action, { table: "T" }, { reason: "   " })).toEqual({ table: "T" });
+    expect(withInputs(action, { table: "T" }, { other: "x" })).toEqual({ table: "T" });
   });
 
   it("lays a graph out in layers and lanes, and survives a cycle", () => {

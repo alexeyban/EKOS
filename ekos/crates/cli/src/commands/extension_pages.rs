@@ -157,11 +157,22 @@ pub fn check_page(ext: &str, page: &ConsolePage, catalogue: &[Entry]) -> Result<
                 );
             }
         }
-        if let Some(required) = entry
-            .args
-            .iter()
-            .find(|a| a.required && !action.binds.iter().any(|(b, _)| *b == a.id))
-        {
+        for (arg, _) in &action.inputs {
+            if !entry.args.iter().any(|a| a.id == *arg && a.kind != "flag") {
+                bail!(
+                    "{at}: input `{arg}` is not a value argument of `{}`",
+                    entry.path.join(" ")
+                );
+            }
+            if action.binds.iter().any(|(b, _)| b == arg) {
+                bail!("{at}: `{arg}` is both bound and typed");
+            }
+        }
+        if let Some(required) = entry.args.iter().find(|a| {
+            a.required
+                && !action.binds.iter().any(|(b, _)| *b == a.id)
+                && !action.inputs.iter().any(|(i, _)| *i == a.id)
+        }) {
             bail!(
                 "{at}: `{}` needs `{}`, which an action cannot give",
                 entry.path.join(" "),
@@ -452,6 +463,7 @@ mod tests {
                 binds: vec![("package", "package")],
                 flags: vec!["allow-metered"],
                 confirm: Some("uses a paid model"),
+                inputs: vec![],
             }],
             ..Default::default()
         }
@@ -482,6 +494,20 @@ mod tests {
             "has no argument",
         );
         refused(&|p| p.actions[0].flags = vec!["force"], "is not a flag");
+        // RFC 0226: a typed input names a value argument, never a flag or a bound one; it can
+        // give a required argument.
+        refused(
+            &|p| p.actions[0].inputs = vec![("allow-metered", "Why")],
+            "is not a value argument",
+        );
+        refused(
+            &|p| p.actions[0].inputs = vec![("package", "Package")],
+            "both bound and typed",
+        );
+        let mut typed = v3_page();
+        typed.actions[0].binds = vec![];
+        typed.actions[0].inputs = vec![("package", "Package")];
+        check_page("e", &typed, &cat).unwrap();
         refused(&|p| p.params[1].name = "Step", "lowercase");
     }
 }

@@ -964,6 +964,14 @@ bucketed key diff (only buckets whose key counts or hashes differ are read key b
 than 5 % of a table's keys vanish at once, until a person accepts it. On iDempiere 739 of 901 tables load
 incrementally.
 
+Step 5 is a reviewed decision (RFC 0226). The plan applies step 3's decisions from every review subject with a valid
+sign-off — tables out of scope are not planned, confirmed PII columns are masked in silver, write-behaviour overrides
+change the mode and delete plan — and is saved as a proposal. On the console's **Extraction** page (or
+`lakehouse extraction show|change|approve`) an operator reads each table's evidence, changes its mode, delete
+cadence or purge policy with a reason, and approves the plan; the approval is a ledger fact with the plan's digest.
+With `require-plan-approval = true`, `generate` builds only the approved plan and names the tables that moved since.
+On iDempiere: 849 tables planned, 53 out of scope, one column masked.
+
 ### iDempiere eval (RFC 0222)
 
 `evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six

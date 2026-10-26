@@ -53,6 +53,8 @@ export interface ExtAction {
   flags?: string[];
   /** RFC 0207: a sentence to acknowledge before running. */
   confirm?: string | null;
+  /** RFC 0226: `[argument id, label]` — text the person types before running. */
+  inputs?: [string, string][];
 }
 
 export interface ExtPage {
@@ -110,6 +112,20 @@ export function actionArgs(
   }
   for (const f of action.flags ?? []) args[f] = true;
   return args;
+}
+
+/** RFC 0226: `args` with what the person typed for the action's inputs; blank ones are left out. */
+export function withInputs(
+  action: ExtAction,
+  args: Record<string, string | boolean>,
+  typed: Record<string, string>,
+): Record<string, string | boolean> {
+  const out = { ...args };
+  for (const [arg] of action.inputs ?? []) {
+    const v = (typed[arg] ?? "").trim();
+    if (v !== "") out[arg] = v;
+  }
+  return out;
 }
 
 export interface GraphNode {

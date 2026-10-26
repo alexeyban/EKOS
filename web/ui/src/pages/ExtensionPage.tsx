@@ -22,6 +22,7 @@ import {
   type ExtPage,
   type ExtPanel,
   type ExtParam,
+  withInputs,
 } from "./extension-view";
 import { Markdown } from "./markdown";
 
@@ -319,12 +320,13 @@ function ActionButton({
   const [confirm, setConfirm] = useState("");
   const [asking, setAsking] = useState(false);
   const [consented, setConsented] = useState(false);
+  const [typed, setTyped] = useState<Record<string, string>>({});
   const args = actionArgs(action, chosen);
   const run = useMutation({
     mutationFn: () =>
       apiPost<{ run_id: string }>(`/workspaces/${ws}/cli`, {
         command: action.command,
-        args: args ?? {},
+        args: withInputs(action, args ?? {}, typed),
         confirm: confirm || null,
       }),
     onSuccess: (r) => navigate(`/runs/${r.run_id}`),
@@ -337,12 +339,23 @@ function ActionButton({
     : args === null
       ? "choose what it runs on first"
       : `ekos ${name} (${entry.class})`;
-  const needsAsk = entry.confirm || Boolean(action.confirm);
+  const inputs = action.inputs ?? [];
+  const needsAsk = entry.confirm || Boolean(action.confirm) || inputs.length > 0;
   if (asking) {
     const typedOk = !entry.confirm || confirm === name;
     const consentOk = !action.confirm || consented;
     return (
       <span className="ext-confirm">
+        {inputs.map(([arg, label]) => (
+          <input
+            key={arg}
+            aria-label={label}
+            placeholder={label}
+            maxLength={512}
+            value={typed[arg] ?? ""}
+            onChange={(e) => setTyped({ ...typed, [arg]: e.target.value })}
+          />
+        ))}
         {action.confirm && (
           <label className="small">
             <input type="checkbox" checked={consented} onChange={(e) => setConsented(e.target.checked)} />{" "}
