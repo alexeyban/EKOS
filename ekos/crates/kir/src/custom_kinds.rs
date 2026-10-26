@@ -383,7 +383,7 @@ prefixes constantly",
     CustomKind {
         name: "LakehouseApproval",
         structurally_keyed: true,
-        note: "(change or mart, evidence hash, approver) — RFC 0190; approvals of one item differ only by evidence; also the approved extraction plan, one id per project whose versions are its approvals, RFC 0226 (written by the ekos-lakehouse extension)",
+        note: "(change or mart, evidence hash, approver) — RFC 0190; approvals of one item differ only by evidence; also the approved extraction plan, one id per project whose versions are its approvals, RFC 0226, and each approved mart requirement, one id per mart, RFC 0215 (written by the ekos-lakehouse extension)",
     },
     // RFC 0200 — Pentaho → lakehouse dbt, written by the ekos-lakehouse extension.
     CustomKind {

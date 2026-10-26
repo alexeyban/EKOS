@@ -6874,6 +6874,14 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       (devlog_303, lakehouse devlog_17)
 - [x] ~~RFC 0227 the full 849-table iDempiere run in Dagster~~ — dropped (2026-10-26, maintainer's decision); the
       165-table subset run stands as the step 6 evidence
+- [x] RFC 0215 — step 4: `lakehouse requirements draft|edit|show|approve` + the console's Requirements page;
+      `Task::Requirements` (EKOS); a draft from text by the routed model over a catalogue excerpt, resolved by EKOS
+      (case-insensitive names, `via` join choice, ≤ 4-key paths, one path per table, similar-name candidates);
+      approval commits `marts/<mart>.md` + `LakehouseApproval` `mart:<name>`; `gold draft` gated by
+      require-plan-approval; step 4 on the bar. iDempiere: hand-written spec → gold; llama3 draft → 9 edits →
+      approved → gold, nothing invented; browser 14/14 (devlog_304, lakehouse devlog_18)
+- [ ] RFC 0215 follow-ups: relative dates in a requirement (`last two years`); a draft from text attributed to the
+      signed-in person (class *external* gets no reviewer); several marts from one request
 - [ ] RFC 0225–0227 follow-ups: a found delete that contradicts the code as an EKOS conflict; cascade + real purge
       routine planted on the testbed; a filter on the Extraction page's table list; PostgreSQL `char(n)` rule text says
       the padding is kept, but both sides' casts drop it (consistent, so reconciliation is green); the console showing

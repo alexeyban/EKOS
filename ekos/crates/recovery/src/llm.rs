@@ -81,10 +81,12 @@ pub enum Task {
     Marketing,
     /// RFC 0200: legacy ETL code (a Pentaho step) translated to SQL.
     Translate,
+    /// RFC 0215: an operator's plain-language request drafted as mart metadata.
+    Requirements,
 }
 
 impl Task {
-    pub const ALL: [Task; 13] = [
+    pub const ALL: [Task; 14] = [
         Task::Default,
         Task::SqlNaming,
         Task::DocSemantics,
@@ -98,6 +100,7 @@ impl Task {
         Task::DocsProse,
         Task::Marketing,
         Task::Translate,
+        Task::Requirements,
     ];
 
     /// The name used in `[llm.tasks.<name>]` and the usage log.
@@ -116,6 +119,7 @@ impl Task {
             Task::DocsProse => "docs-prose",
             Task::Marketing => "marketing",
             Task::Translate => "translate",
+            Task::Requirements => "requirements",
         }
     }
 

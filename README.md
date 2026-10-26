@@ -976,7 +976,18 @@ Silver reads what the source and EKOS know about each column (RFC 0227): `Y`/`N`
 constraint or the application model says so, declared value lists are tested strictly, and the application's own
 lists and logical foreign keys are tested as warnings, since the database does not enforce them. Retained purges are
 flagged, and history closes rows deleted at the source. `lakehouse run` starts the Dagster job (the console's
-**Run the pipeline**). On the iDempiere testbed a closed 165-table subset ran in Dagster: all bronze tables reconciled, 165 silver models built, 3,664 of 3,667 tests passing and 3 warnings on real data outside the application's lists. The full 849-table run is still to do.
+**Run the pipeline**). On the iDempiere testbed a closed 165-table subset ran in Dagster: all bronze tables reconciled, 165 silver models built, 3,664 of 3,667 tests passing and 3 warnings on real data outside the application's lists. The full 849-table run was dropped.
+
+Step 4 turns a request into an approved mart requirement (RFC 0215). On the console's **Requirements** page (or
+`lakehouse requirements draft|edit|show|approve`) an operator describes a mart in plain words. The model routed to
+the `requirements` task (local Ollama unless a metered route is allowed) drafts its header from a catalogue excerpt
+of the plan, and EKOS resolves every term against the deployed plan. Names match regardless of case, and a term may
+choose a join path with `… via table.column`. Joins are searched at most four keys deep, and one table is never
+joined along two paths. Whatever does not resolve is a question for the operator, answered by changing the term,
+never by the model. An approval commits `marts/<mart>.md` and is a ledger fact; with `require-plan-approval`,
+`gold draft` builds only approved requirements. On iDempiere the plan's example request was drafted by `llama3`,
+answered by nine edits (three `via` choices among 3, 36 and 19 key paths) and approved, and the gold mart was proposed
+with nothing invented.
 
 ### iDempiere eval (RFC 0222)
 
@@ -1306,7 +1317,8 @@ max-tokens = 8192            # reasoning models spend hidden tokens; 1024/2048 t
 format (Claude and Qwen Flash on Messages, GPT/Grok on Responses, the rest on Chat Completions), and
 `[llm.tasks.<task>]` routes one kind of call to its own model — tasks: `ask`, `doc-semantics`,
 `description`, `semantics`, `sql-naming`, `session-capture`, `architecture`, `reconstruct`,
-`nl-sql`, `docs-prose`, `marketing`. Measured on this repository (RFC 0197's tables):
+`nl-sql`, `docs-prose`, `marketing`, `translate` (Pentaho code steps, RFC 0200), `requirements` (a plain-language mart
+request drafted as mart metadata, RFC 0215). Measured on this repository (RFC 0197's tables):
 
 ```toml
 [llm]
