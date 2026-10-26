@@ -263,6 +263,13 @@ pub fn leaves(root: &clap::Command) -> Vec<(Vec<String>, clap::Command)> {
     out
 }
 
+/// A command's class: the built-in table first, then an extension's rows (RFC 0218).
+pub fn class_for(path: &str, extra: &[(&str, Class, bool)]) -> Option<Class> {
+    class_of(path)
+        .or_else(|| class_in(extra, path))
+        .map(|(c, _)| c)
+}
+
 fn class_of(path: &str) -> Option<(Class, bool)> {
     class_in(CLASSES, path)
 }

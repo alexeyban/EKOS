@@ -6893,4 +6893,9 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       the padding is kept, but both sides' casts drop it (consistent, so reconciliation is green); the console showing
       dbt test results per table; business names/descriptions from the application model in silver docs (licences)
 - [ ] RFC 0217 optional CDC
-- [ ] RFC 0218 generated demo book
+- [x] RFC 0218 generated demo book (devlog_306): run logs for every write/review/admin/external command, lakehouse
+      stage lines, step 2 from `<state>/docs/estate.json`, ekos-lakehouse `tools/demo-book` (tour + render + PDF), the
+      iDempiere book in the demo repo `book/`
+- [ ] RFC 0218 follow-ups: the review page runs `review`/`signoff` outside the run queue, so their logs land in
+      `<state>/runs/` (the book finds them there) rather than on a console run page;
+      a console Publish for step 2 (RFC 0214 Phase 2); a step-6 run from the console on the testbed

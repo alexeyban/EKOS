@@ -99,13 +99,22 @@ pub fn init_logging_with(config: &EkosConfig, run_log: Option<&crate::run_log::R
 /// Logging for the MCP server: stdout carries JSON-RPC frames only, so all
 /// diagnostics must go to stderr.
 pub fn init_logging_stderr(config: &EkosConfig) {
+    init_logging_stderr_with(config, None);
+}
+
+/// [`init_logging_stderr`], plus the command's run log when it has one (RFC 0218).
+pub fn init_logging_stderr_with(config: &EkosConfig, run_log: Option<&crate::run_log::RunLog>) {
+    use tracing_subscriber::prelude::*;
     let level = &config.workspace.log_level;
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_env("EKOS_LOG")
-                .unwrap_or_else(|_| default_filter(level).into()),
+    let filter = tracing_subscriber::EnvFilter::try_from_env("EKOS_LOG")
+        .unwrap_or_else(|_| default_filter(level).into());
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_filter(filter),
         )
-        .with_writer(std::io::stderr)
+        .with(run_log.map(|log| log.layer()))
         .init();
 }
 

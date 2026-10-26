@@ -872,6 +872,15 @@ lines — the model calls the command made, then its outcome. The file is `EKOS_
 otherwise `.ekos/runs/<timestamp>-<command>.jsonl`; the console sets it per run and shows the lines as
 a steps table on the run page. On iDempiere every command logged zero model calls.
 
+RFC 0218 widened it: every command whose catalogue class is write, review, admin or external writes
+one too (`docs generate`, `signoff approve`, `lakehouse marts build`, …), named after the command's
+path (`<timestamp>-lakehouse-marts-build.jsonl`); extensions add their own stage lines. `docs generate
+--layout estate` also records its latest run in `.ekos/docs/estate.json`, which step 2 of the
+workflow bar reads. The run logs feed the generated **demo book** (ekos-lakehouse `tools/demo-book`):
+a script walks the console through the seven steps and renders, per step, the screen, the run log
+behind it and the numbers, keeping the narration a person wrote — the iDempiere book is in
+[ekos-lakehouse-oracle/book](https://github.com/alexeyban/ekos-lakehouse-oracle/tree/main/book).
+
 ```
 {"stage":"oracle.catalog","msg":"read DBA_TAB_COLUMNS","ms":687,"owner":"ADEMPIERE","query":"columns","rows":30457,"cmd":"build","t_ms":4889}
 {"stage":"oracle.catalog","msg":"reconciled against DBA_OBJECTS","kinds":13,"mismatches":0,"objects":10613,"owner":"ADEMPIERE","cmd":"build","t_ms":8985}

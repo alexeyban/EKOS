@@ -141,6 +141,10 @@ fn keep_manual(new: &str, old: &str) -> String {
     out
 }
 
+/// Under the state directory: the latest estate generation — where, how many pages, when
+/// (RFC 0218). The workflow's step 2 reads it.
+pub const RECORD: &str = "docs/estate.json";
+
 /// Write `pages` under `out` (RFC 0208's file rules).
 pub fn write_pages(out: &Path, pages: &[estate::EstatePage]) -> Result<Written> {
     std::fs::create_dir_all(out).with_context(|| format!("creating {}", out.display()))?;
@@ -270,6 +274,27 @@ pub fn generate(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()> {
         max_er_tables: config.docs_estate.max_er_tables.unwrap_or(30).max(2),
     });
     let w = write_pages(output, &pages)?;
+    let record = serde_json::json!({
+        "output": crate::home::canonical_dir(output)
+            .unwrap_or_else(|_| output.to_path_buf())
+            .display()
+            .to_string(),
+        "pages": pages.len(),
+        "written": w.written.len(),
+        "unchanged": w.unchanged.len(),
+        "removed": w.removed.len(),
+        "at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        "committed_at": provenance.committed_at,
+    });
+    // RFC 0218: the workflow's step 2 reads this record; losing it only hides the step's state.
+    let record_path = config.ekos_dir(cwd).join(RECORD);
+    if let Some(dir) = record_path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(e) = std::fs::write(&record_path, format!("{record:#}\n")) {
+        eprintln!("warning: {}: {e}", record_path.display());
+    }
+    ekos_common::run_log::emit("docs", "estate pages written", &record);
     println!(
         "estate docs: {} page(s) — {} written, {} unchanged, {} removed → {}",
         pages.len(),

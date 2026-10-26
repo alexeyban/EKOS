@@ -5,6 +5,7 @@
 //! crate logs (redacted, RFC 0043), counts model calls, and ends the run with an `llm` line and a
 //! `run finished` line. Each line is flushed as it is written: the console reads the file live.
 
+use crate::commands::catalogue::Class;
 use anyhow::Result;
 use ekos_common::redaction::{RedactionConfig, redact};
 use ekos_common::run_log::{CACHE_HIT, COMPLETION, EMBEDDING, MODEL_CALL_TARGET, TARGET};
@@ -332,7 +333,37 @@ pub fn for_command(cmd: &str, config: &EkosConfig, cwd: &Path) -> Option<RunLog>
         .filter(|v| !v.is_empty())
         .map(PathBuf::from);
     let path = path_for(config, cwd, cmd, env);
-    match RunLog::open(&path, cmd, config.redaction_config()) {
+    open_started(&path, cmd, config)
+}
+
+/// RFC 0218: the run log of a command that changes something — catalogue class write, review,
+/// admin or external. `path` is the command's path (`lakehouse marts build`): the log's `cmd`, and
+/// its file name with dashes. Read and local commands, and commands without a class, have none.
+pub fn for_class(
+    path: &[String],
+    class: Option<Class>,
+    config: &EkosConfig,
+    cwd: &Path,
+) -> Option<RunLog> {
+    if path.is_empty() || !class.is_some_and(changes_something) {
+        return None;
+    }
+    let env = std::env::var_os("EKOS_RUN_LOG")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+    let file = path_for(config, cwd, &path.join("-"), env);
+    open_started(&file, &path.join(" "), config)
+}
+
+fn changes_something(class: Class) -> bool {
+    matches!(
+        class,
+        Class::Write | Class::Review | Class::Admin | Class::External
+    )
+}
+
+fn open_started(path: &Path, cmd: &str, config: &EkosConfig) -> Option<RunLog> {
+    match RunLog::open(path, cmd, config.redaction_config()) {
         Ok(log) => {
             log.started();
             Some(log)
@@ -520,5 +551,37 @@ mod tests {
         let default = path_for(&config, cwd, "build", None);
         assert!(default.starts_with(config.ekos_dir(cwd).join("runs")));
         assert!(default.to_string_lossy().ends_with("-build.jsonl"));
+    }
+
+    #[test]
+    fn a_command_that_changes_something_gets_a_log_named_by_its_path() {
+        let config = EkosConfig::default();
+        let dir = tempfile::tempdir().unwrap();
+        let path: Vec<String> = ["lakehouse", "marts", "build"].map(String::from).into();
+        for class in [None, Some(Class::Read), Some(Class::Local)] {
+            assert!(for_class(&path, class, &config, dir.path()).is_none());
+        }
+        assert!(for_class(&[], Some(Class::Write), &config, dir.path()).is_none());
+        if std::env::var_os("EKOS_RUN_LOG").is_some() {
+            return; // the environment names the file; covered above
+        }
+        let log = for_class(&path, Some(Class::External), &config, dir.path()).unwrap();
+        log.finish(&Ok(()));
+        let runs = config.ekos_dir(dir.path()).join("runs");
+        let file = std::fs::read_dir(&runs)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        assert!(
+            file.to_string_lossy()
+                .ends_with("-lakehouse-marts-build.jsonl")
+        );
+        let text = std::fs::read_to_string(file).unwrap();
+        let first: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(first["cmd"], "lakehouse marts build");
+        assert_eq!(first["msg"], "started");
+        assert!(text.contains(r#""stage":"llm""#));
     }
 }

@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
 Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
-`devlog_305.md` as of this writing) before starting non-trivial work: they are the project's
+`devlog_306.md` as of this writing) before starting non-trivial work: they are the project's
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
-`ekos/docs/rfcs/` has `0025`+ (highest: `0228`; 0213–0218 are reserved by the Oracle/iDempiere plan for Parts II–V, 0217 and 0218 still unwritten). **Check both directories for the highest existing number before
+`ekos/docs/rfcs/` has `0025`+ (highest: `0228`; 0213–0218 are reserved by the Oracle/iDempiere plan for Parts II–V, 0217 still unwritten). **Check both directories for the highest existing number before
 picking one for a new RFC** — two RFCs have already collided on the same number once (0027) from
 sessions that only checked one location.
 
@@ -181,7 +181,8 @@ reads "all of X" should); `semantic/src/tickets.rs` adds `TicketFor` at commit. 
 (default 500) joins the build fingerprint key only when changed (`build.rs::observer_settings_key`) — an
 observer setting that changes output must invalidate the cache. `File` objects live in the ledger, not the CKM.
 RFC 0220 run logs: `ekos_common::run_log::emit(stage, msg, &data)` is a run-log line (target `ekos_run_log`);
-`crates/cli/src/run_log.rs` is the layer — the pipeline commands write JSON lines to `EKOS_RUN_LOG` or
+`crates/cli/src/run_log.rs` is the layer — the pipeline commands (and, RFC 0218, every command whose catalogue class
+is write/review/admin/external, by `Cli::command_path`: `run_log::for_class`) write JSON lines to `EKOS_RUN_LOG` or
 `<state>/runs/<stamp>-<cmd>.jsonl` (warnings copied redacted), ending with `llm` (model calls, counted from
 `ekos_model_call` events that `MeteredLlmProvider`, the LLM cache and the embedding providers emit — **a new
 model-call path must emit one**) and `run finished`. The terminal filter turns both targets off. The console sets

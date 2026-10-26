@@ -43,6 +43,11 @@ struct Cli {
 
     #[command(subcommand)]
     command: Commands,
+
+    /// The command's path (`review approve`, `lakehouse marts build`), for its catalogue class
+    /// (RFC 0218). Filled by `parse_cli`.
+    #[arg(skip)]
+    command_path: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -1830,6 +1835,12 @@ where
 {
     let root = extensions.extend_cli(cli_command())?;
     let matches = root.get_matches_from(args);
+    let mut command_path = Vec::new();
+    let mut at = &matches;
+    while let Some((name, sub)) = at.subcommand() {
+        command_path.push(name.to_string());
+        at = sub;
+    }
     if let Some((name, sub)) = matches.subcommand()
         && extensions.command_owner(name).is_some()
     {
@@ -1843,9 +1854,12 @@ where
                 name: name.to_string(),
                 matches: sub.clone(),
             },
+            command_path,
         });
     }
-    Ok(Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit()))
+    let mut cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
+    cli.command_path = command_path;
+    Ok(cli)
 }
 
 /// The whole `ekos` CLI: parses arguments and dispatches every command. The public binary calls
@@ -2050,11 +2064,20 @@ where
     // The MCP server owns stdout for protocol frames; the machine-readable `--json` / graph-export
     // commands own stdout for the document a consumer parses. Both send logs to stderr so nothing
     // interleaves with what a program reads (RFC 0127 R1/R2, RFC 0129 R5/R6).
-    // RFC 0220: a pipeline command writes a structured run log.
-    let run_log = pipeline_command_name(&command)
-        .and_then(|name| crate::run_log::for_command(name, &config, &cwd));
-    if matches!(command, Commands::Mcp { .. }) || emits_machine_output(&command) {
+    // RFC 0220: a pipeline command writes a structured run log; RFC 0218: so does every command
+    // that changes something (catalogue class write, review, admin or external).
+    let run_log = match pipeline_command_name(&command) {
+        Some(name) => crate::run_log::for_command(name, &config, &cwd),
+        None => {
+            let path = cli.command_path.join(" ");
+            let class = crate::commands::catalogue::class_for(&path, &extensions.command_classes());
+            crate::run_log::for_class(&cli.command_path, class, &config, &cwd)
+        }
+    };
+    if matches!(command, Commands::Mcp { .. }) {
         crate::commands::init_logging_stderr(&config);
+    } else if emits_machine_output(&command) {
+        crate::commands::init_logging_stderr_with(&config, run_log.as_ref());
     } else {
         crate::commands::init_logging_with(&config, run_log.as_ref());
     }
@@ -3174,6 +3197,31 @@ async fn dispatch_eval(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 0218: the parser records the command's path, which picks its catalogue class and so
+    /// whether it writes a run log.
+    #[test]
+    fn the_parser_records_the_commands_path_for_its_class() {
+        let cli = parse_cli(
+            &Extensions::none(),
+            [
+                "ekos",
+                "--project",
+                "p",
+                "signoff",
+                "approve",
+                "scope",
+                "--digest",
+                "d",
+            ],
+        )
+        .unwrap();
+        assert_eq!(cli.command_path, ["signoff", "approve"]);
+        let class = crate::commands::catalogue::class_for("signoff approve", &[]);
+        assert_eq!(class, Some(crate::commands::catalogue::Class::Review));
+        let cli = parse_cli(&Extensions::none(), ["ekos", "workflow", "status"]).unwrap();
+        assert_eq!(cli.command_path, ["workflow", "status"]);
+    }
 
     /// RFC 0056: clap auto-kebab-cases `ClickHouse` to `click-house` by default (splitting on
     /// the internal case boundary) — every doc/README/RFC reference uses the one-word

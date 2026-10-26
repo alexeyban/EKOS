@@ -144,8 +144,10 @@ What the analysis recovers, all deterministically:
 | git history | one `Ticket` per tracker id, linked to commits, files, change sets, code and doc sections | 0219 |
 | documentation | Markdown front matter as properties; sections linked to the tickets they name | 0221 |
 
-Every pipeline command writes a JSON-lines **run log** (`<state>/runs/`), one line per step with its counts, ending
-with the number of model calls (RFC 0220). The console shows it as a steps table.
+Every command that changes something writes a JSON-lines **run log** (`<state>/runs/`, or the console's run when
+started there), one line per step with its counts, ending with the number of model calls: the pipeline commands
+since RFC 0220, every command classed write, review, admin or external since RFC 0218 — a sign-off, an extraction
+change, a mart build. The console shows it as a steps table on the run's page.
 
 **On iDempiere** (`release-13`, 4,542 Java files, the Oracle seed): 763 `ModelTable`s with 16,660 columns and 2,882
 code-declared keys; migration scripts with 9 of 62,251 statements rejected; 61 of 61 routines recovered; 2,154 change
@@ -167,8 +169,12 @@ publishers already read (GitHub wiki, Confluence, Azure DevOps). Two gates are b
 ever reaches a page (a column profile gives counts only), and text is used only from sources whose licence is known
 (`[docs-estate] licences`). A re-run keeps manual sections and deletes only pages it generated (RFC 0214).
 
-**Not done:** publishing. A dry run against this repository's GitHub wiki produced 1,061 files with no broken links;
-the real publish waits for the maintainer, and the step stays *todo* on the bar.
+Each run records where it wrote and how many pages in `<state>/docs/estate.json`; the bar shows step 2 *partial*
+with that line ("1060 page(s) generated … into …") until the pages are published. From the console, run it on the
+**Commands** page (`docs generate`, layout `estate`, an output folder inside the project).
+
+**Not done:** publishing from the console. A dry run against this repository's GitHub wiki produced 1,061 files with
+no broken links; the real publish waits for the maintainer.
 
 ---
 
@@ -436,6 +442,24 @@ A browser run passed 8/8.
 
 ---
 
+## The demo book
+
+`tools/demo-book` in ekos-lakehouse (RFC 0218) walks the console through the seven steps and writes a book: per step,
+the screen, what the operator clicks, the run log behind it, what happens behind it, what they get and the caveats.
+
+```bash
+python -m demo_book tour --console URL --workspace ID --out capture/ [--act test-db --act docs --act edit-undo --act reconcile]
+python -m demo_book render --capture capture/ --out book/ --pdf book/demo-book.pdf
+```
+
+The tour reads; each `--act` runs something that leaves the project as it was (a connection test, the estate docs, a
+change and its undo in steps 4 and 5, one mart's reconciliation), never an approval or a build. Screenshots, logs and
+numbers are regenerated on every render; the narration lives in manual sections a render keeps; what the capture
+lacks is said on the page and fails the render unless `--allow-missing`. The iDempiere book is in the demo
+repository, [`book/`](https://github.com/alexeyban/ekos-lakehouse-oracle/tree/main/book).
+
+---
+
 ## What is guaranteed
 
 - **Read-only on the source.** Database sessions are read-only transactions with a user EKOS reports if it can
@@ -457,7 +481,8 @@ A browser run passed 8/8.
 | What | Where |
 |---|---|
 | a project's config and state | `<EKOS_HOME>/data/<tenant>/<project>/{ekos.toml,state/}` |
-| run logs | `<state>/runs/<stamp>-<command>.jsonl` |
+| run logs | `<state>/runs/<stamp>-<command path with dashes>.jsonl` (`…-lakehouse-marts-build.jsonl`) |
+| the latest estate documentation | `<state>/docs/estate.json` (where, pages, when) |
 | review cache | `<state>/review/state.json` |
 | step 5 proposal, changes, approval | `<state>/lakehouse/extraction/{proposed,changes,approved}.json` |
 | step 4 drafts and approvals | `<state>/lakehouse/requirements/<mart>.{md,json,approved.json}` |
@@ -494,6 +519,7 @@ A browser run passed 8/8.
 | Step 5 | 0225 extraction plan and deletes · 0226 the Extraction page |
 | Step 6 | 0216 Oracle source · 0227 silver from the source model · 0192–0194, 0196 bronze, silver, schema changes, monitoring |
 | Step 7 | 0195 gold · 0228 marts: propose, merge, build, reconcile |
+| All | 0218 run logs for every command that changes something; the generated demo book |
 
 ---
 
@@ -504,4 +530,6 @@ A browser run passed 8/8.
 - A relative date in a requirement ("last two years"), several marts from one request, and attributing a draft from
   text to the signed-in person.
 - In step 7: Build following the run on the page, and marts not described by a requirement.
-- Optional CDC with Debezium (RFC 0217), and the generated demo book (RFC 0218).
+- Optional CDC with Debezium (RFC 0217).
+- Run logs for steps 3 and 6 on iDempiere: the sign-offs and the subset load ran before RFC 0218, so the demo book
+  quotes none for them.
