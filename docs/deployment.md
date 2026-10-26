@@ -356,6 +356,9 @@ docker compose -f deploy/docker-compose.yml up -d --build
 - The console upgrades its own database at start. Take the backup first: there is no downgrade.
 - A ledger is append-only and is read by newer versions. Some upgrades change what is indexed
   and rebuild the search index at the first write; the release notes say when.
+- From RFC 0229 (tantivy 0.27) the search index is written in a newer format. A newer EKOS reads
+  an older index as it is; an older EKOS cannot read an index a newer one wrote, and runs without
+  search (it says so) until the index is rebuilt. Restore the backup to go back.
 - Re-running the pipeline is never needed for an upgrade. It is how new compiler features reach
   an existing project, and for a project with model-backed passes it costs money.
 

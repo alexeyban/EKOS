@@ -6892,6 +6892,8 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       routine planted on the testbed; a filter on the Extraction page's table list; PostgreSQL `char(n)` rule text says
       the padding is kept, but both sides' casts drop it (consistent, so reconciliation is green); the console showing
       dbt test results per table; business names/descriptions from the application model in silver docs (licences)
+- [x] RFC 0229 zstd advisories (RUSTSEC-2026-0391/0403/0410): zstd 0.14.3, parquet 60, tantivy 0.27 (devlog_307);
+      the extensions' lockfiles follow
 - [ ] RFC 0217 optional CDC
 - [x] RFC 0218 generated demo book (devlog_306): run logs for every write/review/admin/external command, lakehouse
       stage lines, step 2 from `<state>/docs/estate.json`, ekos-lakehouse `tools/demo-book` (tour + render + PDF), the

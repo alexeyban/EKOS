@@ -757,7 +757,7 @@ impl SearchIndex {
         limit: usize,
     ) -> Result<Vec<(Uuid, String, f32)>, LedgerError> {
         let top = searcher
-            .search(&query, &TopDocs::with_limit(limit))
+            .search(&query, &TopDocs::with_limit(limit).order_by_score())
             .map_err(terr)?;
         let mut out = Vec::with_capacity(top.len());
         for (score, addr) in top {
