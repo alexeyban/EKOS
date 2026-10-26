@@ -972,6 +972,12 @@ cadence or purge policy with a reason, and approves the plan; the approval is a 
 With `require-plan-approval = true`, `generate` builds only the approved plan and names the tables that moved since.
 On iDempiere: 849 tables planned, 53 out of scope, one column masked.
 
+Silver reads what the source and EKOS know about each column (RFC 0227): `Y`/`N` flags become booleans when a check
+constraint or the application model says so, declared value lists are tested strictly, and the application's own
+lists and logical foreign keys are tested as warnings, since the database does not enforce them. Retained purges are
+flagged, and history closes rows deleted at the source. `lakehouse run` starts the Dagster job (the console's
+**Run the pipeline**). On the iDempiere testbed a closed 165-table subset ran in Dagster: all bronze tables reconciled, 165 silver models built, 3,664 of 3,667 tests passing and 3 warnings on real data outside the application's lists. The full 849-table run is still to do.
+
 ### iDempiere eval (RFC 0222)
 
 `evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six

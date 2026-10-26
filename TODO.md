@@ -6868,8 +6868,15 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       fact, `require-plan-approval` gate in `generate`, step 5 on the bar, the console's Extraction page; EKOS
       `Action::inputs` (typed text on page actions). iDempiere 849 planned / 53 out of scope / 1 mask; browser 11/11
       (devlog_302, lakehouse devlog_16)
-- [ ] RFC 0225/0226 follow-ups: silver flag for retained purges + SCD2 close + step 3 labels (step 6); a found delete
-      that contradicts the code as an EKOS conflict; cascade + real purge routine planted on the testbed; a Dagster run
-      of the whole iDempiere pipeline; a filter on the Extraction page's table list
+- [x] RFC 0227 — step 6: Oracle check lists + application-model code facts into the plan; silver flags → boolean,
+      declared lists (error) / code lists + code references (warn), retained-purge flag, snapshot hard deletes;
+      `lakehouse run`; Oracle `CHAR(n)` padding kept (Trino's cast dropped it); Dagster/dbt-safe names; a 165-table subset run in Dagster: bronze green, silver built, 3,664/3,667 tests pass, 3 data warnings; fixes from the run: reload on a changed load expression, no `$` in Iceberg names, YAML 1.1 booleans, numeric value lists, the lock always rewritten
+      (devlog_303, lakehouse devlog_17)
+- [ ] RFC 0227 the full 849-table iDempiere run in Dagster (needs Trino > 2 GiB and dbt ≤ 2 threads; 30 tables have
+      a reload requested)
+- [ ] RFC 0225–0227 follow-ups: a found delete that contradicts the code as an EKOS conflict; cascade + real purge
+      routine planted on the testbed; a filter on the Extraction page's table list; PostgreSQL `char(n)` rule text says
+      the padding is kept, but both sides' casts drop it (consistent, so reconciliation is green); the console showing
+      dbt test results per table; business names/descriptions from the application model in silver docs (licences)
 - [ ] RFC 0217 optional CDC
 - [ ] RFC 0218 generated demo book
