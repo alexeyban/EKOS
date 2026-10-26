@@ -6894,6 +6894,10 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       dbt test results per table; business names/descriptions from the application model in silver docs (licences)
 - [x] RFC 0229 zstd advisories (RUSTSEC-2026-0391/0403/0410): zstd 0.14.3, parquet 60, tantivy 0.27 (devlog_307);
       the extensions' lockfiles follow
+- [x] Plan exit report against VI.4's gates (`evals/oracle-idempiere/exit/`, devlog_308): 8 met, 2 partial, 2 BLOCKERS
+- [ ] Exit BLOCKER: 195 code ↔ database conflicts (and 1 identity match) to settle in step 3 — a person's work
+- [ ] Exit BLOCKER: plant a cascade delete, a keyless table and a permissions loss on the testbed (RFC 0225 III.5)
+- [ ] Exit: run logs for steps 3 and 6 on the testbed (the next sign-off and the next load print them)
 - [ ] RFC 0217 optional CDC
 - [x] RFC 0218 generated demo book (devlog_306): run logs for every write/review/admin/external command, lakehouse
       stage lines, step 2 from `<state>/docs/estate.json`, ekos-lakehouse `tools/demo-book` (tour + render + PDF), the
