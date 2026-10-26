@@ -6872,8 +6872,8 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
       declared lists (error) / code lists + code references (warn), retained-purge flag, snapshot hard deletes;
       `lakehouse run`; Oracle `CHAR(n)` padding kept (Trino's cast dropped it); Dagster/dbt-safe names; a 165-table subset run in Dagster: bronze green, silver built, 3,664/3,667 tests pass, 3 data warnings; fixes from the run: reload on a changed load expression, no `$` in Iceberg names, YAML 1.1 booleans, numeric value lists, the lock always rewritten
       (devlog_303, lakehouse devlog_17)
-- [ ] RFC 0227 the full 849-table iDempiere run in Dagster (needs Trino > 2 GiB and dbt ≤ 2 threads; 30 tables have
-      a reload requested)
+- [x] ~~RFC 0227 the full 849-table iDempiere run in Dagster~~ — dropped (2026-10-26, maintainer's decision); the
+      165-table subset run stands as the step 6 evidence
 - [ ] RFC 0225–0227 follow-ups: a found delete that contradicts the code as an EKOS conflict; cascade + real purge
       routine planted on the testbed; a filter on the Extraction page's table list; PostgreSQL `char(n)` rule text says
       the padding is kept, but both sides' casts drop it (consistent, so reconciliation is green); the console showing

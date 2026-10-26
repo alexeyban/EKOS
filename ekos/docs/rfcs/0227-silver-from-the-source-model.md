@@ -126,5 +126,6 @@ Found and fixed by the run:
 - **The lock is always rewritten.** `generate` kept a lock edited by hand like any other file, so it could describe
   another pipeline than the SQL beside it.
 
-Not done: the full 849-table run (it needs a larger Trino than the sandbox's 2 GiB and more free memory). 30
+Not done: the full 849-table run (it needs a larger Trino than the sandbox's 2 GiB and more free memory); dropped by
+the maintainer's decision, so the subset run is this RFC's Phase 3 evidence. 30
 incremental tables outside the subset still have a reload requested.
