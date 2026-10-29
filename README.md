@@ -2525,15 +2525,17 @@ solution for modern data teams.
 
 <br clear="left">
 
-### Omid Ahmadi — Core Team, Ecosystem & Growth
+### Omid Ahmadi — CEO & Founder
 
-**AI Researcher & Agentic Systems Engineer**
+**M.Sc. in Software Engineering | M.Sc. in Fluid Engineering**
 
 <img src="docs/assets/team-omid-ahmadi.jpg" alt="Portrait of Omid Ahmadi" width="140" align="left" hspace="16" vspace="4">
 
-Researcher focused on sustainable AI applications across the oil, gas, and petrochemical
-industries, with a focus on intelligent agents, autonomous systems, and reliable AI infrastructure
-for industrial environments.
+CEO and founder of EKOS, leading strategic growth, partnerships, and business development.
+
+**Technical expertise:**
+- AI infrastructure, autonomous agents, x402 agentic payments
+- AI-driven development of refinery fluid systems and equipment
 
 <br clear="left">
 
