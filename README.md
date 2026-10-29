@@ -2510,16 +2510,16 @@ the devlogs, not this table.
 
 ## Team
 
-### Alexey Banaev — Founder & Lead Developer
+### Alexey Banaev — Co-Founder & Lead Developer
 
 <img src="docs/assets/team-alexey-banaev.jpg" alt="Portrait of Alexey Banaev" width="140" align="left" hspace="16" vspace="4">
 
 Alexey is a Data Engineer and Solution Architect with extensive experience designing data
-platforms, analytics solutions, and distributed systems. He founded EKOS to address a fundamental
+platforms, analytics solutions, and distributed systems. He co-founded EKOS to address a fundamental
 challenge in modern data environments: making complex, fragmented data ecosystems understandable,
 traceable, and usable.
 
-As EKOS's founder and main developer, Alexey leads the product architecture and engineering,
+As EKOS's co-founder and main developer, Alexey leads the product architecture and engineering,
 combining data engineering, software development, and AI-driven approaches to build a practical
 solution for modern data teams.
 
