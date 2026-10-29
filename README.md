@@ -2525,13 +2525,13 @@ solution for modern data teams.
 
 <br clear="left">
 
-### Omid Ahmadi — CEO & Founder
+### Omid Ahmadi — CEO & Co-Founder
 
 **M.Sc. in Software Engineering | M.Sc. in Fluid Engineering**
 
 <img src="docs/assets/team-omid-ahmadi.jpg" alt="Portrait of Omid Ahmadi" width="140" align="left" hspace="16" vspace="4">
 
-CEO and founder of EKOS, leading strategic growth, partnerships, and business development.
+CEO and co-founder of EKOS, leading strategic growth, partnerships, and business development.
 
 **Technical expertise:**
 - AI infrastructure, autonomous agents, x402 agentic payments
