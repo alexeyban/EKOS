@@ -2529,7 +2529,7 @@ solution for modern data teams.
 
 **M.Sc. in Software Engineering | M.Sc. in Fluid Engineering**
 
-<img src="docs/assets/team-omid-ahmadi.jpg" alt="Portrait of Omid Ahmadi" width="140" align="left" hspace="16" vspace="4">
+<img src="docs/assets/team-omid-ahmadi-2026.jpg" alt="Portrait of Omid Ahmadi" width="140" align="left" hspace="16" vspace="4">
 
 CEO and co-founder of EKOS, leading strategic growth, partnerships, and business development.
 
