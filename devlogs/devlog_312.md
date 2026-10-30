@@ -1,0 +1,126 @@
+# Devlog 312 — Cross-reference integrity, Phases 2–4: calls, imports, cycles, reachability, console, triage (RFC 0233)
+
+**Date:** 2026-10-30
+**PRs:** none (local `main`, not committed)
+**Branch:** `main`
+
+---
+
+## Summary
+
+RFC 0233 (devlog_311 shipped Phases 0–1) now covers its whole plan:
+
+- **SQL routine calls** checked against per-dialect built-in lists.
+- **Imports** checked for Perl, Elixir, JavaScript (relative) and Python, with excluded directories reported as
+  coverage gaps.
+- **Module cycles** and **unused tables**.
+- **Reachability** through a per-language contract.
+- **The `ekos_xref_check` MCP tool.**
+- **A console Integrity tab and dashboard tiles.**
+- **A Reference integrity section** in the estate docs, which ekos-lakehouse's documentation inherits.
+- **Opt-in, cite-or-drop LLM triage.**
+
+On LedgerSMB the check now reports **4 errors, all real bugs**: the 2 table references from devlog_311, a misspelled
+function call and a call to a function that only exists under another name. Reachability is decidable only for SQL
+routines. On both test estates most routines are dynamic, and the check says so instead of calling them dead.
+
+---
+
+## Phases 2–4
+
+### Problem / motivation
+Phase 1 covered only table references. The draft also asked for in-language references, cycles, orphans,
+reachability with an honest dynamic share, an MCP tool, a console tab and optional triage.
+
+### What was built
+| Component | What |
+|---|---|
+| `semantic/src/xref.rs` | routine-call references (`routine-calls`), `NameCheck`/`check_name`, `declaring_files`, migration-path rule, metrics `external`/`cycles`/`orphans`/`reachability`, `XREF_VERSION` 2 |
+| `semantic/src/xref_builtins.rs` | sorted built-in lists (common, PostgreSQL + common extensions, Oracle) and system qualifiers (`pg_catalog`, `dbms_*`, `utl_*`) |
+| `semantic/src/xref_imports.rs` | Perl / Elixir / JS-relative / Python import checks; imports into unobserved files are coverage gaps |
+| `semantic/src/xref_graph.rs` | `ReferenceCycle` (iterative Tarjan over module `DependsOn`), `OrphanArtifact` |
+| `semantic/src/xref_reach.rs` | `ReachabilityRules` contract, `RULES` (SQL supported, 7 families unsupported with reasons), BFS over `Calls`, registry guard test |
+| `semantic/src/xref_triage.rs` | triage prompt + cite-or-drop judge |
+| `recovery` `Task::Triage` | `[llm.tasks.xref-triage]` |
+| `compiler-core` | `[xref] entry-points` |
+| `cli/commands/check.rs` | `--reachability`, `--from-index`, unobserved-file walk, `agent_check` (MCP), `explain` |
+| `cli/commands/mcp.rs` | `ekos_xref_check` (in `SCOPE_REFUSED_TOOLS`), exact tool-list test updated; `read_scope.rs` leak suite lists it |
+| `cli/commands/docs_estate.rs`, `docs-gen/src/estate.rs` | `IntegritySummary` mirror → Findings page *Reference integrity* section |
+| catalogue | `check explain` → `external`, metered |
+| console API | `routes/integrity.py` (one fixed argv in `readproc._ALLOWED`), `tests/test_integrity.py` |
+| console UI | `pages/Integrity.tsx`, `integrity-shared.ts`, tests, tab, route, dashboard tiles, `XrefReport` types |
+
+### Implementation details worth remembering
+- **Perl and Elixir packages carry no "defined" marker.** One id is shared between a `package X;` and every `use X`,
+  and a declared package has no properties. *Declared* means the target of a `Contains` edge from its file (or, for
+  Elixir, its enclosing module). The first version tested `source_span` and flagged 435 of 436 LedgerSMB imports.
+- **The file of a Perl package or Elixir module** is only on that `Contains` edge (`declaring_files`).
+- **A JavaMethod's SQL text** (`sql[].text`) is the only place Java names a stored routine. Its words are reachability
+  roots.
+- **Trigger functions** are linked by a `Calls` edge only when `semantic::triggers` resolved them. The trigger's
+  `function` property is read too.
+- **Reachability and orphans need relationships.** With none (older unit tests, a bare object list), both are
+  skipped instead of calling everything unused.
+- **`succ.iter().nth(pos)` on a `BTreeSet` inside Tarjan** made each step linear in the node's degree. Adjacency is
+  now `Vec`s.
+- **The console never recomputes:** iDempiere needs 20 s and 1.7 GB for one check. `--from-index` serves the
+  commit-time file in 0.35 s and refuses an index from an older `XREF_VERSION`.
+
+### Decisions
+- **Reachability for SQL only, the rest unsupported with reasons**, not guessed. The analyzers record no
+  cross-file call graph and no entry points. Making Rust, Python or Java supported is analyzer work (TODO).
+- **Rust and Java imports are not checked:** the compiler already refuses them (an RFC non-goal).
+- **Triage is its own subcommand, not a `--explain` flag.** The console's catalogue classes commands by path, and a
+  flag on the `read`-class `check refs` would let a reader trigger a model call. `check explain` is `external`.
+- **The lakehouse section is generated by EKOS's estate docs.** `lakehouse docs generate` calls
+  `ekos::commands::docs_estate::generate`, so no change was needed in that repository, and it depends on EKOS `main`
+  over git anyway.
+- **The contract is a trait over compiled objects,** not a method on every `CompilerPass`. The facts it needs are
+  already in the ledger, and the rules sit next to the engine that uses them. A registry test keeps every symbol kind
+  claimed.
+
+---
+
+## Measured
+| | LedgerSMB | iDempiere (code + scripts, no DB) |
+|---|---|---|
+| References | 2,018, 98.0 % resolved | 12,836, 95.2 % (Java → schema 97.8 %) |
+| Errors | 4, all real (2 tables, `lsmb__next_businss_day`, `lsmb__daycount_act_365`) | 0 |
+| Routine calls | 190 resolved, 2 errors, 1 from an upgrade script → info | 868 resolved; 1 Oracle `CREATE TYPE` constructor → warning |
+| Perl imports | 401 resolved; 35 into excluded `old/` → coverage gaps (every one checked: `old/lib/LedgerSMB/*.pm`) | — |
+| Cycles | 1 | 26 (one SCC of 279 Java types) |
+| Orphans | 28 tables | 46 tables, all in `migration-historic/` |
+| SQL reachability | 22 / 517 reachable, 95.7 % dynamic | 85 / 130 reachable, 34.6 % dynamic |
+| `check explain`, local llama3 | 4 findings: 2 dropped (cited an unshown id; named something it did not cite), 2 kept | — |
+
+---
+
+## Knowledge Captured
+- **A precision rule is only as good as its first real run.** Every rule here came from a false positive on
+  LedgerSMB or iDempiere. Measure each new reference source on a real repository before trusting its errors.
+- **Excluded directories hide definitions.** LedgerSMB's `ekos.toml` excludes `old/`, where 15 still-imported
+  packages live. A check that reads only the observed files must ask the file system what it skipped (names only)
+  before calling an import broken.
+- **Built-in function names drown a call check.** LedgerSMB's routines make 430 calls to 53 names, 49 of them
+  built-in. Without per-dialect lists, routine calls cannot be checked at all.
+- **Oracle `CREATE TYPE` makes a callable constructor** (`TABLE_OF_VARCHAR2(...)`) that EKOS does not compile.
+- **Local llama3 invents ids.** Of 4 triage answers, 1 cited an object it was not shown and 1 named an object it
+  did not cite. Cite-or-drop is not optional.
+- **vitest under this sandbox cannot write `node_modules/.vite`.** The tests pass and the cache write fails
+  afterwards with `EACCES`, which is harmless.
+
+---
+
+## Files Changed
+| File | Change summary |
+|---|---|
+| `ekos/crates/semantic/src/{xref,xref_builtins,xref_imports,xref_graph,xref_reach,xref_triage}.rs`, `lib.rs` | the engine's Phase 2–4 parts (38 `xref` tests in the crate) |
+| `ekos/crates/recovery/src/llm.rs` | `Task::Triage` |
+| `ekos/crates/compiler-core/src/config.rs` | `[xref] entry-points` |
+| `ekos/crates/cli/src/commands/{check,mcp,docs_estate,catalogue,migrate_logic}.rs`, `app.rs` | flags, MCP tool, explain, estate section, catalogue row |
+| `ekos/crates/cli/tests/read_scope.rs` | `ekos_xref_check` refused under a restricting scope |
+| `ekos/crates/docs-gen/src/estate.rs` | `IntegritySummary` + Findings section + test |
+| `web/api/app/{readproc,main}.py`, `routes/integrity.py`, `tests/test_integrity.py` | Integrity route |
+| `web/ui/src/{WorkspaceShell,main}.tsx`, `pages/{Integrity,Dashboard}.tsx`, `pages/integrity-shared.ts`, `pages/Integrity.test.tsx`, `api/types.ts`, `index.css` | Integrity tab + dashboard tiles |
+| `ekos/docs/rfcs/0233-…md` | §11 Phases 2–4 as built, measured |
+| `README.md`, `TODO.md`, `docs/generated/ekos-self-documentation.html`, `CLAUDE.md` | documentation |

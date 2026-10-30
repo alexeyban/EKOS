@@ -553,6 +553,7 @@ fn every_other_tool_refuses_a_restricted_reader() {
         "ekos_status",
         "ekos_audit",
         "ekos_conflicts",
+        "ekos_xref_check",
         "ekos_semantics_lookup",
         "ekos_semantics_gaps",
         "ekos_session_note",

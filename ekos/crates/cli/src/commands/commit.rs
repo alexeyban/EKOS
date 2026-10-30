@@ -295,6 +295,18 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     let step = phase_note("deriving write behaviour");
     let (write_behaviour, ticket_links) = commit_write_behaviour(&*ledger)?;
     step.done();
+
+    // RFC 0233: the integrity index — every reference the steps above could not link, with
+    // evidence. Read-only over the ledger; written to a file under the state directory, never to
+    // the ledger (the findings are derived and change every commit).
+    let xref_stats = if config.xref.enabled {
+        let step = phase_note("checking cross-references");
+        let stats = crate::commands::check::commit_step(config, cwd, &*ledger)?;
+        step.done();
+        Some(stats)
+    } else {
+        None
+    };
     ledger.set_write_context(Some(write_ctx("commit:llm-description")));
 
     // RFC 0088: real, evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` for every
@@ -411,6 +423,17 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     }
     print_write_behaviour(&write_behaviour);
     print_ticket_links(&ticket_links);
+    if let Some((counts, rate)) = &xref_stats {
+        let n = |s| counts.get(&s).copied().unwrap_or(0);
+        use ekos_semantic::xref::Severity;
+        println!(
+            "  Cross-references:      {} error(s), {} warning(s), {} info; resolution {} (`ekos check refs`)",
+            n(Severity::Error),
+            n(Severity::Warning),
+            n(Severity::Info),
+            rate.map_or_else(|| "n/a".to_string(), |r| format!("{:.1}%", r * 100.0))
+        );
+    }
     if let Some(stats) = &embed_stats {
         println!(
             "  Vector embeddings:     {} embedded, {} already indexed, {} error(s) ({}-dim {})",

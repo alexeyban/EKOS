@@ -6924,3 +6924,34 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [ ] Silver accepted-values warnings on iDempiere: `C_DOCTYPE.DOCBASETYPE` and `C_PAYMENT.TRXTYPE` hold codes the
       application's code list does not declare — settle in step 3 (glossary) or widen the generated test
 - [ ] Column lineage: a `count(*)` measure has no upstream column, so a mart's count shows no path to the source
+
+## RFC 0233 — cross-reference integrity check (2026-10-30, devlog_311)
+
+- [x] Phase 0: `ekos_semantic::xref` (diagnostic model, name normalization, fingerprints without ids or lines),
+      `[xref]` in `ekos.toml`, `<state>/xref-ignore.toml` with a mandatory `reason`, the integrity index
+      `<state>/integrity/current.json` written at `ekos commit`
+- [x] Phase 1: `UnresolvedReference` / `AmbiguousReference` from routine/view footprints, Kettle and SQL
+      transformation steps, Java embedded SQL and dbt sources; `ekos check refs` with `--scope`, `--min-confidence`,
+      `--format table|json|sarif`, `--fail-on`, `--baseline <time|report.json>`, `--show-suppressed`
+- [x] Phase 1 precision on LedgerSMB: 2 errors in 1,366 references, both real (devlog_311)
+- [x] iDempiere code + scripts without the database: 597 errors / 1,349 warnings → 0 / 0 (609 info, hand-checked)
+      after the redefinition, model-claim, migration-history and test-code rules (devlog_311)
+- [ ] Phase 1 precision on the iDempiere testbed **with the live Oracle catalog** (the devlog_311 run had code and
+      scripts only)
+- [x] Phase 2 (devlog_312): SQL routine calls + per-dialect built-ins, Perl / Elixir / JS-relative / Python
+      imports (excluded directories → coverage gaps), `ReferenceCycle`, `OrphanArtifact`, the `ReachabilityRules`
+      contract + registry guard
+- [x] Phase 3 (devlog_312): SQL routine reachability (`UnreachableSymbol` / `DynamicReferenceUnknown`), per-family
+      metrics with the dynamic share, `ekos_xref_check` MCP tool (scope-refused), `--from-index`
+- [x] Phase 4 (devlog_312): console Integrity tab + dashboard tiles, estate-docs *Reference integrity* section
+      (ekos-lakehouse inherits it), `ekos check explain` cite-or-drop triage (`Task::Triage`)
+- [ ] Config ↔ code: no extractor records environment-variable or config-key reads yet
+- [ ] Reachability for Rust (record visibility, `main`, `#[test]`; cross-file calls), Python (`__main__`,
+      `pyproject` entry points, a call graph), JS (`package.json` `main`/`exports`), Java (a call graph; `@Test`;
+      dictionary entry points) — each family is declared unsupported in `xref_reach::RULES` until then
+- [ ] Perl / Python code's SQL is not extracted: their table reads count neither as uses (orphans) nor as routine
+      callers (reachability is dynamic wherever such code exists)
+- [ ] Oracle `CREATE TYPE` is not compiled (constructor calls are warnings)
+- [ ] ekos-lakehouse: bump its EKOS dependency so `lakehouse docs generate` carries the integrity section
+- [ ] iDempiere AD checks (`AD_Column.Callout`, `AD_Process.Classname`, …) need the dictionary rows: extend
+      `[[databases]] dictionary` (RFC 0212) beyond `AD_Table`

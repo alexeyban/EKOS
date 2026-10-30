@@ -205,6 +205,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: LlmCommands,
     },
+    /// Integrity checks over the compiled ledger (RFC 0233)
+    Check {
+        #[command(subcommand)]
+        subcommand: CheckCommands,
+    },
     /// Which source files changed since the ledger was committed, and which compiled objects
     /// cite them (RFC 0171)
     Freshness {
@@ -1316,6 +1321,63 @@ enum SignoffCommands {
 }
 
 #[derive(Subcommand)]
+enum CheckCommands {
+    /// References that resolve to nothing or to several objects — code, ETL and dbt into a
+    /// schema, SQL routines and views to tables — with evidence, confidence and a fingerprint
+    Refs {
+        /// Which references: cross-system (code/ETL/dbt → schema), code (within one system), all
+        #[arg(long, value_enum, default_value = "all")]
+        scope: crate::commands::check::Scope,
+        /// Hide findings below this confidence (0–1; default `[xref] min-confidence`)
+        #[arg(long)]
+        min_confidence: Option<f64>,
+        #[arg(long, value_enum, default_value = "table")]
+        format: crate::commands::check::Format,
+        /// Exit 1 when a shown finding is at or above this severity: error or warning
+        #[arg(long, value_parser = parse_fail_on)]
+        fail_on: Option<ekos_semantic::xref::Severity>,
+        /// Show only findings new since this: an RFC 3339 ledger time, or a `--format json` report file
+        #[arg(long)]
+        baseline: Option<String>,
+        /// Also list the findings `xref-ignore.toml` suppresses, with their reasons
+        #[arg(long)]
+        show_suppressed: bool,
+        /// Also list UnreachableSymbol / DynamicReferenceUnknown findings (always counted in the
+        /// metrics; hidden by default because a dynamic estate yields one per routine)
+        #[arg(long)]
+        reachability: bool,
+        /// Report what the last `ekos commit` recorded in the integrity index instead of
+        /// recomputing from the ledger (fast; what the console reads)
+        #[arg(long)]
+        from_index: bool,
+    },
+    /// Ask the configured model to suggest the target of an ambiguous reference, or the caller of
+    /// a routine nothing provably reaches — labelled suggestions, never findings or facts
+    Explain {
+        /// Only these findings (fingerprint, or a unique prefix); default every eligible one
+        #[arg(long)]
+        fingerprint: Vec<String>,
+        /// At most this many model calls
+        #[arg(long, default_value_t = 5)]
+        limit: usize,
+        /// Allow a model that is not a local Ollama one (the call may be billed)
+        #[arg(long)]
+        allow_metered: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+fn parse_fail_on(s: &str) -> std::result::Result<ekos_semantic::xref::Severity, String> {
+    match ekos_semantic::xref::Severity::parse(s) {
+        Some(ekos_semantic::xref::Severity::Info) | None => {
+            Err(format!("`{s}`: expected error or warning"))
+        }
+        Some(sev) => Ok(sev),
+    }
+}
+
+#[derive(Subcommand)]
 enum ConflictsCommands {
     /// The current conflicts: duplicate definitions, merge losses, label mismatches, code ↔ database
     List {
@@ -1798,6 +1860,12 @@ fn emits_machine_output(command: &Commands) -> bool {
         | Commands::Ekl { json, .. }
         | Commands::Coverage { json, .. }
         | Commands::Freshness { json, .. } => *json,
+        Commands::Check {
+            subcommand: CheckCommands::Refs { format, .. },
+        } => *format != crate::commands::check::Format::Table,
+        Commands::Check {
+            subcommand: CheckCommands::Explain { json, .. },
+        } => *json,
         Commands::Llm { subcommand } => match subcommand {
             LlmCommands::Routes { json }
             | LlmCommands::Usage { json, .. }
@@ -2099,6 +2167,47 @@ where
         Commands::Coverage { json, strict, all } => {
             crate::commands::coverage::run(&config, &cwd, json, strict, all)
         }
+        Commands::Check { subcommand } => match subcommand {
+            CheckCommands::Explain {
+                fingerprint,
+                limit,
+                allow_metered,
+                json,
+            } => {
+                crate::commands::check::explain(
+                    &config,
+                    &cwd,
+                    &fingerprint,
+                    limit,
+                    allow_metered,
+                    json,
+                )
+                .await
+            }
+            CheckCommands::Refs {
+                scope,
+                min_confidence,
+                format,
+                fail_on,
+                baseline,
+                show_suppressed,
+                reachability,
+                from_index,
+            } => crate::commands::check::refs(
+                &config,
+                &cwd,
+                &crate::commands::check::RefsArgs {
+                    scope,
+                    min_confidence,
+                    format,
+                    fail_on,
+                    baseline,
+                    show_suppressed,
+                    reachability,
+                    from_index,
+                },
+            ),
+        },
         Commands::Freshness { json, limit } => {
             crate::commands::freshness::run(&config, &cwd, json, limit)
         }

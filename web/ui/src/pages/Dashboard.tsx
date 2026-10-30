@@ -13,7 +13,8 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "../api/client";
-import type { Doctor, KindCount, QueryStats, Stats, Timeline } from "../api/types";
+import type { Doctor, KindCount, QueryStats, Stats, Timeline, XrefSummary } from "../api/types";
+import { pct } from "./integrity-shared";
 
 const CHART = "#7c3aed";
 const CHART_B = "#059669";
@@ -33,6 +34,8 @@ export function Dashboard() {
   const kinds = useWs<KindCount[]>(id, "kinds", "/stats/kinds");
   const timeline = useWs<Timeline>(id, "timeline", "/stats/timeline?bucket=day");
   const queries = useWs<QueryStats>(id, "queries", "/stats/queries");
+  // RFC 0233: the integrity index's headline numbers; absent until the first commit writes it.
+  const integrity = useWs<XrefSummary>(id, "integrity", "/integrity?summary=true");
 
   return (
     <>
@@ -44,6 +47,17 @@ export function Dashboard() {
           <Tile label="objects" value={stats.data.objects} />
           <Tile label="relationships" value={stats.data.relationships} />
           <Tile label="evidence" value={stats.data.evidence ?? "—"} />
+        </section>
+      )}
+      {integrity.data && (
+        <section className="tiles" aria-label="integrity">
+          <Tile label="reference resolution" value={pct(integrity.data.metrics.resolution_rate)} />
+          <Tile
+            label="cross-system resolution"
+            value={pct(integrity.data.metrics.cross_system_resolution_rate)}
+          />
+          <Tile label="integrity errors" value={integrity.data.by_severity.error ?? 0} />
+          <Tile label="module cycles" value={integrity.data.metrics.cycles ?? 0} />
         </section>
       )}
       {stats.data && (

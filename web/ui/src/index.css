@@ -764,6 +764,13 @@ main:has(.sem-page) {
   display: flex;
   justify-content: flex-end;
 }
+/* RFC 0233: a finding's summary card above the referring object's evidence panel. */
+.sem-panel-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
 .sem-title {
   margin: 0.5rem 0 0.2rem;
   overflow-wrap: anywhere;

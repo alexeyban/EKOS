@@ -264,6 +264,11 @@ fn manifest_path(config: &EkosConfig, cwd: &Path, name: &str) -> PathBuf {
     config.ekos_dir(cwd).join(name)
 }
 
+/// The manifest the last successful `ekos commit` promoted, if any.
+pub fn committed_manifest(config: &EkosConfig, cwd: &Path) -> Option<SourceManifest> {
+    read_manifest(&manifest_path(config, cwd, COMMITTED_MANIFEST))
+}
+
 /// The manifest the last `ekos build` recorded, if any.
 pub fn built_manifest(config: &EkosConfig, cwd: &Path) -> Option<SourceManifest> {
     read_manifest(&manifest_path(config, cwd, SOURCE_MANIFEST))

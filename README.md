@@ -1223,6 +1223,56 @@ order type. The detector first surfaced a CASE that swaps `'A'`↔`'L'` misread 
 extractor no longer reads a rewrite as a meaning. `[conflicts]
 enabled = false` restores the old behaviour.
 
+**Broken references across systems (RFC 0233).** Every name a routine, a view, a Kettle step, SQL
+built in a Java method or a dbt `source()` points at is resolved against every compiled relation —
+DDL, live catalog, application model — by the same rule lineage links by. A name that resolves to
+nothing is an `UnresolvedReference`, one that resolves to several an `AmbiguousReference`: with the
+file and line it came from, the closest names, the evidence, a confidence, and a fingerprint that
+survives recompiles and edits above it. Relations a routine creates at run time (`CREATE TEMP TABLE`,
+`EXECUTE 'CREATE VIEW …'`), table functions and system catalogs are not findings; a name in a schema
+EKOS compiled nothing from is a coverage gap (info), not an error.
+
+```bash
+ekos check refs                                  # metrics + findings, most severe first
+ekos check refs --scope cross-system --fail-on error --format sarif > xref.sarif   # CI / code scanning
+ekos check refs --format json > baseline.json    # later: --baseline baseline.json shows only new ones
+ekos check refs --baseline 2026-10-01T00:00:00Z  # or new since a ledger time
+```
+
+`ekos commit` writes the same report to `<state>/integrity/current.json` (never to the ledger).
+`[xref]` sets `min-confidence` and per-kind severities; `<state>/xref-ignore.toml` suppresses by
+`fingerprint`, `target` or `source` glob, and every rule must carry a `reason`. On LedgerSMB (1,366
+references) it reports 2 errors, both real: `budget__reject` deletes from `budget_to_project` and
+`budget_to_department`, which no file creates. A name the repository's migration scripts alter but no
+compiled DDL defines is a coverage gap, and one they drop is an error naming the script — on
+iDempiere's code without its database (11,966 references, 97.7 % of the Java → schema ones resolved)
+that leaves 0 errors and 609 info findings; connect the live catalog to decide the rest.
+
+The same check covers calls and imports inside one language: a SQL routine calling a function no
+file defines and no engine provides (`coalesce`, `nvl` and `dbms_*` are built in), a Perl `use` or
+Elixir `alias` of a package under the workspace's own namespace that no file declares, a relative JS
+import with no file behind it, a Python import under an in-tree package. An import into a directory
+`[observe] ignore-patterns` excludes is a coverage gap naming the file. It also reports module
+dependency cycles, tables nothing uses, and SQL routine reachability. A routine no view, trigger,
+Java SQL text or `[xref] entry-points` glob reaches is `UnreachableSymbol`, unless code that may
+call it by name exists, in which case it is `DynamicReferenceUnknown`. The dynamic share is always
+printed beside the coverage, and languages without a call graph are reported as unsupported, with
+the reason. On LedgerSMB that adds two more real bugs: a call to `lsmb__next_businss_day` (a typo)
+and to `lsmb__daycount_act_365` (only `…_365fixed` exists).
+
+```bash
+ekos check refs --reachability                 # also list unreachable / dynamic routines
+ekos check refs --from-index --format json     # the last commit's report, no recompute
+ekos check explain --limit 5                   # a model suggests targets; kept only if cited
+```
+
+Agents get `ekos_xref_check` over MCP: the findings, and `name` to check one table or routine name
+before writing SQL against it. The web console has an **Integrity** tab and dashboard tiles. The
+estate docs' Findings page has a *Reference integrity* section, which ekos-lakehouse's documentation
+inherits. `check explain` keeps a model's suggestion only when it names an object it was shown and
+cites it. Suggestions are printed, never stored, and a model that is not a local Ollama one needs
+`--allow-metered`.
+
 ### Real schema and class structure from source (RFC 0091/0092)
 
 **File-based SQL schema needs a dialect.** `.sql` files parse under the `generic` (ANSI) dialect

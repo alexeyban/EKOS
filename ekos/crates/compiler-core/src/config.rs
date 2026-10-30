@@ -46,6 +46,9 @@ pub struct EkosConfig {
     pub freshness: FreshnessConfig,
     #[serde(default)]
     pub conflicts: ConflictsConfig,
+    /// RFC 0233: `[xref]` — the cross-reference integrity check.
+    #[serde(default)]
+    pub xref: XrefConfig,
     /// RFC 0219: issue-tracker keys whose ticket ids join commits, change sets and code.
     #[serde(default)]
     pub tickets: TicketsConfig,
@@ -450,6 +453,43 @@ pub struct ConflictsConfig {
 impl Default for ConflictsConfig {
     fn default() -> Self {
         Self { enabled: true }
+    }
+}
+
+/// RFC 0233 — `[xref]`: the cross-reference integrity check (`ekos check refs`). On by default:
+/// deterministic, no LLM, one pass over the objects at `ekos commit`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct XrefConfig {
+    /// `false`: `ekos commit` does not write the integrity index (`ekos check refs` still runs).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Findings below this confidence (0–1) are not shown or failed on; `--min-confidence`
+    /// overrides it for one run.
+    #[serde(default)]
+    pub min_confidence: f64,
+    /// The suppression file, relative to the state directory (default `xref-ignore.toml`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignore_file: Option<PathBuf>,
+    /// Per-kind severity: `UnresolvedReference = "warning"`. Kinds and severities are checked
+    /// when the check runs.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub severity: std::collections::BTreeMap<String, String>,
+    /// Reachability roots beyond what the analyzers record: globs (`*`) over symbol names, e.g.
+    /// `["api_*", "public.report__*"]` for routines an external system calls.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entry_points: Vec<String>,
+}
+
+impl Default for XrefConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_confidence: 0.0,
+            ignore_file: None,
+            severity: std::collections::BTreeMap::new(),
+            entry_points: Vec::new(),
+        }
     }
 }
 
@@ -1183,6 +1223,7 @@ impl Default for EkosConfig {
             semantics: SemanticsConfig::default(),
             freshness: FreshnessConfig::default(),
             conflicts: ConflictsConfig::default(),
+            xref: XrefConfig::default(),
             tickets: TicketsConfig::default(),
             review: ReviewConfig::default(),
             docs_estate: DocsEstateConfig::default(),
@@ -1404,6 +1445,14 @@ log-level = "debug"
         assert!(EkosConfig::default().conflicts.enabled);
         let cfg: EkosConfig = toml::from_str("[conflicts]\nenabled = false\n").unwrap();
         assert!(!cfg.conflicts.enabled);
+        // RFC 0233: the integrity index is on by default; severities parse as a table.
+        assert!(EkosConfig::default().xref.enabled);
+        let cfg: EkosConfig = toml::from_str(
+            "[xref]\nmin-confidence = 0.5\n[xref.severity]\nAmbiguousReference = \"info\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.xref.min_confidence, 0.5);
+        assert_eq!(cfg.xref.severity["AmbiguousReference"], "info");
     }
 
     #[test]

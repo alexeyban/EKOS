@@ -215,6 +215,59 @@ pub fn write_pages(out: &Path, pages: &[estate::EstatePage]) -> Result<Written> 
 }
 
 /// `ekos docs generate --layout estate --output <dir>`
+/// RFC 0233: the integrity index as the estate's Findings page shows it — the headline numbers
+/// and the error and warning findings (not reachability notes or coverage gaps).
+fn integrity_summary(index: &super::check::Index) -> estate::IntegritySummary {
+    use ekos_semantic::xref::{DiagnosticKind, Severity};
+    let m = &index.report.metrics;
+    let pct = |r: Option<f64>| r.map_or_else(|| "—".to_string(), |r| format!("{:.1}%", r * 100.0));
+    estate::IntegritySummary {
+        computed_at: Some(index.computed_at.format("%Y-%m-%d %H:%M UTC").to_string()),
+        resolution: m.resolution_rate,
+        cross_system_resolution: m.cross_system_resolution_rate,
+        cycles: m.cycles,
+        orphans: m.orphans.iter().map(|(k, n)| (k.clone(), *n)).collect(),
+        reachability: m
+            .reachability
+            .iter()
+            .map(|(f, r)| {
+                let line = match &r.unsupported_because {
+                    Some(why) => format!("unsupported: {why}"),
+                    None => format!(
+                        "{} of {} routines reachable ({}), {} unreachable, {} dynamic ({})",
+                        r.reachable,
+                        r.symbols,
+                        pct(r.reachability_coverage),
+                        r.unreachable,
+                        r.dynamic,
+                        pct(r.dynamic_share)
+                    ),
+                };
+                (f.clone(), line)
+            })
+            .collect(),
+        findings: index
+            .report
+            .diagnostics
+            .iter()
+            .filter(|d| d.severity >= Severity::Warning && !d.coverage_gap)
+            .filter(|d| d.kind != DiagnosticKind::DynamicReferenceUnknown)
+            .take(500)
+            .map(|d| estate::IntegrityRow {
+                severity: d.severity.as_str().to_string(),
+                kind: d.kind.as_str().to_string(),
+                target: d.target_spec.written.clone(),
+                location: match (&d.source.file, d.source.line) {
+                    (Some(f), Some(l)) => format!("{f}:{l}"),
+                    (Some(f), None) => f.clone(),
+                    _ => format!("{} {}", d.source.object_kind, d.source.object_name),
+                },
+                reason: d.reason.clone(),
+            })
+            .collect(),
+    }
+}
+
 pub fn generate(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()> {
     let ledger = open_store_read_only(config, cwd).map_err(|e| {
         anyhow::anyhow!("{e}\nRun the pipeline (`ekos build` … `ekos commit`) first.")
@@ -263,6 +316,7 @@ pub fn generate(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()> {
     };
     let licences = licences(config, cwd);
     let conflicts = super::conflicts::current_ids(config, cwd);
+    let integrity = super::check::read_index(config, cwd).map(|i| integrity_summary(&i));
     let pages = estate::build(&EstateInput {
         objects: &objects,
         relationships: &relationships,
@@ -272,6 +326,7 @@ pub fn generate(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()> {
         provenance: &provenance,
         current_conflicts: conflicts.as_ref(),
         max_er_tables: config.docs_estate.max_er_tables.unwrap_or(30).max(2),
+        integrity: integrity.as_ref(),
     });
     let w = write_pages(output, &pages)?;
     let record = serde_json::json!({

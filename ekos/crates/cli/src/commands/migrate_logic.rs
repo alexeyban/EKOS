@@ -908,14 +908,14 @@ use ekos_migrate_logic::reconstruct::{self, Reconstruction};
 ///
 /// A local Ollama model costs nothing. Anything else is billed somewhere, so it needs the flag —
 /// per run, never a config default somebody set once (RFC 0164's open question, answered).
-fn model_call_allowed(config: &EkosConfig, allow_metered: bool) -> Result<()> {
+pub(crate) fn model_call_allowed(config: &EkosConfig, allow_metered: bool) -> Result<()> {
     let local = config.llm.provider.as_deref() == Some("ollama");
     if local || allow_metered {
         return Ok(());
     }
     bail!(
         "the configured model ({}) is not local, so a call may be billed. Re-run with \
-         --allow-metered to send this one routine to it, or set `[llm] provider = \"ollama\"`.",
+         --allow-metered to send this request to it, or set `[llm] provider = \"ollama\"`.",
         config.llm.provider.as_deref().unwrap_or("anthropic")
     )
 }

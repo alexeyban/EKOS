@@ -83,10 +83,12 @@ pub enum Task {
     Translate,
     /// RFC 0215: an operator's plain-language request drafted as mart metadata.
     Requirements,
+    /// RFC 0233: `ekos check explain` — a suggested target or entry point for one finding.
+    Triage,
 }
 
 impl Task {
-    pub const ALL: [Task; 14] = [
+    pub const ALL: [Task; 15] = [
         Task::Default,
         Task::SqlNaming,
         Task::DocSemantics,
@@ -101,6 +103,7 @@ impl Task {
         Task::Marketing,
         Task::Translate,
         Task::Requirements,
+        Task::Triage,
     ];
 
     /// The name used in `[llm.tasks.<name>]` and the usage log.
@@ -120,6 +123,7 @@ impl Task {
             Task::Marketing => "marketing",
             Task::Translate => "translate",
             Task::Requirements => "requirements",
+            Task::Triage => "xref-triage",
         }
     }
 

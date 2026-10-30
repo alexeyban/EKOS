@@ -62,6 +62,36 @@ pub struct EstateInput<'a> {
     pub current_conflicts: Option<&'a BTreeSet<String>>,
     /// Diagram size cap (RFC 0214 §3.3).
     pub max_er_tables: usize,
+    /// RFC 0233: the last commit's integrity index, as the CLI translated it; `None` = no index.
+    pub integrity: Option<&'a IntegritySummary>,
+}
+
+/// RFC 0233 — the integrity index's headline numbers and its error and warning findings. A small
+/// local mirror of `ekos_semantic::xref::Report` (the CLI translates), as `ArchitectureConfidence`
+/// mirrors the recovery crate's evaluation report.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct IntegritySummary {
+    pub computed_at: Option<String>,
+    pub resolution: Option<f64>,
+    pub cross_system_resolution: Option<f64>,
+    pub cycles: usize,
+    /// (kind, count) of unused tables and views.
+    pub orphans: Vec<(String, usize)>,
+    /// (language family, one line: coverage beside dynamic share, or why unsupported).
+    pub reachability: Vec<(String, String)>,
+    pub findings: Vec<IntegrityRow>,
+}
+
+/// One error or warning finding.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IntegrityRow {
+    pub severity: String,
+    pub kind: String,
+    /// The name the reference wrote.
+    pub target: String,
+    /// `file:line`, or the referring object.
+    pub location: String,
+    pub reason: String,
 }
 
 /// One page: a path under the docs root and its full text (front matter included).
@@ -1509,7 +1539,71 @@ fn findings_page(m: &Model) -> EstatePage {
         .map(|((u, d), n)| vec![code(u), cell(d), n.to_string()])
         .collect();
     b.push_str(&table(&["updates", "deletes", "tables"], &rows));
+    if let Some(i) = m.input.integrity {
+        b.push_str(&integrity_section(m, i));
+    }
     page(path, "Findings", 7, b)
+}
+
+/// RFC 0233: references that resolve to nothing or to several objects, cycles and unused tables.
+fn integrity_section(m: &Model, i: &IntegritySummary) -> String {
+    let pct = |r: Option<f64>| r.map_or_else(|| "—".to_string(), |r| format!("{:.1}%", r * 100.0));
+    let mut b = String::from("\n## Reference integrity\n\n");
+    b.push_str(&format!(
+        "References resolved: **{}** (cross-system: {}). Module cycles: {}. Unused tables and views: {}.{}\n\n",
+        pct(i.resolution),
+        pct(i.cross_system_resolution),
+        i.cycles,
+        if i.orphans.is_empty() {
+            "none".to_string()
+        } else {
+            i.orphans
+                .iter()
+                .map(|(k, n)| format!("{n} {k}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        },
+        i.computed_at
+            .as_deref()
+            .map(|t| format!(" Checked at commit {t}."))
+            .unwrap_or_default()
+    ));
+    if !i.reachability.is_empty() {
+        let rows: Vec<Vec<String>> = i
+            .reachability
+            .iter()
+            .map(|(f, line)| vec![code(f), cell(line)])
+            .collect();
+        b.push_str(&table(&["language", "reachability"], &rows));
+        b.push('\n');
+    }
+    // A finding about an out-of-scope table is not this documentation's concern.
+    let rows: Vec<Vec<String>> = i
+        .findings
+        .iter()
+        .filter(|r| {
+            let t = table_key(r.target.rsplit('.').next().unwrap_or(&r.target));
+            !(m.tables.contains_key(&t) && !m.in_scope(&t))
+        })
+        .map(|r| {
+            vec![
+                cell(&r.severity),
+                code(&r.kind),
+                code(&r.target),
+                cell(&r.location),
+                cell(&r.reason),
+            ]
+        })
+        .collect();
+    b.push_str(&format!(
+        "Errors and warnings ({}); coverage gaps and other notes are in `ekos check refs`:\n\n",
+        rows.len()
+    ));
+    b.push_str(&table(
+        &["severity", "kind", "reference", "where", "why"],
+        &rows,
+    ));
+    b
 }
 
 fn home(m: &Model, counts: &[(&str, String)]) -> EstatePage {
@@ -1753,6 +1847,7 @@ mod tests {
             provenance: &prov,
             current_conflicts: None,
             max_er_tables: 30,
+            integrity: None,
         })
     }
 
@@ -1900,6 +1995,7 @@ mod tests {
                 provenance: &prov,
                 current_conflicts: None,
                 max_er_tables: 3,
+                integrity: None,
             })
         };
         let area = body(&m_input_pages, "data-model/c/index.md");
@@ -1940,5 +2036,62 @@ mod tests {
         );
         assert_eq!(detect_licence(&gpl2), Some("GPL-2.0"));
         assert!(!licence_allows_text("unknown") && !licence_allows_text("none"));
+    }
+    /// RFC 0233: the Findings page carries the integrity index's numbers and its errors, except
+    /// those about out-of-scope tables.
+    #[test]
+    fn findings_carry_the_integrity_section_within_scope() {
+        let o = vec![
+            KirObject::new("orders", ObjectKind::Table).with_property("dialect", json!("postgres")),
+            KirObject::new("old_log", ObjectKind::Table)
+                .with_property("dialect", json!("postgres")),
+        ];
+        let scope: BTreeMap<String, ScopeEntry> = [(
+            "old_log".to_string(),
+            ScopeEntry {
+                in_scope: false,
+                class: "log".into(),
+                decided: true,
+            },
+        )]
+        .into();
+        let row = |target: &str| IntegrityRow {
+            severity: "error".into(),
+            kind: "UnresolvedReference".into(),
+            target: target.into(),
+            location: "sql/a.sql:3".into(),
+            reason: "no compiled relation has this name".into(),
+        };
+        let summary = IntegritySummary {
+            computed_at: Some("2026-10-30 16:07 UTC".into()),
+            resolution: Some(0.98),
+            cross_system_resolution: None,
+            cycles: 1,
+            orphans: vec![("Table".into(), 2)],
+            reachability: vec![("sql".into(), "22 of 517 reachable, 95.7% dynamic".into())],
+            findings: vec![row("budget_to_project"), row("public.old_log")],
+        };
+        let lic = BTreeMap::new();
+        let prov = Provenance::default();
+        let pages = build(&EstateInput {
+            objects: &o,
+            relationships: &[],
+            scope: &scope,
+            subjects: &[],
+            licences: &lic,
+            provenance: &prov,
+            current_conflicts: None,
+            max_er_tables: 30,
+            integrity: Some(&summary),
+        });
+        let f = body(&pages, "findings/index.md");
+        assert!(f.contains("## Reference integrity"), "{f}");
+        assert!(f.contains("References resolved: **98.0%**"));
+        assert!(f.contains("budget_to_project"));
+        assert!(
+            !f.contains("public.old_log"),
+            "an out-of-scope table's finding is left out"
+        );
+        assert!(f.contains("95.7% dynamic"));
     }
 }

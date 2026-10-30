@@ -429,3 +429,91 @@ export interface DatabaseTest {
   };
   census_vs_compiled: CensusRow[];
 }
+
+// ── RFC 0233 cross-reference integrity ───────────────────────────────────────────────────────
+
+export type XrefKind =
+  | "UnresolvedReference"
+  | "AmbiguousReference"
+  | "UnreachableSymbol"
+  | "DynamicReferenceUnknown"
+  | "ReferenceCycle"
+  | "OrphanArtifact";
+
+export type XrefSeverity = "error" | "warning" | "info";
+
+export interface XrefCandidate {
+  id: string;
+  kind: string;
+  name: string;
+  file?: string | null;
+}
+
+/** One finding of `ekos check refs`. */
+export interface XrefDiagnostic {
+  kind: XrefKind;
+  severity: XrefSeverity;
+  confidence: number;
+  source: {
+    object_id?: string;
+    object_kind?: string;
+    object_name: string;
+    file?: string | null;
+    line?: number | null;
+    extractor?: string;
+    access?: string;
+  };
+  target_spec: { written: string; normalized?: string; expected?: string; namespace?: string };
+  candidates?: XrefCandidate[];
+  coverage_gap?: boolean;
+  cross_system?: boolean;
+  reason: string;
+  fingerprint: string;
+}
+
+export interface XrefCounts {
+  references: number;
+  resolved: number;
+  unresolved: number;
+  ambiguous: number;
+}
+
+export interface XrefFamilyReach {
+  supported: boolean;
+  unsupported_because?: string;
+  symbols: number;
+  entry_points: number;
+  reachable: number;
+  unreachable: number;
+  dynamic: number;
+  reachability_coverage?: number;
+  dynamic_share?: number;
+}
+
+export interface XrefMetrics {
+  all?: XrefCounts;
+  cross_system?: XrefCounts;
+  dynamic?: number;
+  system?: number;
+  external?: number;
+  stale_sources?: number;
+  by_extractor?: Record<string, XrefCounts>;
+  resolution_rate?: number | null;
+  cross_system_resolution_rate?: number | null;
+  cycles?: number;
+  orphans?: Record<string, number>;
+  reachability?: Record<string, XrefFamilyReach>;
+}
+
+export interface XrefReport {
+  version: number;
+  computed_at?: string;
+  metrics: XrefMetrics;
+  diagnostics: XrefDiagnostic[];
+}
+
+export interface XrefSummary {
+  computed_at?: string;
+  metrics: XrefMetrics;
+  by_severity: Partial<Record<XrefSeverity, number>>;
+}

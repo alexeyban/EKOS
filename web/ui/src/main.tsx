@@ -76,6 +76,10 @@ const router = createBrowserRouter([
             lazy: () => import("./pages/Conflicts").then((m) => ({ Component: m.Conflicts })),
           },
           {
+            path: "integrity",
+            lazy: () => import("./pages/Integrity").then((m) => ({ Component: m.Integrity })),
+          },
+          {
             path: "sources",
             lazy: () => import("./pages/Sources").then((m) => ({ Component: m.Sources })),
           },

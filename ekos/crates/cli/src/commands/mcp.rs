@@ -129,6 +129,10 @@ pub const SCOPE_REFUSED_TOOLS: &[(&str, &str)] = &[
         "conflicts carry no source; counts come from a file beside the ledger",
     ),
     (
+        "ekos_xref_check",
+        "reads the integrity index beside the ledger, which names files of every source",
+    ),
+    (
         "ekos_semantics_lookup",
         "business-semantics items carry no source",
     ),
@@ -1079,6 +1083,9 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     if config.conflicts.enabled {
         tools.push(conflicts_tool_definition());
     }
+    if config.xref.enabled {
+        tools.push(xref_tool_definition());
+    }
     tools.push(signoff_status_tool_definition());
     for e in ext.iter() {
         tools.extend(e.mcp_tools(config));
@@ -1098,6 +1105,25 @@ fn signoff_status_tool_definition() -> Value {
         "name": "ekos_signoff_status",
         "description": "Where the project stands in the seven-step operator workflow (analyse, documentation, review and sign-off, requirements, extraction, bronze/silver, marts), and whether a person has signed off each review subject (scope, pii, conflicts, identity, write-behaviour, glossary): valid, stale (a signed fact changed since), revoked or none, with item and blocking counts. `signed_off` is false until every subject is validly signed; steps 4-7 refuse to run until then. Read-only: only a person can sign off, on the CLI or in the console.",
         "inputSchema": { "type": "object", "properties": {} }
+    })
+}
+
+/// RFC 0233 — read-only.
+fn xref_tool_definition() -> Value {
+    json!({
+        "name": "ekos_xref_check",
+        "description": "Cross-reference integrity: references that resolve to NOTHING or to SEVERAL objects (a Java query naming a table no schema defines, a routine calling a misspelled function, a Perl `use` of a missing package), dependency cycles, unused tables, and SQL routine reachability. Pass `name` to check one table or routine name BEFORE writing SQL or code against it: returns resolved / ambiguous (with every match) / unresolved / built_in. Each finding has file:line, a confidence and its reason; `info` coverage gaps and `DynamicReferenceUnknown` are not defects. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "A table, view or routine name to resolve now (e.g. `c_invoice`, `public.orders`)" },
+                "kind": { "type": "string", "enum": ["UnresolvedReference", "AmbiguousReference", "ReferenceCycle", "OrphanArtifact", "UnreachableSymbol", "DynamicReferenceUnknown"] },
+                "subject": { "type": "string", "description": "Narrow to findings whose target, source object or file contains this" },
+                "scope": { "type": "string", "enum": ["cross-system", "all"], "description": "Default all" },
+                "min_confidence": { "type": "number", "description": "0–1 (default `[xref] min-confidence`)" },
+                "limit": { "type": "integer", "description": "Max findings (default 20, max 200)" }
+            }
+        }
     })
 }
 
@@ -1725,6 +1751,15 @@ fn call_tool(
             args.get("status").and_then(Value::as_str).unwrap_or("open"),
             limit,
         );
+    }
+
+    if name == "ekos_xref_check" {
+        if !config.xref.enabled {
+            anyhow::bail!("the integrity check is disabled — set [xref] enabled = true");
+        }
+        let ledger = cache.get(config, workspace)?;
+        let limit = bounded_arg(args, "limit", 20, 1, 200)? as usize;
+        return super::check::agent_check(config, workspace, ledger, args, limit);
     }
 
     if name == "ekos_signoff_status" {
@@ -3359,6 +3394,8 @@ mod tests {
                 "ekos_architecture_review",
                 // RFC 0172 — on by default, read-only.
                 "ekos_conflicts",
+                // RFC 0233 — on by default, read-only.
+                "ekos_xref_check",
                 // RFC 0213 — read-only.
                 "ekos_signoff_status"
             ]

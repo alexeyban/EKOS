@@ -21,6 +21,12 @@ pub mod transform_ir;
 pub mod triggers;
 pub mod workflow;
 pub mod write_behaviour;
+pub mod xref;
+mod xref_builtins;
+mod xref_graph;
+mod xref_imports;
+pub mod xref_reach;
+pub mod xref_triage;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
