@@ -20,7 +20,7 @@ variable "region" {
 }
 
 variable "zone" {
-  description = "Zone for the VM, its disk and Filestore. Default: <region>-a."
+  description = "Zone for the VM, its disk and Filestore. Default: the region's first zone that is up."
   type        = string
   default     = ""
 }
@@ -181,7 +181,7 @@ variable "kubernetes_namespace" {
 }
 
 variable "helm_values" {
-  description = "Kubernetes only: extra values files (YAML strings) for the chart, e.g. an ingress."
+  description = "Kubernetes only: extra values files (YAML strings) for the chart. With a domain, give the ingress class and TLS here."
   type        = list(string)
   default     = []
 }

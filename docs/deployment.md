@@ -410,6 +410,8 @@ What each deployment creates and how it behaves:
   console's instance lease (`EKOS_CONSOLE_INSTANCE_LEASE`) makes the new one take over and the old
   one stop. Never scale the console beyond one replica.
 - **Kubernetes** without a `domain` is reached with `kubectl -n ekos port-forward svc/ekos 8000:80`.
+  With a `domain`, give the cluster's ingress class and TLS in `helm_values` (for example
+  `ingress: {className: …, tlsSecretName: …}`); Terraform refuses a domain without them.
   The chart (`deploy/helm/ekos`) can be installed on any cluster on its own.
 
 Cost notes: Filestore (Cloud Run) is 1 TiB at least; Container Apps needs a premium file share; an

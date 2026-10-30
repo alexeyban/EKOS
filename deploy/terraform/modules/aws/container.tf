@@ -318,5 +318,5 @@ resource "aws_ecs_service" "this" {
     container_port   = 8000
   }
 
-  depends_on = [aws_lb_listener.https, aws_efs_mount_target.this, aws_iam_role_policy.runtime]
+  depends_on = [aws_lb_listener.https, aws_efs_mount_target.this, aws_iam_role_policy.runtime, aws_iam_role_policy.execution_secrets, aws_secretsmanager_secret_version.this]
 }

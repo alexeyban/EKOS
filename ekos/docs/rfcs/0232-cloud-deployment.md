@@ -115,7 +115,8 @@ not stop the others.
 Container Apps and Cloud Run give an HTTPS name; ECS uses an ALB with the operator's ACM certificate
 (`domain` + `certificate_arn` required). A VM runs Caddy, which gets a certificate for `domain`, or
 by default for `<label>.<region>.cloudapp.azure.com` (Azure) or `<ip>.sslip.io` (GCP, AWS).
-Kubernetes: the chart's Ingress when `domain` is set, otherwise `kubectl port-forward`. The OIDC
+Kubernetes: the chart's Ingress when `domain` is set — its class and TLS come from the operator's
+`helm_values`, since each cluster serves an Ingress differently — otherwise `kubectl port-forward`. The OIDC
 redirect URI is derived from that address.
 
 ## 3. Alternatives considered
@@ -138,8 +139,7 @@ redirect URI is derived from that address.
 * A GCS FUSE or EFS-backed `kubernetes` storage option; one ReadWriteOnce disk only.
 * Restore on first start from the newest backup (a fresh deployment over an empty share). Run
   `ekos home restore --from <backup_url>` once by hand.
-* Cloud Run's Filestore preparation is a one-shot job plus a two-minute wait; there is no readiness
-  signal from the job to the service.
+* An ingress controller or certificate for Kubernetes; the operator supplies them.
 
 ## 5. Verification
 

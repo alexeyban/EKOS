@@ -50,7 +50,8 @@ arrive (the console never clones) or where backups go.
   the git token.
 - **NFS shares start owned by root**; the image runs as uid 1000. Container Apps uses a busybox init
   container to `chown`; Cloud Run has no init containers, so a one-shot Cloud Run job does it at
-  creation (`start_execution_token`) and the service waits two minutes (`time_sleep`); EFS access
+  creation (`run_execution_token`, which Terraform waits on until the execution completes —
+  `start_execution_token` only waits for it to start); EFS access
   points create their roots owned by 1000; Kubernetes uses `fsGroup`.
 - **Cloud Run's URL is computed** (`https://<name>-<project number>.<region>.run.app`) because the
   OIDC redirect URI is an environment variable of the same service — reading `uri` would be a cycle.
@@ -76,6 +77,16 @@ arrive (the console never clones) or where backups go.
   backups and network are shared by the three computes.
 
 ---
+
+### Independent review (before the PR)
+A review against the provider docs found ten problems, all fixed: GKE's Secret Manager add-on uses
+its own CSI driver (`secrets-store-gke.csi.k8s.io`, now `csi.driver` in the chart); GCP IAM for the
+GKE workload pool must wait for the cluster; the Azure backups account (shared keys off) needs
+`storage_use_azuread` and a Blob data role for the deployer; a domain on Kubernetes needs the
+operator's ingress class and TLS (now a precondition); the Cloud Run job is awaited with
+`run_execution_token`; the AWS CSI provider chart (3.1.4, pinned) bundles the driver, so the separate
+driver release was removed; the GCP zone comes from `google_compute_zones`; the AWS VM opens 80 and
+443 only; premium NFS shares are 100 GiB at least; the ECS service waits for its secrets.
 
 ## Knowledge Captured
 - `object_store` 0.14's `buffered` module needs its `tokio` feature; `WriteMultipart` (always

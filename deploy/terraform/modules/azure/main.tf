@@ -82,6 +82,14 @@ resource "azurerm_key_vault" "this" {
   tags                       = local.tags
 }
 
+# The backups account has no shared keys, so Terraform manages its container with Entra ID
+# (`storage_use_azuread` in the provider) and needs a data-plane role on it.
+resource "azurerm_role_assignment" "deployer_blobs" {
+  scope                = azurerm_storage_account.backups.id
+  role_definition_name = "Storage Blob Data Owner"
+  principal_id         = data.azurerm_client_config.current.object_id
+}
+
 # Whoever runs Terraform writes the secrets; the identity only reads them.
 resource "azurerm_role_assignment" "deployer_secrets" {
   scope                = azurerm_key_vault.this.id
@@ -137,10 +145,16 @@ resource "azurerm_storage_account" "backups" {
   tags                            = local.tags
 }
 
+resource "time_sleep" "blob_rbac" {
+  depends_on      = [azurerm_role_assignment.deployer_blobs]
+  create_duration = "60s"
+}
+
 resource "azurerm_storage_container" "backups" {
   name                  = "backups"
   storage_account_id    = azurerm_storage_account.backups.id
   container_access_type = "private"
+  depends_on            = [time_sleep.blob_rbac]
 }
 
 resource "azurerm_storage_management_policy" "backups" {

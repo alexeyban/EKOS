@@ -5,6 +5,13 @@ data "google_project" "this" {
   project_id = var.project_id
 }
 
+# Not every region has an `-a` zone.
+data "google_compute_zones" "available" {
+  project = var.project_id
+  region  = var.region
+  status  = "UP"
+}
+
 resource "random_string" "suffix" {
   length  = 6
   special = false
@@ -12,7 +19,7 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  zone   = var.zone != "" ? var.zone : "${var.region}-a"
+  zone   = var.zone != "" ? var.zone : data.google_compute_zones.available.names[0]
   suffix = random_string.suffix.result
   labels = merge({ app = "ekos", managed-by = "terraform" }, var.labels)
 
@@ -102,6 +109,8 @@ resource "google_secret_manager_secret_iam_member" "runtime" {
   secret_id = google_secret_manager_secret.this[each.key].secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = local.runtime_member
+  # On GKE the member is the cluster's workload identity pool, which exists once a cluster does.
+  depends_on = [google_container_cluster.this]
 }
 
 # ── backups ──────────────────────────────────────────────────────────────────
@@ -131,6 +140,8 @@ resource "google_storage_bucket_iam_member" "runtime" {
   bucket = google_storage_bucket.backups.name
   role   = "roles/storage.objectUser"
   member = local.runtime_member
+  # On GKE the member is the cluster's workload identity pool, which exists once a cluster does.
+  depends_on = [google_container_cluster.this]
 }
 
 # ── network ──────────────────────────────────────────────────────────────────

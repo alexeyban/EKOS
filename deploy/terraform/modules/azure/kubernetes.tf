@@ -118,6 +118,15 @@ resource "helm_release" "ekos" {
     }
   })], var.helm_values)
 
+  lifecycle {
+    # A domain makes the console's address (and the OIDC redirect) https://<domain>; what serves
+    # it — an ingress class, a certificate — differs per cluster and is the operator's to give.
+    precondition {
+      condition     = var.domain == "" || length(var.helm_values) > 0
+      error_message = "compute = \"kubernetes\" with a domain needs helm_values with the ingress class and TLS (ingress.className, ingress.tlsSecretName or the class's certificate annotations); see docs/deployment.md."
+    }
+  }
+
   depends_on = [
     azurerm_federated_identity_credential.ekos,
     azurerm_key_vault_secret.console,

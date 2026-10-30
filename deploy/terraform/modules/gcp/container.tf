@@ -32,14 +32,14 @@ resource "google_filestore_instance" "this" {
 
 # A Filestore share starts owned by root and Cloud Run runs the image as uid 1000. This job
 # (busybox, as root) creates home/ and sources/ on the share and hands them to uid 1000, once at
-# creation; the service waits for it.
+# creation; Terraform waits for that execution to complete (`run_execution_token`).
 resource "google_cloud_run_v2_job" "prepare_share" {
-  count                 = local.run
-  project               = var.project_id
-  name                  = "${var.name}-prepare-share"
-  location              = var.region
-  deletion_protection   = false
-  start_execution_token = "prepare-${local.suffix}"
+  count               = local.run
+  project             = var.project_id
+  name                = "${var.name}-prepare-share"
+  location            = var.region
+  deletion_protection = false
+  run_execution_token = "prepare-${local.suffix}"
 
   template {
     task_count = 1
@@ -71,13 +71,6 @@ resource "google_cloud_run_v2_job" "prepare_share" {
       }
     }
   }
-}
-
-# The job's first execution is started, not awaited.
-resource "time_sleep" "prepare_share" {
-  count           = local.run
-  depends_on      = [google_cloud_run_v2_job.prepare_share]
-  create_duration = "120s"
 }
 
 resource "google_cloud_run_v2_service" "ekos" {
@@ -238,7 +231,7 @@ resource "google_cloud_run_v2_service" "ekos" {
   }
 
   depends_on = [
-    time_sleep.prepare_share,
+    google_cloud_run_v2_job.prepare_share,
     google_secret_manager_secret_version.this,
     google_secret_manager_secret_iam_member.runtime,
     google_storage_bucket_iam_member.runtime,

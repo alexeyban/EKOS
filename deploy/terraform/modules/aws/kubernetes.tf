@@ -111,23 +111,16 @@ resource "aws_eks_pod_identity_association" "ekos" {
   role_arn        = aws_iam_role.runtime.arn
 }
 
-# The Secrets Store CSI driver and its AWS provider (not part of Auto Mode).
-resource "helm_release" "csi_driver" {
-  count      = local.eks
-  name       = "secrets-store-csi-driver"
-  repository = "https://kubernetes-sigs.github.io/secrets-store-csi-driver/charts"
-  chart      = "secrets-store-csi-driver"
-  namespace  = "kube-system"
-  depends_on = [aws_eks_cluster.this]
-}
-
+# The Secrets Store CSI driver and its AWS provider (not part of Auto Mode). The provider's chart
+# installs the driver as its subchart (`secrets-store-csi-driver.install`, on by default).
 resource "helm_release" "csi_provider_aws" {
   count      = local.eks
+  version    = "3.1.4"
   name       = "secrets-store-csi-driver-provider-aws"
   repository = "https://aws.github.io/secrets-store-csi-driver-provider-aws"
   chart      = "secrets-store-csi-driver-provider-aws"
   namespace  = "kube-system"
-  depends_on = [helm_release.csi_driver]
+  depends_on = [aws_eks_cluster.this]
 }
 
 resource "helm_release" "ekos" {
@@ -169,6 +162,15 @@ resource "helm_release" "ekos" {
       host    = var.domain
     }
   })], var.helm_values)
+
+  lifecycle {
+    # A domain makes the console's address (and the OIDC redirect) https://<domain>; what serves
+    # it — an ingress class, a certificate — differs per cluster and is the operator's to give.
+    precondition {
+      condition     = var.domain == "" || length(var.helm_values) > 0
+      error_message = "compute = \"kubernetes\" with a domain needs helm_values with the ingress class and TLS (ingress.className, ingress.tlsSecretName or the class's certificate annotations); see docs/deployment.md."
+    }
+  }
 
   depends_on = [
     aws_eks_pod_identity_association.ekos,

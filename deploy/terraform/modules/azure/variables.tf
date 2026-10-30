@@ -183,7 +183,7 @@ variable "kubernetes_namespace" {
 }
 
 variable "helm_values" {
-  description = "Kubernetes only: extra values files (YAML strings) for the chart, e.g. an ingress."
+  description = "Kubernetes only: extra values files (YAML strings) for the chart. With a domain, give the ingress class and TLS here."
   type        = list(string)
   default     = []
 }

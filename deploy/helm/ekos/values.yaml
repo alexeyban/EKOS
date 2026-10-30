@@ -22,6 +22,9 @@ secretEnvFrom: []
 # named after the variable they become (`ekos-entrypoint` reads EKOS_SECRETS_DIR). The provider
 # (`azure`, `gke`, `aws`) and its parameters are cloud-specific; the Terraform modules fill them.
 csi:
+  # The CSI driver's name: the upstream driver on AKS and EKS; GKE's Secret Manager add-on
+  # registers its own (`secrets-store-gke.csi.k8s.io`).
+  driver: secrets-store.csi.k8s.io
   console:
     enabled: false
     provider: ""

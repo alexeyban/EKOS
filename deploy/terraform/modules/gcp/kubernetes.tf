@@ -10,7 +10,7 @@ locals {
   gke         = var.compute == "kubernetes" ? 1 : 0
   image_parts = regex("^(.*?)(?::([^:/]+))?$", var.image)
 
-  gke_csi = {
+  gke_csi = merge({ driver = "secrets-store-gke.csi.k8s.io" }, {
     for group, ids in { console = local.console_secret_ids, gitSync = local.git_sync_secret_ids } : group => {
       enabled                   = length(ids) > 0
       provider                  = "gke"
@@ -21,7 +21,7 @@ locals {
         }])
       }
     }
-  }
+  })
 }
 
 resource "google_container_cluster" "this" {
@@ -79,6 +79,15 @@ resource "helm_release" "ekos" {
       host    = var.domain
     }
   })], var.helm_values)
+
+  lifecycle {
+    # A domain makes the console's address (and the OIDC redirect) https://<domain>; what serves
+    # it — an ingress class, a certificate — differs per cluster and is the operator's to give.
+    precondition {
+      condition     = var.domain == "" || length(var.helm_values) > 0
+      error_message = "compute = \"kubernetes\" with a domain needs helm_values with the ingress class and TLS (ingress.className, ingress.tlsSecretName or the class's certificate annotations); see docs/deployment.md."
+    }
+  }
 
   depends_on = [
     google_secret_manager_secret_version.this,

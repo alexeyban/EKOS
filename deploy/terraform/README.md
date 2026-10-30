@@ -29,6 +29,10 @@ Secrets passed this way end up in Terraform's state (as with any secret Terrafor
 state in an encrypted remote backend. The values go to the cloud's secret store, and the console
 reads them from there.
 
+Whoever applies needs to create role assignments (Azure: Owner or User Access Administrator on
+the subscription; GCP: IAM admin on the project; AWS: IAM). On Azure the example sets
+`storage_use_azuread = true`: the backups account has shared keys off.
+
 Every deployment runs one console (the EKOS home is a single-writer SQLite + ledger store), a git
 sync beside it when `git_repos` is set, and a nightly `ekos home backup --to` the deployment's
 bucket. The operator's guide is [docs/deployment.md](../../docs/deployment.md#10-in-a-cloud-azure-google-cloud-aws-rfc-0232);

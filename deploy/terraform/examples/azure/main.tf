@@ -27,6 +27,8 @@ provider "azurerm" {
     }
   }
   subscription_id = var.subscription_id
+  # The backups account has shared keys off; containers and policies are managed with Entra ID.
+  storage_use_azuread = true
 }
 
 # Used only with compute = "kubernetes"; unconfigured otherwise.

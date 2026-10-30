@@ -128,7 +128,7 @@ spec:
         {{- if .Values.csi.console.enabled }}
         - name: secrets-console
           csi:
-            driver: secrets-store.csi.k8s.io
+            driver: {{ .Values.csi.driver }}
             readOnly: true
             volumeAttributes:
               secretProviderClass: {{ include "ekos.name" . }}-console
@@ -136,7 +136,7 @@ spec:
         {{- if and .Values.gitSync.enabled .Values.csi.gitSync.enabled }}
         - name: secrets-git-sync
           csi:
-            driver: secrets-store.csi.k8s.io
+            driver: {{ .Values.csi.driver }}
             readOnly: true
             volumeAttributes:
               secretProviderClass: {{ include "ekos.name" . }}-git-sync

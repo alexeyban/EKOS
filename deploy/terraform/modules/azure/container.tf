@@ -59,7 +59,8 @@ resource "azurerm_storage_share" "home" {
   name               = "home"
   storage_account_id = azurerm_storage_account.files[0].id
   enabled_protocol   = "NFS"
-  quota              = var.home_size_gb
+  # Premium shares are 100 GiB at least.
+  quota = max(100, var.home_size_gb)
 }
 
 resource "azurerm_storage_share" "sources" {
