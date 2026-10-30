@@ -1,0 +1,5 @@
+# TLS for the console (RFC 0232): Caddy gets and renews a certificate for the domain.
+{$EKOS_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy ekos:8000
+}

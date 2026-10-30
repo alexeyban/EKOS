@@ -1,0 +1,45 @@
+# EKOS on one VM (RFC 0232), written by cloud-init. The console and the git sync run from the
+# same image; Caddy terminates TLS when a domain is configured. State is on the data disk at
+# /var/lib/ekos-data; secrets are files on tmpfs under /run/ekos-secrets, fetched from the
+# cloud's secret store at every start by ekos-fetch-secrets (never written to disk).
+services:
+  ekos:
+    image: ${EKOS_IMAGE}
+    restart: unless-stopped
+    env_file: /etc/ekos/console.env
+    environment:
+      EKOS_SECRETS_DIR: /run/secrets/ekos
+    volumes:
+      - /var/lib/ekos-data/home:/var/lib/ekos
+      - /var/lib/ekos-data/sources:/sources:ro
+      - /run/ekos-secrets/console:/run/secrets/ekos:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  git-sync:
+    image: ${EKOS_IMAGE}
+    profiles: ["git-sync"]
+    restart: unless-stopped
+    command: ["ekos-git-sync"]
+    env_file: /etc/ekos/git-sync.env
+    environment:
+      EKOS_SECRETS_DIR: /run/secrets/ekos
+      EKOS_GIT_SYNC_DEST: /sources
+    volumes:
+      - /var/lib/ekos-data/sources:/sources
+      - /run/ekos-secrets/git-sync:/run/secrets/ekos:ro
+
+  caddy:
+    image: caddy:2.10
+    profiles: ["tls"]
+    restart: unless-stopped
+    environment:
+      EKOS_DOMAIN: ${EKOS_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/ekos/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /var/lib/ekos-data/caddy:/data

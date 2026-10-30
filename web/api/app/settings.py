@@ -153,6 +153,13 @@ class Settings(BaseSettings):
     chat_max_tokens: int = 2048
 
     # Job runner (RFC 0131): per-workspace queue depth, and where run logs land.
+    # RFC 0232: in a cloud. The lease keeps one console writing a home on a network share; a
+    # backup URL turns on scheduled `ekos home backup --to` (cron in UTC).
+    instance_lease: bool = False
+    instance_lease_seconds: int = Field(default=10, ge=1)
+    backup_url: str = ""
+    backup_cron: str = "17 2 * * *"
+
     run_queue_depth: int = 16
     # Each stage of a chained compile run (pipeline, Init & compile). A single command keeps its
     # own limit (30 min); a large project's commit takes longer than that (RFC 0189 amendment).

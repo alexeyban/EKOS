@@ -435,3 +435,40 @@ fn an_archive_that_would_write_outside_the_home_is_refused() {
         .collect();
     assert!(left.is_empty(), "{left:?}");
 }
+
+/// RFC 0232: `--to` takes only an object-storage URL, never a local path, and a remote restore
+/// URL must name a backup or a location. A build without the `object-storage` feature says so
+/// rather than writing anywhere.
+#[test]
+fn object_storage_flags_refuse_what_is_not_a_cloud_location() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+
+    let err = refused(&home, &["home", "backup", "--to", "/tmp/somewhere"]);
+    assert!(err.contains("object-storage URL"), "{err}");
+    let err = refused(
+        &home,
+        &["home", "backup", "--to", "s3://b/x/", "--out", "x.tar.zst"],
+    );
+    assert!(err.contains("cannot be used with"), "{err}");
+
+    let err = refused(
+        &home,
+        &["home", "restore", "--from", "s3://b/ekos/notes.txt"],
+    );
+    assert!(err.contains("is not a backup's name"), "{err}");
+    let err = refused(&home, &["home", "restore"]);
+    assert!(err.contains("required"), "{err}");
+
+    project(&home, root.path(), "default", "shop", "orders");
+    let err = refused(&home, &["home", "backup", "--to", "gs://bucket/ekos/"]);
+    if cfg!(feature = "object-storage") {
+        // No credentials and no network in a test: the upload fails and the archive is kept.
+        assert!(err.contains("the backup is kept at"), "{err}");
+    } else {
+        assert!(err.contains("built without object storage"), "{err}");
+        // Refused before anything was written.
+        assert!(!home.join("backups").exists());
+    }
+}

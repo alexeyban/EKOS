@@ -1,0 +1,11 @@
+EKOS is starting (one replica, Recreate strategy).
+
+{{- if .Values.ingress.enabled }}
+Open https://{{ .Values.ingress.host }}
+{{- else }}
+Reach it without exposing it:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ekos.name" . }} 8000:{{ .Values.service.port }}
+  open http://127.0.0.1:8000
+{{- end }}
+
+Projects are created for directories under /sources{{ if .Values.gitSync.enabled }}, kept up to date by the git-sync sidecar{{ end }}.

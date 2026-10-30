@@ -60,6 +60,53 @@ jobs:
         working-directory: ekos
         run: cargo fmt --check
 
+      # RFC 0232: the container image is built with `object-storage`; a stock build is not.
+      - name: Clippy + tests with object storage (the image's build)
+        working-directory: ekos
+        run: |
+          cargo clippy -p ekos -p ekos-segment-backend --features ekos/object-storage,ekos-segment-backend/object-store --all-targets -- -D warnings
+          cargo test -p ekos --features object-storage --lib home_remote
+          cargo test -p ekos --features object-storage --test home_backup object_storage
+
+  deploy:
+    # RFC 0232: the cloud deployments. Terraform modules for Azure, Google Cloud and AWS, the
+    # Helm chart, and the scripts the image runs there (git sync, secrets entrypoint).
+    name: Deploy (Terraform, Helm, scripts)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive deploy/terraform
+
+      - name: terraform validate (every example, every module)
+        run: |
+          set -e
+          for dir in deploy/terraform/examples/* deploy/terraform/modules/*; do
+            echo "::group::$dir"
+            terraform -chdir="$dir" init -backend=false -input=false >/dev/null
+            terraform -chdir="$dir" validate
+            echo "::endgroup::"
+          done
+
+      - name: helm lint + template
+        run: |
+          helm lint deploy/helm/ekos
+          helm template ekos deploy/helm/ekos >/dev/null
+          helm template ekos deploy/helm/ekos \
+            --set gitSync.enabled=true --set 'gitSync.repos[0]=shop=https://github.com/acme/shop.git' \
+            --set csi.console.enabled=true --set csi.console.provider=aws \
+            --set persistence.storageClass=ekos-gp3 --set persistence.createStorageClass.enabled=true \
+            --set persistence.createStorageClass.provisioner=ebs.csi.eks.amazonaws.com \
+            --set ingress.enabled=true --set ingress.host=ekos.example.com >/dev/null
+
+      - name: scripts (git sync, entrypoint, wiki snapshot)
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v
+
   integration:
     name: Integration tests
     runs-on: ubuntu-latest

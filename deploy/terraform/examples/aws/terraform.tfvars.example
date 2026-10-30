@@ -1,0 +1,23 @@
+region  = "eu-central-1"
+compute = "vm" # vm | container | kubernetes
+
+# VM: shell through SSM (`aws ssm start-session --target $(terraform output -raw vm_instance_id)`);
+# the console is on https://<ip>.sslip.io unless you set a domain pointing at the VM's address.
+# Container: domain and an ACM certificate for it are required; CNAME the domain to `load_balancer_dns`.
+# domain          = "ekos.example.com"
+# certificate_arn = "arn:aws:acm:eu-central-1:123456789012:certificate/..."
+
+# Sign-in with any OIDC provider (Cognito, Okta, Entra ID, Keycloak). Redirect URI: <url>/api/auth/callback.
+oidc = {
+  issuer    = "https://cognito-idp.eu-central-1.amazonaws.com/<pool-id>"
+  client_id = "<app-client-id>"
+  scopes    = "openid email profile"
+}
+owners = "you@example.com"
+# oidc_client_secret = set with TF_VAR_oidc_client_secret
+# secrets            = set with TF_VAR_secrets='{"OPENAI_API_KEY":"sk-..."}'
+
+git_repos = [
+  "shop=https://github.com/acme/shop.git#main",
+]
+# git_token = set with TF_VAR_git_token

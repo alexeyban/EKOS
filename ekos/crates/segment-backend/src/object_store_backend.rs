@@ -159,6 +159,10 @@ impl ObjectStoreBackend {
                     || k.starts_with("OBJECT_STORE_")
             })
             .map(|(k, v)| (k.to_ascii_lowercase(), v))
+            .chain(managed_identity_endpoint(
+                std::env::var("IDENTITY_ENDPOINT").ok(),
+                std::env::var("AZURE_MSI_ENDPOINT").ok(),
+            ))
             .collect();
         let (store, path) = object_store::parse_url_opts(&parsed, opts)
             .map_err(|e| BackendError::store(url, e.to_string()))?;
@@ -171,6 +175,19 @@ impl ObjectStoreBackend {
         } else {
             ObjPath::from(format!("{}/{}", self.prefix.trim_end_matches('/'), key))
         }
+    }
+}
+
+/// RFC 0232: Azure Container Apps and App Service give a managed identity through a local token
+/// endpoint named by `IDENTITY_ENDPOINT` (with `IDENTITY_HEADER`, which `object_store` reads
+/// itself), not through instance metadata. Forward it as `azure_msi_endpoint` unless one is set.
+fn managed_identity_endpoint(
+    identity_endpoint: Option<String>,
+    explicit: Option<String>,
+) -> Option<(String, String)> {
+    match (identity_endpoint, explicit) {
+        (Some(e), None) if !e.is_empty() => Some(("azure_msi_endpoint".to_string(), e)),
+        _ => None,
     }
 }
 
@@ -295,6 +312,20 @@ mod tests {
     use object_store::memory::InMemory;
     use std::io::Write;
     use tempfile::tempdir;
+
+    #[test]
+    fn a_container_apps_identity_endpoint_becomes_the_msi_endpoint_unless_one_is_set() {
+        let ep = "http://localhost:42356/msi/token".to_string();
+        assert_eq!(
+            managed_identity_endpoint(Some(ep.clone()), None),
+            Some(("azure_msi_endpoint".to_string(), ep.clone()))
+        );
+        assert_eq!(
+            managed_identity_endpoint(Some(ep), Some("http://x".into())),
+            None
+        );
+        assert_eq!(managed_identity_endpoint(None, None), None);
+    }
 
     #[test]
     fn object_store_backend_satisfies_the_contract_against_in_memory() {

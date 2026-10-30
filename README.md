@@ -460,6 +460,11 @@ open http://127.0.0.1:8000
   A project created that way appears in the console after a restart.
 - The container runs as a non-root user and listens on loopback over plain HTTP. For access from
   other machines put a reverse proxy with TLS in front.
+- **In a cloud** (RFC 0232): `deploy/terraform` deploys the same image to Azure, Google Cloud or
+  AWS as a VM, a serverless container (Container Apps, Cloud Run, ECS Fargate) or on Kubernetes
+  (AKS, GKE, EKS, with the `deploy/helm/ekos` chart), with secrets in the cloud's secret store, one
+  workload identity, a git sync for the sources and nightly backups to object storage. See
+  [docs/deployment.md](docs/deployment.md#10-in-a-cloud-azure-google-cloud-aws-rfc-0232).
 - A model server on the host (Ollama) is reachable from a project's `ekos.toml` as
   `http://host.docker.internal:11434`.
 

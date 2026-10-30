@@ -28,6 +28,7 @@ pub mod extension_pages;
 pub mod freshness;
 pub mod graph;
 pub mod home_backup;
+pub mod home_remote;
 pub mod identity;
 pub mod import;
 pub mod init;

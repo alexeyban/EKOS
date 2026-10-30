@@ -1120,13 +1120,23 @@ enum HomeCommands {
     /// With the global --tenant, that tenant's projects only
     Backup {
         /// Where to write it (default: <home>/backups/ekos-backup-<time>.tar.zst)
-        #[arg(long, value_name = "FILE")]
+        #[arg(long, value_name = "FILE", conflicts_with = "to")]
         out: Option<PathBuf>,
+        /// RFC 0232: upload it to object storage under this location (s3://bucket/prefix/,
+        /// gs://bucket/prefix/, https://<account>.blob.core.windows.net/<container>/prefix/) and
+        /// remove the local copy. Credentials come from the machine's cloud identity
+        #[arg(long, value_name = "URL")]
+        to: Option<String>,
     },
     /// Restore a backup into the home. Nothing that exists is replaced without --force
     Restore {
         /// The archive `ekos home backup` wrote
-        archive: PathBuf,
+        #[arg(required_unless_present = "from", conflicts_with = "from")]
+        archive: Option<PathBuf>,
+        /// RFC 0232: restore from object storage: one backup's URL, or a location ending in `/`
+        /// for the newest backup there
+        #[arg(long, value_name = "URL")]
+        from: Option<String>,
         /// Replace projects (and the console database) that already exist; each is moved to
         /// the home's trash first
         #[arg(long)]
@@ -2068,19 +2078,30 @@ where
             let invoked_from = std::env::current_dir()?;
             let tenant = tenant_flag.as_deref();
             return match subcommand {
-                HomeCommands::Backup { out } => crate::commands::home_backup::run_backup(
-                    &home,
-                    tenant,
-                    out.map(|o| invoked_from.join(o)),
-                ),
-                HomeCommands::Restore { archive, force } => {
-                    crate::commands::home_backup::run_restore(
+                HomeCommands::Backup { out, to } => match to {
+                    Some(url) => crate::commands::home_backup::run_backup_to(&home, tenant, &url),
+                    None => crate::commands::home_backup::run_backup(
+                        &home,
+                        tenant,
+                        out.map(|o| invoked_from.join(o)),
+                    ),
+                },
+                HomeCommands::Restore {
+                    archive,
+                    from,
+                    force,
+                } => match (archive, from) {
+                    (_, Some(url)) => {
+                        crate::commands::home_backup::run_restore_from(&home, &url, tenant, force)
+                    }
+                    (Some(archive), None) => crate::commands::home_backup::run_restore(
                         &home,
                         &invoked_from.join(archive),
                         tenant,
                         force,
-                    )
-                }
+                    ),
+                    (None, None) => unreachable!("clap requires an archive or --from"),
+                },
             };
         }
         other => other,

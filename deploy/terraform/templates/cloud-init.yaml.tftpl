@@ -1,0 +1,66 @@
+#cloud-config
+# EKOS on one VM (RFC 0232). Rendered by the deploy/terraform modules; shared by all three clouds.
+package_update: true
+packages:
+  - docker.io
+  - docker-compose-v2
+  - curl
+  - jq
+
+write_files:
+  - path: /etc/ekos/docker-compose.yml
+    permissions: "0644"
+    encoding: b64
+    content: ${base64encode(compose)}
+  - path: /etc/ekos/Caddyfile
+    permissions: "0644"
+    encoding: b64
+    content: ${base64encode(caddyfile)}
+  - path: /etc/ekos/compose.env
+    permissions: "0644"
+    encoding: b64
+    content: ${base64encode(compose_env)}
+  - path: /etc/ekos/console.env
+    permissions: "0644"
+    encoding: b64
+    content: ${base64encode(console_env)}
+  - path: /etc/ekos/git-sync.env
+    permissions: "0644"
+    encoding: b64
+    content: ${base64encode(git_sync_env)}
+  - path: /usr/local/sbin/ekos-fetch-secrets
+    permissions: "0700"
+    encoding: b64
+    content: ${base64encode(fetch_secrets)}
+  - path: /usr/local/sbin/ekos-prepare-disk
+    permissions: "0700"
+    encoding: b64
+    content: ${base64encode(prepare_disk)}
+  - path: /etc/systemd/system/ekos.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=EKOS (console, git sync, TLS proxy)
+      Requires=docker.service
+      After=docker.service network-online.target var-lib-ekos\x2ddata.mount
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      EnvironmentFile=/etc/ekos/compose.env
+      # Secrets: fetched from the secret store at every start, onto tmpfs.
+      ExecStartPre=/usr/local/sbin/ekos-fetch-secrets
+      ExecStartPre=/usr/bin/docker compose -f /etc/ekos/docker-compose.yml pull --quiet
+      ExecStart=/usr/bin/docker compose -f /etc/ekos/docker-compose.yml up --remove-orphans
+      ExecStop=/usr/bin/docker compose -f /etc/ekos/docker-compose.yml down
+      Restart=on-failure
+      RestartSec=15
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - [/usr/local/sbin/ekos-prepare-disk]
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, docker.service]
+  - [systemctl, enable, --now, ekos.service]

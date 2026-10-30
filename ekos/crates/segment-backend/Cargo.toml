@@ -12,7 +12,7 @@ rust-version.workspace = true
 default = []
 # Pulls the `object_store` crate + a tokio runtime for `ObjectStoreBackend` (RFC 0111 Distributed
 # mode). Off by default so a Local-mode build never compiles it. Includes the real cloud stores
-# (S3 / S3-compatible like MinIO, Azure ADLS Gen2) alongside `file://` — "object storage support"
+# (S3 / S3-compatible like MinIO, Azure Blob / ADLS Gen2, Google Cloud Storage — RFC 0232) alongside `file://` — "object storage support"
 # means actual object storage, not just the local-FS scheme.
 object-store = [
     "dep:object_store",
@@ -22,10 +22,13 @@ object-store = [
     "object_store/fs",
     "object_store/aws",
     "object_store/azure",
+    "object_store/gcp",
 ]
 # Back-compat aliases — the cloud providers now come with `object-store` itself.
 aws = ["object-store"]
 azure = ["object-store"]
+# RFC 0232: Google Cloud Storage (`gs://`), the third of the three clouds.
+gcp = ["object-store"]
 
 [dependencies]
 thiserror.workspace = true

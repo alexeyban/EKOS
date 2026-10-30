@@ -1,0 +1,84 @@
+# EKOS on Kubernetes (RFC 0232). One replica, always: the console, its SQLite database and the
+# ledgers live on one ReadWriteOnce volume, and the Deployment uses the Recreate strategy so an
+# upgrade never runs two consoles over it.
+
+image:
+  repository: ghcr.io/alexeyban/ekos
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Plain settings for the console, as environment variables: sign-in (EKOS_CONSOLE_OIDC_*,
+# EKOS_CONSOLE_OWNERS, EKOS_CONSOLE_PRODUCTION), scheduled backups (EKOS_CONSOLE_BACKUP_URL,
+# EKOS_CONSOLE_BACKUP_CRON), model endpoints. See docs/deployment.md. Secrets do not go here:
+# use `secretEnvFrom` or `csi`.
+env: {}
+
+# Names of existing Kubernetes Secrets whose keys become environment variables of the console.
+secretEnvFrom: []
+
+# Secrets read from the cloud's secret store by the Secrets Store CSI driver, mounted as files
+# named after the variable they become (`ekos-entrypoint` reads EKOS_SECRETS_DIR). The provider
+# (`azure`, `gke`, `aws`) and its parameters are cloud-specific; the Terraform modules fill them.
+csi:
+  console:
+    enabled: false
+    provider: ""
+    parameters: {}
+  gitSync:
+    enabled: false
+    provider: ""
+    parameters: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  labels: {}
+
+podLabels: {}
+podAnnotations: {}
+
+persistence:
+  # One volume: `home/` is the EKOS home, `sources/` the checked-out repositories.
+  existingClaim: ""
+  storageClass: ""
+  # Create the storage class too (EKS Auto Mode has none by default).
+  createStorageClass:
+    enabled: false
+    provisioner: ""
+    parameters: {}
+  size: 50Gi
+  accessMode: ReadWriteOnce
+
+gitSync:
+  enabled: false
+  # name=https-url[#branch], one per entry.
+  repos: []
+  intervalSeconds: 300
+  depth: 0
+  username: x-access-token
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 512Mi}
+
+resources:
+  requests: {cpu: "1", memory: 4Gi}
+  limits: {memory: 8Gi}
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tlsSecretName: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

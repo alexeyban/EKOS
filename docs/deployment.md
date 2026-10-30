@@ -322,7 +322,17 @@ docker compose -f deploy/docker-compose.yml cp \
 - Not in a backup: your sources (they are not in the volume), the binary, the trash.
 - The archive is not encrypted. It holds the ledgers and the console database (token hashes,
   not tokens). Protect it as you would the volume.
-- There is no schedule. Run it from the host's cron.
+- On one server there is no schedule: run it from the host's cron. In a cloud (section 10) the
+  console backs up to object storage on a schedule.
+
+The image can also write a backup straight to object storage and restore from there (RFC 0232),
+with the machine's cloud identity; no key is ever on the command line:
+
+```bash
+ekos home backup --to s3://my-bucket/ekos/          # or gs://…, https://<account>.blob.core.windows.net/<container>/ekos/
+ekos home restore --from s3://my-bucket/ekos/ --force   # the newest backup there
+ekos home restore --from s3://my-bucket/ekos/ekos-backup-20261030T021700Z.tar.zst --force
+```
 
 To restore onto a new machine or a new volume, start the deployment first, then:
 
@@ -362,16 +372,63 @@ docker compose -f deploy/docker-compose.yml up -d --build
 - Re-running the pipeline is never needed for an upgrade. It is how new compiler features reach
   an existing project, and for a project with model-backed passes it costs money.
 
+## 10. In a cloud: Azure, Google Cloud, AWS (RFC 0232)
+
+`deploy/terraform` deploys the same image to any of the three clouds, three ways each:
+
+| `compute` | Azure | Google Cloud | AWS |
+|---|---|---|---|
+| `vm` | VM + managed disk, Caddy | Compute Engine + persistent disk, Caddy | EC2 + EBS, Caddy |
+| `container` | Container Apps + Azure Files NFS | Cloud Run + Filestore | ECS Fargate + ALB + EFS |
+| `kubernetes` | AKS + Helm chart | GKE Autopilot + Helm chart | EKS Auto Mode + Helm chart |
+
+```bash
+cd deploy/terraform/examples/azure        # or gcp, aws
+cp terraform.tfvars.example terraform.tfvars   # compute, OIDC, owners, repositories
+export TF_VAR_secrets='{"OPENAI_API_KEY":"sk-…"}' TF_VAR_git_token=… TF_VAR_oidc_client_secret=…
+terraform init && terraform apply
+terraform output url
+```
+
+What each deployment creates and how it behaves:
+
+- **Secrets** go to Key Vault / Secret Manager / Secrets Manager, never into the image, a file in
+  the repository or the VM's disk. The platform injects them (Container Apps, Cloud Run, ECS) or
+  mounts them as files the image's entrypoint turns into variables (Kubernetes CSI, the VM's boot
+  script). Rotate one in the store and restart the console.
+- **One identity** (managed identity, service account, IAM role; workload identity on Kubernetes)
+  may read those secrets and write `ekos/` in the backup bucket. Nothing else.
+- **Sign-in**: give `oidc` and `owners` and the console starts in production mode. The redirect URI
+  to register with the provider is `<url>/api/auth/callback`. Without OIDC the console uses two
+  generated tokens: `terraform output -json static_tokens`.
+- **Sources**: `git_repos = ["shop=https://github.com/acme/shop.git#main"]` runs the git sync beside
+  the console; it clones into `/sources/shop` and keeps it at the branch's tip every five minutes.
+  Create the project for `/sources/shop` in the console as usual.
+- **Backups** run every night (`backup_cron`, UTC) to the deployment's bucket and expire after
+  `backup_retention_days`. `terraform output backup_url` is what `ekos home restore --from` takes.
+- **One console at a time.** Container platforms briefly run a new revision beside the old one; the
+  console's instance lease (`EKOS_CONSOLE_INSTANCE_LEASE`) makes the new one take over and the old
+  one stop. Never scale the console beyond one replica.
+- **Kubernetes** without a `domain` is reached with `kubectl -n ekos port-forward svc/ekos 8000:80`.
+  The chart (`deploy/helm/ekos`) can be installed on any cluster on its own.
+
+Cost notes: Filestore (Cloud Run) is 1 TiB at least; Container Apps needs a premium file share; an
+EKS or AKS cluster costs more than a VM for one console. The VM is the cheapest and simplest.
+
 ## What is not built
 
-- **One server only.** No Kubernetes manifests, no PostgreSQL, no object storage for the home.
+- **One console.** It is a single writer over its home, on one machine, VM, container or pod
+  (section 10). No PostgreSQL; the home is a disk or an NFS share, not object storage.
 - **Isolation between tenants is by directory and permission check**, inside one process and
   one OS user. It is not a sandbox.
-- **No TLS in the container**, no OAuth for MCP clients, no rate limits, no spending limits.
-- **No scheduled or encrypted backups**, and no deletion of a tenant or a user.
+- **No TLS in the container** (the cloud deployments put it in front), no OAuth for MCP clients, no
+  rate limits, no spending limits.
+- **No encrypted backups** beyond the bucket's own encryption at rest, and no deletion of a tenant
+  or a user. Scheduled backups exist only with `backup_url` (the cloud deployments set it).
 - **Limits inside a project** leave a limited reader without a dashboard, semantics or
   conflicts, and cannot apply to operators.
-- **Sources are local directories.** EKOS does not clone from a URL; mount a checkout.
+- **Sources are local directories.** The console does not clone; mount a checkout, or run the git
+  sync beside it (`ekos-git-sync`, section 10).
 - **Evaluation runs** (`ekos eval run`) write beside the sources and do not work for a project
   kept in the home.
 - The image is `linux/amd64`.
@@ -390,4 +447,5 @@ described in [operator-workflow.md](operator-workflow.md).
 | Settings | `deploy/.env`; every one is described in `deploy/.env.example` |
 | Design | RFCs 0178–0183 in `ekos/docs/rfcs/` |
 | An offline install package of the CLI | `scripts/package-release.sh` → `dist/ekos-<version>-release.tar.gz` |
+| Cloud deployments | `deploy/terraform` (modules and examples for Azure, Google Cloud, AWS), `deploy/helm/ekos`; RFC 0232 |
 | A check of a whole deployment | `deploy/e2e/run.sh`: the image, a test identity provider, two tenants, a group from a claim, an MCP client, the pages in a browser, backup and restore |

@@ -6955,3 +6955,14 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [ ] ekos-lakehouse: bump its EKOS dependency so `lakehouse docs generate` carries the integrity section
 - [ ] iDempiere AD checks (`AD_Column.Callout`, `AD_Process.Classname`, …) need the dictionary rows: extend
       `[[databases]] dictionary` (RFC 0212) beyond `AD_Table`
+## RFC 0232 — EKOS on Azure, Google Cloud and AWS (2026-10-30, devlog_313)
+
+- [x] `ekos home backup --to <url>` / `ekos home restore --from <url>`: S3, Azure Blob, GCS (`object-storage` feature, in the image; GCS added to `object_store`)
+- [x] Console instance lease (single writer over a shared home) and scheduled backups (`backup_url`, `backup_cron`)
+- [x] `ekos-git-sync` (sources from git, token as a header only) and `ekos-entrypoint` (secret files → variables) in the image
+- [x] Terraform: `deploy/terraform/modules/{common,azure,gcp,aws}` × `vm | container | kubernetes`, examples per cloud
+- [x] Helm chart `deploy/helm/ekos` (one replica, Recreate, CSI secrets, git-sync sidecar)
+- [x] CI `deploy` job: terraform fmt + validate, helm lint + template, script tests
+- [ ] Apply each example against a real account (vm first) and record what broke
+- [ ] Restore from the newest backup on first start over an empty home
+- [ ] Private networking options (private endpoints, internal load balancers)

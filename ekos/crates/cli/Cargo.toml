@@ -30,6 +30,11 @@ distributed = ["ekos-distributed/object-store", "ekos-segment-backend/object-sto
 # compiler to build and Oracle Instant Client at run time. Without it, a `[[databases]]` entry of
 # kind `oracle` fails `ekos build` with a message saying so.
 oracle = ["ekos-plugin-oracle/oracle"]
+# RFC 0232 — `ekos home backup --to <url>` / `ekos home restore <url>`: backups in S3, Azure Blob
+# or Google Cloud Storage, authenticated by the machine's cloud identity. Only the `object_store`
+# client, never the distributed services (RFC 0113 keeps those out of a stock build). Off by
+# default for the install packages; the container image is built with it.
+object-storage = ["ekos-segment-backend/object-store", "dep:futures"]
 
 [dependencies]
 ekos-common.workspace = true
@@ -82,6 +87,8 @@ ekos-plugin-javascript.workspace = true
 clap.workspace = true
 uuid.workspace = true
 tokio.workspace = true
+# RFC 0232: streams a backup to and from object storage (`object-storage` feature only).
+futures = { version = "0.3", optional = true }
 axum.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
