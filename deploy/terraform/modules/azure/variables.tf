@@ -153,7 +153,7 @@ variable "backup_retention_days" {
 # ── sizes ────────────────────────────────────────────────────────────────────
 
 variable "home_size_gb" {
-  description = "The EKOS home (ledgers, console database) plus checked-out sources."
+  description = "The EKOS home (ledgers, console database) plus checked-out sources. On a VM a premium disk's size sets its IOPS: 32 GiB is a P4 (120 IOPS), too slow for a commit (a 142k-object one stalled at 46 % I/O pressure); keep 128 (P10, 500) or more."
   type        = number
   default     = 128
 }
