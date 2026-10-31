@@ -184,6 +184,22 @@ def test_impact_translates_a_tool_error_into_a_404(
     assert r.status_code == 404
 
 
+def test_a_knowledge_server_that_does_not_answer_is_a_504_not_a_500(
+    rec: tuple[TestClient, RecordingMcp],
+) -> None:
+    # Seen on Azure Container Apps (RFC 0232): the first query after a 142k-object commit on a
+    # network disk outlasted the MCP client's wait, and the dashboard got a bare 500.
+    client, recorder = rec
+
+    async def slow_call_tool(name: str, args: dict[str, Any] | None = None) -> Any:
+        raise TimeoutError
+
+    recorder.call_tool = slow_call_tool  # type: ignore[method-assign]
+    r = client.get("/api/workspaces/any/stats/kinds", headers=AUTH)
+    assert r.status_code == 504
+    assert "did not answer in time" in r.json()["detail"]
+
+
 def test_graph_layout_returns_a_position_per_node(rec: tuple[TestClient, RecordingMcp]) -> None:
     client, _ = rec
     r = client.post(

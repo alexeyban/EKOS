@@ -223,6 +223,17 @@ async def _lifespan(app: FastAPI):
             lease.release()
 
 
+async def _timed_out(_request, exc: TimeoutError) -> JSONResponse:
+    """A call to a workspace's knowledge server (or another process) that did not answer in time
+    is a gateway timeout, not a crash: the first query after a large commit on a network disk
+    can take longer than the client waits (seen on Azure Container Apps, RFC 0232)."""
+    log.warning("request timed out: %s", exc or "no answer in time")
+    return JSONResponse(
+        {"detail": "the workspace's knowledge server did not answer in time; try again"},
+        status_code=504,
+    )
+
+
 def cookie_is_https_only(settings) -> bool:
     """Whether the session cookie is marked `Secure`. It is when sign-in comes back to an
     `https://` address, which is what a console behind a TLS proxy is configured with. On plain
@@ -253,6 +264,8 @@ def create_app() -> FastAPI:
     # Outermost, so nothing answers a request from elsewhere, not even a 404.
     if settings.local:
         app.add_middleware(LoopbackOnly)
+
+    app.add_exception_handler(TimeoutError, _timed_out)
 
     for prefix, routers in MOUNTS:
         for r in routers:
