@@ -6972,4 +6972,5 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] `terraform test` with mocked providers for every module (25 runs, in CI); platform start-probe limits fixed (Container Apps, Cloud Run) and pinned
 - [x] Release smoke test checks git sync, entrypoint and `object-storage` in the image; `.dockerignore` fix
 - [x] Monthly cost table per cloud × compute in `docs/deployment.md` §10
-- [ ] Pin the examples' image tag to the first release containing RFC 0232
+- [x] Pin the image to the latest release (1.1.0) instead of `:latest` in the modules, examples and chart (2026-10-31)
+- [ ] Release an image containing RFC 0232 and move the pin to it (1.1.0 has no entrypoint, git sync, `backup --to` or lease)

@@ -227,5 +227,6 @@ have anyway.
 
 `release.yml`'s smoke test now also checks that the image has `ekos-git-sync`, `ekos-entrypoint` and
 an `ekos` built with `object-storage` (a restore from `s3://` with no network must fail at the
-connection, not be refused as unsupported). The examples keep `:latest` until a release contains
-this work; pin them to that version then.
+connection, not be refused as unsupported). The modules, examples and chart pin the latest
+release, `1.1.0`, which predates this RFC (no entrypoint, git sync, `backup --to` or lease); move the
+pin to the first release that contains it.

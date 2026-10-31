@@ -3,7 +3,7 @@ name: ekos
 description: EKOS knowledge compiler — console, API and `ekos` binary in one pod, with an optional git sync sidecar (RFC 0232)
 type: application
 version: 0.1.0
-appVersion: "latest"
+appVersion: "1.1.0"
 home: https://github.com/alexeyban/EKOS
 sources:
   - https://github.com/alexeyban/EKOS

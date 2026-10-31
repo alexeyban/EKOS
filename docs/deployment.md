@@ -390,6 +390,14 @@ terraform init && terraform apply
 terraform output url
 ```
 
+**The image.** The modules, the examples and the chart default to the latest release,
+`ghcr.io/alexeyban/ekos:1.1.0`. That release predates this section: its image has no
+`ekos-entrypoint` and no `ekos-git-sync` (the git sync container does not start), no
+`ekos home backup --to` (scheduled backups fail and nothing is restored on first start), no
+instance lease, and no secrets read from mounted files (Kubernetes, VM). Until a release contains
+RFC 0232, build the image from `main` (`docker build -t <registry>/ekos:<tag> .`), push it to your
+registry and set `image`.
+
 What each deployment creates and how it behaves:
 
 - **Secrets** go to Key Vault / Secret Manager / Secrets Manager, never into the image, a file in
