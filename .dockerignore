@@ -10,6 +10,9 @@
 web/*
 !web/api/
 !web/ui/
+# RFC 0232: the two scripts the image runs, and nothing else from scripts/.
+!scripts/ekos-git-sync.py
+!scripts/ekos-entrypoint.sh
 
 # Build output and dependencies: rebuilt inside the image.
 ekos/target/
