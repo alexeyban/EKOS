@@ -19,10 +19,12 @@ resource "azurerm_log_analytics_workspace" "ca" {
 }
 
 resource "azurerm_container_app_environment" "this" {
-  count                      = local.ca
-  name                       = "${var.name}-env"
-  location                   = azurerm_resource_group.this.location
-  resource_group_name        = azurerm_resource_group.this.name
+  count               = local.ca
+  name                = "${var.name}-env"
+  location            = azurerm_resource_group.this.location
+  resource_group_name = azurerm_resource_group.this.name
+  # azurerm 4.x refuses a workspace id without the destination stated (seen on the first apply).
+  logs_destination           = "log-analytics"
   log_analytics_workspace_id = azurerm_log_analytics_workspace.ca[0].id
   infrastructure_subnet_id   = azurerm_subnet.main.id
   # Private: the environment's load balancer has an address in the subnet only.

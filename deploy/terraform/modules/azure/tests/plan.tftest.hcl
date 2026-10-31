@@ -158,6 +158,10 @@ run "container_is_public_with_the_lease" {
     error_message = "public by default."
   }
   assert {
+    condition     = azurerm_container_app_environment.this[0].logs_destination == "log-analytics"
+    error_message = "azurerm 4.x applies a workspace id only with logs_destination = log-analytics."
+  }
+  assert {
     condition     = module.common.console_env["EKOS_CONSOLE_INSTANCE_LEASE"] == "true"
     error_message = "a network share needs the lease."
   }
