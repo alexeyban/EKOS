@@ -88,6 +88,27 @@ operator's ingress class and TLS (now a precondition); the Cloud Run job is awai
 driver release was removed; the GCP zone comes from `google_compute_zones`; the AWS VM opens 80 and
 443 only; premium NFS shares are 100 GiB at least; the ECS service waits for its secrets.
 
+## Phase 1 — getting the PR green (2026-10-31)
+
+The first CI run on the PR failed, and the image could not be built. Found and fixed:
+
+| Problem | Fix |
+|---|---|
+| `ekos home backup --to` panicked: *cannot start a runtime from within a runtime*. The `ekos` binary is `#[tokio::main]` and `home_remote` built its own runtime and called `block_on`. Local tests ran without `object-storage`, so the path never executed. | `home_remote::block_on` reuses a running runtime through `block_in_place` (the bridge `commit.rs` uses for embeddings) and builds one only when there is none. |
+| `docker build` failed at `COPY scripts/ekos-git-sync.py`: the `.dockerignore` allowlist never re-admitted `scripts/`. CI does not build the image. | The two scripts are let in by name. |
+| RFC number collision: a business-descriptions draft had landed on `main` as 0232. | Renumbered to 0234 (it named its number only in its title). |
+| Web console job: ruff RUF005 in `tests/test_integrity.py`, inherited from `main`. | Fixed on `main`, merged in. |
+
+Checked by hand on the rebuilt image: `ekos --version`; a backup to `s3://` on a local MinIO
+restored into an empty home answers the same query with the same object id; `ekos-git-sync`
+clones a public repository in one round; `EKOS_SECRETS_DIR` turns a file into a variable, keeps
+the platform's value when both are set and skips a file whose name is not a variable name.
+`deploy/e2e/run.sh` on the image passes 143/143, so the new `ENTRYPOINT` breaks nothing. The CI
+`deploy` job's `terraform init` + `validate` with the real providers (azurerm 5.x, google 8.x,
+aws 6.x) and `helm lint` passed on the first run; nothing needed changing. Clippy is clean on 1.98.
+
+---
+
 ## Knowledge Captured
 - `object_store` 0.14's `buffered` module needs its `tokio` feature; `WriteMultipart` (always
   available) plus `put_multipart` is enough for a streamed upload.
@@ -102,6 +123,12 @@ driver release was removed; the GCP zone comes from `google_compute_zones`; the 
   while its own example omits it; the module sets `mode = "Manual"`.
 - curl ≥ 7.75 signs AWS requests itself (`--aws-sigv4`), so an Ubuntu VM reads Secrets Manager with
   IMDSv2 credentials and no AWS CLI.
+- **Test a feature-gated path with its feature on, in the binary.** The object-storage upload
+  passed every local test and panicked on its first real run: the runtime clash only shows when
+  the code runs inside `#[tokio::main]` with the feature compiled in.
+- **Nothing in CI builds the production image.** A `.dockerignore` allowlist silently drops a new
+  top-level path; build the image (`docker build -t ekos:e2e .`) whenever `Dockerfile` `COPY`s
+  something new.
 - This session had no `terraform`/`helm` binaries (no route to their downloads). The modules were
   checked with python-hcl2 against each provider's docs (every argument name), a reference checker,
   `hclwrite.Format` built from source (what `terraform fmt` uses) and a small Go renderer for the
@@ -113,7 +140,7 @@ driver release was removed; the GCP zone comes from `google_compute_zones`; the 
 | File | Change summary |
 |---|---|
 | `ekos/docs/rfcs/0232-cloud-deployment.md` | new RFC |
-| `ekos/crates/cli/src/commands/home_remote.rs` | new: object-storage transfer for backups |
+| `ekos/crates/cli/src/commands/home_remote.rs` | new: object-storage transfer for backups; `block_on` bridge (Phase 1) |
 | `ekos/crates/cli/src/commands/home_backup.rs`, `app.rs`, `commands/mod.rs` | `--to`, `--from` |
 | `ekos/crates/cli/Cargo.toml` | `object-storage` feature, optional `futures` |
 | `ekos/crates/cli/tests/home_backup.rs` | flags test |
@@ -121,7 +148,7 @@ driver release was removed; the GCP zone comes from `google_compute_zones`; the 
 | `web/api/app/cloud.py`, `main.py`, `scheduler.py`, `settings.py`, `console_file.py` | lease, scheduled backups |
 | `web/api/tests/test_cloud.py` | new |
 | `scripts/ekos-git-sync.py`, `scripts/ekos-entrypoint.sh`, `scripts/tests/test_{git_sync,entrypoint}.py` | new |
-| `Dockerfile` | feature, entrypoint, git sync |
+| `Dockerfile`, `.dockerignore` | feature, entrypoint, git sync; scripts let into the context (Phase 1) |
 | `deploy/terraform/**`, `deploy/helm/ekos/**` | new |
 | `.github/workflows/ci.yml` | `deploy` job; object-storage clippy and tests |
 | `docs/deployment.md`, `README.md`, `docs/generated/ekos-self-documentation.html`, `TODO.md`, `CLAUDE.md` | docs |
