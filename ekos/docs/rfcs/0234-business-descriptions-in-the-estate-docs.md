@@ -1,4 +1,4 @@
-# RFC 0232 — Business descriptions in the estate docs
+# RFC 0234 — Business descriptions in the estate docs
 
 **Status:** Proposed
 **Date:** 2026-10-27
