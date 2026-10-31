@@ -141,6 +141,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
       secrets         = local.vm_secrets
       azure_client_id = azurerm_user_assigned_identity.ekos.client_id
       azure_vault_uri = azurerm_key_vault.this.vault_uri
+      azure_registry  = local.acr_server
       aws_region      = ""
     })
   }))
@@ -156,6 +157,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
     azurerm_key_vault_secret.console,
     azurerm_key_vault_secret.git_sync,
     azurerm_role_assignment.ekos_backups,
+    azurerm_role_assignment.ekos_acr_pull,
   ]
 }
 

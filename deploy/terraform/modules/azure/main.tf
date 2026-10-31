@@ -22,6 +22,9 @@ locals {
 
   backup_url = var.backup_cron == "" ? "" : "https://${azurerm_storage_account.backups.name}.blob.core.windows.net/${azurerm_storage_container.backups.name}/ekos/"
 
+  # …/providers/Microsoft.ContainerRegistry/registries/<name>
+  acr_server = var.acr_id == "" ? "" : "${lower(element(split("/", var.acr_id), 8))}.azurecr.io"
+
   # Key Vault names allow letters, digits and dashes.
   console_kv_names  = { for n in module.common.console_secret_names : n => "${var.name}-${lower(replace(n, "_", "-"))}" }
   git_sync_kv_names = { for n in module.common.git_sync_secret_names : n => "${var.name}-${lower(replace(n, "_", "-"))}" }
@@ -177,6 +180,14 @@ resource "azurerm_storage_management_policy" "backups" {
 resource "azurerm_role_assignment" "ekos_backups" {
   scope                = azurerm_storage_container.backups.id
   role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = azurerm_user_assigned_identity.ekos.principal_id
+  principal_type       = "ServicePrincipal"
+}
+
+resource "azurerm_role_assignment" "ekos_acr_pull" {
+  count                = var.acr_id == "" ? 0 : 1
+  scope                = var.acr_id
+  role_definition_name = "AcrPull"
   principal_id         = azurerm_user_assigned_identity.ekos.principal_id
   principal_type       = "ServicePrincipal"
 }

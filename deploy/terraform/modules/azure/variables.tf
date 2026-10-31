@@ -51,6 +51,12 @@ variable "image" {
   default     = "ghcr.io/alexeyban/ekos:1.1.0"
 }
 
+variable "acr_id" {
+  description = "Resource id of an Azure Container Registry holding `image` (a private registry). The deployment's identity (and AKS's kubelet) gets AcrPull on it; the VM signs in with that identity at each start, Container Apps through its registry identity. Empty: the image is pulled anonymously."
+  type        = string
+  default     = ""
+}
+
 variable "domain" {
   description = "Public DNS name for the console. VM: optional (default: the public IP's <label>.<region>.cloudapp.azure.com; Caddy gets a certificate). Container: informational only, the app's own HTTPS name is used. Kubernetes: the ingress host, empty for port-forward only."
   type        = string

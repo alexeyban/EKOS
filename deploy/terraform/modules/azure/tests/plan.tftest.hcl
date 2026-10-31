@@ -232,3 +232,50 @@ run "kubernetes_with_a_domain_needs_helm_values" {
   }
   expect_failures = [helm_release.ekos]
 }
+
+run "a_private_registry_is_pulled_with_the_deployments_identity" {
+  command = plan
+  variables {
+    compute = "container"
+    image   = "ekosdemo.azurecr.io/ekos:abc123"
+    acr_id  = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/ekos-shared/providers/Microsoft.ContainerRegistry/registries/EkosDemo"
+  }
+
+  assert {
+    condition     = azurerm_role_assignment.ekos_acr_pull[0].role_definition_name == "AcrPull" && azurerm_role_assignment.ekos_acr_pull[0].principal_id == azurerm_user_assigned_identity.ekos.principal_id
+    error_message = "the identity may pull from the registry."
+  }
+  assert {
+    condition     = one(azurerm_container_app.ekos[0].registry).server == "ekosdemo.azurecr.io"
+    error_message = "Container Apps pulls through its registry identity (login server lower-cased)."
+  }
+}
+
+run "a_vm_signs_in_to_the_private_registry_at_each_start" {
+  command = plan
+  variables {
+    acr_id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/ekos-shared/providers/Microsoft.ContainerRegistry/registries/ekosdemo"
+  }
+
+  assert {
+    condition     = strcontains(base64decode(azurerm_linux_virtual_machine.vm[0].custom_data), base64encode(templatefile("../../templates/fetch-secrets.sh.tftpl", { cloud = "azure", secrets = local.vm_secrets, azure_client_id = azurerm_user_assigned_identity.ekos.client_id, azure_vault_uri = azurerm_key_vault.this.vault_uri, azure_registry = "ekosdemo.azurecr.io", aws_region = "" })))
+    error_message = "the boot script is the one rendered for this registry."
+  }
+  assert {
+    condition     = strcontains(templatefile("../../templates/fetch-secrets.sh.tftpl", { cloud = "azure", secrets = local.vm_secrets, azure_client_id = "c", azure_vault_uri = "https://kv/", azure_registry = local.acr_server, aws_region = "" }), "docker login ekosdemo.azurecr.io")
+    error_message = "the boot script signs in to the registry."
+  }
+  assert {
+    condition     = !strcontains(templatefile("../../templates/fetch-secrets.sh.tftpl", { cloud = "azure", secrets = local.vm_secrets, azure_client_id = "c", azure_vault_uri = "https://kv/", azure_registry = "", aws_region = "" }), "docker login")
+    error_message = "no registry: no sign-in."
+  }
+}
+
+run "no_registry_no_pull_role" {
+  command = plan
+
+  assert {
+    condition     = length(azurerm_role_assignment.ekos_acr_pull) == 0
+    error_message = "a public image needs no role."
+  }
+}
