@@ -142,6 +142,11 @@ run "eks_without_a_domain_has_no_ingress" {
     condition     = output.url == "http://127.0.0.1:8000"
     error_message = "no domain: port-forward."
   }
+  # registry/repository:tag is split for the chart (a registry port is not a tag).
+  assert {
+    condition     = yamldecode(helm_release.ekos[0].values[0]).image.repository == "ghcr.io/alexeyban/ekos" && yamldecode(helm_release.ekos[0].values[0]).image.tag == "1.1.0"
+    error_message = "the pinned image reaches the chart."
+  }
 }
 
 run "eks_with_a_domain_needs_a_certificate_or_its_own_ingress" {

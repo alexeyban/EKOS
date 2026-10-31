@@ -136,6 +136,14 @@ resource "azurerm_container_app" "ekos" {
     identity_ids = [azurerm_user_assigned_identity.ekos.id]
   }
 
+  dynamic "registry" {
+    for_each = local.acr_server == "" ? [] : [local.acr_server]
+    content {
+      server   = registry.value
+      identity = azurerm_user_assigned_identity.ekos.id
+    }
+  }
+
   # Iterated over the names, not the secret resources: those carry the (sensitive) values.
   dynamic "secret" {
     for_each = local.ca_secret_name
@@ -266,5 +274,5 @@ resource "azurerm_container_app" "ekos" {
     }
   }
 
-  depends_on = [time_sleep.rbac, azurerm_role_assignment.ekos_backups]
+  depends_on = [time_sleep.rbac, azurerm_role_assignment.ekos_backups, azurerm_role_assignment.ekos_acr_pull]
 }

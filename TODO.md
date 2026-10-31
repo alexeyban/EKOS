@@ -6963,7 +6963,9 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] Terraform: `deploy/terraform/modules/{common,azure,gcp,aws}` × `vm | container | kubernetes`, examples per cloud
 - [x] Helm chart `deploy/helm/ekos` (one replica, Recreate, CSI secrets, git-sync sidecar)
 - [x] CI `deploy` job: terraform fmt + validate, helm lint + template, script tests
-- [ ] Apply each example against a real account (vm first) and record what broke
+- [x] Azure `vm` applied for real through Azure Pipelines, demoed and destroyed (2026-10-31, devlog_315; private repo inbox0216/ekos-deploy)
+- [ ] Apply the rest: Azure container/kubernetes, Google Cloud, AWS
+- [ ] Ledger commit on a network disk is write-latency-bound (48 min for 142k objects on Azure, unchanged from P4 to P20): batch or group-commit the fact writes
 - [x] Restore from the newest backup on first start over an empty home (2026-10-31, devlog_314; a failed read stops the start)
 - [x] `exposure = public | private` for the console's address: internal Container Apps environment + private DNS, Cloud Run internal ingress, internal ALB on ECS and EKS, `gce-internal` on GKE (devlog_314)
 - [ ] Private endpoints for the secret stores and backup buckets (needs Terraform run from inside the network)
@@ -6972,4 +6974,5 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] `terraform test` with mocked providers for every module (25 runs, in CI); platform start-probe limits fixed (Container Apps, Cloud Run) and pinned
 - [x] Release smoke test checks git sync, entrypoint and `object-storage` in the image; `.dockerignore` fix
 - [x] Monthly cost table per cloud × compute in `docs/deployment.md` §10
-- [ ] Pin the examples' image tag to the first release containing RFC 0232
+- [x] Pin the image to the latest release (1.1.0) instead of `:latest` in the modules, examples and chart (2026-10-31)
+- [ ] Release an image containing RFC 0232 and move the pin to it (1.1.0 has no entrypoint, git sync, `backup --to` or lease)

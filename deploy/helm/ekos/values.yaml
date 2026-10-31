@@ -4,7 +4,7 @@
 
 image:
   repository: ghcr.io/alexeyban/ekos
-  tag: latest
+  tag: "1.1.0"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []

@@ -23,6 +23,10 @@ services:
     profiles: ["git-sync"]
     restart: unless-stopped
     command: ["ekos-git-sync"]
+    # The image's HEALTHCHECK probes the console's port, which this container does not serve;
+    # inherited, it marks a working git sync unhealthy (seen on the first Azure deployment).
+    healthcheck:
+      disable: true
     env_file: /etc/ekos/git-sync.env
     environment:
       EKOS_SECRETS_DIR: /run/secrets/ekos

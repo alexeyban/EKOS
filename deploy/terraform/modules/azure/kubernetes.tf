@@ -47,6 +47,14 @@ resource "azurerm_kubernetes_cluster" "this" {
   }
 }
 
+resource "azurerm_role_assignment" "aks_acr_pull" {
+  count                = local.aks == 1 && var.acr_id != "" ? 1 : 0
+  scope                = var.acr_id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_kubernetes_cluster.this[0].kubelet_identity[0].object_id
+  principal_type       = "ServicePrincipal"
+}
+
 resource "azurerm_federated_identity_credential" "ekos" {
   count                     = local.aks
   name                      = "${var.name}-aks"

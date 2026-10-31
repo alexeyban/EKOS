@@ -58,8 +58,9 @@ Phase 2 of the plan (apply on each cloud) needs accounts and money. Phase 3's ga
   and the buckets would stop Terraform, run from outside the network, from writing the secrets. A VM is refused:
   without a public address it needs NAT for its egress and a way in that the module cannot know.
 - **GKE private needs the operator's TLS secret**: Google-managed certificates are external only.
-- **The examples keep `:latest`.** Pinning to a version that does not exist yet breaks them until the release; it is a
-  TODO for the first release containing this work.
+- **The image is pinned to the latest release, 1.1.0** (modules, examples, chart `tag` and `appVersion`), not
+  `:latest`. That release predates RFC 0232: no entrypoint, git sync, `backup --to` or lease. `docs/deployment.md` §10
+  says so and how to build the image from `main` until a release contains it; moving the pin is a TODO.
 - **The cost table came from a research subagent**, prices checked on 2026-10-31 from the providers' price APIs and
   pages; the figures it could not confirm from an official page are named in §10.
 

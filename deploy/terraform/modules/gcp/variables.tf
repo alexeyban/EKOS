@@ -52,7 +52,7 @@ variable "exposure" {
 variable "image" {
   description = "The EKOS image."
   type        = string
-  default     = "ghcr.io/alexeyban/ekos:latest"
+  default     = "ghcr.io/alexeyban/ekos:1.1.0"
 }
 
 variable "domain" {

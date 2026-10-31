@@ -135,6 +135,7 @@ resource "aws_instance" "vm" {
       secrets         = local.vm_secrets
       azure_client_id = ""
       azure_vault_uri = ""
+      azure_registry  = ""
       aws_region      = var.region
     })
   })
