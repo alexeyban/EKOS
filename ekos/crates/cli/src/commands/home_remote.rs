@@ -135,11 +135,18 @@ mod imp {
     const CHUNK: usize = 8 * 1024 * 1024;
     const CONCURRENCY: usize = 4;
 
-    fn runtime() -> Result<tokio::runtime::Runtime> {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .context("starting the object-storage runtime")
+    /// Run `fut` to completion. The `ekos` binary is `#[tokio::main]`, and starting a second
+    /// runtime inside it panics, so reuse the running one when there is one (the bridge
+    /// `commit.rs` uses for embeddings).
+    fn block_on<T>(fut: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => tokio::task::block_in_place(|| handle.block_on(fut)),
+            Err(_) => tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .context("starting the object-storage runtime")?
+                .block_on(fut),
+        }
     }
 
     fn key(prefix: &str, name: &str) -> ObjPath {
@@ -179,7 +186,7 @@ mod imp {
         let path = key(&prefix, &name);
         let mut source =
             std::fs::File::open(file).with_context(|| format!("reading {}", file.display()))?;
-        runtime()?.block_on(async {
+        block_on(async {
             let upload = store
                 .put_multipart(&path)
                 .await
@@ -205,7 +212,6 @@ mod imp {
 
     pub fn download(target: &Target, dir: &Path) -> Result<PathBuf> {
         let (store, prefix) = open(&target.location)?;
-        let rt = runtime()?;
         let name = match &target.object {
             Some(n) => n.clone(),
             None => {
@@ -214,7 +220,7 @@ mod imp {
                 } else {
                     Some(ObjPath::from(prefix.trim_matches('/')))
                 };
-                let names: Vec<String> = rt.block_on(async {
+                let names: Vec<String> = block_on(async {
                     let mut out = Vec::new();
                     let mut listing = store.list(base.as_ref());
                     while let Some(meta) = listing.next().await {
@@ -244,7 +250,7 @@ mod imp {
         let path = key(&prefix, &name);
         let mut out =
             std::fs::File::create(&dest).with_context(|| format!("writing {}", dest.display()))?;
-        rt.block_on(async {
+        block_on(async {
             let mut stream = store
                 .get(&path)
                 .await
