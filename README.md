@@ -463,7 +463,9 @@ open http://127.0.0.1:8000
 - **In a cloud** (RFC 0232): `deploy/terraform` deploys the same image to Azure, Google Cloud or
   AWS as a VM, a serverless container (Container Apps, Cloud Run, ECS Fargate) or on Kubernetes
   (AKS, GKE, EKS, with the `deploy/helm/ekos` chart), with secrets in the cloud's secret store, one
-  workload identity, a git sync for the sources and nightly backups to object storage. See
+  workload identity, a git sync for the sources and nightly backups to object storage; a new
+  deployment over an existing bucket restores the newest backup on its first start, GKE and EKS get
+  an HTTPS ingress for a `domain`, and `exposure = "private"` keeps the console off the internet. See
   [docs/deployment.md](docs/deployment.md#10-in-a-cloud-azure-google-cloud-aws-rfc-0232).
 - A model server on the host (Ollama) is reachable from a project's `ekos.toml` as
   `http://host.docker.internal:11434`.

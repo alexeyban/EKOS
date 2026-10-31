@@ -35,6 +35,20 @@ variable "compute" {
   }
 }
 
+variable "exposure" {
+  description = "`public` (default): the console is reachable from the internet. `private`: only from inside the network — Cloud Run's internal ingress; on GKE the internal Application Load Balancer (`gce-internal`), which needs ingress.tlsSecretName in helm_values. Not for `vm`: a VM without a public address needs your own way in."
+  type        = string
+  default     = "public"
+  validation {
+    condition     = contains(["public", "private"], var.exposure)
+    error_message = "exposure must be public or private."
+  }
+  validation {
+    condition     = var.exposure == "public" || var.compute != "vm"
+    error_message = "exposure = \"private\" is for compute = container or kubernetes; a VM without a public address needs your own way in (a VPN, a bastion)."
+  }
+}
+
 variable "image" {
   description = "The EKOS image."
   type        = string
@@ -180,8 +194,14 @@ variable "kubernetes_namespace" {
   default = "ekos"
 }
 
+variable "proxy_only_cidr" {
+  description = "Kubernetes with exposure = private: the proxy-only subnet the internal Application Load Balancer needs (outside address_space)."
+  type        = string
+  default     = "10.42.16.0/23"
+}
+
 variable "helm_values" {
-  description = "Kubernetes only: extra values files (YAML strings) for the chart. With a domain, give the ingress class and TLS here."
+  description = "Kubernetes only: extra values files (YAML strings) for the chart, applied over the module's. A domain gets a Google-managed certificate on a reserved address by default; with exposure = private give ingress.tlsSecretName here."
   type        = list(string)
   default     = []
 }

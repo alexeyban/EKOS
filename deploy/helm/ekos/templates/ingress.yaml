@@ -1,17 +1,45 @@
 {{- if .Values.ingress.enabled }}
+{{- $name := include "ekos.name" . }}
+{{- $gke := .Values.ingress.gke }}
+{{- $alb := .Values.ingress.eksAlb }}
+{{- $annotations := dict }}
+{{- if $gke.internal }}
+{{- $_ := set $annotations "kubernetes.io/ingress.class" "gce-internal" }}
+{{- else if or $gke.managedCertificate $gke.staticIpName }}
+{{- $_ := set $annotations "kubernetes.io/ingress.class" "gce" }}
+{{- end }}
+{{- if or $gke.internal $gke.managedCertificate }}
+{{- /* HTTPS only: the console's session cookie is secure once OIDC is on. */}}
+{{- $_ := set $annotations "kubernetes.io/ingress.allow-http" "false" }}
+{{- end }}
+{{- if $gke.managedCertificate }}
+{{- $_ := set $annotations "networking.gke.io/managed-certificates" $name }}
+{{- end }}
+{{- with $gke.staticIpName }}
+{{- $_ := set $annotations "kubernetes.io/ingress.global-static-ip-name" . }}
+{{- end }}
+{{- if $alb.enabled }}
+{{- $_ := set $annotations "alb.ingress.kubernetes.io/listen-ports" "[{\"HTTPS\":443}]" }}
+{{- end }}
+{{- /* The operator's own annotations win over the presets. */}}
+{{- range $k, $v := .Values.ingress.annotations }}
+{{- $_ := set $annotations $k $v }}
+{{- end }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "ekos.name" . }}
+  name: {{ $name }}
   labels:
     {{- include "ekos.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- with $annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
-  {{- with .Values.ingress.className }}
-  ingressClassName: {{ . }}
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- else if $alb.enabled }}
+  ingressClassName: {{ $name }}-alb
   {{- end }}
   {{- if .Values.ingress.tlsSecretName }}
   tls:
@@ -28,7 +56,46 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "ekos.name" . }}
+                name: {{ $name }}
                 port:
                   name: http
+{{- if $gke.managedCertificate }}
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "ekos.labels" . | nindent 4 }}
+spec:
+  domains:
+    - {{ required "ingress.host is required for a managed certificate" .Values.ingress.host | quote }}
+{{- end }}
+{{- if $alb.enabled }}
+---
+# EKS Auto Mode's load balancing is configured by IngressClassParams, not controller flags.
+apiVersion: eks.amazonaws.com/v1
+kind: IngressClassParams
+metadata:
+  name: {{ $name }}-alb
+  labels:
+    {{- include "ekos.labels" . | nindent 4 }}
+spec:
+  scheme: {{ $alb.scheme }}
+  certificateARNs:
+    - {{ required "ingress.eksAlb.certificateArn is required" $alb.certificateArn | quote }}
+---
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: {{ $name }}-alb
+  labels:
+    {{- include "ekos.labels" . | nindent 4 }}
+spec:
+  controller: eks.amazonaws.com/alb
+  parameters:
+    apiGroup: eks.amazonaws.com
+    kind: IngressClassParams
+    name: {{ $name }}-alb
+{{- end }}
 {{- end }}

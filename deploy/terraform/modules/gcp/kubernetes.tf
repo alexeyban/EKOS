@@ -38,11 +38,46 @@ resource "google_container_cluster" "this" {
   # VPC-native; GKE picks the pod and service ranges.
   ip_allocation_policy {}
 
+  # Only Workload Identity and OAuth tokens; never a client certificate.
+  master_auth {
+    client_certificate_config {
+      issue_client_certificate = false
+    }
+  }
+
   secret_manager_config {
     enabled = true
   }
 
   depends_on = [google_project_service.apis]
+}
+
+# The ingress preset (RFC 0232). Public: a reserved global address and a Google-managed
+# certificate for `domain` on the GCE load balancer; point the domain's A record at the
+# `ingress_ip` output and the certificate is issued once it resolves. Private: the internal
+# Application Load Balancer, which needs a proxy-only subnet and a certificate the operator puts
+# in a Kubernetes TLS secret (Google-managed certificates are external only).
+locals {
+  gke_ingress_public  = local.gke == 1 && var.domain != "" && var.exposure == "public"
+  gke_ingress_private = local.gke == 1 && var.domain != "" && var.exposure == "private"
+}
+
+resource "google_compute_global_address" "ingress" {
+  count      = local.gke_ingress_public ? 1 : 0
+  project    = var.project_id
+  name       = "${var.name}-ingress"
+  depends_on = [google_project_service.apis]
+}
+
+resource "google_compute_subnetwork" "proxy_only" {
+  count         = local.gke_ingress_private ? 1 : 0
+  project       = var.project_id
+  name          = "${var.name}-proxy-only"
+  region        = var.region
+  network       = google_compute_network.this.id
+  ip_cidr_range = var.proxy_only_cidr
+  purpose       = "REGIONAL_MANAGED_PROXY"
+  role          = "ACTIVE"
 }
 
 resource "helm_release" "ekos" {
@@ -77,19 +112,24 @@ resource "helm_release" "ekos" {
     ingress = {
       enabled = var.domain != ""
       host    = var.domain
+      gke = {
+        managedCertificate = local.gke_ingress_public
+        staticIpName       = local.gke_ingress_public ? google_compute_global_address.ingress[0].name : ""
+        internal           = local.gke_ingress_private
+      }
     }
   })], var.helm_values)
 
   lifecycle {
-    # A domain makes the console's address (and the OIDC redirect) https://<domain>; what serves
-    # it — an ingress class, a certificate — differs per cluster and is the operator's to give.
+    # The internal load balancer cannot use a Google-managed certificate.
     precondition {
-      condition     = var.domain == "" || length(var.helm_values) > 0
-      error_message = "compute = \"kubernetes\" with a domain needs helm_values with the ingress class and TLS (ingress.className, ingress.tlsSecretName or the class's certificate annotations); see docs/deployment.md."
+      condition     = !local.gke_ingress_private || length(var.helm_values) > 0
+      error_message = "compute = \"kubernetes\" with exposure = \"private\" and a domain needs helm_values with ingress.tlsSecretName (a Kubernetes TLS secret for the domain in the namespace); see docs/deployment.md."
     }
   }
 
   depends_on = [
+    google_compute_subnetwork.proxy_only,
     google_secret_manager_secret_version.this,
     google_secret_manager_secret_iam_member.runtime,
     google_storage_bucket_iam_member.runtime,

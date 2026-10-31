@@ -147,7 +147,13 @@ async def test_a_backup_runs_the_command_and_records_the_result(tmp_path: Path) 
 def test_the_cloud_settings_have_rows_in_the_console_file() -> None:
     from app import console_file
 
-    for name in ["instance_lease", "instance_lease_seconds", "backup_url", "backup_cron"]:
+    for name in [
+        "instance_lease",
+        "instance_lease_seconds",
+        "backup_url",
+        "backup_cron",
+        "backup_restore_on_empty",
+    ]:
         assert name in console_file.FIELDS
         assert not console_file.FIELDS[name].secret
 
@@ -163,3 +169,55 @@ def test_the_lease_survives_concurrent_writers_without_a_torn_file(tmp_path: Pat
         assert cloud._read(b.path) is not None
     leftovers = [p for p in os.listdir(tmp_path) if p.endswith(".tmp")]
     assert leftovers == []
+
+
+def _fake(tmp_path: Path, name: str, body: str) -> str:
+    fake = tmp_path / name
+    fake.write_text("#!/bin/sh\n" + body)
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    return str(fake)
+
+
+def test_a_home_is_empty_without_projects_or_a_console_database(tmp_path: Path) -> None:
+    db = tmp_path / "control" / "console.db"
+    (tmp_path / "data").mkdir()
+    assert cloud.home_is_empty(tmp_path, db)
+    # A tenant directory alone (what the image creates) is still empty.
+    (tmp_path / "data" / "acme").mkdir()
+    assert cloud.home_is_empty(tmp_path, db)
+    project = tmp_path / "data" / "acme" / "shop"
+    project.mkdir()
+    (project / "ekos.toml").write_text("")
+    assert not cloud.home_is_empty(tmp_path, db)
+    project.joinpath("ekos.toml").unlink()
+    db.parent.mkdir()
+    db.write_text("")
+    assert not cloud.home_is_empty(tmp_path, db)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a #! fake binary")
+async def test_an_empty_home_is_restored_and_a_full_one_is_left_alone(tmp_path: Path) -> None:
+    calls = tmp_path / "calls"
+    ekos = _fake(tmp_path, "ekos", f'echo "$@" >> {calls}\nexit 0\n')
+    db = tmp_path / "control" / "console.db"
+    assert await cloud.restore_if_empty(ekos, "s3://b/ekos", tmp_path, db) == "restored"
+    assert calls.read_text().split() == ["home", "restore", "--from", "s3://b/ekos/"]
+
+    db.parent.mkdir()
+    db.write_text("")
+    calls.unlink()
+    assert await cloud.restore_if_empty(ekos, "s3://b/ekos/", tmp_path, db) == "not-empty"
+    assert not calls.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a #! fake binary")
+async def test_no_backup_yet_starts_empty_but_an_unreadable_location_stops_the_start(
+    tmp_path: Path,
+) -> None:
+    db = tmp_path / "control" / "console.db"
+    none = _fake(tmp_path, "none", "echo 'Error: no backup under gs://b/ekos/' >&2\nexit 1\n")
+    assert await cloud.restore_if_empty(none, "gs://b/ekos/", tmp_path, db) == "no-backup"
+
+    denied = _fake(tmp_path, "denied", "echo 'Error: listing gs://b/ekos/: 403' >&2\nexit 1\n")
+    with pytest.raises(cloud.RestoreError, match="403"):
+        await cloud.restore_if_empty(denied, "gs://b/ekos/", tmp_path, db)

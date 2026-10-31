@@ -134,12 +134,13 @@ redirect URI is derived from that address.
 
 ## 4. Not built
 
-* Private networking for the console (private endpoints, internal load balancers); the modules expose
-  HTTPS publicly, restricted by `allowed_cidrs` where the platform allows it.
+* Private endpoints for the secret stores and the backup buckets. They stay public endpoints
+  restricted to the deployment's identity: behind a private endpoint, Terraform run from outside
+  the network could not write the secrets. `exposure = "private"` (§6) covers the console's own
+  address only, and not on a VM.
 * A GCS FUSE or EFS-backed `kubernetes` storage option; one ReadWriteOnce disk only.
-* Restore on first start from the newest backup (a fresh deployment over an empty share). Run
-  `ekos home restore --from <backup_url>` once by hand.
-* An ingress controller or certificate for Kubernetes; the operator supplies them.
+* An ingress preset for AKS (§6.2).
+* A restore larger than the platform's start allowance (§6.1); that one is run by hand.
 
 ## 5. Verification
 
@@ -153,4 +154,78 @@ redirect URI is derived from that address.
   drop local edits, refuse a non-checkout, one failure does not stop the rest, config validation,
   token only in the header variable); `scripts/tests/test_entrypoint.py`.
 * Deployment: CI's new `deploy` job runs `terraform fmt -check`, `terraform validate` on every module
-  and example, `helm lint` and `helm template`. None of the three clouds was applied for this RFC.
+  and example, `terraform test` (§6.4), `helm lint` and `helm template` (each preset rendered). None
+  of the three clouds was applied for this RFC.
+
+## 6. Amendment (2026-10-31): the gaps that need no cloud account
+
+### 6.1 Restore on first start
+
+With `backup_url` set and `backup_restore_on_empty` (default on), the console checks the home after
+taking the instance lease and before opening its database. Empty — no `data/*/*/ekos.toml` and no
+console database — means `ekos home restore --from <backup_url>/` (`cloud.restore_if_empty`), with
+the backup job's environment (`platform_env`). The outcome decides the start:
+
+| Restore | Console |
+|---|---|
+| succeeded | starts over the restored home; logs a warning so the platform's log shows it; rewrites the lease at once, since the restore moved `control/` (lease file included) to the trash |
+| `no backup under …` | a first deployment: starts empty |
+| anything else (wrong bucket, credentials, network) | **does not start** (`RestoreError`) |
+
+The last row is the point: a console that starts empty over a location it cannot read uploads an
+empty backup that night, and that becomes the newest one. A crash-looping console is the safe
+failure. The restore runs before `/api/health` answers, so it must fit the start allowance, and two
+allowances in the modules were wrong for the platform, refused at apply (no provider validates
+them): Container Apps' startup probe asked for 60 failures (the maximum is 10; now 10 × 60 s) and
+Cloud Run's for 300 s (the maximum of period × failures is 240 s; now 5 s × 48). ECS's `startPeriod`
+is now its maximum, 300 s, with 600 s of load-balancer grace; the chart's start allowance is
+`startupSeconds` (1800). The plan tests pin each platform's limit.
+
+### 6.2 Ingress presets for Kubernetes
+
+A `domain` no longer needs hand-written `helm_values` on GKE and EKS; `helm_values` still apply over
+the module's and replace a preset.
+
+* **GKE**: `google_compute_global_address` + a `ManagedCertificate` (chart
+  `ingress.gke.managedCertificate`, `staticIpName`), GCE ingress class, HTTP off. Output
+  `ingress_ip` for the domain's A record.
+* **EKS Auto Mode**: the chart's `IngressClass` (controller `eks.amazonaws.com/alb`) +
+  `IngressClassParams` (`scheme`, `certificateARNs` from `certificate_arn`), HTTPS listener. Both
+  public subnets carry `kubernetes.io/role/elb` and `kubernetes.io/role/internal-elb`, the tags
+  Auto Mode chooses subnets by. Without `certificate_arn` the preset is off and a domain needs
+  `helm_values`.
+* **AKS: not built.** The obvious preset, the application routing add-on, is NGINX-based and
+  supported only until November 2026; its replacement (the Gateway API implementation) is not in
+  azurerm 5.12, which offers only `web_app_routing` (NGINX) and the Application Gateway ingress
+  controller. A domain on AKS keeps needing `helm_values`.
+
+### 6.3 `exposure = "public" | "private"`
+
+| | `private` |
+|---|---|
+| Container Apps | `internal_load_balancer_enabled`; a private DNS zone named after the environment's default domain, linked to the VNet, `*` → its static IP |
+| Cloud Run | `INGRESS_TRAFFIC_INTERNAL_ONLY` |
+| ECS | `internal = true` on the ALB |
+| EKS | `IngressClassParams.scheme = internal` |
+| GKE | `gce-internal` + a `REGIONAL_MANAGED_PROXY` subnet (`proxy_only_cidr`); needs `ingress.tlsSecretName` |
+| AKS | nothing to change: the module adds no ingress |
+| VM | refused by a variable validation |
+
+### 6.4 Plans with mocked providers
+
+`modules/{azure,gcp,aws}/tests/plan.tftest.hcl` (25 runs) plan each module with
+`mock_provider … { override_during = plan }`: no account, no network, run in CI. They check which
+resources each `compute` creates, what reaches the console's environment (lease, backup URL,
+production mode, OIDC redirect), each preset and `exposure`, every precondition, and the platform
+limits above. A mutation check confirmed they fail when the switch they cover is broken. Two
+things were learned writing them: the azurerm mock still parses resource ids, so each mocked
+resource needs a well-formed ARM id; and a mock cannot fill a block the configuration does not
+declare, so the GKE cluster now declares `master_auth` (no client certificate), which it should
+have anyway.
+
+### 6.5 The image
+
+`release.yml`'s smoke test now also checks that the image has `ekos-git-sync`, `ekos-entrypoint` and
+an `ekos` built with `object-storage` (a restore from `s3://` with no network must fail at the
+connection, not be refused as unsupported). The examples keep `:latest` until a release contains
+this work; pin them to that version then.

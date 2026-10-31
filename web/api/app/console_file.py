@@ -118,6 +118,11 @@ FIELDS: dict[str, Field] = {
         "https://<account>.blob.core.windows.net/…). Empty: no scheduled backups",
     ),
     "backup_cron": Field("Cloud", "When to back up, as a crontab line in UTC"),
+    "backup_restore_on_empty": Field(
+        "Cloud",
+        "When the home is empty at start (a new deployment or share), restore the newest backup "
+        "under backup_url first. A location the console cannot read stops the start",
+    ),
     "run_queue_depth": Field("Runs", "Commands queued per workspace before new ones are refused"),
     "run_stage_timeout_seconds": Field(
         "Runs",

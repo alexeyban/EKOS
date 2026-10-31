@@ -76,10 +76,12 @@ spec:
               mountPath: /run/secrets/ekos
               readOnly: true
             {{- end }}
+          # The console serves nothing until it has started, and over an empty home with a
+          # backup URL that includes restoring the newest backup (RFC 0232).
           startupProbe:
             httpGet: {path: /api/health, port: http}
             periodSeconds: 5
-            failureThreshold: 60
+            failureThreshold: {{ div (int .Values.startupSeconds) 5 | max 1 }}
           livenessProbe:
             httpGet: {path: /api/health, port: http}
             periodSeconds: 30

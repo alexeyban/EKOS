@@ -180,6 +180,8 @@ resource "aws_subnet" "public" {
   tags = merge(local.tags, {
     Name                     = "${var.name}-public-${count.index}"
     "kubernetes.io/role/elb" = "1"
+    # EKS Auto Mode finds the subnets for an internal ALB (exposure = "private") by this tag.
+    "kubernetes.io/role/internal-elb" = "1"
   })
 }
 

@@ -25,12 +25,41 @@ resource "azurerm_container_app_environment" "this" {
   resource_group_name        = azurerm_resource_group.this.name
   log_analytics_workspace_id = azurerm_log_analytics_workspace.ca[0].id
   infrastructure_subnet_id   = azurerm_subnet.main.id
-  tags                       = local.tags
+  # Private: the environment's load balancer has an address in the subnet only.
+  internal_load_balancer_enabled = var.exposure == "private"
+  tags                           = local.tags
 
   workload_profile {
     name                  = "Consumption"
     workload_profile_type = "Consumption"
   }
+}
+
+# An internal environment's default domain resolves only through a private DNS zone: every app
+# name under it points at the environment's internal address, for whatever is in the VNet (or
+# peered with it, or resolving through it).
+resource "azurerm_private_dns_zone" "ca" {
+  count               = local.ca == 1 && var.exposure == "private" ? 1 : 0
+  name                = azurerm_container_app_environment.this[0].default_domain
+  resource_group_name = azurerm_resource_group.this.name
+  tags                = local.tags
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "ca" {
+  count                = length(azurerm_private_dns_zone.ca)
+  name                 = "${var.name}-ca"
+  private_dns_zone_id  = azurerm_private_dns_zone.ca[0].id
+  virtual_network_id   = azurerm_virtual_network.this.id
+  registration_enabled = false
+  tags                 = local.tags
+}
+
+resource "azurerm_private_dns_a_record" "ca" {
+  count               = length(azurerm_private_dns_zone.ca)
+  name                = "*"
+  private_dns_zone_id = azurerm_private_dns_zone.ca[0].id
+  ttl                 = 300
+  records             = [azurerm_container_app_environment.this[0].static_ip_address]
 }
 
 # Premium FileStorage is the only account kind with NFS shares. NFS has no encryption in
@@ -179,12 +208,14 @@ resource "azurerm_container_app" "ekos" {
         path = "/sources"
       }
 
+      # Container Apps allows 10 failures at most (60 is refused at apply), so the start allowance
+      # (10 min, room for a first-start restore) comes from the interval.
       startup_probe {
         transport               = "HTTP"
         port                    = 8000
         path                    = "/api/health"
-        interval_seconds        = 5
-        failure_count_threshold = 60
+        interval_seconds        = 60
+        failure_count_threshold = 10
       }
       liveness_probe {
         transport        = "HTTP"

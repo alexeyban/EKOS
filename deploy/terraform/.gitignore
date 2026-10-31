@@ -1,0 +1,5 @@
+# Local provider caches and lock files from `terraform init`; CI initialises afresh.
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*

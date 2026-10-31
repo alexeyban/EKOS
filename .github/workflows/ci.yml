@@ -93,6 +93,15 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: terraform test (each module planned with mocked providers, no account)
+        run: |
+          set -e
+          for dir in deploy/terraform/modules/azure deploy/terraform/modules/gcp deploy/terraform/modules/aws; do
+            echo "::group::$dir"
+            terraform -chdir="$dir" test
+            echo "::endgroup::"
+          done
+
       - name: helm lint + template
         run: |
           helm lint deploy/helm/ekos
@@ -103,6 +112,21 @@ jobs:
             --set persistence.storageClass=ekos-gp3 --set persistence.createStorageClass.enabled=true \
             --set persistence.createStorageClass.provisioner=ebs.csi.eks.amazonaws.com \
             --set ingress.enabled=true --set ingress.host=ekos.example.com >/dev/null
+          # The ingress presets the Terraform modules turn on (GKE, EKS Auto Mode).
+          helm template ekos deploy/helm/ekos --set ingress.enabled=true --set ingress.host=ekos.example.com \
+            --set ingress.gke.managedCertificate=true --set ingress.gke.staticIpName=ekos-ingress \
+            | grep -q 'kind: ManagedCertificate'
+          helm template ekos deploy/helm/ekos --set ingress.enabled=true --set ingress.host=ekos.example.com \
+            --set ingress.gke.internal=true --set ingress.tlsSecretName=ekos-tls \
+            | grep -q 'kubernetes.io/ingress.class: gce-internal'
+          helm template ekos deploy/helm/ekos --set ingress.enabled=true --set ingress.host=ekos.example.com \
+            --set ingress.eksAlb.enabled=true --set ingress.eksAlb.scheme=internal \
+            --set ingress.eksAlb.certificateArn=arn:aws:acm:eu-west-1:123456789012:certificate/x \
+            | grep -q 'controller: eks.amazonaws.com/alb'
+          # A preset never drops the operator's own annotations.
+          helm template ekos deploy/helm/ekos --set ingress.enabled=true --set ingress.host=ekos.example.com \
+            --set ingress.gke.managedCertificate=true --set 'ingress.annotations.example\.com/team=data' \
+            | grep -q 'example.com/team: data'
 
       - name: scripts (git sync, entrypoint, wiki snapshot)
         run: python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v

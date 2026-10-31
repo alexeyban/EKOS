@@ -25,6 +25,20 @@ variable "compute" {
   }
 }
 
+variable "exposure" {
+  description = "`public` (default): the console is reachable from the internet. `private`: only from inside the network — an internal load balancer (ECS) or an internal ALB scheme (EKS). Not for `vm`: a VM without a public address needs your own way in."
+  type        = string
+  default     = "public"
+  validation {
+    condition     = contains(["public", "private"], var.exposure)
+    error_message = "exposure must be public or private."
+  }
+  validation {
+    condition     = var.exposure == "public" || var.compute != "vm"
+    error_message = "exposure = \"private\" is for compute = container or kubernetes; a VM without a public address needs your own way in (a VPN, a bastion)."
+  }
+}
+
 variable "image" {
   description = "The EKOS image."
   type        = string
@@ -38,7 +52,7 @@ variable "domain" {
 }
 
 variable "certificate_arn" {
-  description = "Container only: ACM certificate for `domain`, on the load balancer."
+  description = "ACM certificate for `domain`, on the load balancer: required for container, and for kubernetes with a domain unless helm_values give another ingress."
   type        = string
   default     = ""
 }
@@ -179,7 +193,7 @@ variable "kubernetes_namespace" {
 }
 
 variable "helm_values" {
-  description = "Kubernetes only: extra values files (YAML strings) for the chart. With a domain, give the ingress class and TLS here."
+  description = "Kubernetes only: extra values files (YAML strings) for the chart, applied over the module's. A domain with certificate_arn gets an EKS Auto Mode ALB by default; without one, give the ingress class and TLS here."
   type        = list(string)
   default     = []
 }

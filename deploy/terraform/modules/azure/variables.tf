@@ -31,6 +31,20 @@ variable "compute" {
   }
 }
 
+variable "exposure" {
+  description = "`public` (default): the console is reachable from the internet. `private`: only from inside the network — Container Apps' internal environment with a private DNS zone in the VNet; on AKS the module adds no ingress, so give an internal one in helm_values. Not for `vm`: a VM without a public address needs your own way in."
+  type        = string
+  default     = "public"
+  validation {
+    condition     = contains(["public", "private"], var.exposure)
+    error_message = "exposure must be public or private."
+  }
+  validation {
+    condition     = var.exposure == "public" || var.compute != "vm"
+    error_message = "exposure = \"private\" is for compute = container or kubernetes; a VM without a public address needs your own way in (a VPN, a bastion)."
+  }
+}
+
 variable "image" {
   description = "The EKOS image."
   type        = string

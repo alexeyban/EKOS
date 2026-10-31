@@ -74,11 +74,12 @@ resource "google_cloud_run_v2_job" "prepare_share" {
 }
 
 resource "google_cloud_run_v2_service" "ekos" {
-  count               = local.run
-  project             = var.project_id
-  name                = var.name
-  location            = var.region
-  ingress             = "INGRESS_TRAFFIC_ALL"
+  count    = local.run
+  project  = var.project_id
+  name     = var.name
+  location = var.region
+  # Private: only from the VPC (and Shared VPC / VPC Service Controls perimeters).
+  ingress             = var.exposure == "private" ? "INGRESS_TRAFFIC_INTERNAL_ONLY" : "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
   # The console signs people in itself (OIDC); Cloud Run's IAM check would stand in front of it.
   invoker_iam_disabled = true
@@ -147,13 +148,16 @@ resource "google_cloud_run_v2_service" "ekos" {
         mount_path = "/sources"
       }
 
+      # Cloud Run allows period × failures of 240 s at most (300 s is refused at apply). The
+      # console serves nothing until it has started, which over an empty home with a backup URL
+      # includes restoring the newest backup: a larger home is restored by hand (docs §10).
       startup_probe {
         http_get {
           path = "/api/health"
           port = 8000
         }
         period_seconds    = 5
-        failure_threshold = 60
+        failure_threshold = 48
       }
       liveness_probe {
         http_get {

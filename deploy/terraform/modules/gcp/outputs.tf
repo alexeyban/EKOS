@@ -43,3 +43,8 @@ output "kubernetes" {
   } : null
   sensitive = true
 }
+
+output "ingress_ip" {
+  description = "Kubernetes with a domain (public): the load balancer's address. Point the domain's A record here; the managed certificate is issued once it resolves."
+  value       = try(google_compute_global_address.ingress[0].address, null)
+}

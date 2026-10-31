@@ -6964,5 +6964,12 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] Helm chart `deploy/helm/ekos` (one replica, Recreate, CSI secrets, git-sync sidecar)
 - [x] CI `deploy` job: terraform fmt + validate, helm lint + template, script tests
 - [ ] Apply each example against a real account (vm first) and record what broke
-- [ ] Restore from the newest backup on first start over an empty home
-- [ ] Private networking options (private endpoints, internal load balancers)
+- [x] Restore from the newest backup on first start over an empty home (2026-10-31, devlog_314; a failed read stops the start)
+- [x] `exposure = public | private` for the console's address: internal Container Apps environment + private DNS, Cloud Run internal ingress, internal ALB on ECS and EKS, `gce-internal` on GKE (devlog_314)
+- [ ] Private endpoints for the secret stores and backup buckets (needs Terraform run from inside the network)
+- [x] Kubernetes ingress presets: GKE managed certificate on a reserved address, EKS Auto Mode ALB with `certificate_arn` (devlog_314)
+- [ ] AKS ingress preset — once azurerm can enable app routing's Gateway API (its NGINX ends Nov 2026)
+- [x] `terraform test` with mocked providers for every module (25 runs, in CI); platform start-probe limits fixed (Container Apps, Cloud Run) and pinned
+- [x] Release smoke test checks git sync, entrypoint and `object-storage` in the image; `.dockerignore` fix
+- [x] Monthly cost table per cloud × compute in `docs/deployment.md` §10
+- [ ] Pin the examples' image tag to the first release containing RFC 0232

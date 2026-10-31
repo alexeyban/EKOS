@@ -38,5 +38,9 @@ sync beside it when `git_repos` is set, and a nightly `ekos home backup --to` th
 bucket. The operator's guide is [docs/deployment.md](../../docs/deployment.md#10-in-a-cloud-azure-google-cloud-aws-rfc-0232);
 the design is [RFC 0232](../../ekos/docs/rfcs/0232-cloud-deployment.md).
 
-CI runs `terraform fmt -check` and `terraform validate` on every module and example. None of these
-was applied against a real account as part of RFC 0232: try a `vm` deployment first.
+CI runs `terraform fmt -check` and `terraform validate` on every module and example, and
+`terraform test` in each cloud module: `tests/plan.tftest.hcl` plans it with mocked providers (no
+account, no network) and checks what each `compute`, `exposure` and preset creates. Run one locally
+with `terraform -chdir=modules/aws init -backend=false && terraform -chdir=modules/aws test`. A
+mocked plan checks the module's logic, not what the cloud accepts. None of these was applied
+against a real account as part of RFC 0232: try a `vm` deployment first.

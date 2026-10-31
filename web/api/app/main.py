@@ -168,6 +168,17 @@ async def _lifespan(app: FastAPI):
     )
     if lease is not None:
         await lease.take_over()
+    if settings.backup_url and settings.backup_restore_on_empty and settings.ekos_home:
+        restored = await cloud.restore_if_empty(
+            settings.ekos_bin,
+            settings.backup_url,
+            Path(settings.ekos_home),
+            Path(settings.console_db),
+        )
+        # The restore replaced control/, lease file included: write it back at once, so a
+        # console starting now still waits for this one.
+        if restored == "restored" and lease is not None:
+            lease.beat()
     models.init_engine(settings.console_db)
     _seed_registry_if_empty()
     home_projects.register_new()

@@ -157,18 +157,24 @@ resource "helm_release" "ekos" {
       intervalSeconds = var.git_sync_interval
       username        = var.git_username
     }
+    # The ingress preset (RFC 0232): Auto Mode's built-in ALB with the ACM certificate. Point the
+    # domain at the load balancer `kubectl get ingress` shows.
     ingress = {
       enabled = var.domain != ""
       host    = var.domain
+      eksAlb = {
+        enabled        = var.domain != "" && var.certificate_arn != ""
+        scheme         = var.exposure == "private" ? "internal" : "internet-facing"
+        certificateArn = var.certificate_arn
+      }
     }
   })], var.helm_values)
 
   lifecycle {
-    # A domain makes the console's address (and the OIDC redirect) https://<domain>; what serves
-    # it — an ingress class, a certificate — differs per cluster and is the operator's to give.
+    # A domain makes the console's address (and the OIDC redirect) https://<domain>.
     precondition {
-      condition     = var.domain == "" || length(var.helm_values) > 0
-      error_message = "compute = \"kubernetes\" with a domain needs helm_values with the ingress class and TLS (ingress.className, ingress.tlsSecretName or the class's certificate annotations); see docs/deployment.md."
+      condition     = var.domain == "" || var.certificate_arn != "" || length(var.helm_values) > 0
+      error_message = "compute = \"kubernetes\" with a domain needs certificate_arn (an ACM certificate for it), or helm_values with another ingress class and TLS; see docs/deployment.md."
     }
   }
 

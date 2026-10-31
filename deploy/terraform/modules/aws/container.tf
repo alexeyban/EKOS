@@ -152,8 +152,10 @@ resource "aws_lb" "this" {
   count              = local.ecs
   name               = "${var.name}-${local.suffix}"
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb[0].id]
-  subnets            = aws_subnet.public[*].id
+  # Private: an address in the VPC only; allowed_cidrs still limit who reaches it.
+  internal        = var.exposure == "private"
+  security_groups = [aws_security_group.alb[0].id]
+  subnets         = aws_subnet.public[*].id
   # Server-sent events from long pipeline runs.
   idle_timeout = 3600
   tags         = local.tags
@@ -237,11 +239,12 @@ locals {
         { sourceVolume = "sources", containerPath = "/sources", readOnly = true },
       ]
       healthCheck = {
-        command     = ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"]
-        interval    = 30
-        timeout     = 5
-        retries     = 3
-        startPeriod = 120
+        command  = ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"]
+        interval = 30
+        timeout  = 5
+        retries  = 3
+        # The most ECS allows; a first-start restore runs before the console answers.
+        startPeriod = 300
       }
       logConfiguration = local.ecs_log
     }],
@@ -303,7 +306,7 @@ resource "aws_ecs_service" "this" {
   # Stop the old task first: never two consoles over one home.
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
-  health_check_grace_period_seconds  = 180
+  health_check_grace_period_seconds  = 600
   tags                               = local.tags
 
   network_configuration {

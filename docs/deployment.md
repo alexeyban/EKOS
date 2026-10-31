@@ -406,16 +406,68 @@ What each deployment creates and how it behaves:
   Create the project for `/sources/shop` in the console as usual.
 - **Backups** run every night (`backup_cron`, UTC) to the deployment's bucket and expire after
   `backup_retention_days`. `terraform output backup_url` is what `ekos home restore --from` takes.
+- **A new deployment over an existing bucket restores itself.** When the console starts over an
+  empty home (no project, no console database) and `backup_url` is set, it restores the newest
+  backup there before it opens its database, and logs `the home was empty; restored …`. An empty
+  location means a first deployment, and the console starts empty. Any other failure — a wrong
+  bucket, missing credentials — stops the start: a console that cannot read its backups must not
+  start empty, because its first nightly backup would become the newest one. The restore has to
+  fit the platform's start allowance (Cloud Run 240 s, Container Apps 10 min, ECS 5 min,
+  Kubernetes `startupSeconds`, 30 min by default; a VM has none). For a larger home, set
+  `EKOS_CONSOLE_BACKUP_RESTORE_ON_EMPTY=false` and run `ekos home restore --from <backup_url>` once
+  by hand.
 - **One console at a time.** Container platforms briefly run a new revision beside the old one; the
   console's instance lease (`EKOS_CONSOLE_INSTANCE_LEASE`) makes the new one take over and the old
   one stop. Never scale the console beyond one replica.
 - **Kubernetes** without a `domain` is reached with `kubectl -n ekos port-forward svc/ekos 8000:80`.
-  With a `domain`, give the cluster's ingress class and TLS in `helm_values` (for example
-  `ingress: {className: …, tlsSecretName: …}`); Terraform refuses a domain without them.
-  The chart (`deploy/helm/ekos`) can be installed on any cluster on its own.
+  With a `domain`:
+  - **GKE**: a reserved global address and a Google-managed certificate. Point the domain's A
+    record at `terraform output ingress_ip`; the certificate is issued once it resolves (up to an
+    hour).
+  - **EKS**: give `certificate_arn` (an ACM certificate for the domain) and the module creates an
+    IngressClass for Auto Mode's built-in ALB. Point the domain at the address
+    `kubectl -n ekos get ingress` shows.
+  - **AKS**: no preset. The application routing add-on's NGINX is supported only until November
+    2026 and its Gateway API successor cannot be enabled from the azurerm provider yet, so give the
+    cluster's ingress class and TLS in `helm_values` (for example
+    `ingress: {className: …, tlsSecretName: …}`); Terraform refuses a domain without them.
 
-Cost notes: Filestore (Cloud Run) is 1 TiB at least; Container Apps needs a premium file share; an
-EKS or AKS cluster costs more than a VM for one console. The VM is the cheapest and simplest.
+  `helm_values` always apply over the module's own values, so they can replace a preset. The
+  chart (`deploy/helm/ekos`) can be installed on any cluster on its own.
+- **`exposure = "private"`** keeps the console off the internet: Container Apps gets an internal
+  environment and a private DNS zone for its domain in the VNet, Cloud Run takes VPC traffic only,
+  ECS gets an internal load balancer, EKS an internal ALB, GKE the internal Application Load
+  Balancer (with a proxy-only subnet, `proxy_only_cidr`; give `ingress.tlsSecretName` in
+  `helm_values`, as Google-managed certificates are external only). On AKS the module adds no
+  ingress, so the one in `helm_values` decides. Reaching it — a VPN, peering, a bastion — is yours.
+  A VM cannot be private (Terraform refuses it), and Key Vault, Secret Manager, Secrets Manager and
+  the backup buckets keep their public endpoints, restricted to the deployment's identity: with
+  private endpoints, Terraform run from outside the network could no longer write the secrets.
+
+**What it costs.** List prices for the module defaults in the examples' regions (Azure
+`westeurope`, Google Cloud `europe-west3`, AWS `eu-central-1`), on demand, one console all month,
+light traffic, 10 GB of backups; checked on 2026-10-31. Estimates, not quotes:
+
+| `compute` | Azure | Google Cloud | AWS |
+|---|---|---|---|
+| `vm` | ~$205 (D4s_v5) | ~$150 (e2-standard-4) | ~$200 (m7i.xlarge) |
+| `container` | $115–280 (Container Apps active vs idle time; premium NFS 228 GiB) | $330–375 (Filestore's 1 TiB minimum + an always-on 2 vCPU instance) | ~$145 (Fargate 2 vCPU / 8 GiB, ALB, EFS by GB stored) |
+| `kubernetes` | ~$235 (one D4s_v5 node, Free tier control plane) | $145–155 (cluster fee + Autopilot Pod requests) | $180–195 (control plane fee + one Auto Mode node) |
+
+- The git sync adds about $60 a month on Cloud Run (its 1 vCPU is always allocated) and $8–28 on
+  Container Apps; nothing on a VM, Fargate or a node with room.
+- An AKS Standard tier (uptime SLA) adds $73. Every public IPv4 address on AWS costs about $4.
+- Not included: internet egress, model API calls, DNS, taxes and support.
+- Not confirmed from an official page: Cloud Run's Tier 2 rate and Filestore's price in Frankfurt,
+  Autopilot's Frankfurt rates (scaled from us-central1), which instance EKS Auto Mode picks. Check
+  the providers' calculators before quoting a figure.
+
+**What has been checked.** `terraform validate` with the real providers; `terraform test` plans
+every module with mocked providers (which resources each `compute` and `exposure` creates, the
+presets, the platform limits on start probes); `helm lint` and `helm template` with each preset;
+the image's backup to and restore from S3-compatible storage, git sync, entrypoint and
+first-start restore against MinIO. **No deployment has been applied to a real Azure, Google Cloud
+or AWS account yet** (RFC 0232 §5).
 
 ## What is not built
 
