@@ -85,7 +85,7 @@ def test_only_the_fixed_read_is_allowed() -> None:
     _check_allowed(ARGV)
     for argv in (
         ["check", "refs", "--format", "json"],  # would recompute over the whole ledger
-        ARGV + ["--baseline", "/etc/passwd"],
+        [*ARGV, "--baseline", "/etc/passwd"],
         ["check", "refs", "--from-index", "--format", "sarif", "--reachability"],
     ):
         with pytest.raises(ReadProcError):
