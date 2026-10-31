@@ -6955,3 +6955,21 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [ ] ekos-lakehouse: bump its EKOS dependency so `lakehouse docs generate` carries the integrity section
 - [ ] iDempiere AD checks (`AD_Column.Callout`, `AD_Process.Classname`, …) need the dictionary rows: extend
       `[[databases]] dictionary` (RFC 0212) beyond `AD_Table`
+## RFC 0232 — EKOS on Azure, Google Cloud and AWS (2026-10-30, devlog_313)
+
+- [x] `ekos home backup --to <url>` / `ekos home restore --from <url>`: S3, Azure Blob, GCS (`object-storage` feature, in the image; GCS added to `object_store`)
+- [x] Console instance lease (single writer over a shared home) and scheduled backups (`backup_url`, `backup_cron`)
+- [x] `ekos-git-sync` (sources from git, token as a header only) and `ekos-entrypoint` (secret files → variables) in the image
+- [x] Terraform: `deploy/terraform/modules/{common,azure,gcp,aws}` × `vm | container | kubernetes`, examples per cloud
+- [x] Helm chart `deploy/helm/ekos` (one replica, Recreate, CSI secrets, git-sync sidecar)
+- [x] CI `deploy` job: terraform fmt + validate, helm lint + template, script tests
+- [ ] Apply each example against a real account (vm first) and record what broke
+- [x] Restore from the newest backup on first start over an empty home (2026-10-31, devlog_314; a failed read stops the start)
+- [x] `exposure = public | private` for the console's address: internal Container Apps environment + private DNS, Cloud Run internal ingress, internal ALB on ECS and EKS, `gce-internal` on GKE (devlog_314)
+- [ ] Private endpoints for the secret stores and backup buckets (needs Terraform run from inside the network)
+- [x] Kubernetes ingress presets: GKE managed certificate on a reserved address, EKS Auto Mode ALB with `certificate_arn` (devlog_314)
+- [ ] AKS ingress preset — once azurerm can enable app routing's Gateway API (its NGINX ends Nov 2026)
+- [x] `terraform test` with mocked providers for every module (25 runs, in CI); platform start-probe limits fixed (Container Apps, Cloud Run) and pinned
+- [x] Release smoke test checks git sync, entrypoint and `object-storage` in the image; `.dockerignore` fix
+- [x] Monthly cost table per cloud × compute in `docs/deployment.md` §10
+- [ ] Pin the examples' image tag to the first release containing RFC 0232

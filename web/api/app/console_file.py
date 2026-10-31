@@ -106,6 +106,23 @@ FIELDS: dict[str, Field] = {
     ),
     "chat_max_tool_calls": Field("Chat", "Most EKOS tool calls the model may make per question"),
     "chat_max_tokens": Field("Chat", "Most tokens in one answer"),
+    "instance_lease": Field(
+        "Cloud",
+        "Keep one console writing this home: a new one takes over and the old one stops. On for "
+        "a home on a network share (container platforms, Kubernetes)",
+    ),
+    "instance_lease_seconds": Field("Cloud", "Heartbeat of the instance lease"),
+    "backup_url": Field(
+        "Cloud",
+        "Back up the home to object storage here (s3://, gs://, "
+        "https://<account>.blob.core.windows.net/…). Empty: no scheduled backups",
+    ),
+    "backup_cron": Field("Cloud", "When to back up, as a crontab line in UTC"),
+    "backup_restore_on_empty": Field(
+        "Cloud",
+        "When the home is empty at start (a new deployment or share), restore the newest backup "
+        "under backup_url first. A location the console cannot read stops the start",
+    ),
     "run_queue_depth": Field("Runs", "Commands queued per workspace before new ones are refused"),
     "run_stage_timeout_seconds": Field(
         "Runs",

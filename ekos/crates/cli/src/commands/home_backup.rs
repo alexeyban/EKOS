@@ -531,6 +531,55 @@ pub fn run_backup(home: &Path, tenant: Option<&str>, out: Option<PathBuf>) -> Re
     Ok(())
 }
 
+/// RFC 0232: back up into `<home>/backups/`, upload the archive to `url`, then remove the local
+/// copy. The upload must succeed before anything is removed.
+pub fn run_backup_to(home: &Path, tenant: Option<&str>, url: &str) -> Result<()> {
+    use super::home_remote;
+    if !home_remote::is_remote(url) {
+        bail!(
+            "--to takes an object-storage URL (s3://…, gs://…, https://<account>.blob.core.windows.net/…); use --out for a file"
+        );
+    }
+    home_remote::available()?;
+    let summary = backup(home, tenant, None, Utc::now())?;
+    let uploaded = home_remote::upload(&summary.path, url).with_context(|| {
+        format!(
+            "the upload failed; the backup is kept at {}",
+            summary.path.display()
+        )
+    })?;
+    std::fs::remove_file(&summary.path)
+        .with_context(|| format!("removing the local copy {}", summary.path.display()))?;
+    let projects: usize = summary.manifest.tenants.values().map(Vec::len).sum();
+    println!(
+        "Backed up {projects} project(s) in {} tenant(s){}: {} file(s)",
+        summary.manifest.tenants.len(),
+        if summary.manifest.control {
+            " and the console's control/"
+        } else {
+            ""
+        },
+        summary.files
+    );
+    println!("  {uploaded}");
+    if !summary.unlocked.is_empty() {
+        println!(
+            "Copied without a write lock (their store has none): {}.",
+            summary.unlocked.join(", ")
+        );
+    }
+    Ok(())
+}
+
+/// RFC 0232: download a backup from object storage into `<home>/backups/` and restore it.
+pub fn run_restore_from(home: &Path, url: &str, tenant: Option<&str>, force: bool) -> Result<()> {
+    use super::home_remote;
+    let target = home_remote::parse_target(url)?;
+    let local = home_remote::download(&target, &home.join("backups"))?;
+    println!("Downloaded {}", local.display());
+    run_restore(home, &local, tenant, force)
+}
+
 pub fn run_restore(home: &Path, archive: &Path, tenant: Option<&str>, force: bool) -> Result<()> {
     let summary = restore(home, archive, tenant, force, Utc::now())?;
     println!("Restored into {}:", home.display());

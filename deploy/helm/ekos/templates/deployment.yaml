@@ -1,0 +1,157 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ekos.name" . }}
+  labels:
+    {{- include "ekos.labels" . | nindent 4 }}
+spec:
+  # One writer over the home, always (RFC 0232).
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ekos.selector" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ekos.selector" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/env: {{ toJson .Values.env | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "ekos.serviceAccount" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        runAsNonRoot: true
+      containers:
+        - name: ekos
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: EKOS_CONSOLE_SUPERVISED
+              value: "false"
+            # Recreate already prevents overlap; the lease also guards a manual second pod.
+            - name: EKOS_CONSOLE_INSTANCE_LEASE
+              value: "true"
+            {{- if .Values.csi.console.enabled }}
+            - name: EKOS_SECRETS_DIR
+              value: /run/secrets/ekos
+            {{- end }}
+            {{- range $k, $v := .Values.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+          {{- if .Values.secretEnvFrom }}
+          envFrom:
+            {{- range .Values.secretEnvFrom }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+          {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/ekos
+              subPath: home
+            - name: data
+              mountPath: /sources
+              subPath: sources
+              readOnly: true
+            {{- if .Values.csi.console.enabled }}
+            - name: secrets-console
+              mountPath: /run/secrets/ekos
+              readOnly: true
+            {{- end }}
+          # The console serves nothing until it has started, and over an empty home with a
+          # backup URL that includes restoring the newest backup (RFC 0232).
+          startupProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 5
+            failureThreshold: {{ div (int .Values.startupSeconds) 5 | max 1 }}
+          livenessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 30
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet: {path: /api/health, port: http}
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        {{- if .Values.gitSync.enabled }}
+        - name: git-sync
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/ekos-entrypoint", "ekos-git-sync"]
+          env:
+            - name: EKOS_GIT_SYNC_REPOS
+              value: {{ join "\n" (required "gitSync.repos must list a repository" .Values.gitSync.repos) | quote }}
+            - name: EKOS_GIT_SYNC_DEST
+              value: /sources
+            - name: EKOS_GIT_SYNC_INTERVAL
+              value: {{ .Values.gitSync.intervalSeconds | quote }}
+            - name: EKOS_GIT_SYNC_DEPTH
+              value: {{ .Values.gitSync.depth | quote }}
+            - name: EKOS_GIT_SYNC_USERNAME
+              value: {{ .Values.gitSync.username | quote }}
+            {{- if .Values.csi.gitSync.enabled }}
+            - name: EKOS_SECRETS_DIR
+              value: /run/secrets/ekos
+            {{- end }}
+          volumeMounts:
+            - name: data
+              mountPath: /sources
+              subPath: sources
+            {{- if .Values.csi.gitSync.enabled }}
+            - name: secrets-git-sync
+              mountPath: /run/secrets/ekos
+              readOnly: true
+            {{- end }}
+          resources:
+            {{- toYaml .Values.gitSync.resources | nindent 12 }}
+        {{- end }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "ekos.claim" . }}
+        {{- if .Values.csi.console.enabled }}
+        - name: secrets-console
+          csi:
+            driver: {{ .Values.csi.driver }}
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "ekos.name" . }}-console
+        {{- end }}
+        {{- if and .Values.gitSync.enabled .Values.csi.gitSync.enabled }}
+        - name: secrets-git-sync
+          csi:
+            driver: {{ .Values.csi.driver }}
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "ekos.name" . }}-git-sync
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

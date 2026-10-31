@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import JSONResponse
 
-from . import home_projects, lifecycle, models
+from . import cloud, home_projects, lifecycle, models
 from .routes import (
     auth,
     chat,
@@ -160,6 +160,25 @@ def _seed_registry_if_empty() -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     settings = get_settings()
+    # RFC 0232: before anything writes the home, become its only writer.
+    lease = (
+        cloud.InstanceLease(settings.control_dir, interval=settings.instance_lease_seconds)
+        if settings.instance_lease
+        else None
+    )
+    if lease is not None:
+        await lease.take_over()
+    if settings.backup_url and settings.backup_restore_on_empty and settings.ekos_home:
+        restored = await cloud.restore_if_empty(
+            settings.ekos_bin,
+            settings.backup_url,
+            Path(settings.ekos_home),
+            Path(settings.console_db),
+        )
+        # The restore replaced control/, lease file included: write it back at once, so a
+        # console starting now still waits for this one.
+        if restored == "restored" and lease is not None:
+            lease.beat()
     models.init_engine(settings.console_db)
     _seed_registry_if_empty()
     home_projects.register_new()
@@ -179,9 +198,20 @@ async def _lifespan(app: FastAPI):
     watcher = (
         asyncio.create_task(lifecycle.watch(settings.control_dir)) if settings.supervised else None
     )
+    holder = asyncio.create_task(lease.hold(lifecycle.shut_down)) if lease is not None else None
+    if settings.backup_url:
+        job = cloud.BackupJob(settings.ekos_bin, settings.backup_url)
+        app.state.backup = job
+        app.state.scheduler.add_platform_job(
+            "ekos-home-backup", job.run, cloud.backup_trigger(settings.backup_cron)
+        )
     try:
         yield
     finally:
+        if holder is not None:
+            holder.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await holder
         if watcher is not None:
             watcher.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -189,6 +219,8 @@ async def _lifespan(app: FastAPI):
         await app.state.scheduler.aclose()
         await app.state.runner.aclose()
         await app.state.supervisor.aclose()
+        if lease is not None:
+            lease.release()
 
 
 def cookie_is_https_only(settings) -> bool:

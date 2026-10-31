@@ -1,0 +1,18 @@
+{{- with .Values.persistence.createStorageClass }}
+{{- if .enabled }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ required "persistence.storageClass names the class to create" $.Values.persistence.storageClass }}
+  labels:
+    {{- include "ekos.labels" $ | nindent 4 }}
+provisioner: {{ required "persistence.createStorageClass.provisioner is required" .provisioner }}
+volumeBindingMode: WaitForFirstConsumer
+reclaimPolicy: Retain
+allowVolumeExpansion: true
+{{- with .parameters }}
+parameters:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end }}

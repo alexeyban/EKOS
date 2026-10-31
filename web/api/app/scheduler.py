@@ -61,6 +61,19 @@ class ConsoleScheduler:
     async def aclose(self) -> None:  # NOSONAR(python:S7503)
         self._sched.shutdown(wait=False)
 
+    def add_platform_job(self, job_id: str, func, trigger) -> None:
+        """A console job that is not a `Schedule` row (RFC 0232: scheduled backups). Its id never
+        collides with a schedule's, which is a UUID."""
+        self._sched.add_job(
+            func,
+            trigger=trigger,
+            id=job_id,
+            replace_existing=True,
+            misfire_grace_time=3600,
+            coalesce=True,
+            max_instances=1,
+        )
+
     # ── registration ─────────────────────────────────────────────────────────
 
     def _register(self, s: Schedule) -> None:

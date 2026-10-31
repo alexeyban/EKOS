@@ -1,0 +1,105 @@
+# EKOS on Kubernetes (RFC 0232). One replica, always: the console, its SQLite database and the
+# ledgers live on one ReadWriteOnce volume, and the Deployment uses the Recreate strategy so an
+# upgrade never runs two consoles over it.
+
+image:
+  repository: ghcr.io/alexeyban/ekos
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# Plain settings for the console, as environment variables: sign-in (EKOS_CONSOLE_OIDC_*,
+# EKOS_CONSOLE_OWNERS, EKOS_CONSOLE_PRODUCTION), scheduled backups (EKOS_CONSOLE_BACKUP_URL,
+# EKOS_CONSOLE_BACKUP_CRON), model endpoints. See docs/deployment.md. Secrets do not go here:
+# use `secretEnvFrom` or `csi`.
+env: {}
+
+# Names of existing Kubernetes Secrets whose keys become environment variables of the console.
+secretEnvFrom: []
+
+# Secrets read from the cloud's secret store by the Secrets Store CSI driver, mounted as files
+# named after the variable they become (`ekos-entrypoint` reads EKOS_SECRETS_DIR). The provider
+# (`azure`, `gke`, `aws`) and its parameters are cloud-specific; the Terraform modules fill them.
+csi:
+  # The CSI driver's name: the upstream driver on AKS and EKS; GKE's Secret Manager add-on
+  # registers its own (`secrets-store-gke.csi.k8s.io`).
+  driver: secrets-store.csi.k8s.io
+  console:
+    enabled: false
+    provider: ""
+    parameters: {}
+  gitSync:
+    enabled: false
+    provider: ""
+    parameters: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  labels: {}
+
+podLabels: {}
+podAnnotations: {}
+
+persistence:
+  # One volume: `home/` is the EKOS home, `sources/` the checked-out repositories.
+  existingClaim: ""
+  storageClass: ""
+  # Create the storage class too (EKS Auto Mode has none by default).
+  createStorageClass:
+    enabled: false
+    provisioner: ""
+    parameters: {}
+  size: 50Gi
+  accessMode: ReadWriteOnce
+
+gitSync:
+  enabled: false
+  # name=https-url[#branch], one per entry.
+  repos: []
+  intervalSeconds: 300
+  depth: 0
+  username: x-access-token
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 512Mi}
+
+resources:
+  requests: {cpu: "1", memory: 4Gi}
+  limits: {memory: 8Gi}
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+# How long the console may take to start before it is restarted. Over an empty home with a
+# backup URL it first restores the newest backup, so leave room for the home's size.
+startupSeconds: 1800
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  tlsSecretName: ""
+  # Presets the Terraform modules turn on (RFC 0232); each needs ingress.host.
+  # GKE: a Google-managed certificate for the host, on the GCE load balancer.
+  gke:
+    managedCertificate: false
+    # A reserved global address (google_compute_global_address) for a stable IP.
+    staticIpName: ""
+    # true: the internal Application Load Balancer (`gce-internal`; needs a proxy-only subnet and
+    # tlsSecretName, as Google-managed certificates are external only).
+    internal: false
+  # EKS Auto Mode: an IngressClass for its built-in ALB, with the ACM certificate.
+  eksAlb:
+    enabled: false
+    scheme: internet-facing
+    certificateArn: ""
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

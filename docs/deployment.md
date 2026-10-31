@@ -322,7 +322,17 @@ docker compose -f deploy/docker-compose.yml cp \
 - Not in a backup: your sources (they are not in the volume), the binary, the trash.
 - The archive is not encrypted. It holds the ledgers and the console database (token hashes,
   not tokens). Protect it as you would the volume.
-- There is no schedule. Run it from the host's cron.
+- On one server there is no schedule: run it from the host's cron. In a cloud (section 10) the
+  console backs up to object storage on a schedule.
+
+The image can also write a backup straight to object storage and restore from there (RFC 0232),
+with the machine's cloud identity; no key is ever on the command line:
+
+```bash
+ekos home backup --to s3://my-bucket/ekos/          # or gs://…, https://<account>.blob.core.windows.net/<container>/ekos/
+ekos home restore --from s3://my-bucket/ekos/ --force   # the newest backup there
+ekos home restore --from s3://my-bucket/ekos/ekos-backup-20261030T021700Z.tar.zst --force
+```
 
 To restore onto a new machine or a new volume, start the deployment first, then:
 
@@ -362,16 +372,117 @@ docker compose -f deploy/docker-compose.yml up -d --build
 - Re-running the pipeline is never needed for an upgrade. It is how new compiler features reach
   an existing project, and for a project with model-backed passes it costs money.
 
+## 10. In a cloud: Azure, Google Cloud, AWS (RFC 0232)
+
+`deploy/terraform` deploys the same image to any of the three clouds, three ways each:
+
+| `compute` | Azure | Google Cloud | AWS |
+|---|---|---|---|
+| `vm` | VM + managed disk, Caddy | Compute Engine + persistent disk, Caddy | EC2 + EBS, Caddy |
+| `container` | Container Apps + Azure Files NFS | Cloud Run + Filestore | ECS Fargate + ALB + EFS |
+| `kubernetes` | AKS + Helm chart | GKE Autopilot + Helm chart | EKS Auto Mode + Helm chart |
+
+```bash
+cd deploy/terraform/examples/azure        # or gcp, aws
+cp terraform.tfvars.example terraform.tfvars   # compute, OIDC, owners, repositories
+export TF_VAR_secrets='{"OPENAI_API_KEY":"sk-…"}' TF_VAR_git_token=… TF_VAR_oidc_client_secret=…
+terraform init && terraform apply
+terraform output url
+```
+
+What each deployment creates and how it behaves:
+
+- **Secrets** go to Key Vault / Secret Manager / Secrets Manager, never into the image, a file in
+  the repository or the VM's disk. The platform injects them (Container Apps, Cloud Run, ECS) or
+  mounts them as files the image's entrypoint turns into variables (Kubernetes CSI, the VM's boot
+  script). Rotate one in the store and restart the console.
+- **One identity** (managed identity, service account, IAM role; workload identity on Kubernetes)
+  may read those secrets and write `ekos/` in the backup bucket. Nothing else.
+- **Sign-in**: give `oidc` and `owners` and the console starts in production mode. The redirect URI
+  to register with the provider is `<url>/api/auth/callback`. Without OIDC the console uses two
+  generated tokens: `terraform output -json static_tokens`.
+- **Sources**: `git_repos = ["shop=https://github.com/acme/shop.git#main"]` runs the git sync beside
+  the console; it clones into `/sources/shop` and keeps it at the branch's tip every five minutes.
+  Create the project for `/sources/shop` in the console as usual.
+- **Backups** run every night (`backup_cron`, UTC) to the deployment's bucket and expire after
+  `backup_retention_days`. `terraform output backup_url` is what `ekos home restore --from` takes.
+- **A new deployment over an existing bucket restores itself.** When the console starts over an
+  empty home (no project, no console database) and `backup_url` is set, it restores the newest
+  backup there before it opens its database, and logs `the home was empty; restored …`. An empty
+  location means a first deployment, and the console starts empty. Any other failure — a wrong
+  bucket, missing credentials — stops the start: a console that cannot read its backups must not
+  start empty, because its first nightly backup would become the newest one. The restore has to
+  fit the platform's start allowance (Cloud Run 240 s, Container Apps 10 min, ECS 5 min,
+  Kubernetes `startupSeconds`, 30 min by default; a VM has none). For a larger home, set
+  `EKOS_CONSOLE_BACKUP_RESTORE_ON_EMPTY=false` and run `ekos home restore --from <backup_url>` once
+  by hand.
+- **One console at a time.** Container platforms briefly run a new revision beside the old one; the
+  console's instance lease (`EKOS_CONSOLE_INSTANCE_LEASE`) makes the new one take over and the old
+  one stop. Never scale the console beyond one replica.
+- **Kubernetes** without a `domain` is reached with `kubectl -n ekos port-forward svc/ekos 8000:80`.
+  With a `domain`:
+  - **GKE**: a reserved global address and a Google-managed certificate. Point the domain's A
+    record at `terraform output ingress_ip`; the certificate is issued once it resolves (up to an
+    hour).
+  - **EKS**: give `certificate_arn` (an ACM certificate for the domain) and the module creates an
+    IngressClass for Auto Mode's built-in ALB. Point the domain at the address
+    `kubectl -n ekos get ingress` shows.
+  - **AKS**: no preset. The application routing add-on's NGINX is supported only until November
+    2026 and its Gateway API successor cannot be enabled from the azurerm provider yet, so give the
+    cluster's ingress class and TLS in `helm_values` (for example
+    `ingress: {className: …, tlsSecretName: …}`); Terraform refuses a domain without them.
+
+  `helm_values` always apply over the module's own values, so they can replace a preset. The
+  chart (`deploy/helm/ekos`) can be installed on any cluster on its own.
+- **`exposure = "private"`** keeps the console off the internet: Container Apps gets an internal
+  environment and a private DNS zone for its domain in the VNet, Cloud Run takes VPC traffic only,
+  ECS gets an internal load balancer, EKS an internal ALB, GKE the internal Application Load
+  Balancer (with a proxy-only subnet, `proxy_only_cidr`; give `ingress.tlsSecretName` in
+  `helm_values`, as Google-managed certificates are external only). On AKS the module adds no
+  ingress, so the one in `helm_values` decides. Reaching it — a VPN, peering, a bastion — is yours.
+  A VM cannot be private (Terraform refuses it), and Key Vault, Secret Manager, Secrets Manager and
+  the backup buckets keep their public endpoints, restricted to the deployment's identity: with
+  private endpoints, Terraform run from outside the network could no longer write the secrets.
+
+**What it costs.** List prices for the module defaults in the examples' regions (Azure
+`westeurope`, Google Cloud `europe-west3`, AWS `eu-central-1`), on demand, one console all month,
+light traffic, 10 GB of backups; checked on 2026-10-31. Estimates, not quotes:
+
+| `compute` | Azure | Google Cloud | AWS |
+|---|---|---|---|
+| `vm` | ~$205 (D4s_v5) | ~$150 (e2-standard-4) | ~$200 (m7i.xlarge) |
+| `container` | $115–280 (Container Apps active vs idle time; premium NFS 228 GiB) | $330–375 (Filestore's 1 TiB minimum + an always-on 2 vCPU instance) | ~$145 (Fargate 2 vCPU / 8 GiB, ALB, EFS by GB stored) |
+| `kubernetes` | ~$235 (one D4s_v5 node, Free tier control plane) | $145–155 (cluster fee + Autopilot Pod requests) | $180–195 (control plane fee + one Auto Mode node) |
+
+- The git sync adds about $60 a month on Cloud Run (its 1 vCPU is always allocated) and $8–28 on
+  Container Apps; nothing on a VM, Fargate or a node with room.
+- An AKS Standard tier (uptime SLA) adds $73. Every public IPv4 address on AWS costs about $4.
+- Not included: internet egress, model API calls, DNS, taxes and support.
+- Not confirmed from an official page: Cloud Run's Tier 2 rate and Filestore's price in Frankfurt,
+  Autopilot's Frankfurt rates (scaled from us-central1), which instance EKS Auto Mode picks. Check
+  the providers' calculators before quoting a figure.
+
+**What has been checked.** `terraform validate` with the real providers; `terraform test` plans
+every module with mocked providers (which resources each `compute` and `exposure` creates, the
+presets, the platform limits on start probes); `helm lint` and `helm template` with each preset;
+the image's backup to and restore from S3-compatible storage, git sync, entrypoint and
+first-start restore against MinIO. **No deployment has been applied to a real Azure, Google Cloud
+or AWS account yet** (RFC 0232 §5).
+
 ## What is not built
 
-- **One server only.** No Kubernetes manifests, no PostgreSQL, no object storage for the home.
+- **One console.** It is a single writer over its home, on one machine, VM, container or pod
+  (section 10). No PostgreSQL; the home is a disk or an NFS share, not object storage.
 - **Isolation between tenants is by directory and permission check**, inside one process and
   one OS user. It is not a sandbox.
-- **No TLS in the container**, no OAuth for MCP clients, no rate limits, no spending limits.
-- **No scheduled or encrypted backups**, and no deletion of a tenant or a user.
+- **No TLS in the container** (the cloud deployments put it in front), no OAuth for MCP clients, no
+  rate limits, no spending limits.
+- **No encrypted backups** beyond the bucket's own encryption at rest, and no deletion of a tenant
+  or a user. Scheduled backups exist only with `backup_url` (the cloud deployments set it).
 - **Limits inside a project** leave a limited reader without a dashboard, semantics or
   conflicts, and cannot apply to operators.
-- **Sources are local directories.** EKOS does not clone from a URL; mount a checkout.
+- **Sources are local directories.** The console does not clone; mount a checkout, or run the git
+  sync beside it (`ekos-git-sync`, section 10).
 - **Evaluation runs** (`ekos eval run`) write beside the sources and do not work for a project
   kept in the home.
 - The image is `linux/amd64`.
@@ -390,4 +501,5 @@ described in [operator-workflow.md](operator-workflow.md).
 | Settings | `deploy/.env`; every one is described in `deploy/.env.example` |
 | Design | RFCs 0178–0183 in `ekos/docs/rfcs/` |
 | An offline install package of the CLI | `scripts/package-release.sh` → `dist/ekos-<version>-release.tar.gz` |
+| Cloud deployments | `deploy/terraform` (modules and examples for Azure, Google Cloud, AWS), `deploy/helm/ekos`; RFC 0232 |
 | A check of a whole deployment | `deploy/e2e/run.sh`: the image, a test identity provider, two tenants, a group from a claim, an MCP client, the pages in a browser, backup and restore |

@@ -1,0 +1,24 @@
+subscription_id = "00000000-0000-0000-0000-000000000000"
+location        = "westeurope"
+compute         = "vm" # vm | container | kubernetes
+
+# VM: SSH key (Azure requires one) and who may SSH in; the console is on https://<name>-xxxxxx.<region>.cloudapp.azure.com
+ssh_public_key = "ssh-ed25519 AAAA... you@laptop"
+admin_cidrs    = []
+
+# Sign-in with Entra ID. The app registration's redirect URI is <url>/api/auth/callback (see `terraform output url`).
+oidc = {
+  issuer       = "https://login.microsoftonline.com/<tenant-id>/v2.0"
+  client_id    = "<application-id>"
+  write_values = "<group-object-id-of-operators>"
+}
+owners = "you@example.com"
+# oidc_client_secret = set with TF_VAR_oidc_client_secret
+
+# Model keys and other secret settings go to Key Vault (set with TF_VAR_secrets='{...}' rather than in a file).
+# secrets = { OPENAI_API_KEY = "sk-..." }
+
+git_repos = [
+  "shop=https://github.com/acme/shop.git#main",
+]
+# git_token = set with TF_VAR_git_token

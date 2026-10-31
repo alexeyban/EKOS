@@ -1,0 +1,25 @@
+#!/bin/bash
+# Format the data disk once, mount it at /var/lib/ekos-data, create the directories the
+# containers use (owned by the image's user, uid 1000). Never formats a disk that has a
+# filesystem: a VM rebuilt over an existing disk keeps its data (RFC 0232).
+set -euo pipefail
+DEVICE="${device}"
+MOUNT=/var/lib/ekos-data
+
+for _ in $(seq 1 60); do
+    [ -e "$DEVICE" ] && break
+    sleep 5
+done
+[ -e "$DEVICE" ] || { echo "data disk $DEVICE not found" >&2; exit 1; }
+DEVICE=$(readlink -f "$DEVICE")
+
+if ! blkid "$DEVICE" >/dev/null 2>&1; then
+    mkfs.ext4 -q -L ekos-data "$DEVICE"
+fi
+UUID=$(blkid -s UUID -o value "$DEVICE")
+mkdir -p "$MOUNT"
+grep -q "$UUID" /etc/fstab || echo "UUID=$UUID $MOUNT ext4 defaults,nofail,discard 0 2" >> /etc/fstab
+mountpoint -q "$MOUNT" || mount "$MOUNT"
+
+mkdir -p "$MOUNT/home" "$MOUNT/sources" "$MOUNT/caddy"
+chown 1000:1000 "$MOUNT/home" "$MOUNT/sources"

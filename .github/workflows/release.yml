@@ -322,6 +322,17 @@ jobs:
           # Not root.
           [ "$(docker exec ekos-smoke id -u)" = "1000" ]
           docker rm -f ekos-smoke
+          # RFC 0232: what the cloud deployments run is in the image — the git sync, the secrets
+          # entrypoint, and an `ekos` built with object storage (without it a restore is refused
+          # before any connection; with it, and no network, the connection fails).
+          docker run --rm ekos:build test -x /usr/local/bin/ekos-git-sync
+          docker run --rm ekos:build test -x /usr/local/bin/ekos-entrypoint
+          out=$(docker run --rm --network none ekos:build \
+            ekos home restore --from s3://ekos-smoke/x/ --home /tmp/empty 2>&1 || true)
+          if printf '%s' "$out" | grep -q 'built without object storage'; then
+            echo "::error::the image's ekos was built without the object-storage feature"
+            exit 1
+          fi
 
       - name: Push
         if: github.ref_type == 'tag'

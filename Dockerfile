@@ -29,9 +29,13 @@ COPY ekos ./ekos
 
 # Lower this on a machine short of memory: each parallel rustc job can take over a gigabyte.
 ARG CARGO_BUILD_JOBS=""
+# RFC 0232: the image is what runs in a cloud, so it can back up to S3, Azure Blob Storage and
+# Google Cloud Storage (`ekos home backup --to`). Only the object-storage client: the
+# `distributed` feature stays out (RFC 0113). Empty builds default features only.
+ARG EKOS_FEATURES="object-storage"
 
-# Default features only, as in release.yml: the `distributed` feature must never be in a stock
-# build (RFC 0113).
+# The `distributed` feature must never be in a stock build (RFC 0113); `object-storage` (above) is
+# not it.
 #
 # No BuildKit cache mounts, deliberately: a distribution's own Docker package often ships
 # without the buildx component (Ubuntu's `docker.io` does), and `RUN --mount` then fails the
@@ -43,6 +47,7 @@ ARG CARGO_BUILD_JOBS=""
 RUN cd ekos \
     && if [ -z "$CARGO_BUILD_JOBS" ]; then unset CARGO_BUILD_JOBS; fi \
     && cargo build --release --locked -p ekos ${CARGO_BUILD_JOBS:+--jobs "$CARGO_BUILD_JOBS"} \
+        ${EKOS_FEATURES:+--features "$EKOS_FEATURES"} \
     && cp target/release/ekos /ekos-bin
 
 # ── 2. The console UI ─────────────────────────────────────────────────────────
@@ -75,6 +80,10 @@ RUN uv sync --frozen --no-dev --no-install-project --no-build
 COPY web/api/app ./app
 COPY --from=ui /ui/dist /opt/ekos/ui/dist
 COPY --from=binary /ekos-bin /usr/local/bin/ekos
+# RFC 0232: the git sync the cloud deployments run beside the console, from this same image.
+COPY scripts/ekos-git-sync.py /usr/local/bin/ekos-git-sync
+# RFC 0232: secrets mounted as files (EKOS_SECRETS_DIR) become environment variables.
+COPY scripts/ekos-entrypoint.sh /usr/local/bin/ekos-entrypoint
 COPY LICENSE /opt/ekos/LICENSE
 
 # Never root. The home is created and owned here so a new named volume mounted over it starts
@@ -109,4 +118,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"]
 
+ENTRYPOINT ["/usr/local/bin/ekos-entrypoint"]
 CMD ["uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
