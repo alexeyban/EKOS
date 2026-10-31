@@ -44,6 +44,47 @@ def test_a_new_console_takes_over_and_the_old_one_learns_it_lost(tmp_path: Path)
     assert cloud._read(new.path).id == "new"
 
 
+async def test_a_displaced_console_restarted_by_its_platform_stands_by(tmp_path: Path) -> None:
+    # Seen on Azure Container Apps during a revision rollout: the old console stood down and
+    # exited, the platform restarted it, it took the lease back, the new one exited and was
+    # restarted in turn — a takeover every 30 s and neither revision ever healthy.
+    clock = Clock()
+    old = cloud.InstanceLease(tmp_path, instance_id="old-1", host="rev1", clock=clock, interval=10)
+    old.take()
+    new = cloud.InstanceLease(tmp_path, instance_id="new-1", host="rev2", clock=clock, interval=10)
+    assert new.take() is not None
+    assert cloud._read(new.path).displaced == "rev1"
+
+    restarted = cloud.InstanceLease(
+        tmp_path, instance_id="old-2", host="rev1", clock=clock, interval=0.01
+    )
+    assert restarted.displaced_here() is not None
+    standby = asyncio.create_task(restarted.take_over())
+    await asyncio.sleep(0.05)
+    assert not standby.done()
+    assert new.beat() is True  # the new console keeps the lease
+
+    # A third rollout still takes over from the new one at once.
+    third = cloud.InstanceLease(tmp_path, instance_id="x-1", host="rev3", clock=clock)
+    assert third.displaced_here() is None
+
+    # When the holder stops (here: its heartbeat goes stale), the one standing by takes over.
+    clock.now += 31
+    await asyncio.wait_for(standby, 1)
+    assert cloud._read(new.path).id == "old-2"
+    assert cloud._read(new.path).displaced == ""
+
+
+def test_a_console_restarted_on_the_same_host_is_not_held_back(tmp_path: Path) -> None:
+    # One VM: the console's own restart is not a displaced one.
+    clock = Clock()
+    cloud.InstanceLease(tmp_path, instance_id="a-1", host="vm", clock=clock).take()
+    again = cloud.InstanceLease(tmp_path, instance_id="a-2", host="vm", clock=clock)
+    assert again.displaced_here() is None
+    again.take()
+    assert cloud._read(again.path).displaced == ""
+
+
 def test_a_stale_holder_is_not_waited_for(tmp_path: Path) -> None:
     clock = Clock()
     cloud.InstanceLease(tmp_path, instance_id="dead", clock=clock, interval=10).take()

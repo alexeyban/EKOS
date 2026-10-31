@@ -72,6 +72,9 @@ class Holder:
     generation: int
     host: str
     heartbeat: float
+    # The host this holder took the lease from while that host's console was alive. A console
+    # restarted there stands by instead of taking the lease back (see `take_over`).
+    displaced: str = ""
 
 
 def _read(path: Path) -> Holder | None:
@@ -82,6 +85,7 @@ def _read(path: Path) -> Holder | None:
             generation=int(data["generation"]),
             host=str(data.get("host", "")),
             heartbeat=float(data["heartbeat"]),
+            displaced=str(data.get("displaced", "")),
         )
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -97,6 +101,7 @@ def _write(path: Path, holder: Holder) -> None:
                 "generation": holder.generation,
                 "host": holder.host,
                 "heartbeat": holder.heartbeat,
+                "displaced": holder.displaced,
             }
         )
     )
@@ -114,12 +119,15 @@ class InstanceLease:
         interval: float = 10.0,
         clock: Callable[[], float] = time.time,
         instance_id: str | None = None,
+        host: str | None = None,
     ) -> None:
         self.path = control / LEASE
         self.interval = interval
         self.clock = clock
-        self.id = instance_id or f"{socket.gethostname()}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        self.host = host or socket.gethostname()
+        self.id = instance_id or f"{self.host}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
         self.generation = 0
+        self.displaced = ""
 
     def stale(self, holder: Holder) -> bool:
         return self.clock() - holder.heartbeat > 3 * self.interval
@@ -130,11 +138,10 @@ class InstanceLease:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         previous = _read(self.path)
         self.generation = (previous.generation if previous else 0) + 1
-        _write(
-            self.path,
-            Holder(self.id, self.generation, socket.gethostname(), self.clock()),
-        )
-        if previous is None or previous.id == self.id or self.stale(previous):
+        alive = previous is not None and previous.id != self.id and not self.stale(previous)
+        self.displaced = previous.host if alive and previous.host != self.host else ""
+        _write(self.path, self._holder())
+        if not alive:
             return None
         log.warning(
             "taking over from console %s on %s (generation %d → %d)",
@@ -145,18 +152,46 @@ class InstanceLease:
         )
         return previous
 
+    def displaced_here(self) -> Holder | None:
+        """The live holder that took the lease from this host, if there is one: this console is
+        the old one, restarted by its platform after it stood down."""
+        current = _read(self.path)
+        if current is None or current.id == self.id or self.stale(current):
+            return None
+        return current if current.displaced == self.host else None
+
     async def take_over(self) -> None:
         """`take`, then give a live previous holder one heartbeat and a margin to see the new id
-        and stop before this one starts writing."""
+        and stop before this one starts writing.
+
+        A console restarted on a host whose console was displaced waits instead, until that
+        holder stops: otherwise a platform that restarts an exited container (Container Apps
+        during a revision rollout, seen on Azure) brings the old console back, it takes the
+        lease back, the new one exits and is restarted in turn, and neither stays up."""
+        holder = self.displaced_here()
+        if holder is not None:
+            log.warning(
+                "console %s on %s took over from this host; standing by until it stops",
+                holder.id,
+                holder.host,
+            )
+            # Another machine writes the lease file: nothing to wait on but the file itself.
+            while True:
+                await asyncio.sleep(self.interval)
+                if self.displaced_here() is None:
+                    break
         if self.take() is not None:
             await asyncio.sleep(self.interval * 1.5)
+
+    def _holder(self) -> Holder:
+        return Holder(self.id, self.generation, self.host, self.clock(), self.displaced)
 
     def beat(self) -> bool:
         """Renew the heartbeat. False when another instance holds the lease: this one must stop."""
         current = _read(self.path)
         if current is not None and current.id != self.id:
             return False
-        _write(self.path, Holder(self.id, self.generation, socket.gethostname(), self.clock()))
+        _write(self.path, self._holder())
         return True
 
     async def hold(self, on_lost: Callable[[], None]) -> None:
