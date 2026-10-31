@@ -53,8 +53,8 @@ pub fn observe_warnings(observe: &ObserveConfig, root: &Path) -> Vec<Finding> {
             out.push(Finding {
                 code: "ignore-pattern-looks-like-a-path",
                 detail: format!(
-                    "'{pat}' looks like a path or glob, but ignore-patterns match a directory \
-                     NAME exactly — so this matches nothing. Use just the directory name."
+                    "'{pat}' looks like a path or glob, but ignore-patterns match a file or \
+                     directory NAME exactly — so this matches nothing. Use just the name."
                 ),
             });
         }
@@ -69,11 +69,32 @@ fn looks_like_a_path_or_glob(pat: &str) -> bool {
         || pat.contains('*')
         || pat.contains('?')
         || pat.contains('[')
-        // a leading-dot + extension shape like ".log" or "*.tmp" (the '*' case is already caught)
-        || (pat.starts_with('.') && pat[1..].contains('.'))
-        || (!pat.starts_with('.') && pat.rsplit_once('.').is_some_and(|(stem, ext)| {
-            !stem.is_empty() && !ext.is_empty() && ext.len() <= 4
-        }))
+        // an extension written as a pattern, ".log" for `*.log` (the '*' case is already caught).
+        // A whole file name, `build.rs` or `.env.local`, is not flagged: observers skip a file whose
+        // name equals a pattern (`ScanContext::is_ignored` checks every path component).
+        || (pat.starts_with('.') && !pat[1..].contains('.') && pat.len() <= 5 && is_known_extension(&pat[1..]))
+}
+
+/// Extensions someone may write as `.ext` meaning "every file with this extension".
+fn is_known_extension(ext: &str) -> bool {
+    matches!(
+        ext,
+        "log"
+            | "tmp"
+            | "bak"
+            | "swp"
+            | "pyc"
+            | "o"
+            | "so"
+            | "class"
+            | "jar"
+            | "zip"
+            | "gz"
+            | "tar"
+            | "csv"
+            | "sql"
+            | "json"
+    )
 }
 
 pub fn build_validate_report(config_path: &Path, root: &Path) -> ValidateReport {
@@ -277,6 +298,7 @@ mod tests {
                 "src/fixtures",
                 "*.tmp",
                 "build.rs",
+                ".log",
                 "node_modules",
             ],
         );
@@ -284,13 +306,22 @@ mod tests {
             .iter()
             .filter(|f| f.code == "ignore-pattern-looks-like-a-path")
             .count();
-        // src/fixtures (has /), *.tmp (has *), build.rs (stem.ext) → 3
+        // src/fixtures (has /), *.tmp (has *), .log (an extension) → 3; build.rs is a file name
         assert_eq!(flagged, 3);
 
         // plain directory names — including dotfiles — are not flagged
         let clean = observe(
             &[],
-            &["target", "node_modules", ".git", ".venv", "fixtures"],
+            &[
+                "target",
+                "node_modules",
+                ".git",
+                ".venv",
+                "fixtures",
+                "build.rs",
+                ".env.local",
+                "mysql-sakila-insert-data.sql",
+            ],
         );
         assert!(
             !observe_warnings(&clean, tmp.path())

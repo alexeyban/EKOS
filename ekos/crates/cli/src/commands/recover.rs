@@ -865,11 +865,11 @@ fn register_file_analysis_passes(
 }
 
 /// Whether a walked entry is a directory named by one of the `[observe]` ignore patterns.
+/// A directory or file whose name is an ignore pattern, as the observers decide it
+/// (`ScanContext::is_ignored`): a file named in `ignore-patterns` is skipped here too.
 fn is_ignored_dir(entry: &walkdir::DirEntry, ignore: &[String]) -> bool {
-    entry.file_type().is_dir() && {
-        let name = entry.file_name().to_str().unwrap_or("");
-        ignore.iter().any(|p| name == p.as_str())
-    }
+    let name = entry.file_name().to_str().unwrap_or("");
+    entry.depth() > 0 && ignore.iter().any(|p| name == p.as_str())
 }
 
 /// The extensions the dependency scan reads (RFC 0019).
