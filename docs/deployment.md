@@ -474,8 +474,18 @@ light traffic, 10 GB of backups; checked on 2026-10-31. Estimates, not quotes:
 every module with mocked providers (which resources each `compute` and `exposure` creates, the
 presets, the platform limits on start probes); `helm lint` and `helm template` with each preset;
 the image's backup to and restore from S3-compatible storage, git sync, entrypoint and
-first-start restore against MinIO. **No deployment has been applied to a real Azure, Google Cloud
-or AWS account yet** (RFC 0232 §5).
+first-start restore against MinIO. **Applied for real once: Azure, `compute = "vm"`** (2026-10-31,
+through Azure Pipelines with a federated service connection and a private ACR image): HTTPS from
+Let's Encrypt, Key Vault secrets, git sync, a project compiled from the console, a backup to Blob
+Storage and a restore on first start all worked; then everything was destroyed. Google Cloud, AWS
+and the `container` / `kubernetes` options have not been applied yet.
+- **A private registry on Azure**: set `acr_id` to the registry's resource id. The deployment's
+  identity gets AcrPull (and AKS's kubelet); the VM signs docker in with that identity at every
+  start, Container Apps uses its registry identity. No registry password exists.
+- **On a VM, the home disk's size is its speed**: a 32 GiB premium disk is a P4 (120 IOPS). The
+  first Azure run's 142k-object commit took 48 minutes on a network disk even at P20, because each
+  synchronous write waits on the disk's latency: keep `home_size_gb` at 128 or more, and exclude
+  data dumps (one `INSERT` per row) from a project's sources.
 
 ## What is not built
 
