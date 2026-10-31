@@ -2119,6 +2119,40 @@ mod tests {
     use ekos_compiler_core::config::{DocumentSemanticsConfig, LlmConfig};
     use tempfile::tempdir;
 
+    /// Real bug, found on Azure Container Apps 2026-10-31: the build skipped Sakila's data
+    /// scripts named in `ignore-patterns`, but recover's own SQL walk skipped only directories,
+    /// read all nine and committed 142k objects. A file named there is skipped by every walk.
+    #[test]
+    fn the_direct_walks_skip_a_file_named_in_ignore_patterns() {
+        let tmp = tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("db/target")).unwrap();
+        for f in ["db/schema.sql", "db/insert-data.sql", "db/target/x.sql"] {
+            std::fs::write(tmp.path().join(f), "SELECT 1;").unwrap();
+        }
+        let ignore = vec!["target".to_string(), "insert-data.sql".to_string()];
+        let mut seen: Vec<String> = WalkDir::new(tmp.path())
+            .into_iter()
+            .filter_entry(|e| !is_ignored_dir(e, &ignore))
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        seen.sort();
+        assert_eq!(seen, ["schema.sql"]);
+
+        // The walk's own root is never skipped, whatever its name.
+        let root = tmp.path().join("db/target");
+        assert_eq!(
+            WalkDir::new(&root)
+                .into_iter()
+                .filter_entry(|e| !is_ignored_dir(e, &ignore))
+                .filter_map(Result::ok)
+                .filter(|e| e.file_type().is_file())
+                .count(),
+            1
+        );
+    }
+
     /// Real bug, found live 2026-08-25/26: every `collect_*_artifact_ids` function except
     /// `collect_crypto_artifact_ids` passed *every* historical artifact for a real target
     /// through, not just the current one — harmless when a target only ever has one real
