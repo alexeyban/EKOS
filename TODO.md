@@ -6964,8 +6964,9 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] Helm chart `deploy/helm/ekos` (one replica, Recreate, CSI secrets, git-sync sidecar)
 - [x] CI `deploy` job: terraform fmt + validate, helm lint + template, script tests
 - [x] Azure `vm` applied for real through Azure Pipelines, demoed and destroyed (2026-10-31, devlog_315; private repo inbox0216/ekos-deploy)
-- [ ] Apply the rest: Azure container/kubernetes, Google Cloud, AWS
-- [ ] Ledger commit on a network disk is write-latency-bound (48 min for 142k objects on Azure, unchanged from P4 to P20): batch or group-commit the fact writes
+- [x] Azure `container` (Container Apps) applied, demoed: rollout lease ping-pong, file names in `ignore-patterns` read by recover, 504 on a slow MCP answer, `logs_destination` — all fixed (2026-11-01, devlog_316)
+- [ ] Apply the rest: Azure kubernetes, Google Cloud, AWS
+- [ ] Ledger commit on a network disk is write-latency-bound (48 min for 142k objects on an Azure disk, unchanged from P4 to P20; ~100 ms per object on Azure Files NFS, 3½ h for 142k): batch or group-commit the fact writes
 - [x] Restore from the newest backup on first start over an empty home (2026-10-31, devlog_314; a failed read stops the start)
 - [x] `exposure = public | private` for the console's address: internal Container Apps environment + private DNS, Cloud Run internal ingress, internal ALB on ECS and EKS, `gce-internal` on GKE (devlog_314)
 - [ ] Private endpoints for the secret stores and backup buckets (needs Terraform run from inside the network)

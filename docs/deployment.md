@@ -426,7 +426,10 @@ What each deployment creates and how it behaves:
   by hand.
 - **One console at a time.** Container platforms briefly run a new revision beside the old one; the
   console's instance lease (`EKOS_CONSOLE_INSTANCE_LEASE`) makes the new one take over and the old
-  one stop. Never scale the console beyond one replica.
+  one stop. A platform that restarts the stopped console (Container Apps does) finds it waiting
+  while the new one is alive, instead of taking the lease back; consoles older than `21230c3` did
+  take it back, so the first rollout onto a newer image may need the old revision deactivated by
+  hand. Never scale the console beyond one replica.
 - **Kubernetes** without a `domain` is reached with `kubectl -n ekos port-forward svc/ekos 8000:80`.
   With a `domain`:
   - **GKE**: a reserved global address and a Google-managed certificate. Point the domain's A
@@ -478,7 +481,9 @@ first-start restore against MinIO. **Applied for real once: Azure, `compute = "v
 through Azure Pipelines with a federated service connection and a private ACR image): HTTPS from
 Let's Encrypt, Key Vault secrets, git sync, a project compiled from the console, a backup to Blob
 Storage and a restore on first start all worked; then everything was destroyed. Google Cloud, AWS
-and the `container` / `kubernetes` options have not been applied yet.
+and Azure `kubernetes` have not been applied yet. Azure `container` (Container Apps) was applied the
+same day: the rollout lease, `ignore-patterns` for file names, a 504 for a slow knowledge server and
+the environment's `logs_destination` were fixed from what it showed (devlog_316).
 - **A private registry on Azure**: set `acr_id` to the registry's resource id. The deployment's
   identity gets AcrPull (and AKS's kubelet); the VM signs docker in with that identity at every
   start, Container Apps uses its registry identity. No registry password exists.
@@ -486,6 +491,9 @@ and the `container` / `kubernetes` options have not been applied yet.
   first Azure run's 142k-object commit took 48 minutes on a network disk even at P20, because each
   synchronous write waits on the disk's latency: keep `home_size_gb` at 128 or more, and exclude
   data dumps (one `INSERT` per row) from a project's sources.
+- **On Azure Files NFS (Container Apps), a commit costs ~100 ms per object**: 142k objects took
+  3½ hours, 3k objects 5 minutes. Name generated SQL and data dumps in `[observe] ignore-patterns`
+  (exact file or directory names, not globs).
 
 ## What is not built
 
