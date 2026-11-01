@@ -829,6 +829,20 @@ test <name>` connects read-only, checks a write is refused, and puts the census 
 to what was compiled. In the web console, a project's **Sources** tab does the same: add directories and databases (the
 password goes to the server's keychain, never to `ekos.toml`), test, and analyse with Init & compile. On iDempiere,
 from an empty project in a browser: census and compiled counts equal for every kind.
+
+PostgreSQL and ClickHouse databases are declared the same way (RFC 0235): `kind = "postgres"` with
+`connect = "host[:port]/database"` and `owners` the schemas, or `kind = "clickhouse"` with
+`connect = "http[s]://host[:port]"` and `owners` the ClickHouse databases. PostgreSQL is read through
+`pg-live`'s read-only session (`default_transaction_read_only`, timeouts) and reconciled against the
+server's own counts; every ClickHouse catalog query carries `readonly=1`. Both probe a write that
+must be refused and compile to the same `origin: live` objects as Oracle — tables with keys and
+foreign keys, views, PL/pgSQL routines and triggers through the readers files use — and a dropped
+object leaves the model. Profiles and the application dictionary stay Oracle-only.
+
+```bash
+ekos database add shop --kind postgres --connect db.local:5432/shop --user shop_ro --password-env SHOP_PW --owner public
+ekos database add wh --kind clickhouse --connect https://ch.local:8443 --user ro --password-env WH_PW --owner analytics
+```
 ### Write behaviour: how each table is updated and deleted (RFC 0212)
 
 Before copying a table incrementally you need to know whether every change moves its timestamp

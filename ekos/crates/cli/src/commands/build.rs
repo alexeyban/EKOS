@@ -6,6 +6,7 @@ use ekos_common::run_log;
 use ekos_compiler_core::EkosConfig;
 use ekos_kir::{KirEvidence, KirId, KirObject, ObjectKind, SourceLocation};
 use ekos_observation_sdk::{Observer, ScanContext, fingerprint_of, source_manifest};
+use ekos_plugin_clickhouse::catalog::{ChConnection, ClickHouseCatalogObserver};
 use ekos_plugin_clickhouse::{ClickHouseHttpClient, ClickHouseObserver};
 use ekos_plugin_confluence::{ConfluenceApiClient, ConfluenceObserver};
 use ekos_plugin_crypto::{CryptoObserver, ParquetExportReader};
@@ -22,6 +23,7 @@ use ekos_plugin_oracle::{
 };
 use ekos_plugin_pentaho::PentahoObserver;
 use ekos_plugin_perl::PerlObserver;
+use ekos_plugin_postgres::{LiveReader as PostgresLiveReader, PgConnection, PostgresObserver};
 use ekos_plugin_python::PythonObserver;
 use ekos_plugin_rust::RustObserver;
 use ekos_plugin_treasury::{DEFAULT_EXPLORER_URL, RealTreasuryClient, TreasuryObserver};
@@ -282,12 +284,32 @@ fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Ob
 /// RFC 0211: one observer per `[[databases]]` entry, with its name. Kept apart from the file
 /// observers: a database is live state, so it is read once per build — never once per source
 /// directory, and never skipped because the source tree's fingerprint is unchanged.
-fn database_observers(config: &EkosConfig) -> Vec<(String, Box<dyn Observer>)> {
+fn database_observers(config: &EkosConfig) -> Result<Vec<(String, Box<dyn Observer>)>> {
     config
         .databases
         .iter()
         .map(|d| {
             let observer: Box<dyn Observer> = match d.kind {
+                // RFC 0235.
+                ekos_compiler_core::DatabaseKind::Postgres => Box::new(PostgresObserver::new(
+                    d.name.clone(),
+                    Arc::new(PostgresLiveReader {
+                        connection: PgConnection::parse(&d.connect, &d.user, &d.password_env)
+                            .map_err(|e| anyhow::anyhow!("database {}: {e}", d.name))?,
+                        schemas: d.owners.clone(),
+                        run_id: format!("build/{}", d.name),
+                        redaction: config.redaction_config(),
+                    }),
+                )),
+                ekos_compiler_core::DatabaseKind::Clickhouse => {
+                    Box::new(ClickHouseCatalogObserver::new(
+                        d.name.clone(),
+                        ChConnection::parse(&d.connect, &d.user, &d.password_env)
+                            .map_err(|e| anyhow::anyhow!("database {}: {e}", d.name))?,
+                        d.owners.clone(),
+                        config.redaction_config(),
+                    ))
+                }
                 ekos_compiler_core::DatabaseKind::Oracle => Box::new(OracleObserver::new(
                     d.name.clone(),
                     Arc::new(OracleLiveReader {
@@ -309,7 +331,7 @@ fn database_observers(config: &EkosConfig) -> Vec<(String, Box<dyn Observer>)> {
                     }),
                 )),
             };
-            (d.name.clone(), observer)
+            Ok((d.name.clone(), observer))
         })
         .collect()
 }
@@ -326,7 +348,7 @@ async fn read_databases(
 ) -> Result<usize> {
     let redaction_config = config.redaction_config();
     let mut read = 0;
-    for (name, observer) in database_observers(config) {
+    for (name, observer) in database_observers(config)? {
         if only.is_some_and(|o| o != name) {
             continue;
         }

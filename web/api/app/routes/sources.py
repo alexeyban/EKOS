@@ -140,6 +140,8 @@ async def add_source(
 
 class DatabaseIn(BaseModel):
     name: str = Field(max_length=63)
+    # RFC 0235.
+    kind: Literal["oracle", "postgres", "clickhouse"] = "oracle"
     connect: str = Field(max_length=300)
     user: str = Field(max_length=128)
     # Sent once; kept in the keychain; never echoed.
@@ -156,13 +158,21 @@ async def add_database(
     settings: Settings = Depends(get_settings),
     principal: Principal = Depends(_OPERATOR),
 ) -> dict:
-    """Add an Oracle database: the password to the keychain, its variable's name to ekos.toml."""
+    """Add an Oracle, PostgreSQL or ClickHouse database: the password to the keychain, its
+    variable's name to ekos.toml."""
     _no_token(principal)
     tenant = _tenant(ws)
     variable = sources_write.secret_name(tenant.id, _project_name(ws), body.name)
     try:
         argv = sources_write.database_add_argv(
-            body.name, body.connect, body.user, variable, body.owners, body.profile, body.dictionary
+            body.name,
+            body.connect,
+            body.user,
+            variable,
+            body.owners,
+            body.profile,
+            body.dictionary,
+            body.kind,
         )
         sources_write.store_password(tenant, variable, body.password)
     except semantics_write.ReviewError as exc:

@@ -43,6 +43,7 @@ members = [
     "plugins/salesforce",
     "plugins/sap",
     "plugins/oracle",
+    "plugins/postgres",
     "plugins/fabric",
     "plugins/snowflake",
     "plugins/clickhouse",
@@ -113,6 +114,7 @@ ekos-marketing                     = { path = "crates/marketing", version = "1.1
 ekos-observation-sdk               = { path = "crates/observation-sdk", version = "1.1.0" }
 ekos-plugin-clickhouse             = { path = "plugins/clickhouse", version = "1.1.0" }
 ekos-plugin-oracle                 = { path = "plugins/oracle", version = "1.1.0" }
+ekos-plugin-postgres               = { path = "plugins/postgres", version = "1.1.0" }
 ekos-plugin-confluence             = { path = "plugins/confluence", version = "1.1.0" }
 ekos-plugin-crypto                 = { path = "plugins/crypto", version = "1.1.0" }
 ekos-plugin-elixir                 = { path = "plugins/elixir", version = "1.1.0" }

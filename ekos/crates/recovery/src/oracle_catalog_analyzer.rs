@@ -1,5 +1,7 @@
 //! RFC 0211 §3.5 — `OracleCatalogPass`: the live Oracle catalog (`ekos-plugin-oracle`'s
-//! artifacts) into KIR.
+//! artifacts) into KIR. RFC 0235: the same pass, parameterised by [`CatalogDialect`], reads the
+//! PostgreSQL (`ekos-plugin-postgres`) and ClickHouse (`ekos-plugin-clickhouse::catalog`) catalogs,
+//! which emit the same artifact shape; Oracle's output, ids and pass name are unchanged.
 //!
 //! - `Table` per table, in `SqlAnalyzerPass`'s property shape (`columns` with `not_null` /
 //!   `primary_key` / `unique`, `check_constraints` with predicates), plus `dialect: oracle`,
@@ -35,6 +37,70 @@ pub const LOGIC_VERSION: &str = "oracle-catalog/4";
 /// The custom kind of the per-owner summary object.
 pub const CATALOG_KIND: &str = "OracleCatalog";
 
+/// RFC 0235: which engine's catalog the artifacts describe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogDialect {
+    Oracle,
+    Postgres,
+    ClickHouse,
+}
+
+impl CatalogDialect {
+    /// The `dialect` stamped on every object, and the pass's name prefix.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Oracle => "oracle",
+            Self::Postgres => "postgres",
+            Self::ClickHouse => "clickhouse",
+        }
+    }
+
+    /// The `source_kind` of the observer's artifacts.
+    pub fn observer(self) -> &'static str {
+        match self {
+            Self::Oracle => "oracle",
+            Self::Postgres => "postgres",
+            Self::ClickHouse => "clickhouse-live",
+        }
+    }
+
+    /// The scheme of the artifacts' targets.
+    fn scheme(self) -> &'static str {
+        match self {
+            Self::Oracle => "oracle",
+            Self::Postgres => "postgres",
+            Self::ClickHouse => "clickhouse",
+        }
+    }
+
+    /// The custom kind of the per-owner summary object.
+    pub fn catalog_kind(self) -> &'static str {
+        match self {
+            Self::Oracle => CATALOG_KIND,
+            Self::Postgres => "PostgresCatalog",
+            Self::ClickHouse => "ClickHouseCatalog",
+        }
+    }
+
+    fn diagnostic(self, n: u8) -> String {
+        let prefix = match self {
+            Self::Oracle => "ORACLE",
+            Self::Postgres => "PGLIVE",
+            Self::ClickHouse => "CHLIVE",
+        };
+        format!("{prefix}{n:03}")
+    }
+
+    /// What a person calls the engine, in messages.
+    fn display(self) -> &'static str {
+        match self {
+            Self::Oracle => "Oracle",
+            Self::Postgres => "PostgreSQL",
+            Self::ClickHouse => "ClickHouse",
+        }
+    }
+}
+
 /// What one run recovered, for `ekos recover`'s summary.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct OracleCatalogStats {
@@ -59,10 +125,10 @@ pub struct OracleCatalogStats {
     pub dictionary_tables: usize,
 }
 
-fn live_id(prefix: &str, key: &str) -> KirId {
+fn live_id(d: CatalogDialect, prefix: &str, key: &str) -> KirId {
     KirId(Uuid::new_v5(
         &Uuid::NAMESPACE_URL,
-        format!("oracle-live-{prefix}:{key}").as_bytes(),
+        format!("{}-live-{prefix}:{key}", d.name()).as_bytes(),
     ))
 }
 
@@ -91,10 +157,10 @@ fn item(target: &str, data: &Value) -> Option<Item> {
 }
 
 /// Stamp the properties every live object carries.
-fn stamp(o: &mut KirObject, database: &str, owner: &str) {
+fn stamp(o: &mut KirObject, d: CatalogDialect, database: &str, owner: &str) {
     for (k, v) in [
         ("origin", json!("live")),
-        ("dialect", json!("oracle")),
+        ("dialect", json!(d.name())),
         ("database", json!(database)),
         ("owner", json!(owner)),
     ] {
@@ -120,8 +186,16 @@ struct TableConstraints {
     checks: Vec<Value>,
 }
 
-/// The pure mapping: every artifact `(target, data)` of one recover run → KIR.
+/// The pure mapping: every Oracle artifact `(target, data)` of one recover run → KIR.
 pub fn recover_catalog(artifacts: &[(String, Value)]) -> (KirGraph, OracleCatalogStats) {
+    recover_catalog_as(CatalogDialect::Oracle, artifacts)
+}
+
+/// [`recover_catalog`] for any dialect's artifacts.
+pub fn recover_catalog_as(
+    d: CatalogDialect,
+    artifacts: &[(String, Value)],
+) -> (KirGraph, OracleCatalogStats) {
     let mut graph = KirGraph::new();
     let mut stats = OracleCatalogStats::default();
     let mut items: Vec<Item> = Vec::new();
@@ -133,7 +207,7 @@ pub fn recover_catalog(artifacts: &[(String, Value)]) -> (KirGraph, OracleCatalo
     for (target, data) in artifacts {
         match data.get("kind").and_then(Value::as_str) {
             Some("catalog") => {
-                add_catalog(&mut graph, target, data);
+                add_catalog(&mut graph, d, target, data);
                 if let Some(objects) = data.get("objects").and_then(Value::as_array) {
                     listed.insert(
                         target.as_str(),
@@ -147,7 +221,7 @@ pub fn recover_catalog(artifacts: &[(String, Value)]) -> (KirGraph, OracleCatalo
             _ => {}
         }
     }
-    stats.stale_objects = drop_stale(&mut items, &listed);
+    stats.stale_objects = drop_stale(d, &mut items, &listed);
     items.sort_by(|a, b| a.target.cmp(&b.target));
     stats.invalid_objects = items
         .iter()
@@ -181,26 +255,26 @@ pub fn recover_catalog(artifacts: &[(String, Value)]) -> (KirGraph, OracleCatalo
     let mut tables: BTreeMap<(String, String, String), KirId> = BTreeMap::new();
     for i in items.iter().filter(|i| i.kind == "table") {
         let key = (i.database.clone(), i.owner.clone(), i.name.clone());
-        let id = add_table(&mut graph, i, constraints.get(&key));
+        let id = add_table(&mut graph, d, i, constraints.get(&key));
         tables.insert(key, id);
         stats.tables += 1;
     }
     for i in items.iter().filter(|i| i.kind == "foreign_key") {
-        if add_foreign_key(&mut graph, i, &tables) {
+        if add_foreign_key(&mut graph, d, i, &tables) {
             stats.foreign_keys += 1;
         } else {
             stats.foreign_keys_unresolved += 1;
         }
     }
     for i in items.iter().filter(|i| i.kind == "view") {
-        if add_view(&mut graph, i) {
+        if add_view(&mut graph, d, i) {
             stats.views += 1;
         } else {
             stats.views_unparsed += 1;
         }
     }
     for i in &items {
-        if let Some(s) = add_routine(&mut graph, i) {
+        if let Some(s) = add_routine(&mut graph, d, i) {
             let (t, r) = (&mut stats.routines, &s.routines);
             t.routines.routines += r.routines;
             t.routines.complete += r.complete;
@@ -258,10 +332,14 @@ fn read_dictionary(dictionary: &mut Dictionary, stats: &mut OracleCatalogStats, 
 }
 
 /// Drop objects an earlier read left behind that the newest catalog no longer lists; how many.
-fn drop_stale(items: &mut Vec<Item>, listed: &BTreeMap<&str, BTreeSet<&str>>) -> usize {
+fn drop_stale(
+    d: CatalogDialect,
+    items: &mut Vec<Item>,
+    listed: &BTreeMap<&str, BTreeSet<&str>>,
+) -> usize {
     let before = items.len();
     items.retain(|i| {
-        let catalog = format!("oracle://{}/{}", i.database, i.owner);
+        let catalog = format!("{}://{}/{}", d.scheme(), i.database, i.owner);
         match listed.get(catalog.as_str()) {
             Some(objects) => i
                 .target
@@ -311,7 +389,7 @@ fn check_sites(table: &str, expression: &str) -> Option<Vec<ekos_kir::predicates
     ))
 }
 
-fn add_catalog(graph: &mut KirGraph, target: &str, data: &Value) {
+fn add_catalog(graph: &mut KirGraph, d: CatalogDialect, target: &str, data: &Value) {
     let database = data["database"].as_str().unwrap_or_default();
     let owner = data["owner"].as_str().unwrap_or_default();
     let ev = graph.add_evidence(KirEvidence::new(
@@ -320,10 +398,10 @@ fn add_catalog(graph: &mut KirGraph, target: &str, data: &Value) {
     ));
     let mut o = KirObject::new(
         format!("{database}/{owner}"),
-        ObjectKind::Custom(CATALOG_KIND.into()),
+        ObjectKind::Custom(d.catalog_kind().into()),
     )
     .with_evidence(ev);
-    o.id = live_id("catalog", &format!("{database}:{owner}"));
+    o.id = live_id(d, "catalog", &format!("{database}:{owner}"));
     for k in [
         "family",
         "census",
@@ -340,11 +418,16 @@ fn add_catalog(graph: &mut KirGraph, target: &str, data: &Value) {
             o.properties.insert(k.into(), v.clone());
         }
     }
-    stamp(&mut o, database, owner);
+    stamp(&mut o, d, database, owner);
     graph.add_object(o);
 }
 
-fn add_table(graph: &mut KirGraph, i: &Item, c: Option<&TableConstraints>) -> KirId {
+fn add_table(
+    graph: &mut KirGraph,
+    d: CatalogDialect,
+    i: &Item,
+    c: Option<&TableConstraints>,
+) -> KirId {
     let single_unique =
         |col: &str| c.is_some_and(|c| c.unique.iter().any(|u| u.len() == 1 && u[0] == col));
     let pk_single = c
@@ -372,6 +455,9 @@ fn add_table(graph: &mut KirGraph, i: &Item, c: Option<&TableConstraints>) -> Ki
                 ("default", "default"),
                 ("comment", "description"),
                 ("profile", "profile"),
+                // RFC 0235: PostgreSQL identity and generated columns.
+                ("identity", "identity"),
+                ("generated", "generated"),
             ] {
                 if let Some(v) = col.get(from) {
                     out[to] = v.clone();
@@ -388,7 +474,11 @@ fn add_table(graph: &mut KirGraph, i: &Item, c: Option<&TableConstraints>) -> Ki
         ),
     ));
     let mut o = KirObject::new(&i.name, ObjectKind::Table).with_evidence(ev);
-    o.id = live_id("table", &format!("{}:{}.{}", i.database, i.owner, i.name));
+    o.id = live_id(
+        d,
+        "table",
+        &format!("{}:{}.{}", i.database, i.owner, i.name),
+    );
     o.properties.insert("columns".into(), Value::Array(columns));
     if let Some(c) = c.filter(|c| !c.checks.is_empty()) {
         o.properties
@@ -406,6 +496,12 @@ fn add_table(graph: &mut KirGraph, i: &Item, c: Option<&TableConstraints>) -> Ki
         ("temporary", "temporary"),
         ("partitioned", "partitioned"),
         ("iot_type", "iot_type"),
+        // RFC 0235: a PostgreSQL partition; a ClickHouse table's engine and keys.
+        ("partition", "partition"),
+        ("engine", "engine"),
+        ("sorting_key", "sorting_key"),
+        ("engine_primary_key", "engine_primary_key"),
+        ("partition_key", "partition_key"),
     ] {
         if let Some(v) = i.detail.get(from) {
             o.properties.insert(to.into(), v.clone());
@@ -414,12 +510,13 @@ fn add_table(graph: &mut KirGraph, i: &Item, c: Option<&TableConstraints>) -> Ki
     if let Some(s) = &i.status {
         o.properties.insert("status".into(), json!(s));
     }
-    stamp(&mut o, &i.database, &i.owner);
+    stamp(&mut o, d, &i.database, &i.owner);
     graph.add_object(o)
 }
 
 fn add_foreign_key(
     graph: &mut KirGraph,
+    d: CatalogDialect,
     i: &Item,
     tables: &BTreeMap<(String, String, String), KirId>,
 ) -> bool {
@@ -444,7 +541,7 @@ fn add_foreign_key(
         format!("foreign key {} {desc}", i.name),
     ));
     let mut rel = KirRelationship::new(RelationshipKind::ForeignKey, *from_id, *to_id);
-    rel.id = live_id("fk", &format!("{}:{}.{}", i.database, i.owner, i.name));
+    rel.id = live_id(d, "fk", &format!("{}:{}.{}", i.database, i.owner, i.name));
     rel.evidence.push(ev);
     for (k, v) in [
         ("fk_desc", json!(desc)),
@@ -459,42 +556,104 @@ fn add_foreign_key(
     true
 }
 
-/// A view through RFC 0169's reader: the dictionary holds the query only, so the `CREATE VIEW`
-/// head is restored around it, and the Oracle dialect's rewrites run first.
-fn add_view(graph: &mut KirGraph, i: &Item) -> bool {
+/// A view through RFC 0169's reader: the catalog holds the query only, so the `CREATE VIEW` head
+/// is restored around it, and the dialect's rewrites run first.
+fn add_view(graph: &mut KirGraph, d: CatalogDialect, i: &Item) -> bool {
     if i.detail.get("text_truncated").is_some() {
         return false;
     }
     let body = i.detail["text"].as_str().unwrap_or_default();
-    let sql = format!("CREATE OR REPLACE VIEW \"{}\" AS {body}\n;\n", i.name);
-    let parser = ekos_plugin_sql_dialect_oracle::OracleDialectParser;
-    let prepared = parser.preprocess(&sql);
-    let (view_graph, _) = recover_views(&i.target, &prepared, parser.sqlparser_dialect().as_ref());
+    let (view_graph, _) = match d {
+        CatalogDialect::Oracle => {
+            let sql = format!("CREATE OR REPLACE VIEW \"{}\" AS {body}\n;\n", i.name);
+            read_views(
+                &ekos_plugin_sql_dialect_oracle::OracleDialectParser,
+                &i.target,
+                &sql,
+            )
+        }
+        CatalogDialect::Postgres | CatalogDialect::ClickHouse => {
+            // `pg_get_viewdef` ends the query with `;`.
+            let body = body.trim().trim_end_matches(';');
+            let head = if i.detail["materialized"] == true {
+                "CREATE MATERIALIZED VIEW"
+            } else {
+                "CREATE VIEW"
+            };
+            let sql = format!("{head} \"{}\" AS {body}\n;\n", i.name.replace('"', "\"\""));
+            if d == CatalogDialect::Postgres {
+                read_views(
+                    &ekos_plugin_sql_dialect_postgres::PostgresDialectParser,
+                    &i.target,
+                    &sql,
+                )
+            } else {
+                read_views(
+                    &ekos_plugin_sql_dialect_clickhouse::ClickHouseDialectParser,
+                    &i.target,
+                    &sql,
+                )
+            }
+        }
+    };
     if view_graph.objects.is_empty() {
         return false;
     }
-    merge_stamped(graph, view_graph, i);
+    merge_stamped(graph, d, view_graph, i);
     true
 }
 
-/// A routine through RFC 0210's PL/SQL reader. The dictionary text starts at `FUNCTION name …`.
-fn add_routine(graph: &mut KirGraph, i: &Item) -> Option<PlSqlStats> {
-    if !matches!(
-        i.kind.as_str(),
-        "function" | "procedure" | "package_body" | "trigger"
-    ) {
-        return None;
-    }
-    let text = i.detail["text"].as_str().unwrap_or_default();
-    let sql = format!("CREATE OR REPLACE {}\n/\n", text.trim_end());
-    let (routine_graph, stats) = recover_plsql(&i.target, &sql, None);
-    merge_stamped(graph, routine_graph, i);
-    Some(stats)
+fn read_views(
+    parser: &dyn SqlDialectParser,
+    target: &str,
+    sql: &str,
+) -> (KirGraph, crate::view_analyzer::ViewStats) {
+    let prepared = parser.preprocess(sql);
+    recover_views(target, &prepared, parser.sqlparser_dialect().as_ref())
 }
 
-fn merge_stamped(graph: &mut KirGraph, mut part: KirGraph, i: &Item) {
+/// A routine: Oracle's through RFC 0210's PL/SQL reader (the dictionary text starts at
+/// `FUNCTION name …`); PostgreSQL's through RFC 0163's reader (`pg_get_functiondef` is the whole
+/// `CREATE OR REPLACE` statement) and its triggers through the trigger reader. ClickHouse has none.
+fn add_routine(graph: &mut KirGraph, d: CatalogDialect, i: &Item) -> Option<PlSqlStats> {
+    let text = i.detail["text"].as_str().unwrap_or_default();
+    match (d, i.kind.as_str()) {
+        (CatalogDialect::Oracle, "function" | "procedure" | "package_body" | "trigger") => {
+            let sql = format!("CREATE OR REPLACE {}\n/\n", text.trim_end());
+            let (routine_graph, stats) = recover_plsql(&i.target, &sql, None);
+            merge_stamped(graph, d, routine_graph, i);
+            Some(stats)
+        }
+        (CatalogDialect::Postgres, "function" | "procedure") => {
+            let sql = format!("{};\n", text.trim_end().trim_end_matches(';'));
+            let (routine_graph, s) = crate::plpgsql_analyzer::recover_routines(&i.target, &sql);
+            merge_stamped(graph, d, routine_graph, i);
+            Some(PlSqlStats {
+                routines: s,
+                ..Default::default()
+            })
+        }
+        (CatalogDialect::Postgres, "trigger") => {
+            let sql = format!("{};\n", text.trim_end().trim_end_matches(';'));
+            let (trigger_graph, s) = crate::trigger_analyzer::recover_triggers_in(
+                &i.target,
+                &sql,
+                &sqlparser::dialect::PostgreSqlDialect {},
+                None,
+            );
+            merge_stamped(graph, d, trigger_graph, i);
+            Some(PlSqlStats {
+                triggers: s.triggers,
+                ..Default::default()
+            })
+        }
+        _ => None,
+    }
+}
+
+fn merge_stamped(graph: &mut KirGraph, d: CatalogDialect, mut part: KirGraph, i: &Item) {
     for o in &mut part.objects {
-        stamp(o, &i.database, &i.owner);
+        stamp(o, d, &i.database, &i.owner);
         if let Some(s) = &i.status {
             o.properties.insert("status".into(), json!(s));
         }
@@ -505,21 +664,34 @@ fn merge_stamped(graph: &mut KirGraph, mut part: KirGraph, i: &Item) {
     graph.evidence.extend(part.evidence);
 }
 
-/// The pass over every `oracle` observation artifact of the store.
+/// The pass over every observation artifact of one dialect's catalog observer.
 pub struct OracleCatalogPass {
+    dialect: CatalogDialect,
     pass_id: String,
     artifact_ids: Vec<ArtifactId>,
     stats: Arc<Mutex<OracleCatalogStats>>,
 }
 
 impl OracleCatalogPass {
+    /// The Oracle pass (RFC 0211).
     pub fn new(
         workspace_name: impl Into<String>,
         artifact_ids: Vec<ArtifactId>,
         stats: Arc<Mutex<OracleCatalogStats>>,
     ) -> Self {
+        Self::for_dialect(CatalogDialect::Oracle, workspace_name, artifact_ids, stats)
+    }
+
+    /// RFC 0235: the pass for any dialect; Oracle's is named `oracle-catalog:<workspace>`.
+    pub fn for_dialect(
+        dialect: CatalogDialect,
+        workspace_name: impl Into<String>,
+        artifact_ids: Vec<ArtifactId>,
+        stats: Arc<Mutex<OracleCatalogStats>>,
+    ) -> Self {
         Self {
-            pass_id: format!("oracle-catalog:{}", workspace_name.into()),
+            dialect,
+            pass_id: format!("{}-catalog:{}", dialect.name(), workspace_name.into()),
             artifact_ids,
             stats,
         }
@@ -554,19 +726,20 @@ impl CompilerPass for OracleCatalogPass {
                 )),
                 Ok(None) => {}
                 Err(e) => ctx.diagnostics.lock().unwrap().warning(
-                    "ORACLE001",
-                    format!("cannot read oracle artifact {id}: {e}"),
+                    self.dialect.diagnostic(1),
+                    format!("cannot read {} artifact {id}: {e}", self.dialect.name()),
                 ),
             }
         }
-        let (graph, stats) = recover_catalog(&artifacts);
+        let (graph, stats) = recover_catalog_as(self.dialect, &artifacts);
         if stats.views_unparsed > 0 {
             ctx.diagnostics.lock().unwrap().warning(
-                "ORACLE002",
+                self.dialect.diagnostic(2),
                 format!(
-                    "{} view(s) from the Oracle catalog could not be read; they are counted in \
+                    "{} view(s) from the {} catalog could not be read; they are counted in \
                      the catalog census but have no View object",
-                    stats.views_unparsed
+                    stats.views_unparsed,
+                    self.dialect.display()
                 ),
             );
         }
@@ -782,8 +955,183 @@ mod tests {
         let ids = |g: &KirGraph| g.objects.iter().map(|o| o.id).collect::<Vec<_>>();
         assert_eq!(ids(&a), ids(&b));
         assert_ne!(
-            live_id("table", "erp:ADEMPIERE.C_INVOICE"),
-            live_id("table", "erp:OTHER.C_INVOICE")
+            live_id(CatalogDialect::Oracle, "table", "erp:ADEMPIERE.C_INVOICE"),
+            live_id(CatalogDialect::Oracle, "table", "erp:OTHER.C_INVOICE")
+        );
+    }
+
+    /// RFC 0235: generalising the pass must not move an Oracle id (a ledger already holds them).
+    #[test]
+    fn oracle_ids_keep_their_rfc_0211_key() {
+        let expected = KirId(Uuid::new_v5(
+            &Uuid::NAMESPACE_URL,
+            b"oracle-live-table:erp:ADEMPIERE.C_INVOICE",
+        ));
+        let (g, _) = recover_catalog(&catalog());
+        assert!(g.objects.iter().any(|o| o.id == expected));
+    }
+
+    fn pg_object(kind: &str, name: &str, detail: Value) -> (String, Value) {
+        (
+            format!("postgres://shop/public/{kind}/{name}"),
+            json!({ "kind": "object", "database": "shop",
+                    "object": { "kind": kind, "owner": "public", "name": name, "status": null, "detail": detail } }),
+        )
+    }
+
+    /// What `ekos-plugin-postgres` emits for a small schema.
+    fn pg_catalog() -> Vec<(String, Value)> {
+        vec![
+            (
+                "postgres://shop/public".into(),
+                json!({ "kind": "catalog", "database": "shop", "owner": "public", "family": "pg_catalog",
+                        "census": { "TABLE": { "valid": 2, "invalid": 0 } },
+                        "write_check": { "result": "refused_by_server", "message": "permission denied" } }),
+            ),
+            pg_object(
+                "table",
+                "customers",
+                json!({ "columns": [
+                { "name": "id", "data_type": "integer", "nullable": false, "identity": "a" }] }),
+            ),
+            pg_object(
+                "table",
+                "orders",
+                json!({ "columns": [
+                { "name": "id", "data_type": "integer", "nullable": false },
+                { "name": "customer_id", "data_type": "integer", "nullable": true },
+                { "name": "total", "data_type": "numeric(10,2)", "nullable": false, "default": "0" }],
+                "comment": "One order" }),
+            ),
+            pg_object(
+                "primary_key",
+                "orders.orders_pkey",
+                json!({ "table": "orders", "columns": ["id"] }),
+            ),
+            pg_object(
+                "primary_key",
+                "customers.customers_pkey",
+                json!({ "table": "customers", "columns": ["id"] }),
+            ),
+            pg_object(
+                "check_constraint",
+                "orders.orders_total_check",
+                json!({ "table": "orders", "columns": ["total"], "condition": "total >= 0" }),
+            ),
+            pg_object(
+                "foreign_key",
+                "orders.orders_customer_fk",
+                json!({ "table": "orders", "columns": ["customer_id"],
+                "references_owner": "public", "references_table": "customers", "references_columns": ["id"],
+                "validated": true, "on_delete": "CASCADE" }),
+            ),
+            pg_object(
+                "view",
+                "big_orders",
+                json!({ "text": " SELECT id, total\n   FROM orders\n  WHERE total > 100::numeric;" }),
+            ),
+            pg_object(
+                "function",
+                "order_total(p integer)",
+                json!({ "language": "plpgsql", "text":
+                "CREATE OR REPLACE FUNCTION public.order_total(p integer)\n RETURNS numeric\n LANGUAGE plpgsql\nAS $function$\nDECLARE v numeric;\nBEGIN\n  SELECT total INTO v FROM orders WHERE id = p;\n  RETURN v;\nEND;\n$function$\n" }),
+            ),
+            pg_object(
+                "trigger",
+                "orders.orders_audit",
+                json!({ "table": "orders", "text":
+                "CREATE TRIGGER orders_audit AFTER INSERT ON public.orders FOR EACH ROW EXECUTE FUNCTION public.order_audit()" }),
+            ),
+        ]
+    }
+
+    #[test]
+    fn a_postgres_catalog_compiles_like_its_ddl_files() {
+        let (g, stats) = recover_catalog_as(CatalogDialect::Postgres, &pg_catalog());
+        assert_eq!(
+            (stats.catalogs, stats.tables, stats.foreign_keys),
+            (1, 2, 1)
+        );
+        assert_eq!((stats.views, stats.views_unparsed), (1, 0));
+        assert_eq!(stats.routines.routines.routines, 1);
+        assert_eq!(stats.routines.triggers, 1);
+        let t = g.objects.iter().find(|o| o.name == "orders").unwrap();
+        assert_eq!(t.properties["dialect"], "postgres");
+        assert_eq!(t.properties["origin"], "live");
+        assert_eq!(t.properties["columns"][0]["primary_key"], true);
+        assert_eq!(t.properties["columns"][2]["default"], "0");
+        assert_eq!(t.properties["description"], "One order");
+        let c = g.objects.iter().find(|o| o.name == "customers").unwrap();
+        assert_eq!(c.properties["columns"][0]["identity"], "a");
+        let custom = |k: &str| {
+            g.objects
+                .iter()
+                .filter(|o| matches!(&o.kind, ObjectKind::Custom(x) if x == k))
+                .count()
+        };
+        assert_eq!(custom("PostgresCatalog"), 1);
+        assert_eq!(custom("OracleCatalog"), 0);
+        assert_eq!(custom("View"), 1);
+        assert_eq!(custom("Procedure"), 1);
+        assert_eq!(custom("Trigger"), 1);
+        assert!(
+            g.objects
+                .iter()
+                .filter(
+                    |o| matches!(&o.kind, ObjectKind::Custom(k) if k == "Procedure" || k == "View")
+                )
+                .all(|o| o.properties["dialect"] == "postgres" && o.properties["origin"] == "live")
+        );
+        // A Postgres table and an Oracle table of the same (database, owner, name) differ.
+        assert_ne!(
+            live_id(CatalogDialect::Postgres, "table", "shop:public.orders"),
+            live_id(CatalogDialect::Oracle, "table", "shop:public.orders")
+        );
+    }
+
+    #[test]
+    fn a_dropped_postgres_object_leaves_with_the_newest_catalog() {
+        let mut artifacts = pg_catalog();
+        artifacts[0].1["objects"] = json!(["table/orders"]);
+        let (g, stats) = recover_catalog_as(CatalogDialect::Postgres, &artifacts);
+        assert!(stats.stale_objects > 0);
+        assert!(!g.objects.iter().any(|o| o.name == "customers"));
+    }
+
+    #[test]
+    fn a_clickhouse_catalog_has_tables_with_engine_keys_and_views() {
+        let artifacts = vec![
+            (
+                "clickhouse://wh/analytics".into(),
+                json!({ "kind": "catalog", "database": "wh", "owner": "analytics", "family": "system",
+                        "census": { "TABLE": { "valid": 1, "invalid": 0 } } }),
+            ),
+            (
+                "clickhouse://wh/analytics/table/events".into(),
+                json!({ "kind": "object", "database": "wh", "object": { "kind": "table", "owner": "analytics",
+                        "name": "events", "status": null, "detail": { "engine": "MergeTree", "sorting_key": "ts, id",
+                        "columns": [{ "name": "id", "data_type": "UInt64", "nullable": false },
+                                    { "name": "note", "data_type": "Nullable(String)", "nullable": true }] } } }),
+            ),
+            (
+                "clickhouse://wh/analytics/view/daily".into(),
+                json!({ "kind": "object", "database": "wh", "object": { "kind": "view", "owner": "analytics",
+                        "name": "daily", "status": null,
+                        "detail": { "text": "SELECT toDate(ts) AS d, count() AS n FROM analytics.events GROUP BY d" } } }),
+            ),
+        ];
+        let (g, stats) = recover_catalog_as(CatalogDialect::ClickHouse, &artifacts);
+        assert_eq!((stats.tables, stats.views, stats.views_unparsed), (1, 1, 0));
+        let t = g.objects.iter().find(|o| o.name == "events").unwrap();
+        assert_eq!(t.properties["engine"], "MergeTree");
+        assert_eq!(t.properties["sorting_key"], "ts, id");
+        assert_eq!(t.properties["dialect"], "clickhouse");
+        assert_eq!(t.properties["columns"][0]["not_null"], true);
+        assert!(t.properties["columns"][1].get("not_null").is_none());
+        assert!(
+            g.objects
+                .iter()
+                .any(|o| matches!(&o.kind, ObjectKind::Custom(k) if k == "ClickHouseCatalog"))
         );
     }
 }

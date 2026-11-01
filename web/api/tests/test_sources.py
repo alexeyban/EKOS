@@ -99,6 +99,7 @@ def test_argv_builders_take_names_only() -> None:
         "database",
         "add",
         "erp",
+        "--kind=oracle",
         "--connect=db.local:1521/XEPDB1",
         "--user=ekos_ro",
         "--password-env=EKOS_DB_X",
@@ -115,6 +116,26 @@ def test_argv_builders_take_names_only() -> None:
     ):
         with pytest.raises(ReviewError):
             database_add_argv(name, connect, user, "V", owners, "p0", None)
+    # RFC 0235: PostgreSQL and ClickHouse, each with its own connect form; Oracle-only settings
+    # are refused for them.
+    pg = database_add_argv(
+        "shop", "db.local:5432/shop", "shop_ro", "V", ["public"], "p0", None, "postgres"
+    )
+    assert pg[3:5] == ["--kind=postgres", "--connect=db.local:5432/shop"]
+    ch = database_add_argv(
+        "wh", "https://ch.local:8443", "ro", "V", ["wh"], "p0", None, "clickhouse"
+    )
+    assert ch[3:5] == ["--kind=clickhouse", "--connect=https://ch.local:8443"]
+    for kind, connect, profile, dictionary in (
+        ("postgres", "https://h:8443", "p0", None),
+        ("clickhouse", "h:5432/shop", "p0", None),
+        ("clickhouse", "http://u:p@h:8123", "p0", None),
+        ("postgres", "h/shop", "p2", None),
+        ("postgres", "h/shop", "p0", "idempiere"),
+        ("mysql", "h/shop", "p0", None),
+    ):
+        with pytest.raises(ReviewError):
+            database_add_argv("x", connect, "u", "V", ["s"], profile, dictionary, kind)
     assert source_add_argv("docs", "/srv/docs", "git") == [
         "source",
         "add",

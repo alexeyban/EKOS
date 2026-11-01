@@ -1,0 +1,22 @@
+[package]
+name = "ekos-plugin-postgres"
+description = "RFC 0235 — live PostgreSQL catalog observer: one artifact per catalog object, read through ekos-pg-live"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ekos-common.workspace = true
+ekos-pg-live.workspace = true
+ekos-migrate.workspace = true
+ekos-observation-sdk.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

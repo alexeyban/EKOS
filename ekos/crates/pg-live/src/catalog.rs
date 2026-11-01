@@ -201,6 +201,7 @@ pub fn introspect(
             }
         };
         let mut detail = serde_json::Map::new();
+        detail.insert("name".into(), serde_json::json!(name));
         if !row[4].is_empty() {
             detail.insert("comment".into(), serde_json::json!(r(&row[4])));
         }
@@ -231,6 +232,8 @@ pub fn introspect(
         schema_filter("n.nspname", schemas)
     ))? {
         let mut detail = serde_json::json!({
+            "relation": row[1],
+            "name": row[2],
             "type": row[3],
             "not_null": row[4] == "t",
             "ordinal": row[8].parse::<i64>().unwrap_or_default(),
@@ -263,10 +266,21 @@ pub fn introspect(
     // referential-integrity family exists for exactly this).
     for row in src.rows(&format!(
         "SELECT n.nspname, c.relname, con.conname, con.contype, con.convalidated, \
-                pg_get_constraintdef(con.oid, true) \
+                pg_get_constraintdef(con.oid, true), \
+                COALESCE((SELECT json_agg(a.attname ORDER BY k.ord) \
+                          FROM unnest(con.conkey) WITH ORDINALITY k(attnum, ord) \
+                          JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum \
+                         )::text, '[]'), \
+                COALESCE(fn.nspname, ''), COALESCE(fc.relname, ''), \
+                COALESCE((SELECT json_agg(a.attname ORDER BY k.ord) \
+                          FROM unnest(con.confkey) WITH ORDINALITY k(attnum, ord) \
+                          JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum \
+                         )::text, '[]') \
          FROM pg_constraint con \
          JOIN pg_class c ON c.oid = con.conrelid \
          JOIN pg_namespace n ON n.oid = c.relnamespace \
+         LEFT JOIN pg_class fc ON fc.oid = con.confrelid \
+         LEFT JOIN pg_namespace fn ON fn.oid = fc.relnamespace \
          WHERE {} ORDER BY n.nspname, c.relname, con.conname",
         schema_filter("n.nspname", schemas)
     ))? {
@@ -277,10 +291,7 @@ pub fn introspect(
             kind,
             qualified_name: format!("{}.{}.{}", row[0], row[1], row[2]),
             schema: Some(row[0].clone()),
-            detail: serde_json::json!({
-                "validated": row[4] == "t",
-                "definition": r(&row[5]),
-            }),
+            detail: constraint_detail(&row, &r),
         });
     }
 
@@ -315,7 +326,8 @@ pub fn introspect(
     for row in src.rows(&format!(
         "SELECT n.nspname, p.proname, p.prokind, l.lanname, \
                 pg_get_function_identity_arguments(p.oid), \
-                COALESCE(p.prosrc, ''), p.provolatile, p.proisstrict \
+                COALESCE(p.prosrc, ''), p.provolatile, p.proisstrict, \
+                COALESCE(pg_get_functiondef(p.oid), '') \
          FROM pg_proc p \
          JOIN pg_namespace n ON n.oid = p.pronamespace \
          JOIN pg_language l ON l.oid = p.prolang \
@@ -332,12 +344,7 @@ pub fn introspect(
             kind,
             qualified_name: format!("{}.{}({})", row[0], row[1], row[4]),
             schema: Some(row[0].clone()),
-            detail: serde_json::json!({
-                "language": row[3],
-                "volatility": row[6],
-                "strict": row[7] == "t",
-                "body": r(&row[5]),
-            }),
+            detail: routine_detail(&row, &r),
         });
     }
 
@@ -355,7 +362,7 @@ pub fn introspect(
             kind: ObjectKind::Trigger,
             qualified_name: format!("{}.{}.{}", row[0], row[1], row[2]),
             schema: Some(row[0].clone()),
-            detail: serde_json::json!({ "definition": r(&row[3]) }),
+            detail: serde_json::json!({ "table": row[1], "name": row[2], "definition": r(&row[3]) }),
         });
     }
 
@@ -413,6 +420,53 @@ pub fn introspect(
     }
 
     Ok(CatalogSnapshot { objects })
+}
+
+/// A constraint's detail. The column lists (RFC 0235) come from `conkey`/`confkey` rather than
+/// from parsing the definition, which quotes and qualifies names only where it must. A row
+/// recorded before those columns existed gives the definition alone.
+fn constraint_detail(row: &[String], r: &dyn Fn(&str) -> String) -> serde_json::Value {
+    let mut d = serde_json::json!({
+        "table": row[1],
+        "name": row[2],
+        "validated": row[4] == "t",
+        "definition": r(&row[5]),
+    });
+    let names = |i: usize| -> Option<serde_json::Value> {
+        serde_json::from_str::<Vec<String>>(row.get(i)?)
+            .ok()
+            .map(Into::into)
+    };
+    if let Some(columns) = names(6) {
+        d["columns"] = columns;
+    }
+    if let (Some(schema), Some(table)) = (row.get(7), row.get(8))
+        && !table.is_empty()
+    {
+        d["references_schema"] = schema.as_str().into();
+        d["references_table"] = table.as_str().into();
+        if let Some(columns) = names(9) {
+            d["references_columns"] = columns;
+        }
+    }
+    d
+}
+
+/// A routine's detail; `definition` is `pg_get_functiondef`'s whole `CREATE OR REPLACE` statement
+/// (RFC 0235), redacted like the body.
+fn routine_detail(row: &[String], r: &dyn Fn(&str) -> String) -> serde_json::Value {
+    let mut d = serde_json::json!({
+        "name": row[1],
+        "arguments": row[4],
+        "language": row[3],
+        "volatility": row[6],
+        "strict": row[7] == "t",
+        "body": r(&row[5]),
+    });
+    if let Some(def) = row.get(8).filter(|s| !s.is_empty()) {
+        d["definition"] = r(def).into();
+    }
+    d
 }
 
 /// Reconcile the snapshot against the server's own counts.
@@ -485,6 +539,35 @@ pub fn reconcile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 0235: a foreign key's columns and target come from the catalog, not the definition.
+    #[test]
+    fn a_constraint_detail_carries_its_columns_and_target() {
+        let row: Vec<String> = [
+            "shop",
+            "orders",
+            "orders_customer_fk",
+            "f",
+            "f",
+            "FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE NOT VALID",
+            r#"["customer_id"]"#,
+            "shop",
+            "customers",
+            r#"["id"]"#,
+        ]
+        .map(str::to_string)
+        .to_vec();
+        let d = constraint_detail(&row, &|s: &str| s.to_string());
+        assert_eq!(d["table"], "orders");
+        assert_eq!(d["columns"][0], "customer_id");
+        assert_eq!(d["references_schema"], "shop");
+        assert_eq!(d["references_table"], "customers");
+        assert_eq!(d["references_columns"][0], "id");
+        assert_eq!(d["validated"], false);
+        // A row recorded before the columns existed keeps its definition only.
+        let old = constraint_detail(&row[..6], &|s: &str| s.to_string());
+        assert!(old.get("columns").is_none() && old.get("references_table").is_none());
+    }
 
     #[test]
     fn constraint_triggers_are_left_to_the_trigger_pass_and_unknown_types_still_fail() {

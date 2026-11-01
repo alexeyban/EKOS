@@ -6,11 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
 Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
-`devlog_316.md` as of this writing) before starting non-trivial work: they are the project's
+`devlog_317.md` as of this writing) before starting non-trivial work: they are the project's
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
-`ekos/docs/rfcs/` has `0025`+ (highest: `0234`; 0213–0218 are reserved by the Oracle/iDempiere plan for Parts II–V, 0217 still unwritten). **Check both directories for the highest existing number before
+`ekos/docs/rfcs/` has `0025`+ (highest: `0235`; 0213–0218 are reserved by the Oracle/iDempiere plan for Parts II–V, 0217 still unwritten). **Check both directories for the highest existing number before
 picking one for a new RFC** — two RFCs have already collided on the same number once (0027) from
 sessions that only checked one location.
 
@@ -160,6 +160,11 @@ TRANSACTION READ ONLY`, reconciled against `*_OBJECTS`. `[[databases]]` in `ekos
 variable **name**, never its value) → `plugins/oracle` observer at build → `OracleCatalogPass` at
 recover → objects with `origin: live`, which identity never merges and name lookups
 (`procedure_lineage::NameIndex::add_object`, `data_lineage`) use only for names no file defines.
+RFC 0235: `kind = "postgres"` (`plugins/postgres`, through `pg-live`, reconciled) and `kind = "clickhouse"`
+(`plugins/clickhouse/src/catalog.rs`, `readonly=1`) emit the same artifacts
+(`observation_sdk::live_catalog`); `recovery/src/oracle_catalog_analyzer.rs` is one pass per `CatalogDialect`
+(Oracle's ids and pass name unchanged), and `ekos database test` reports the same JSON for every kind, counting
+compiled objects from `ckm/model.json`.
 `semantic/src/live_conflicts.rs` compares `ModelTable`s / `db/oracle` routines with them at commit
 (RFC 0172 conflicts with an `explanation`: `pending_migration` by time **and** release horizon,
 `translation_table`; `mandatory_but_nullable` carries a `measured` null count from the profile).

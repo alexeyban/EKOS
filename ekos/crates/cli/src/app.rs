@@ -1038,11 +1038,16 @@ enum SourceCommands {
 
 #[derive(Subcommand)]
 enum DatabaseCommands {
-    /// Add an Oracle database; its password stays in an environment variable named here
+    /// Add a database (Oracle, PostgreSQL or ClickHouse); its password stays in an environment
+    /// variable named here
     Add {
         /// Database name: lowercase letters, digits, `-` and `_`
         name: String,
-        /// Easy Connect string: host:port/service
+        /// oracle (default), postgres or clickhouse
+        #[arg(long)]
+        kind: Option<String>,
+        /// oracle: host:port/service; postgres: host[:port]/database; clickhouse:
+        /// http[s]://host[:port]
         #[arg(long)]
         connect: String,
         /// A read-only user (EKOS refuses nothing else, but reports a user that can write)
@@ -1051,7 +1056,7 @@ enum DatabaseCommands {
         /// The NAME of the environment variable holding the password, never the password
         #[arg(long, value_name = "VAR")]
         password_env: String,
-        /// A schema (owner) to read; repeat for several
+        /// A schema (a database, for ClickHouse) to read; repeat for several
         #[arg(long = "owner", required = true)]
         owners: Vec<String>,
         /// What `ekos build` may measure: p0 (statistics), p1 (row counts), p2 (one scan per table)
@@ -2253,6 +2258,7 @@ where
             match subcommand {
                 DatabaseCommands::Add {
                     name,
+                    kind,
                     connect,
                     user,
                     password_env,
@@ -2263,6 +2269,7 @@ where
                     &config_path,
                     database::AddArgs {
                         name,
+                        kind,
                         connect,
                         user,
                         password_env,
@@ -2272,7 +2279,9 @@ where
                     },
                 ),
                 DatabaseCommands::List { json } => database::list(&config, json),
-                DatabaseCommands::Test { name, json } => database::test(&config, &cwd, &name, json),
+                DatabaseCommands::Test { name, json } => {
+                    database::test(&config, &cwd, &name, json).await
+                }
                 DatabaseCommands::Remove { name } => database::remove(&config_path, &name),
             }
         }

@@ -1,4 +1,4 @@
-//! `ekos database list|add|remove|test` — RFC 0223.
+//! `ekos database list|add|remove|test` — RFC 0223; PostgreSQL and ClickHouse kinds, RFC 0235.
 //!
 //! `[[databases]]` entries edited through `toml_edit` (comments and the rest of the file kept, the
 //! edited file must still load), and a connection test that reads the catalog the way `ekos build`
@@ -44,9 +44,7 @@ pub fn infos(config: &EkosConfig) -> Vec<DatabaseInfo> {
         .iter()
         .map(|d| DatabaseInfo {
             name: d.name.clone(),
-            kind: match d.kind {
-                DatabaseKind::Oracle => "oracle",
-            },
+            kind: d.kind.as_str(),
             connect: d.connect.clone(),
             user: d.user.clone(),
             password_env: d.password_env.clone(),
@@ -70,7 +68,7 @@ pub fn list(config: &EkosConfig, json_out: bool) -> Result<()> {
     }
     if rows.is_empty() {
         println!(
-            "No databases. Add one: ekos database add <name> --connect host:port/service --user <u> --password-env <VAR> --owner <SCHEMA>"
+            "No databases. Add one: ekos database add <name> [--kind oracle|postgres|clickhouse] --connect <address> --user <u> --password-env <VAR> --owner <SCHEMA>"
         );
     }
     for d in rows {
@@ -94,7 +92,7 @@ pub fn with_database(config_text: &str, d: &DatabaseConfig) -> Result<String> {
     let mut doc: toml_edit::DocumentMut = config_text.parse().context("parsing ekos.toml")?;
     let mut t = toml_edit::Table::new();
     t["name"] = toml_edit::value(d.name.as_str());
-    t["kind"] = toml_edit::value("oracle");
+    t["kind"] = toml_edit::value(d.kind.as_str());
     t["connect"] = toml_edit::value(d.connect.as_str());
     t["user"] = toml_edit::value(d.user.as_str());
     t["password-env"] = toml_edit::value(d.password_env.as_str());
@@ -146,6 +144,8 @@ fn checked(text: String) -> Result<String> {
 /// The arguments of `ekos database add`.
 pub struct AddArgs {
     pub name: String,
+    /// `oracle` (default), `postgres` or `clickhouse`.
+    pub kind: Option<String>,
     pub connect: String,
     pub user: String,
     pub password_env: String,
@@ -178,16 +178,20 @@ pub fn add(config_path: &Path, a: AddArgs) -> Result<()> {
             "--password-env is the NAME of an environment variable (letters, digits, `_`), never the password itself"
         );
     }
-    if !a.connect.contains('/') {
-        bail!("--connect is an Easy Connect string: host:port/service");
-    }
+    let kind = parse_kind(a.kind.as_deref())?;
+    check_connect(kind, &a.connect)?;
     let d = DatabaseConfig {
         name: a.name.clone(),
-        kind: DatabaseKind::Oracle,
+        kind,
         connect: a.connect,
         user: a.user,
         password_env: a.password_env,
-        owners: a.owners.iter().map(|o| o.to_ascii_uppercase()).collect(),
+        // Oracle's dictionary spells owners in upper case; PostgreSQL and ClickHouse names are
+        // case-sensitive as written.
+        owners: match kind {
+            DatabaseKind::Oracle => a.owners.iter().map(|o| o.to_ascii_uppercase()).collect(),
+            _ => a.owners.clone(),
+        },
         profile,
         dictionary,
     };
@@ -203,6 +207,33 @@ pub fn add(config_path: &Path, a: AddArgs) -> Result<()> {
         d.name
     );
     Ok(())
+}
+
+fn parse_kind(kind: Option<&str>) -> Result<DatabaseKind> {
+    Ok(match kind.unwrap_or("oracle") {
+        "oracle" => DatabaseKind::Oracle,
+        "postgres" | "postgresql" => DatabaseKind::Postgres,
+        "clickhouse" => DatabaseKind::Clickhouse,
+        other => bail!("--kind is oracle, postgres or clickhouse, not {other:?}"),
+    })
+}
+
+/// RFC 0235: `connect` per kind (the observers parse it again, the same way).
+fn check_connect(kind: DatabaseKind, connect: &str) -> Result<()> {
+    match kind {
+        DatabaseKind::Oracle if !connect.contains('/') => {
+            bail!("--connect is an Easy Connect string: host:port/service")
+        }
+        DatabaseKind::Oracle => Ok(()),
+        DatabaseKind::Postgres => ekos_plugin_postgres::PgConnection::parse(connect, "", "")
+            .map(|_| ())
+            .map_err(|e| anyhow::anyhow!("--{e}")),
+        DatabaseKind::Clickhouse => {
+            ekos_plugin_clickhouse::catalog::ChConnection::parse(connect, "", "")
+                .map(|_| ())
+                .map_err(|e| anyhow::anyhow!("--{e}"))
+        }
+    }
 }
 
 /// `ekos database remove`
@@ -245,67 +276,101 @@ pub fn compare(
         .collect()
 }
 
-/// Ledger objects read live from database `name`, by kind.
+/// Objects read live from database `name`, by kind: from the latest compiled model, which holds
+/// only what the newest catalog read listed. The ledger is append-only, so counting it would keep
+/// an object dropped from the database (RFC 0235 §4, found live); it is the fallback when no model
+/// has been compiled.
 fn compiled_counts(
     config: &EkosConfig,
     cwd: &Path,
     name: &str,
 ) -> Result<Option<BTreeMap<String, usize>>> {
-    let Ok(ledger) = open_store_read_only(config, cwd) else {
-        return Ok(None);
+    let live = |properties: &std::collections::HashMap<String, Value>| {
+        properties.get("origin").and_then(Value::as_str) == Some("live")
+            && properties.get("database").and_then(Value::as_str) == Some(name)
+    };
+    let kind_name = |k: &ObjectKind| match k {
+        ObjectKind::Custom(k) => k.clone(),
+        k => k.to_string(),
     };
     let mut out = BTreeMap::new();
-    for o in ledger.all_objects()? {
-        let live = o.properties.get("origin").and_then(Value::as_str) == Some("live")
-            && o.properties.get("database").and_then(Value::as_str) == Some(name);
-        if !live {
-            continue;
+    let model_path = config.ekos_dir(cwd).join("ckm").join("model.json");
+    if ekos_common::compress::resolve_auto(&model_path).is_some() {
+        let model: ekos_semantic::CkModel = ekos_common::compress::read_json_auto(&model_path)?;
+        for o in model.objects.iter().filter(|o| live(&o.properties)) {
+            *out.entry(kind_name(&o.kind)).or_insert(0) += 1;
         }
-        let kind = match &o.kind {
-            ObjectKind::Custom(k) => k.clone(),
-            k => k.to_string(),
+    } else {
+        let Ok(ledger) = open_store_read_only(config, cwd) else {
+            return Ok(None);
         };
-        *out.entry(kind).or_insert(0) += 1;
+        for o in ledger.all_objects()?.iter().filter(|o| live(&o.properties)) {
+            *out.entry(kind_name(&o.kind)).or_insert(0) += 1;
+        }
     }
     Ok(if out.is_empty() { None } else { Some(out) })
 }
 
 /// `ekos database test`
-pub fn test(config: &EkosConfig, cwd: &Path, name: &str, json_out: bool) -> Result<()> {
+pub async fn test(config: &EkosConfig, cwd: &Path, name: &str, json_out: bool) -> Result<()> {
     let Some(d) = config.databases.iter().find(|d| d.name == name) else {
         bail!("no database {name:?} in this project (ekos database list)");
     };
-    let connection = ekos_plugin_oracle::OraConnection {
-        connect_string: d.connect.clone(),
-        user: d.user.clone(),
-        password_env: d.password_env.clone(),
-    };
     let run_id = format!("test-{}", chrono::Utc::now().format("%Y%m%dT%H%M%S"));
+    let redaction = config.redaction_config();
     let started = std::time::Instant::now();
-    let result = ekos_plugin_oracle::test_connection(
-        &connection,
-        &d.owners,
-        &run_id,
-        &config.redaction_config(),
-    )
-    .map_err(|e| anyhow::anyhow!("database {name}: {e}"))?;
-    let ms = started.elapsed().as_millis() as u64;
-    let mut census: BTreeMap<String, usize> = BTreeMap::new();
-    let mut invalid = 0;
-    for o in &result.owners {
-        for (t, c) in &o.census {
-            *census.entry(t.clone()).or_default() += c.valid + c.invalid;
-            invalid += c.invalid;
+    let fail = |e: String| anyhow::anyhow!("database {name}: {e}");
+    // Every kind reports the same JSON (RFC 0235 §2.3): label, family, owners[].census,
+    // write_check, any_privileges.
+    let result: Value = match d.kind {
+        DatabaseKind::Oracle => {
+            let connection = ekos_plugin_oracle::OraConnection {
+                connect_string: d.connect.clone(),
+                user: d.user.clone(),
+                password_env: d.password_env.clone(),
+            };
+            let r =
+                ekos_plugin_oracle::test_connection(&connection, &d.owners, &run_id, &redaction)
+                    .map_err(|e| fail(e.to_string()))?;
+            serde_json::to_value(r)?
         }
-    }
+        DatabaseKind::Postgres => {
+            let connection =
+                ekos_plugin_postgres::PgConnection::parse(&d.connect, &d.user, &d.password_env)
+                    .map_err(fail)?;
+            let owners = d.owners.clone();
+            // The driver is synchronous and starts its own runtime: off this one.
+            tokio::task::spawn_blocking(move || {
+                ekos_plugin_postgres::test_connection(&connection, &owners, &run_id, &redaction)
+            })
+            .await?
+            .map_err(|e| fail(e.to_string()))?
+        }
+        DatabaseKind::Clickhouse => {
+            let connection = ekos_plugin_clickhouse::catalog::ChConnection::parse(
+                &d.connect,
+                &d.user,
+                &d.password_env,
+            )
+            .map_err(fail)?;
+            ekos_plugin_clickhouse::catalog::test_connection(&connection, &d.owners, &redaction)
+                .await
+                .map_err(fail)?
+        }
+    };
+    let ms = started.elapsed().as_millis() as u64;
+    let (census, invalid) = census_of(&result);
     let compiled = compiled_counts(config, cwd, name)?;
     let rows = compare(&census, compiled.as_ref());
-    let read_only = result.write_check.as_ref().map(|w| w.is_safe());
+    let read_only = result["write_check"]["result"]
+        .as_str()
+        .map(|r| r == "refused_by_server");
     if json_out {
         println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "database": name,
+                "kind": d.kind.as_str(),
                 "ok": true,
                 "ms": ms,
                 "read_only": read_only,
@@ -318,23 +383,39 @@ pub fn test(config: &EkosConfig, cwd: &Path, name: &str, json_out: bool) -> Resu
     }
     println!(
         "{name}: connected as {} ({} views) in {ms} ms; writes {}",
-        result.label,
-        result.family,
+        result["label"].as_str().unwrap_or_default(),
+        result["family"].as_str().unwrap_or_default(),
         match read_only {
             Some(true) => "refused by the server (read-only)",
             Some(false) => "ALLOWED — use a read-only user",
             None => "not checked (no table)",
         }
     );
-    for o in &result.owners {
-        let total: usize = o.census.values().map(|c| c.valid + c.invalid).sum();
-        println!("  {}: {total} objects, {} columns", o.owner, o.columns);
-    }
-    if !result.any_privileges.is_empty() {
+    for o in result["owners"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+    {
+        let total: u64 = o["census"]
+            .as_object()
+            .map(|m| {
+                m.values()
+                    .map(|c| c["valid"].as_u64().unwrap_or(0) + c["invalid"].as_u64().unwrap_or(0))
+                    .sum()
+            })
+            .unwrap_or(0);
         println!(
-            "  ANY privileges held: {}",
-            result.any_privileges.join(", ")
+            "  {}: {total} objects, {} columns",
+            o["owner"].as_str().unwrap_or_default(),
+            o["columns"]
         );
+    }
+    let any: Vec<&str> = result["any_privileges"]
+        .as_array()
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    if !any.is_empty() {
+        println!("  ANY privileges held: {}", any.join(", "));
     }
     println!("  {:<10} {:>8} {:>9}", "", "census", "compiled");
     for r in rows {
@@ -350,6 +431,24 @@ pub fn test(config: &EkosConfig, cwd: &Path, name: &str, json_out: bool) -> Resu
         );
     }
     Ok(())
+}
+
+/// A test report's census summed over owners (`TYPE` → count), and the invalid objects.
+fn census_of(result: &Value) -> (BTreeMap<String, usize>, usize) {
+    let mut census: BTreeMap<String, usize> = BTreeMap::new();
+    let mut invalid = 0;
+    for o in result["owners"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+    {
+        for (t, c) in o["census"].as_object().into_iter().flatten() {
+            let n = |k: &str| c[k].as_u64().unwrap_or(0) as usize;
+            *census.entry(t.clone()).or_default() += n("valid") + n("invalid");
+            invalid += n("invalid");
+        }
+    }
+    (census, invalid)
 }
 
 #[cfg(test)]
@@ -409,6 +508,7 @@ mod tests {
         std::fs::write(&p, BASE).unwrap();
         let args = |pw: &str| AddArgs {
             name: "erp".into(),
+            kind: None,
             connect: "h:1521/S".into(),
             user: "u".into(),
             password_env: pw.into(),
@@ -424,6 +524,52 @@ mod tests {
             vec!["ERP".to_string()],
             "owners upper-cased"
         );
+    }
+
+    /// RFC 0235: each kind checks its own connect form and keeps owners as written.
+    #[test]
+    fn add_takes_postgres_and_clickhouse_with_their_own_connect_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("ekos.toml");
+        std::fs::write(&p, BASE).unwrap();
+        let args = |name: &str, kind: &str, connect: &str| AddArgs {
+            name: name.into(),
+            kind: Some(kind.into()),
+            connect: connect.into(),
+            user: "ro".into(),
+            password_env: "PW".into(),
+            owners: vec!["Sales".into()],
+            profile: None,
+            dictionary: None,
+        };
+        assert!(add(&p, args("pg", "postgres", "https://h:8123")).is_err());
+        assert!(add(&p, args("ch", "clickhouse", "h:5432/shop")).is_err());
+        assert!(add(&p, args("x", "mysql", "h/x")).is_err());
+        add(&p, args("pg", "postgres", "db.local:5432/shop")).unwrap();
+        add(&p, args("ch", "clickhouse", "http://ch.local:8123")).unwrap();
+        let c: EkosConfig = toml::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(c.databases[0].kind, DatabaseKind::Postgres);
+        assert_eq!(
+            c.databases[0].owners,
+            vec!["Sales".to_string()],
+            "not upper-cased"
+        );
+        assert_eq!(c.databases[1].kind, DatabaseKind::Clickhouse);
+        assert_eq!(infos(&c)[1].kind, "clickhouse");
+        // Oracle-only settings are refused for the other kinds.
+        let mut p2 = args("pg2", "postgres", "h/db");
+        p2.profile = Some("p2".into());
+        assert!(add(&p, p2).is_err());
+    }
+
+    #[test]
+    fn a_test_report_sums_its_census_over_owners() {
+        let r = json!({ "owners": [
+            { "census": { "TABLE": { "valid": 2, "invalid": 1 }, "VIEW": { "valid": 1, "invalid": 0 } } },
+            { "census": { "TABLE": { "valid": 3, "invalid": 0 } } },
+        ] });
+        let (census, invalid) = census_of(&r);
+        assert_eq!((census["TABLE"], census["VIEW"], invalid), (6, 1, 1));
     }
 
     #[test]

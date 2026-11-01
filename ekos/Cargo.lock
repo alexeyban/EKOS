@@ -968,6 +968,7 @@ dependencies = [
  "ekos-plugin-oracle",
  "ekos-plugin-pentaho",
  "ekos-plugin-perl",
+ "ekos-plugin-postgres",
  "ekos-plugin-python",
  "ekos-plugin-rust",
  "ekos-plugin-treasury",
@@ -1679,6 +1680,20 @@ dependencies = [
  "tokio",
  "tracing",
  "walkdir",
+]
+
+[[package]]
+name = "ekos-plugin-postgres"
+version = "1.1.0"
+dependencies = [
+ "async-trait",
+ "ekos-common",
+ "ekos-migrate",
+ "ekos-observation-sdk",
+ "ekos-pg-live",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -12,6 +12,9 @@ use async_trait::async_trait;
 use ekos_artifact::ObservationArtifact;
 use thiserror::Error;
 
+/// RFC 0211 / 0235: the artifact shape every live database observer emits.
+pub mod live_catalog;
+
 /// Error returned by an observer during scanning.
 #[derive(Debug, Error)]
 pub enum ObserveError {

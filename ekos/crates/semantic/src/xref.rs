@@ -282,6 +282,8 @@ pub(crate) enum Expect {
 pub(crate) enum SqlDialect {
     Postgres,
     Oracle,
+    /// RFC 0235: a live ClickHouse catalog's views.
+    ClickHouse,
 }
 
 /// The file that declares each object, from `File → object` `Contains` edges — the only place a
@@ -916,8 +918,13 @@ fn footprint_refs<'a>(o: &'a KirObject, lines: &StatementLines, out: &mut Vec<Re
         }
     }
     // Phase 2: the routines it calls. Built-ins are in the same list, told apart by dialect.
-    let dialect = match str_prop(o, "language").as_deref() {
-        Some("plsql") => SqlDialect::Oracle,
+    // A live catalog's objects state their dialect (RFC 0211 / 0235); a file's are inferred.
+    let dialect = match (
+        str_prop(o, "dialect").as_deref(),
+        str_prop(o, "language").as_deref(),
+    ) {
+        (Some("clickhouse"), _) => SqlDialect::ClickHouse,
+        (Some("oracle"), _) | (_, Some("plsql")) => SqlDialect::Oracle,
         _ if file.as_deref().is_some_and(|f| f.contains("/oracle/")) => SqlDialect::Oracle,
         _ => SqlDialect::Postgres,
     };
@@ -1051,7 +1058,8 @@ pub fn check_name(candidates: &[KirObject], name: &str) -> NameCheck {
     let ids = index.candidates(&normalized);
     let built_in = is_system_relation(&normalized)
         || crate::xref_builtins::is_builtin(&normalized, SqlDialect::Postgres)
-        || crate::xref_builtins::is_builtin(&normalized, SqlDialect::Oracle);
+        || crate::xref_builtins::is_builtin(&normalized, SqlDialect::Oracle)
+        || crate::xref_builtins::is_builtin(&normalized, SqlDialect::ClickHouse);
     // A routine's overloads, or one relation defined in several files, are one object to a caller.
     let distinct: BTreeSet<(String, String)> = ids
         .iter()

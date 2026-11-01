@@ -1091,10 +1091,27 @@ pub enum DatabaseDictionary {
     Idempiere,
 }
 
+/// RFC 0211 / 0235: which engine a `[[databases]]` entry is, and so how `connect` and `owners`
+/// read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum DatabaseKind {
+    /// `connect` is Easy Connect (`host:port/service`), `owners` are schemas.
     Oracle,
+    /// `connect` is `host[:port]/database`, `owners` are schemas.
+    Postgres,
+    /// `connect` is `http[s]://host[:port]`, `owners` are databases.
+    Clickhouse,
+}
+
+impl DatabaseKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Oracle => "oracle",
+            Self::Postgres => "postgres",
+            Self::Clickhouse => "clickhouse",
+        }
+    }
 }
 
 /// RFC 0211 §3.4 profile tiers, in increasing cost.
@@ -1326,6 +1343,23 @@ impl EkosConfig {
             }
             if d.owners.is_empty() {
                 anyhow::bail!("[[databases]] {:?} lists no owners to read", d.name);
+            }
+            // RFC 0235: profiles and dictionaries are read for Oracle only; refused rather than
+            // silently ignored for the other kinds.
+            if d.kind != DatabaseKind::Oracle {
+                if d.profile != DatabaseProfile::P0 {
+                    anyhow::bail!(
+                        "[[databases]] {:?}: profile {:?} is read for oracle databases only",
+                        d.name,
+                        d.profile
+                    );
+                }
+                if d.dictionary.is_some() {
+                    anyhow::bail!(
+                        "[[databases]] {:?}: an application dictionary is read for oracle databases only",
+                        d.name
+                    );
+                }
             }
         }
         Ok(())
@@ -1673,6 +1707,32 @@ path = "/tmp/ekos-containers/b"
             cfg.storage.containers[0].path,
             PathBuf::from("/tmp/ekos-containers/a")
         );
+    }
+
+    /// RFC 0235: PostgreSQL and ClickHouse databases parse; profiles and dictionaries are
+    /// Oracle-only and refused for them.
+    #[test]
+    fn postgres_and_clickhouse_databases_parse_without_oracle_only_settings() {
+        for (kind, connect) in [
+            ("postgres", "db.local:5432/shop"),
+            ("clickhouse", "https://ch.local:8443"),
+        ] {
+            let db = format!(
+                "[[databases]]\nname = \"wh\"\nkind = \"{kind}\"\nconnect = \"{connect}\"\n\
+                 user = \"ro\"\npassword-env = \"WH_PW\"\nowners = [\"public\"]\n"
+            );
+            let cfg: EkosConfig = toml::from_str(&db).unwrap();
+            cfg.check_sources().unwrap();
+            assert_eq!(cfg.databases[0].kind.as_str(), kind);
+            for extra in ["profile = \"p1\"\n", "dictionary = \"idempiere\"\n"] {
+                let c: EkosConfig = toml::from_str(&format!("{db}{extra}")).unwrap();
+                let err = c.check_sources().unwrap_err().to_string();
+                assert!(
+                    err.contains("oracle databases only"),
+                    "{kind} {extra}: {err}"
+                );
+            }
+        }
     }
 
     /// RFC 0211: `[[databases]]` parses, and its names share the sources' namespace.

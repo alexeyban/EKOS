@@ -108,7 +108,7 @@ pub use local_docs_analyzer::LocalDocAnalyzerPass;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAiProvider;
 pub use openai_responses::OpenAiResponsesProvider;
-pub use oracle_catalog_analyzer::{OracleCatalogPass, OracleCatalogStats};
+pub use oracle_catalog_analyzer::{CatalogDialect, OracleCatalogPass, OracleCatalogStats};
 pub use package_json_analyzer::PackageJsonAnalyzerPass;
 pub use pentaho_analyzer::{PentahoAnalyzerPass, PentahoStats};
 pub use perl_analyzer::{PerlAnalyzerPass, PerlStats};

@@ -8,7 +8,15 @@ import type { Me } from "../WorkspaceShell";
 import { Sources } from "./Sources";
 
 const listing = {
-  sources: [{ name: "idempiere", kind: "git", path: "/src/idempiere", exists: true, git: true }],
+  sources: [
+    {
+      name: "idempiere",
+      kind: "git",
+      path: "/src/idempiere",
+      exists: true,
+      git: true,
+    },
+  ],
   databases: [
     {
       name: "erp",
@@ -33,7 +41,13 @@ const tested: DatabaseTest = {
   test: {
     label: "oracle:ekos_ro@db:1521/XEPDB1",
     family: "dba",
-    owners: [{ owner: "ADEMPIERE", columns: 30457, census: { TABLE: { valid: 903, invalid: 0 } } }],
+    owners: [
+      {
+        owner: "ADEMPIERE",
+        columns: 30457,
+        census: { TABLE: { valid: 903, invalid: 0 } },
+      },
+    ],
     any_privileges: [],
   },
   census_vs_compiled: [
@@ -69,27 +83,46 @@ describe("Sources page", () => {
     expect(await screen.findByText("/src/idempiere")).toBeInTheDocument();
     expect(screen.getByText("password stored")).toBeInTheDocument();
     expect(screen.queryByText("Test connection")).toBeNull();
-    expect(screen.queryByText("Add an Oracle database")).toBeNull();
+    expect(screen.queryByText("Add a database")).toBeNull();
   });
 
   it("adds a database and clears the password field once it is stored", async () => {
-    vi.spyOn(client, "api").mockResolvedValue({ sources: [], databases: [] } as never);
+    vi.spyOn(client, "api").mockResolvedValue({
+      sources: [],
+      databases: [],
+    } as never);
     const post = vi
       .spyOn(client, "apiPost")
-      .mockResolvedValue({ message: "Added database erp", password_env: "EKOS_DB_X" });
+      .mockResolvedValue({
+        message: "Added database erp",
+        password_env: "EKOS_DB_X",
+      });
     renderAs(operator);
-    fireEvent.click(await screen.findByText("Add an Oracle database"));
-    fireEvent.change(screen.getByLabelText("database name"), { target: { value: "erp" } });
-    fireEvent.change(screen.getByLabelText("connect"), { target: { value: "db:1521/XEPDB1" } });
-    fireEvent.change(screen.getByLabelText("user"), { target: { value: "ekos_ro" } });
-    fireEvent.change(screen.getByLabelText("password"), { target: { value: "pw" } });
-    fireEvent.change(screen.getByLabelText("owners"), { target: { value: "ADEMPIERE, OTHER" } });
-    fireEvent.change(screen.getByLabelText("profile"), { target: { value: "p2" } });
+    fireEvent.click(await screen.findByText("Add a database"));
+    fireEvent.change(screen.getByLabelText("database name"), {
+      target: { value: "erp" },
+    });
+    fireEvent.change(screen.getByLabelText("connect"), {
+      target: { value: "db:1521/XEPDB1" },
+    });
+    fireEvent.change(screen.getByLabelText("user"), {
+      target: { value: "ekos_ro" },
+    });
+    fireEvent.change(screen.getByLabelText("password"), {
+      target: { value: "pw" },
+    });
+    fireEvent.change(screen.getByLabelText("owners"), {
+      target: { value: "ADEMPIERE, OTHER" },
+    });
+    fireEvent.change(screen.getByLabelText("profile"), {
+      target: { value: "p2" },
+    });
     fireEvent.click(screen.getByText("Add database"));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     expect(post.mock.calls[0]).toEqual([
       "/workspaces/ws1/databases",
       {
+        kind: "oracle",
         name: "erp",
         connect: "db:1521/XEPDB1",
         user: "ekos_ro",
@@ -103,12 +136,67 @@ describe("Sources page", () => {
     expect(screen.getByLabelText("password")).toHaveValue("");
   });
 
+  it("adds a PostgreSQL or ClickHouse database without Oracle's profile and dictionary", async () => {
+    vi.spyOn(client, "api").mockResolvedValue({
+      sources: [],
+      databases: [],
+    } as never);
+    const post = vi
+      .spyOn(client, "apiPost")
+      .mockResolvedValue({
+        message: "Added database wh",
+        password_env: "EKOS_DB_X",
+      });
+    renderAs(operator);
+    fireEvent.click(await screen.findByText("Add a database"));
+    fireEvent.change(screen.getByLabelText("database kind"), {
+      target: { value: "postgres" },
+    });
+    expect(
+      screen.getByPlaceholderText("db.local:5432/shop"),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("profile")).toBeNull();
+    expect(screen.queryByLabelText("dictionary")).toBeNull();
+    fireEvent.change(screen.getByLabelText("database kind"), {
+      target: { value: "clickhouse" },
+    });
+    expect(
+      screen.getByText("Databases to read (comma-separated)"),
+    ).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("database name"), {
+      target: { value: "wh" },
+    });
+    fireEvent.change(screen.getByLabelText("connect"), {
+      target: { value: "https://ch.local:8443" },
+    });
+    fireEvent.change(screen.getByLabelText("user"), {
+      target: { value: "ro" },
+    });
+    fireEvent.change(screen.getByLabelText("password"), {
+      target: { value: "pw" },
+    });
+    fireEvent.change(screen.getByLabelText("owners"), {
+      target: { value: "analytics" },
+    });
+    fireEvent.click(screen.getByText("Add database"));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0][1]).toMatchObject({
+      kind: "clickhouse",
+      connect: "https://ch.local:8443",
+      owners: ["analytics"],
+      profile: "p0",
+      dictionary: null,
+    });
+  });
+
   it("tests a connection and shows the census next to what was compiled", async () => {
     vi.spyOn(client, "api").mockResolvedValue(listing as never);
     vi.spyOn(client, "apiPost").mockResolvedValue(tested);
     renderAs(operator);
     fireEvent.click(await screen.findByText("Test connection"));
-    expect(await screen.findByText("writes refused (read-only)")).toBeInTheDocument();
+    expect(
+      await screen.findByText("writes refused (read-only)"),
+    ).toBeInTheDocument();
     expect(screen.getByText("equal")).toBeInTheDocument();
     expect(screen.getByText("differs")).toBeInTheDocument();
     expect(screen.getByText(/30457 columns/)).toBeInTheDocument();

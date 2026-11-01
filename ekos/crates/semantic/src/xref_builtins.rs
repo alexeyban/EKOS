@@ -436,6 +436,131 @@ const ORACLE: &[&str] = &[
     "xmltype",
 ];
 
+/// RFC 0235: ClickHouse functions that no prefix rule below covers. Sorted, lower-case (names are
+/// normalized before the lookup, although ClickHouse itself is case-sensitive).
+const CLICKHOUSE: &[&str] = &[
+    "accuratecast",
+    "accuratecastornull",
+    "adddays",
+    "addhours",
+    "addminutes",
+    "addmonths",
+    "addseconds",
+    "addweeks",
+    "addyears",
+    "any",
+    "anyheavy",
+    "anylast",
+    "assumenotnull",
+    "base64decode",
+    "base64encode",
+    "bitand",
+    "bitor",
+    "bitxor",
+    "cityhash64",
+    "concatwithseparator",
+    "countdistinct",
+    "dictget",
+    "dictgetordefault",
+    "dicthas",
+    "empty",
+    "endswith",
+    "farmhash64",
+    "finalizeaggregation",
+    "flatten",
+    "formatdatetime",
+    "formatreadablesize",
+    "generateuuidv4",
+    "geodistance",
+    "halfmd5",
+    "hex",
+    "if",
+    "ifnull",
+    "ilike",
+    "indexof",
+    "intdiv",
+    "intdivorzero",
+    "javahash",
+    "laginframe",
+    "leadinframe",
+    "length",
+    "like",
+    "lowcardinalitykeys",
+    "lower",
+    "lowerutf8",
+    "match",
+    "max",
+    "md5",
+    "min",
+    "modulo",
+    "multiif",
+    "multisearchany",
+    "murmurhash3_64",
+    "notempty",
+    "notlike",
+    "now",
+    "now64",
+    "nullif",
+    "parsedatetime",
+    "parsedatetimebesteffort",
+    "parsedatetimebesteffortornull",
+    "position",
+    "rand",
+    "rand64",
+    "range",
+    "replaceall",
+    "replaceone",
+    "replaceregexpall",
+    "replaceregexpone",
+    "round",
+    "rownumberinallblocks",
+    "runningdifference",
+    "sha256",
+    "siphash64",
+    "splitbychar",
+    "splitbyregexp",
+    "splitbystring",
+    "startswith",
+    "subtractdays",
+    "subtracthours",
+    "subtractmonths",
+    "subtractyears",
+    "sum",
+    "sumif",
+    "throwif",
+    "today",
+    "trimboth",
+    "tuple",
+    "unhex",
+    "upper",
+    "upperutf8",
+    "uuidstringtonum",
+    "visiblewidth",
+    "xxhash64",
+    "yesterday",
+];
+
+/// RFC 0235: ClickHouse function families named by prefix (`toDate`, `toStartOfMonth`,
+/// `arrayJoin`, `uniqExact`, `quantileTDigest`, `groupArray`, `argMax`, `JSONExtractString`, …).
+const CLICKHOUSE_PREFIXES: &[&str] = &[
+    "arg",
+    "array",
+    "bitmap",
+    "count",
+    "date",
+    "dict",
+    "group",
+    "has",
+    "is",
+    "json",
+    "map",
+    "quantile",
+    "sum",
+    "to",
+    "uniq",
+    "visitparam",
+];
+
 /// Qualifiers whose members are always built in.
 const SYSTEM_QUALIFIERS: &[&str] = &["pg_catalog", "information_schema", "sys"];
 
@@ -456,6 +581,9 @@ pub(crate) fn is_builtin(name: &str, dialect: SqlDialect) -> bool {
         || match dialect {
             SqlDialect::Postgres => has(POSTGRES) || tail.starts_with("pg_"),
             SqlDialect::Oracle => has(ORACLE),
+            SqlDialect::ClickHouse => {
+                has(CLICKHOUSE) || CLICKHOUSE_PREFIXES.iter().any(|p| tail.starts_with(p))
+            }
         }
 }
 
@@ -465,7 +593,7 @@ mod tests {
 
     #[test]
     fn lists_are_sorted_and_lower_case() {
-        for list in [COMMON, POSTGRES, ORACLE] {
+        for list in [COMMON, POSTGRES, ORACLE, CLICKHOUSE, CLICKHOUSE_PREFIXES] {
             assert!(
                 list.windows(2).all(|w| w[0] < w[1]),
                 "unsorted or duplicate"
@@ -483,5 +611,18 @@ mod tests {
         assert!(is_builtin("dbms_output.put_line", SqlDialect::Oracle));
         assert!(is_builtin("pg_catalog.format_type", SqlDialect::Postgres));
         assert!(!is_builtin("lsmb__next_businss_day", SqlDialect::Postgres));
+        // RFC 0235.
+        for f in [
+            "todate",
+            "tostartofmonth",
+            "arrayjoin",
+            "uniqexact",
+            "multiif",
+            "count",
+        ] {
+            assert!(is_builtin(f, SqlDialect::ClickHouse), "{f}");
+        }
+        assert!(!is_builtin("todate", SqlDialect::Postgres));
+        assert!(!is_builtin("shop_score", SqlDialect::ClickHouse));
     }
 }

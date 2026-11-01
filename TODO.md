@@ -6955,6 +6955,17 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [ ] ekos-lakehouse: bump its EKOS dependency so `lakehouse docs generate` carries the integrity section
 - [ ] iDempiere AD checks (`AD_Column.Callout`, `AD_Process.Classname`, …) need the dictionary rows: extend
       `[[databases]] dictionary` (RFC 0212) beyond `AD_Table`
+
+## RFC 0235 — PostgreSQL and ClickHouse as project databases (2026-11-01, devlog_317)
+
+- [x] `[[databases]] kind = "postgres" | "clickhouse"`, `ekos database add --kind`, per-kind connect check
+- [x] `ekos-plugin-postgres` (pg-live read-only session, reconciled) and `ekos-plugin-clickhouse::catalog` (`readonly=1`), both with a write probe
+- [x] One analyzer for all three dialects (`CatalogDialect`; Oracle ids unchanged), `PostgresCatalog` / `ClickHouseCatalog` kinds
+- [x] Console Sources tab: Kind selector, per-kind hints, Oracle-only fields hidden; API validates per kind
+- [x] `database test` counts compiled objects from the latest model (a dropped object no longer reads as a difference)
+- [x] Integrity check: ClickHouse built-ins; live objects choose built-ins by their `dialect`
+- [ ] Profiles (`p1`/`p2`) for PostgreSQL and ClickHouse (pg-live has P0/P1 profiling already)
+- [ ] MySQL, SQL Server, Snowflake as `[[databases]]` kinds (each needs a read-only live reader first)
 ## RFC 0232 — EKOS on Azure, Google Cloud and AWS (2026-10-30, devlog_313)
 
 - [x] `ekos home backup --to <url>` / `ekos home restore --from <url>`: S3, Azure Blob, GCS (`object-storage` feature, in the image; GCS added to `object_store`)

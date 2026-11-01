@@ -17,7 +17,9 @@ export function Sources() {
   const list = useQuery({
     queryKey: ["sources", id],
     queryFn: () =>
-      api<{ sources: DirSource[]; databases: DatabaseSource[] }>(`/workspaces/${id}/sources`),
+      api<{ sources: DirSource[]; databases: DatabaseSource[] }>(
+        `/workspaces/${id}/sources`,
+      ),
     enabled: id !== "",
   });
   const canOperate = mayOperate(me);
@@ -25,9 +27,10 @@ export function Sources() {
   return (
     <div className="sem-page">
       <p className="muted sem-note">
-        Step 1: what EKOS reads. Add the repositories, document folders and databases, test each
-        database, then <strong>Init &amp; compile</strong> (top right) analyses them. Nothing is
-        ever written into a source; a database is read through a read-only user.
+        Step 1: what EKOS reads. Add the repositories, document folders and
+        databases, test each database, then <strong>Init &amp; compile</strong>{" "}
+        (top right) analyses them. Nothing is ever written into a source; a
+        database is read through a read-only user.
       </p>
       {list.isLoading && <p className="muted">loading…</p>}
       {list.isError && <p className="err">{String(list.error)}</p>}
@@ -37,8 +40,8 @@ export function Sources() {
             <strong>Directories</strong>
             {list.data.sources.length === 0 ? (
               <p className="muted">
-                No named sources: the project reads the directory it was created from. Adding one
-                names that directory too.
+                No named sources: the project reads the directory it was created
+                from. Adding one names that directory too.
               </p>
             ) : (
               <table className="review-table">
@@ -76,9 +79,16 @@ export function Sources() {
           </section>
           <section className="card">
             <strong>Databases</strong>
-            {list.data.databases.length === 0 && <p className="muted">No database yet.</p>}
+            {list.data.databases.length === 0 && (
+              <p className="muted">No database yet.</p>
+            )}
             {list.data.databases.map((d) => (
-              <DatabaseRow key={d.name} workspace={id} db={d} canOperate={canOperate} />
+              <DatabaseRow
+                key={d.name}
+                workspace={id}
+                db={d}
+                canOperate={canOperate}
+              />
             ))}
             {canOperate && <AddDatabase workspace={id} />}
           </section>
@@ -122,7 +132,11 @@ function AddDirectory({ workspace }: { workspace: string }) {
           onChange={(e) => setPath(e.target.value)}
           style={{ minWidth: "24rem" }}
         />
-        <select aria-label="source kind" value={kind} onChange={(e) => setKind(e.target.value)}>
+        <select
+          aria-label="source kind"
+          value={kind}
+          onChange={(e) => setKind(e.target.value)}
+        >
           <option value="">detect</option>
           <option value="git">git</option>
           <option value="dir">dir</option>
@@ -140,9 +154,36 @@ function AddDirectory({ workspace }: { workspace: string }) {
   );
 }
 
+// RFC 0235: what each kind's form asks for. Profiles and the application dictionary are Oracle's.
+const KINDS = {
+  oracle: {
+    label: "Oracle",
+    connect: "Connect (host:port/service)",
+    connectHint: "db.local:1521/ORCLPDB1",
+    owners: "Schemas to read (comma-separated)",
+    ownersHint: "ADEMPIERE",
+  },
+  postgres: {
+    label: "PostgreSQL",
+    connect: "Connect (host[:port]/database)",
+    connectHint: "db.local:5432/shop",
+    owners: "Schemas to read (comma-separated)",
+    ownersHint: "public",
+  },
+  clickhouse: {
+    label: "ClickHouse",
+    connect: "Connect (http[s]://host[:port])",
+    connectHint: "https://ch.local:8443",
+    owners: "Databases to read (comma-separated)",
+    ownersHint: "analytics",
+  },
+} as const;
+type Kind = keyof typeof KINDS;
+
 function AddDatabase({ workspace }: { workspace: string }) {
   const qc = useQueryClient();
   const [f, setF] = useState({
+    kind: "oracle" as Kind,
     name: "",
     connect: "",
     user: "",
@@ -155,18 +196,22 @@ function AddDatabase({ workspace }: { workspace: string }) {
     setF((x) => ({ ...x, [k]: e.target.value }));
   const add = useMutation({
     mutationFn: () =>
-      apiPost<{ message: string; password_env: string }>(`/workspaces/${workspace}/databases`, {
-        name: f.name,
-        connect: f.connect,
-        user: f.user,
-        password: f.password,
-        owners: f.owners
-          .split(/[,\s]+/)
-          .map((o) => o.trim())
-          .filter(Boolean),
-        profile: f.profile,
-        dictionary: f.dictionary || null,
-      }),
+      apiPost<{ message: string; password_env: string }>(
+        `/workspaces/${workspace}/databases`,
+        {
+          kind: f.kind,
+          name: f.name,
+          connect: f.connect,
+          user: f.user,
+          password: f.password,
+          owners: f.owners
+            .split(/[,\s]+/)
+            .map((o) => o.trim())
+            .filter(Boolean),
+          profile: f.kind === "oracle" ? f.profile : "p0",
+          dictionary: f.kind === "oracle" ? f.dictionary || null : null,
+        },
+      ),
     onSuccess: () => {
       // The password leaves the page as soon as it is stored.
       setF((x) => ({ ...x, password: "" }));
@@ -174,10 +219,27 @@ function AddDatabase({ workspace }: { workspace: string }) {
     },
   });
   const ready = f.name && f.connect && f.user && f.password && f.owners;
+  const k = KINDS[f.kind];
   return (
     <details className="sem-decide">
-      <summary>Add an Oracle database</summary>
+      <summary>Add a database</summary>
       <div className="sources-form">
+        <label className="sem-field">
+          <span>Kind</span>
+          <select
+            aria-label="database kind"
+            value={f.kind}
+            onChange={(e) =>
+              setF((x) => ({ ...x, kind: e.target.value as Kind }))
+            }
+          >
+            {(Object.keys(KINDS) as Kind[]).map((key) => (
+              <option key={key} value={key}>
+                {KINDS[key].label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="sem-field">
           <span>Name</span>
           <input
@@ -188,12 +250,12 @@ function AddDatabase({ workspace }: { workspace: string }) {
           />
         </label>
         <label className="sem-field">
-          <span>Connect (host:port/service)</span>
+          <span>{k.connect}</span>
           <input
             aria-label="connect"
             value={f.connect}
             onChange={set("connect")}
-            placeholder="db.local:1521/ORCLPDB1"
+            placeholder={k.connectHint}
           />
         </label>
         <label className="sem-field">
@@ -201,7 +263,9 @@ function AddDatabase({ workspace }: { workspace: string }) {
           <input aria-label="user" value={f.user} onChange={set("user")} />
         </label>
         <label className="sem-field">
-          <span>Password (kept in the console's keychain, never in ekos.toml)</span>
+          <span>
+            Password (kept in the console's keychain, never in ekos.toml)
+          </span>
           <input
             aria-label="password"
             type="password"
@@ -211,32 +275,50 @@ function AddDatabase({ workspace }: { workspace: string }) {
           />
         </label>
         <label className="sem-field">
-          <span>Schemas to read (comma-separated)</span>
+          <span>{k.owners}</span>
           <input
             aria-label="owners"
             value={f.owners}
             onChange={set("owners")}
-            placeholder="ADEMPIERE"
+            placeholder={k.ownersHint}
           />
         </label>
-        <label className="sem-field">
-          <span>Profile</span>
-          <select aria-label="profile" value={f.profile} onChange={set("profile")}>
-            <option value="p0">p0 — optimizer statistics only</option>
-            <option value="p1">p1 — row counts</option>
-            <option value="p2">p2 — one scan per table (null counts, bounds)</option>
-          </select>
-        </label>
-        <label className="sem-field">
-          <span>Application dictionary</span>
-          <select aria-label="dictionary" value={f.dictionary} onChange={set("dictionary")}>
-            <option value="">none</option>
-            <option value="idempiere">iDempiere / ADempiere</option>
-          </select>
-        </label>
+        {f.kind === "oracle" && (
+          <>
+            <label className="sem-field">
+              <span>Profile</span>
+              <select
+                aria-label="profile"
+                value={f.profile}
+                onChange={set("profile")}
+              >
+                <option value="p0">p0 — optimizer statistics only</option>
+                <option value="p1">p1 — row counts</option>
+                <option value="p2">
+                  p2 — one scan per table (null counts, bounds)
+                </option>
+              </select>
+            </label>
+            <label className="sem-field">
+              <span>Application dictionary</span>
+              <select
+                aria-label="dictionary"
+                value={f.dictionary}
+                onChange={set("dictionary")}
+              >
+                <option value="">none</option>
+                <option value="idempiere">iDempiere / ADempiere</option>
+              </select>
+            </label>
+          </>
+        )}
       </div>
       <div className="btnrow">
-        <button className="save" disabled={!ready || add.isPending} onClick={() => add.mutate()}>
+        <button
+          className="save"
+          disabled={!ready || add.isPending}
+          onClick={() => add.mutate()}
+        >
           Add database
         </button>
       </div>
@@ -257,21 +339,28 @@ function DatabaseRow({
 }) {
   const qc = useQueryClient();
   const test = useMutation({
-    mutationFn: () => apiPost<DatabaseTest>(`/workspaces/${workspace}/databases/${db.name}/test`),
+    mutationFn: () =>
+      apiPost<DatabaseTest>(
+        `/workspaces/${workspace}/databases/${db.name}/test`,
+      ),
   });
   const remove = useMutation({
-    mutationFn: () => apiDelete(`/workspaces/${workspace}/databases/${db.name}`),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["sources", workspace] }),
+    mutationFn: () =>
+      apiDelete(`/workspaces/${workspace}/databases/${db.name}`),
+    onSuccess: () =>
+      void qc.invalidateQueries({ queryKey: ["sources", workspace] }),
   });
   const t = test.data;
   return (
     <div className="sem-decide" aria-label={`database ${db.name}`}>
       <p>
-        <strong>{db.name}</strong>{" "}
+        <strong>{db.name}</strong> <span className="chip">{db.kind}</span>{" "}
         <code>
           {db.user}@{db.connect}
         </code>{" "}
-        · schemas {db.owners.join(", ")} · profile {db.profile}
+        · {db.kind === "clickhouse" ? "databases" : "schemas"}{" "}
+        {db.owners.join(", ")}
+        {db.kind === "oracle" ? ` · profile ${db.profile}` : ""}
         {db.dictionary ? ` · dictionary ${db.dictionary}` : ""} ·{" "}
         {db.password_stored ? (
           <span className="chip ok">password stored</span>
@@ -293,13 +382,16 @@ function DatabaseRow({
           </button>
         </div>
       )}
-      {test.isPending && <p className="muted">connecting and reading the catalog…</p>}
+      {test.isPending && (
+        <p className="muted">connecting and reading the catalog…</p>
+      )}
       {test.isError && <p className="err">{String(test.error)}</p>}
       {remove.isError && <p className="err">{String(remove.error)}</p>}
       {t && (
         <>
           <p>
-            Connected as <code>{t.test.label}</code> ({t.test.family} views) in {t.ms} ms ·{" "}
+            Connected as <code>{t.test.label}</code> ({t.test.family} views) in{" "}
+            {t.ms} ms ·{" "}
             {t.read_only === true ? (
               <span className="chip ok">writes refused (read-only)</span>
             ) : t.read_only === false ? (
@@ -311,7 +403,11 @@ function DatabaseRow({
           </p>
           {t.test.owners.map((o) => (
             <p key={o.owner} className="muted">
-              {o.owner}: {Object.values(o.census).reduce((n, c) => n + c.valid + c.invalid, 0)}{" "}
+              {o.owner}:{" "}
+              {Object.values(o.census).reduce(
+                (n, c) => n + c.valid + c.invalid,
+                0,
+              )}{" "}
               objects, {o.columns} columns
             </p>
           ))}
@@ -332,15 +428,21 @@ function DatabaseRow({
                   <td>{r.compiled ?? "—"}</td>
                   <td>
                     {r.equal === true && <span className="chip ok">equal</span>}
-                    {r.equal === false && <span className="chip bad">differs</span>}
-                    {r.equal === null && <span className="muted">not compiled yet</span>}
+                    {r.equal === false && (
+                      <span className="chip bad">differs</span>
+                    )}
+                    {r.equal === null && (
+                      <span className="muted">not compiled yet</span>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
           {t.test.any_privileges.length > 0 && (
-            <p className="err">ANY privileges held: {t.test.any_privileges.join(", ")}</p>
+            <p className="err">
+              ANY privileges held: {t.test.any_privileges.join(", ")}
+            </p>
           )}
         </>
       )}

@@ -193,9 +193,11 @@ source later, and a project compiled without names cannot gain them.
 ### Sources and databases (RFC 0223)
 
 A project's **Sources** tab lists its directories and databases. An operator adds a directory (it
-must lie under the tenant's source roots) or an Oracle database: connect string
-(`host:port/service`), a read-only user, the password, the schemas to read, the profile tier, and
-optionally the iDempiere dictionary. The first directory added to a project created from one
+must lie under the tenant's source roots) or a database. **Kind** chooses Oracle, PostgreSQL or
+ClickHouse (RFC 0235), which sets the connect form: Oracle `host:port/service`, PostgreSQL
+`host[:port]/database`, ClickHouse `http[s]://host[:port]`. Then a read-only user, the password and
+the schemas to read (for ClickHouse, the databases); for Oracle also the profile tier and,
+optionally, the iDempiere dictionary. The first directory added to a project created from one
 directory names that directory as a source too, so it keeps being read.
 
 **The password** is kept in the server's keychain under a variable the console names
@@ -208,7 +210,7 @@ database (admin) deletes the password the console kept for it.
 
 **Test connection** reads the catalog read-only (no profiling), checks that the server refuses a
 write, and puts the database's census next to what was compiled: tables, views, routines,
-triggers. The Oracle driver needs Instant Client: set `LD_LIBRARY_PATH` (and `TNS_ADMIN` if you use
+triggers. PostgreSQL and ClickHouse need nothing installed on the server. The Oracle driver needs Instant Client: set `LD_LIBRARY_PATH` (and `TNS_ADMIN` if you use
 one) in the console's environment; the console passes these to every `ekos` it starts.
 
 ## 5. Limits inside a project

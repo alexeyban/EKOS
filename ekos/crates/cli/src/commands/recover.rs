@@ -8,7 +8,7 @@ use ekos_compiler_core::{
     scheduler::FailureMode,
 };
 use ekos_recovery::{
-    ArchitectureReasoningPass, ArchitectureReasoningStats, CicdAnalyzerPass,
+    ArchitectureReasoningPass, ArchitectureReasoningStats, CatalogDialect, CicdAnalyzerPass,
     ClickHouseAnalyzerPass, ConfluenceAnalyzerPass, CrateTopologyAnalyzerPass, CryptoAnalyzerPass,
     DbtAnalyzerPass, DependencyAnalyzerPass, DialectRule, DocumentSemanticsAnalyzerPass,
     DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass,
@@ -257,21 +257,28 @@ fn print_plsql_stats(handles: &[Arc<std::sync::Mutex<PlSqlStats>>]) {
     );
 }
 
-fn print_oracle_catalog_stats(handle: Option<&Arc<std::sync::Mutex<OracleCatalogStats>>>) {
-    let Some(handle) = handle else {
-        return;
-    };
+/// RFC 0211 / 0235: one live catalog pass's summary.
+fn print_live_catalog_stats(
+    dialect: CatalogDialect,
+    handle: &Arc<std::sync::Mutex<OracleCatalogStats>>,
+) {
     let s = handle.lock().unwrap().clone();
+    let stage = format!("{}.recover", dialect.name());
+    let label = match dialect {
+        CatalogDialect::Oracle => "Oracle",
+        CatalogDialect::Postgres => "PostgreSQL",
+        CatalogDialect::ClickHouse => "ClickHouse",
+    };
     // A pass served from cache does not run, so it fills no counters; zeros would read as an
     // empty database.
     if s.catalogs == 0 {
-        run_log::emit("oracle.recover", "unchanged (cached)", &json!({}));
-        println!("  Oracle catalog: unchanged since the last recover (cached)");
+        run_log::emit(&stage, "unchanged (cached)", &json!({}));
+        println!("  {label} catalog: unchanged since the last recover (cached)");
         return;
     }
     let r = &s.routines.routines;
     run_log::emit(
-        "oracle.recover",
+        &stage,
         "catalog objects",
         &json!({
             "schemas": s.catalogs,
@@ -292,8 +299,9 @@ fn print_oracle_catalog_stats(handle: Option<&Arc<std::sync::Mutex<OracleCatalog
         }),
     );
     println!(
-        "  Oracle catalog: {} schema(s), {} tables, {} foreign keys ({} unresolved), {} views \
-         ({} unread), {} routines ({} complete, {} partial), {} statements, {} invalid object(s)",
+        "  {label} catalog: {} schema(s), {} tables, {} foreign keys ({} unresolved), {} views \
+         ({} unread), {} routines ({} complete, {} partial), {} statements, {} trigger(s), {} \
+         invalid object(s)",
         s.catalogs,
         s.tables,
         s.foreign_keys,
@@ -304,8 +312,16 @@ fn print_oracle_catalog_stats(handle: Option<&Arc<std::sync::Mutex<OracleCatalog
         r.complete,
         r.partial,
         r.statements,
+        s.routines.triggers,
         s.invalid_objects
     );
+    if dialect != CatalogDialect::Oracle {
+        println!(
+            "  {label} catalog: {} object(s) no longer in the database",
+            s.stale_objects
+        );
+        return;
+    }
     println!(
         "  Oracle profile:  tier {}; {} table(s) scanned, {} failed or skipped; log mode {}; {} \
          object(s) no longer in the database",
@@ -422,7 +438,8 @@ struct SqlStatsHandles {
     triggers: Vec<Arc<std::sync::Mutex<TriggerStats>>>,
     history: Vec<Arc<std::sync::Mutex<SchemaHistoryStats>>>,
     /// RFC 0211: the live Oracle catalog pass (one per run, when any database was observed).
-    oracle: Option<Arc<std::sync::Mutex<OracleCatalogStats>>>,
+    /// RFC 0211 / 0235: one entry per live catalog pass registered.
+    live_catalogs: Vec<(CatalogDialect, Arc<std::sync::Mutex<OracleCatalogStats>>)>,
 }
 
 /// Everything `ekos recover` reports once its passes have run.
@@ -657,7 +674,9 @@ impl RecoverSummary {
         print_plpgsql_stats(&sql_stats.plpgsql);
         print_plsql_stats(&sql_stats.plsql);
         print_history_stats(&sql_stats.history);
-        print_oracle_catalog_stats(sql_stats.oracle.as_ref());
+        for (dialect, stats) in &sql_stats.live_catalogs {
+            print_live_catalog_stats(*dialect, stats);
+        }
         print_run_outcome(config, cwd, parallel, report, ctx)
     }
 }
@@ -1521,17 +1540,25 @@ pub async fn run_with(
         pass_manager.register(Box::new(clickhouse_pass));
     }
 
-    // ── Live Oracle catalog artifacts (RFC 0211) ─────────────────────────
-    let oracle_artifact_ids = collect_artifact_ids_for_connector(&*artifact_store, "oracle");
-    if !oracle_artifact_ids.is_empty() {
+    // ── Live database catalog artifacts (RFC 0211 Oracle, RFC 0235 PostgreSQL / ClickHouse) ──
+    for dialect in [
+        CatalogDialect::Oracle,
+        CatalogDialect::Postgres,
+        CatalogDialect::ClickHouse,
+    ] {
+        let ids = collect_artifact_ids_for_connector(&*artifact_store, dialect.observer());
+        if ids.is_empty() {
+            continue;
+        }
         let stats = Arc::new(std::sync::Mutex::new(OracleCatalogStats::default()));
-        sql_stats.oracle = Some(Arc::clone(&stats));
-        pass_manager.register(Box::new(OracleCatalogPass::new(
+        sql_stats.live_catalogs.push((dialect, Arc::clone(&stats)));
+        pass_manager.register(Box::new(OracleCatalogPass::for_dialect(
+            dialect,
             cwd.file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .as_ref(),
-            oracle_artifact_ids,
+            ids,
             stats,
         )));
     }

@@ -14,10 +14,25 @@ from . import envs, keychain, models
 from .semantics_write import ReviewError
 
 _NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
-_OWNER = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]{0,127}$")
-_CONNECT = re.compile(r"^[A-Za-z0-9._-]+(:[0-9]{1,5})?/[A-Za-z0-9._$#-]+$")
-_USER = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]{0,127}$")
+_OWNER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#]{0,127}$")
+_USER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#.-]{0,127}$")
 PROFILES = ("p0", "p1", "p2")
+# RFC 0235: each kind's `connect` form, and what the form calls it.
+KINDS = ("oracle", "postgres", "clickhouse")
+_CONNECT = {
+    "oracle": (
+        re.compile(r"^[A-Za-z0-9._-]+(:[0-9]{1,5})?/[A-Za-z0-9._$#-]+$"),
+        "host:port/service (Easy Connect)",
+    ),
+    "postgres": (
+        re.compile(r"^[A-Za-z0-9._-]+(:[0-9]{1,5})?/[A-Za-z0-9._$-]+$"),
+        "host[:port]/database",
+    ),
+    "clickhouse": (
+        re.compile(r"^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?/?$"),
+        "http[s]://host[:port]",
+    ),
+}
 
 
 def check_name(name: str, what: str) -> str:
@@ -54,24 +69,32 @@ def database_add_argv(
     owners: list[str],
     profile: str,
     dictionary: str | None,
+    kind: str = "oracle",
 ) -> list[str]:
     check_name(name, "database")
-    if not _CONNECT.match(connect or ""):
-        raise ReviewError("connect is host:port/service (Easy Connect)")
+    if kind not in KINDS:
+        raise ReviewError("kind is oracle, postgres or clickhouse")
+    pattern, form = _CONNECT[kind]
+    if not pattern.match(connect or ""):
+        raise ReviewError(f"connect is {form}")
     if not _USER.match(user or ""):
-        raise ReviewError("user: an Oracle user name")
+        raise ReviewError("user: a database user name")
+    what = "database names" if kind == "clickhouse" else "schema names"
     if not owners or any(not _OWNER.match(o) for o in owners) or len(owners) > 50:
-        raise ReviewError("owners: one or more schema names")
+        raise ReviewError(f"owners: one or more {what}")
     if profile not in PROFILES:
         raise ReviewError("profile is p0, p1 or p2")
     if dictionary not in (None, "idempiere"):
         raise ReviewError("dictionary is idempiere or none")
+    if kind != "oracle" and (profile != "p0" or dictionary):
+        raise ReviewError("profiles and application dictionaries are read for Oracle only")
     if not envs.is_valid_name(password_env):
         raise ReviewError("not a usable variable name")
     argv = [
         "database",
         "add",
         name,
+        f"--kind={kind}",
         f"--connect={connect}",
         f"--user={user}",
         f"--password-env={password_env}",
