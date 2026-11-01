@@ -282,7 +282,7 @@ none of the console's settings. With the box unticked they receive none, so a ho
 fails for want of a key. A local model server still works: point `ekos.toml` at
 `http://host.docker.internal:11434`.
 
-Calls to a hosted model are billed by that provider. EKOS does not track or cap spending.
+Calls to a hosted model are billed by that provider. A project can cap what one command may spend with `[llm] budget-usd` (RFC 0197: a call that would pass the budget, or whose price is unknown, is refused), and `ekos llm usage` reports what was spent; the console itself sets no cap.
 
 Outside production mode the `default` tenant keeps the console's whole environment (minus the
 console's own settings and other tenants' named variables), as before this existed.

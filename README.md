@@ -138,7 +138,7 @@ database's own object counts, behind the `oracle` build feature — RFC 0211), p
 proof-of-concept clients for Salesforce, SAP,
 Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
 account). SQL in the PostgreSQL, SQL Server (T-SQL), MySQL, Snowflake, Databricks and ClickHouse dialects is
-parsed from files (RFC 0031); live PostgreSQL / SQL Server database connectors and a Jira connector remain planned.
+parsed from files (RFC 0031); live Oracle, PostgreSQL and ClickHouse catalogs are read through `[[databases]]` (RFC 0211, RFC 0235); a live SQL Server connector and a Jira connector remain planned.
 
 ## Installation
 
