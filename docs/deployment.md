@@ -398,7 +398,8 @@ terraform output url
 `ekos home backup --to` (scheduled backups fail and nothing is restored on first start), no
 instance lease, and no secrets read from mounted files (Kubernetes, VM). Until a release contains
 RFC 0232, build the image from `main` (`docker build -t <registry>/ekos:<tag> .`), push it to your
-registry and set `image`.
+registry and set `image`. On Azure, `az acr build` builds it in the registry without a local Docker, and the
+example's `acr_id` (the registry's resource id) lets the deployment pull it.
 
 What each deployment creates and how it behaves:
 

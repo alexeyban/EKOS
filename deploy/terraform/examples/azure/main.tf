@@ -48,6 +48,7 @@ module "ekos" {
   location           = var.location
   compute            = var.compute
   image              = var.image
+  acr_id             = var.acr_id
   domain             = var.domain
   ssh_public_key     = var.ssh_public_key
   admin_cidrs        = var.admin_cidrs
@@ -57,6 +58,11 @@ module "ekos" {
   secrets            = var.secrets
   git_repos          = var.git_repos
   git_token          = var.git_token
+  backup_cron        = var.backup_cron
+  home_size_gb       = var.home_size_gb
+  vm_size            = var.vm_size
+  container_cpu      = var.container_cpu
+  container_memory   = var.container_memory
 }
 
 variable "subscription_id" { type = string }
@@ -75,6 +81,11 @@ variable "compute" {
 variable "image" {
   type    = string
   default = "ghcr.io/alexeyban/ekos:1.1.0"
+}
+# A private registry holding `image`: its resource id. The deployment's identity gets AcrPull on it.
+variable "acr_id" {
+  type    = string
+  default = ""
 }
 variable "domain" {
   type    = string
@@ -120,6 +131,27 @@ variable "git_token" {
   type      = string
   default   = ""
   sensitive = true
+}
+
+variable "backup_cron" {
+  type    = string
+  default = "17 2 * * *"
+}
+variable "home_size_gb" {
+  type    = number
+  default = 128
+}
+variable "vm_size" {
+  type    = string
+  default = "Standard_D4s_v5"
+}
+variable "container_cpu" {
+  type    = number
+  default = 2
+}
+variable "container_memory" {
+  type    = string
+  default = "4Gi"
 }
 
 output "url" { value = module.ekos.url }

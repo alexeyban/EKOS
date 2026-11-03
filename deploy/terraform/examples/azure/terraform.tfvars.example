@@ -2,6 +2,11 @@ subscription_id = "00000000-0000-0000-0000-000000000000"
 location        = "westeurope"
 compute         = "vm" # vm | container | kubernetes
 
+# The image. ghcr.io/alexeyban/ekos:1.1.0 (the default) predates RFC 0232: build one from main in
+# your own registry (az acr build) and give its resource id, so the deployment can pull it.
+# image  = "<registry>.azurecr.io/ekos:<commit>"
+# acr_id = "/subscriptions/<id>/resourceGroups/<rg>/providers/Microsoft.ContainerRegistry/registries/<registry>"
+
 # VM: SSH key (Azure requires one) and who may SSH in; the console is on https://<name>-xxxxxx.<region>.cloudapp.azure.com
 ssh_public_key = "ssh-ed25519 AAAA... you@laptop"
 admin_cidrs    = []
