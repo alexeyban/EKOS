@@ -1,0 +1,19 @@
+# RFC 0241 — the baseline for the final comparison: cell A with max-tokens 4096, so the difference to G/H is EKOS alone.
+name = "A-4k"
+description = "Cell A (raw DDL, baseline prompt, no evidence, no lookup) with the output allowance of the RFC 0241 cells"
+context = "raw-ddl"
+evidence = false
+value-lookup = false
+few-shot = 0
+n = 1
+r = 1
+max-tokens = 4096
+ves-iterations = 3
+timeout-seconds = 30
+
+[llm]
+# OpenCode Zen, Claude Haiku 5.5 ($0.10 / $0.50 per million tokens). Metered: needs --allow-metered.
+provider = "zen"
+model = "claude-haiku-5-5"
+api-key-env = "OPENCODE_API_KEY"
+budget-usd = 1.0

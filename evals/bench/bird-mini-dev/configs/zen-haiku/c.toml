@@ -1,0 +1,19 @@
+# RFC 0240 §2.4 — the same cell on OpenCode Zen (Claude Haiku 5.5). Same prompt, n and r.
+name = "C"
+description = "EKOS pack; no evidence; value lookup — the no-oracle-knowledge entry"
+context = "ekos-pack"
+evidence = false
+value-lookup = true
+few-shot = 0
+n = 1
+r = 1
+max-tokens = 1024
+ves-iterations = 3
+timeout-seconds = 30
+
+[llm]
+# OpenCode Zen, Claude Haiku 5.5 ($0.10 / $0.50 per million tokens). Metered: needs --allow-metered.
+provider = "zen"
+model = "claude-haiku-5-5"
+api-key-env = "OPENCODE_API_KEY"
+budget-usd = 1.0

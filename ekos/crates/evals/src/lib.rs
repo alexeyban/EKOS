@@ -12,6 +12,7 @@
 //! report   — aggregation + the text/JSON report
 //! ```
 
+pub mod bench;
 pub mod echoes;
 pub mod evaluators;
 pub mod history;

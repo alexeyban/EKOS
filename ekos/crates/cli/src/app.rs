@@ -778,6 +778,11 @@ enum EvalCommands {
         #[arg(long, value_name = "FILE")]
         output: Option<PathBuf>,
     },
+    /// External benchmarks: prepare, run, compare and export (RFC 0240)
+    Bench {
+        #[command(subcommand)]
+        subcommand: BenchCommands,
+    },
     /// List saved eval runs (evals/reports/*.json) as a trend table
     History {
         /// Default: <cwd>/evals/reports
@@ -788,6 +793,83 @@ enum EvalCommands {
         limit: Option<usize>,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum BenchCommands {
+    /// Benchmark adapters and the suites under evals/bench/
+    List {
+        /// Default: <cwd>/evals/bench
+        #[arg(long, value_name = "DIR")]
+        bench_dir: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check archives, extract databases, build one EKOS project per database, scan for leakage
+    Prepare {
+        /// The suite's directory name under evals/bench/ (e.g. bird-mini-dev)
+        #[arg(long)]
+        suite: String,
+        #[arg(long, value_name = "DIR")]
+        bench_dir: Option<PathBuf>,
+        /// Fail instead of downloading a missing archive
+        #[arg(long)]
+        offline: bool,
+        /// Rebuild every project and value index even when up to date
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run one experiment cell over a split and save the report
+    Run {
+        #[arg(long)]
+        suite: String,
+        /// An experiment cell: a file stem under the suite's configs/ (e.g. c) or a TOML path
+        #[arg(long)]
+        cell: String,
+        /// tune, hold or all
+        #[arg(long, default_value = "all")]
+        split: String,
+        /// Only the first N questions of the split
+        #[arg(long)]
+        limit: Option<usize>,
+        /// A fixed, hash-ordered sample of N questions of the split, spread over its databases
+        #[arg(long)]
+        sample: Option<usize>,
+        /// Replace the cell's [llm] model for this run (recorded in the report)
+        #[arg(long)]
+        model: Option<String>,
+        /// Allow a route that is not a local Ollama model (it costs money)
+        #[arg(long)]
+        allow_metered: bool,
+        #[arg(long, value_name = "DIR")]
+        bench_dir: Option<PathBuf>,
+        /// Default: <cwd>/evals/reports/bench/<suite>
+        #[arg(long, value_name = "DIR")]
+        reports_dir: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Paired comparison of two reports: difference, bootstrap interval, flipped questions
+    Compare {
+        report_a: PathBuf,
+        report_b: PathBuf,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Write a report's predictions in a benchmark's submission format
+    Export {
+        report: PathBuf,
+        /// bird-submission
+        #[arg(long)]
+        target: String,
+        /// Default: <suite>/data/export
+        #[arg(long, value_name = "DIR")]
+        out: Option<PathBuf>,
+        #[arg(long, value_name = "DIR")]
+        bench_dir: Option<PathBuf>,
     },
 }
 
@@ -1904,6 +1986,13 @@ fn emits_machine_output(command: &Commands) -> bool {
             EvalCommands::Run { json, .. } => *json,
             EvalCommands::History { json, .. } => *json,
             EvalCommands::Regrade { json, .. } => *json,
+            EvalCommands::Bench { subcommand } => match subcommand {
+                BenchCommands::List { json, .. }
+                | BenchCommands::Prepare { json, .. }
+                | BenchCommands::Run { json, .. }
+                | BenchCommands::Compare { json, .. } => *json,
+                BenchCommands::Export { .. } => false,
+            },
         },
         _ => false,
     }
@@ -3318,6 +3407,7 @@ async fn dispatch_eval(
                 output,
             },
         ),
+        EvalCommands::Bench { subcommand } => dispatch_bench(subcommand, config, cwd).await,
         EvalCommands::History {
             reports_dir,
             limit,
@@ -3330,6 +3420,78 @@ async fn dispatch_eval(
             };
             crate::commands::eval::history(cwd, opts)
         }
+    }
+}
+
+/// `ekos eval bench …` (RFC 0240)
+async fn dispatch_bench(
+    subcommand: BenchCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    use crate::commands::eval_bench as bench;
+    match subcommand {
+        BenchCommands::List { bench_dir, json } => bench::list(cwd, bench_dir.as_deref(), json),
+        BenchCommands::Prepare {
+            suite,
+            bench_dir,
+            offline,
+            force,
+            json,
+        } => {
+            bench::prepare(
+                cwd,
+                bench::PrepareOpts {
+                    suite: &suite,
+                    bench_dir: bench_dir.as_deref(),
+                    offline,
+                    force,
+                    json,
+                },
+            )
+            .await
+        }
+        BenchCommands::Run {
+            suite,
+            cell,
+            split,
+            limit,
+            sample,
+            model,
+            allow_metered,
+            bench_dir,
+            reports_dir,
+            json,
+        } => {
+            bench::run(
+                config,
+                cwd,
+                bench::RunOpts {
+                    suite: &suite,
+                    bench_dir: bench_dir.as_deref(),
+                    config: &cell,
+                    split: split.parse()?,
+                    limit,
+                    sample,
+                    model: model.as_deref(),
+                    allow_metered,
+                    reports_dir,
+                    json,
+                },
+            )
+            .await
+        }
+        BenchCommands::Compare {
+            report_a,
+            report_b,
+            json,
+        } => bench::compare(&report_a, &report_b, json),
+        BenchCommands::Export {
+            report,
+            target,
+            out,
+            bench_dir,
+        } => bench::export(cwd, bench_dir.as_deref(), &report, target.parse()?, out),
     }
 }
 

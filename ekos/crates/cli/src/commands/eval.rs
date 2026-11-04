@@ -38,7 +38,7 @@ pub struct EvalRunOpts<'a> {
 /// Human label for what actually answered. Records the resolved model for every provider, not just
 /// ollama — a report that says only `"claude"` cannot be compared against a later run on a
 /// different model (RFC 0139 §5).
-fn agent_label(config: &EkosConfig) -> String {
+pub(crate) fn agent_label(config: &EkosConfig) -> String {
     let model = config.llm.model.as_deref().unwrap_or("default");
     match config.llm.provider.as_deref() {
         Some("ollama") => format!("ollama ({model})"),
@@ -75,7 +75,7 @@ fn with_agent(config: &EkosConfig, agent: Option<&str>) -> Result<EkosConfig> {
 /// if a real model generated them. There is no `--agent mock` option (`run`'s own match above
 /// only accepts claude/anthropic/ollama/openai), so reaching the mock here can only mean the
 /// fallback fired, never a deliberate choice.
-fn check_not_mock(llm: &dyn LlmProvider, agent: &str, key_env: &str) -> Result<()> {
+pub(crate) fn check_not_mock(llm: &dyn LlmProvider, agent: &str, key_env: &str) -> Result<()> {
     if llm.model_name() != MOCK_MODEL_NAME {
         return Ok(());
     }
@@ -231,6 +231,15 @@ pub fn history(cwd: &Path, opts: EvalHistoryOpts) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&reports)?);
     } else {
         print!("{}", ekos_evals::history::render_table(&runs));
+        // RFC 0240: benchmark reports live under <reports>/bench/<suite>/.
+        let mut bench_runs = super::eval_bench::history_rows(&reports_dir);
+        if let Some(limit) = opts.limit {
+            let start = bench_runs.len().saturating_sub(limit);
+            bench_runs.drain(..start);
+        }
+        if !bench_runs.is_empty() {
+            print!("{}", super::eval_bench::render_history(&bench_runs));
+        }
     }
     Ok(())
 }

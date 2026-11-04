@@ -1029,6 +1029,17 @@ measure's total in the mart next to the same aggregate over silver. The page sho
 which terms were compiled exactly and which a model drafted, the tests, and the lineage. On iDempiere four marts went
 from approved to reconciled, every total equal.
 
+### External benchmarks: BIRD (RFC 0240 / 0241)
+
+`ekos eval bench` runs external Text-to-SQL benchmarks against EKOS projects built from the
+benchmark's own databases: `prepare` downloads and verifies the data, builds one project per
+database and scans every ledger for leaked questions, gold SQL and evidence; `run` answers one
+experiment cell over a split; `compare` gives the paired difference with a bootstrap interval;
+`export` writes BIRD's prediction format. On BIRD Mini-Dev 1024's full hold-out split (302
+questions, Claude Haiku 5.5), the EKOS cell (pack + column profiles + value lookup + result checks)
+scored 63.9% execution accuracy against 53.3% for the same model with raw DDL: +10.6 points, 95%
+CI +4.3 to +16.9, for $0.30 a run. See `evals/README.md`.
+
 ### iDempiere eval (RFC 0222)
 
 `evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six

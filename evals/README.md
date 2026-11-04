@@ -99,3 +99,37 @@ despite the real repo being much further along) — `ekos query find "<exact nam
 hits for something you know exists in git means it hasn't been through `ekos build/recover/
 resolve/compile/commit` yet, not that the fact is wrong. Ground new scenarios in what the ledger
 actually has, or refresh the workspace first.
+
+## External benchmarks — `ekos eval bench` (RFC 0240)
+
+`evals/bench/<suite>/` holds a benchmark suite: `suite.toml` (adapter, release, question file and
+database archive with pinned SHA-256s, the tune/hold-out split) and `configs/` (one TOML per
+experiment cell). Everything downloaded or built goes to `evals/bench/<suite>/data/` and reports to
+`evals/reports/bench/<suite>/` — both gitignored.
+
+```bash
+ekos eval bench list
+ekos eval bench prepare --suite bird-mini-dev            # download, verify, extract, build 11 projects, leakage scan
+ekos eval bench run --suite bird-mini-dev --cell c --split hold [--sample 100 | --limit N]
+ekos eval bench compare <report-c> <report-a>            # paired bootstrap + McNemar, flipped questions
+ekos eval bench export <report> --target bird-submission # prediction file + metadata sheet
+ekos eval history                                        # bench runs are listed after the RFC 0138 runs
+```
+
+The BIRD cells (`evals/bench/bird-mini-dev/configs/`): **A** raw DDL · **B** raw DDL + evidence ·
+**C** EKOS pack + value lookup (no oracle knowledge) · **D** EKOS pack + evidence + value lookup ·
+**C-prime** EKOS pack alone. They share the model route (`qwen2.5-coder:3b` on a local Ollama by
+default; `--model` overrides, `--allow-metered` is required for any non-Ollama route), the BIRD
+baseline prompt and `n`/`r`. Compare C with A for "does EKOS recover what the evidence supplies",
+D with B for "what EKOS adds to the hint", C with C-prime for value lookup alone.
+
+RFC 0241 adds Zen cells under `configs/zen-haiku/`: **E** pack + column profiles · **F** E +
+value lookup v2 · **G** F + the `ekos-v1` prompt + result checks (the best; 63.9% on the full
+hold-out split against 53.3% for **A-4k**, cell A with the same 4,096-token allowance) · **H** G
+with three varied-context candidates · **G-nv** G without value lookup. Reports count outcomes
+(`correct`, `no_sql`, `exec_error`, `wrong_columns`, `wrong_rows`, `wrong_values`) and billed vs
+cache-served calls.
+
+Tune on `--split tune` only. A run on `hold`/`all` is marked *contaminated* when the same cell ran
+on the hold-out split earlier with a different configuration. EX/Soft-F1 parity with the official
+evaluator: `crates/evals/tests/bird_parity.rs` (needs a `bird-bench/mini_dev` checkout and a report).

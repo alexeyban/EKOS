@@ -1,0 +1,29 @@
+# RFC 0240 — BIRD Mini-Dev, SQLite, the "Mini-Dev 1024" release (2026-10-28 update).
+#
+# Questions come from the Hugging Face dataset at a pinned revision; the databases from the
+# original Mini-Dev package (the SQLite databases did not change in the update — the README says
+# the original dev databases serve the SQLite version). `ekos eval bench prepare` downloads both,
+# checks these checksums and extracts only <db>/<db>.sqlite and <db>/database_description/*.csv:
+# the package's own question and gold files never leave the archive.
+name = "bird-mini-dev"
+adapter = "bird"
+version = "Mini-Dev 1024"
+dialect = "sqlite"
+new-dev = false
+notes = "birdsql/bird_mini_dev @ 5b256b5a (data/manifest.json revision colleague_review_fixes_20261025)"
+
+[questions]
+file = "mini_dev_sqlite.jsonl"
+url = "https://huggingface.co/datasets/birdsql/bird_mini_dev/resolve/5b256b5a9c17478f06ed6912612e9a14d17065c8/data/mini_dev_sqlite.jsonl"
+sha256 = "926af2a0d1b47e5d0d15a7aa8a34d4721007f4550a881555b6a89496b54a2606"
+
+[databases]
+file = "minidev.zip"
+url = "https://bird-bench.oss-cn-beijing.aliyuncs.com/minidev.zip"
+sha256 = "cc48ba16838204e4e214512030cb572eeb5f7bcdd999bae4b9b6ff12ec13b92f"
+prefix = "minidev/MINIDEV/dev_databases/"
+
+# Fixed seed, stratified by database and difficulty: 40% tune / 60% hold-out (RFC 0240 §6).
+[split]
+seed = 240
+tune-fraction = 0.4

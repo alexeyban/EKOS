@@ -100,18 +100,7 @@ pub fn add(
         }
     }
 
-    std::fs::create_dir_all(location.dir())
-        .with_context(|| format!("creating {}", location.dir().display()))?;
-    std::fs::write(location.config_path(), contents)?;
-    let (config, root) = home::load_project(location)?;
-    for dir in [
-        config.ekos_dir(&root),
-        config.artifact_dir(&root),
-        config.ledger_dir(&root),
-        config.ekos_dir(&root).join("config"),
-    ] {
-        std::fs::create_dir_all(&dir)?;
-    }
+    let (config, root) = write_project(location, &contents)?;
 
     println!(
         "Created project {} (tenant {})",
@@ -140,6 +129,37 @@ pub fn add(
         "Next: ekos {select} build && ekos {select} recover && ekos {select} resolve \\\n      \
          && ekos {select} compile && ekos {select} commit"
     );
+    Ok(())
+}
+
+/// Writes a new project's `ekos.toml` and creates its state directories; prints nothing.
+fn write_project(location: &ProjectLocation, contents: &str) -> Result<(EkosConfig, PathBuf)> {
+    std::fs::create_dir_all(location.dir())
+        .with_context(|| format!("creating {}", location.dir().display()))?;
+    std::fs::write(location.config_path(), contents)?;
+    let (config, root) = home::load_project(location)?;
+    for dir in [
+        config.ekos_dir(&root),
+        config.artifact_dir(&root),
+        config.ledger_dir(&root),
+        config.ekos_dir(&root).join("config"),
+    ] {
+        std::fs::create_dir_all(&dir)?;
+    }
+    Ok((config, root))
+}
+
+/// A project over one source directory with the default config plus `extra` appended, for
+/// commands that build projects of their own (RFC 0240's benchmark projects). Prints nothing.
+pub fn create_quiet(location: &ProjectLocation, source: &Path, extra: &str) -> Result<()> {
+    if location.dir().exists() {
+        bail!("project {:?} already exists", location.project);
+    }
+    let source = crate::home::canonical_dir(source)
+        .with_context(|| format!("source {}", source.display()))?;
+    let mut contents = with_source_root(super::init::DEFAULT_CONFIG, &source)?;
+    contents.push_str(extra);
+    write_project(location, &contents)?;
     Ok(())
 }
 

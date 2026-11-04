@@ -1,0 +1,24 @@
+# RFC 0241 — cell E on OpenCode Zen (Claude Haiku 5.5). Tuned on the tune split only.
+name = "E"
+description = "EKOS pack + column profiles; baseline prompt; no value lookup"
+context = "ekos-pack"
+evidence = false
+value-lookup = false
+few-shot = 0
+n = 1
+r = 1
+max-tokens = 4096
+ves-iterations = 3
+timeout-seconds = 30
+profiles = true
+value-lookup-version = 1
+prompt = "baseline"
+result-checks = false
+vary-context = false
+
+[llm]
+# OpenCode Zen, Claude Haiku 5.5 ($0.10 / $0.50 per million tokens). Metered: needs --allow-metered.
+provider = "zen"
+model = "claude-haiku-5-5"
+api-key-env = "OPENCODE_API_KEY"
+budget-usd = 0.6

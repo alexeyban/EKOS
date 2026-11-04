@@ -1,0 +1,17 @@
+# RFC 0240 §2.4 — cell B. The model route, n and r are the same in every cell.
+name = "B"
+description = "Raw DDL; BIRD evidence in the prompt; no value lookup"
+context = "raw-ddl"
+evidence = true
+value-lookup = false
+few-shot = 0
+n = 1
+r = 1
+max-tokens = 1024
+ves-iterations = 3
+timeout-seconds = 30
+
+[llm]
+provider = "ollama"
+model = "qwen2.5-coder:3b"
+context-window = 10240

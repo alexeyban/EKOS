@@ -135,6 +135,13 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("eval run", Class::Write, true),
     ("eval regrade", Class::Write, false),
     ("eval history", Class::Read, false),
+    // RFC 0240: prepare downloads benchmark data from a public URL and builds projects; run
+    // calls the cell's model and writes a report; both stay off the web console.
+    ("eval bench list", Class::Read, false),
+    ("eval bench prepare", Class::Local, false),
+    ("eval bench run", Class::Local, true),
+    ("eval bench compare", Class::Read, false),
+    ("eval bench export", Class::Local, false),
     ("migrate init", Class::Write, false),
     ("migrate discover", Class::External, false),
     ("migrate profile", Class::External, false),

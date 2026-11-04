@@ -23,6 +23,7 @@ pub mod docs_estate;
 pub mod doctor;
 pub mod ekl;
 pub mod eval;
+pub mod eval_bench;
 pub mod export;
 pub mod extension_pages;
 pub mod freshness;

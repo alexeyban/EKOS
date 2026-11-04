@@ -14,6 +14,9 @@
 /marketing/posted/
 /marketing/logs/
 /evals/reports/*.json
+# RFC 0240: benchmark downloads, extracted databases, scratch projects and run reports
+/evals/bench/*/data/
+/evals/reports/bench/
 /marketing/.env
 .env
 
