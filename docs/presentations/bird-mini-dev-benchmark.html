@@ -97,7 +97,7 @@ nav.back a:hover { text-decoration: underline; }
 
 <div class="tiles">
   <div class="tile"><div class="k">EKOS cell G2 · hold-out</div><div class="v">66.9%</div><div class="s">execution accuracy, 302 questions · CI 61.9–72.2</div></div>
-  <div class="tile"><div class="k">Raw DDL baseline A-4k</div><div class="v">53.3%</div><div class="s">same model, prompt and output limit</div></div>
+  <div class="tile"><div class="k">Raw DDL baseline A-4k</div><div class="v">53.3%</div><div class="s">same model and output limit</div></div>
   <div class="tile"><div class="k">Difference</div><div class="v">+13.6 pts</div><div class="s">95% CI +8.0 to +19.5 · McNemar p &lt; 0.0001</div></div>
   <div class="tile"><div class="k">Price per question</div><div class="v">$0.00099</div><div class="s">EKOS cell, uncached · baseline $0.00067</div></div>
   <div class="tile"><div class="k">Total billed</div><div class="v">$2.39</div><div class="s">2,865 calls · 10,182,225 in / 2,737,094 out tokens</div></div>
@@ -332,7 +332,7 @@ ekos eval history                                       # every run, newest last
 <p>The machine was a 12-core Linux workstation with 62 GB RAM and a 4 GB GTX 1650. The model calls run remotely (Zen) or on the local GPU (Ollama). The harness itself is single-threaded and light.</p>
 <h3>What the results say</h3>
 <ul>
-<li><b>EKOS’s compiled pack beats raw DDL by 10–14 points</b> with the same model, prompt and output limit: G 63.9% (a clean hold-out) and G2 66.9%, against 53.3%. Both differences are significant on 302 paired questions.</li>
+<li><b>EKOS’s compiled pack beats raw DDL by 10–14 points</b> with the same model and output limit (EKOS adds five prompt rules and one result check): G 63.9% (a clean hold-out) and G2 66.9%, against 53.3%. Both differences are significant on 302 paired questions.</li>
 <li><b>What moved the score</b> (on the tune split): column profiles +11 points; the <code>ekos-v1</code> prompt with result checks another +12. Raising the output limit from 1,024 to 4,096 tokens removed answers with no SQL at all (9% of the baseline). Voting between three candidates did not pay; value lookup is neutral.</li>
 <li><b>formula_1 was worse under the pack</b> (G 18/33 against 26/33) until the profile also counted empty strings. Its lap-time columns record “no time” as both NULL and <code>''</code>. A profile that reported only the NULLs made the model drop the <code>&lt;&gt; ''</code> filter it writes when it sees raw DDL. G2 fixed it: 26/33.</li>
 <li><b>The scorer matches BIRD’s official one.</b> 704 recorded predictions gave identical verdicts from <code>bird-bench/mini_dev</code>’s scorer (Python 3.10, SQLite 3.37.2). One Soft-F1 value differed because SQLite before 3.45 cannot parse 16 nested <code>replace()</code> calls.</li>
