@@ -206,6 +206,47 @@ empty strings, among them `qualifying.q2/q3`, `trans.k_symbol` (53,433), `patien
 - Example values never include a blank.
 - Cells E–H keep the v1 rendering, so their results stay reproducible. Cell `G2` is G with v2.
 
-**Status.** Built and unit-tested. Not yet measured: the RFC 0241 budget is spent, and measuring
-G2 on the tune split costs about $0.20.
+**Measured (2026-11-04, a further $0.33 approved for it).**
+
+Tune split (198 questions): G2 67.7% against G 65.7% (+2.0, CI −3.0 to +7.1). The gain sat where
+the fix aims:
+
+| Questions (tune) | G | G2 |
+|---|---|---|
+| formula_1 | 10 / 22 | 16 / 22 |
+| gold SQL filters empty strings | 7 / 17 | 12 / 17 |
+| all others | 123 / 181 | 122 / 181 |
+
+Hold-out split (302 questions, run once, **after** the hold-out analysis above, so not a clean
+hold-out number). The harness's contamination check does not flag it, because G2 never ran on
+the hold-out split before; it is labelled here by hand.
+
+| Questions (hold) | A-4k | G | G2 |
+|---|---|---|---|
+| all | 161 (53.3%) | 193 (63.9%) | **202 (66.9%)** |
+| formula_1 | 26 / 33 | 18 / 33 | 26 / 33 |
+| gold SQL filters empty strings | 15 / 27 | 10 / 27 | 18 / 27 |
+| all others | 146 / 275 | 183 / 275 | 184 / 275 |
+
+- **G2 − A-4k = +13.6 points**, CI [+8.0, +19.5], p < 0.0001.
+- **G2 − G = +3.0**, CI [−0.7, +6.6], p = 0.14.
+- **G2's cost:** $0.199 for 302 questions; 108 of 318 calls came from the cache, because prompts
+  for databases without empty strings are unchanged.
+
+**A second defect, found while inspecting the pack: no dictionary description ever reached it.**
+`ekos eval bench context` (new; it prints the schema text a cell shows the model) showed zero
+column descriptions in all 11 databases, although `schema.sql` holds 681 `COMMENT ON COLUMN`
+lines.
+
+- The SQL analyzer stores a table or column declared with a quoted identifier *with* its quotes
+  (`"qualifying"`, `"q3"`), while `COMMENT ON` targets are read with them stripped. The two never
+  matched, and every comment was dropped silently.
+- So **every EKOS cell measured in RFCs 0240 and 0241 — C, C′, D, E, F, G, G2 — ran without
+  BIRD's column and value descriptions.** Their gains come from the ledger's tables, keys and
+  joins, the profiles, value lookup and the prompt.
+- Fixed in `recovery/src/sql_analyzer.rs` (names compared unquoted; `SqlAnalyzerPass` v6). The
+  fix applies to any schema with quoted identifiers, not only BIRD.
+- `prepare` now also rebuilds a project compiled by another EKOS version.
+- The CLI end-to-end test now asserts that a dictionary description reaches the pack.
+- A cell with descriptions has not been measured: that needs budget.
 

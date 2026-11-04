@@ -917,6 +917,26 @@ impl BenchAdapter for BirdAdapter {
         Ok(p)
     }
 
+    fn schema_text(&self, cfg: &ExperimentConfig, h: &super::DbHandle) -> Result<String> {
+        let profile = if cfg.profiles {
+            Some(required(
+                h.profile.as_ref(),
+                "column profile",
+                "this database",
+            )?)
+        } else {
+            None
+        };
+        render_schema(
+            cfg.context,
+            0,
+            h,
+            h.pack.as_ref(),
+            profile,
+            cfg.profile_version >= 2,
+        )
+    }
+
     fn score(
         &self,
         s: &BenchScenario,

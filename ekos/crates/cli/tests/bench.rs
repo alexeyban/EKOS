@@ -143,6 +143,19 @@ fn prepare_run_compare_export_on_the_fixture_suite() {
         prepared["databases"]["shop"]["ledger_fingerprint"]
     );
 
+    // The dictionary reaches the pack: COMMENT ON lines on quoted identifiers (RFC 0241 §6).
+    let pack = ok(&ekos(
+        cwd,
+        &[
+            "eval", "bench", "context", "--suite", "fixture", "--cell", "e", "--db", "shop",
+        ],
+    ));
+    assert!(
+        pack.contains("customer segment; values: retail: a private person"),
+        "{pack}"
+    );
+    assert!(pack.contains("-- 4 rows"), "the profile is shown: {pack}");
+
     let listing = ok(&ekos(cwd, &["eval", "bench", "list"]));
     assert!(
         listing.contains("fixture") && listing.contains("c-prime"),

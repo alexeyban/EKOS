@@ -7001,7 +7001,9 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] Final hold-out (302 q): G 63.9% vs A-4k 53.3%, +10.6 [+4.3, +16.9]; spend $1.67 of $2
 - [x] Official-scorer parity: 704 predictions, identical EX verdicts; 1 SQLite-version difference (parser stack, 3.37 vs 3.46), reported apart (2026-11-04)
 - [x] formula_1 is worse under the pack (55 vs 79): profile reported NULLs but not `''` (7 of 9 losses) — profile v2 + cell G2 (RFC 0241 §6)
-- [ ] Measure G2 on the tune split (~$0.20, needs budget), then one hold-out run marked as post-analysis
+- [x] G2 measured: tune 67.7 (formula_1 10→16/22); hold 66.9 vs A-4k 53.3 (+13.6), run after the analysis (RFC 0241 §6)
+- [x] SQL analyzer: `COMMENT ON` missed tables/columns declared with quoted identifiers (every BIRD description was dropped) — fixed, `SqlAnalyzerPass` v6; `ekos eval bench context`
+- [ ] Measure a cell with the dictionary descriptions (needs budget; projects rebuild on the new EKOS version)
 - [ ] Few-shot examples from `bird23-train-filtered` (new suite, train split only)
 - [ ] `bird-dev` and the cleaned `bird-sql-dev-1106` suites; the PostgreSQL variant of Mini-Dev (exercises RFC 0235)
 - [ ] Ollama provider: honour `[llm] base-url` (it reads only `OLLAMA_BASE_URL`)

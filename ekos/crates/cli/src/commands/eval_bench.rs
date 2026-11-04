@@ -23,6 +23,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// This build's version, recorded per prepared project.
+const EKOS_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// The tenant every benchmark project lives in, inside the suite's own scratch home.
 const TENANT: &str = "bench";
 
@@ -59,6 +62,10 @@ pub struct Prepared {
 pub struct PreparedDb {
     pub project: String,
     pub source_digest: String,
+    /// The EKOS that compiled it: another version may compile the same sources differently
+    /// (RFC 0241 §6 — the SQL analyzer fix), so it is rebuilt.
+    #[serde(default)]
+    pub ekos_version: String,
     pub ledger_fingerprint: String,
     pub objects: usize,
     pub relationships: usize,
@@ -184,10 +191,9 @@ pub async fn prepare(cwd: &Path, opts: PrepareOpts<'_>) -> Result<()> {
     for spec in &specs {
         let location = crate::home::location(&dirs.home(), TENANT, &spec.name)?;
         let up_to_date = !opts.force
-            && previous
-                .databases
-                .get(&spec.db_id)
-                .is_some_and(|p| p.source_digest == spec.source_digest)
+            && previous.databases.get(&spec.db_id).is_some_and(|p| {
+                p.source_digest == spec.source_digest && p.ekos_version == EKOS_VERSION
+            })
             && location.state_dir().join("ckm").exists();
         if up_to_date {
             eprintln!("  {:<28} up to date", spec.db_id);
@@ -229,6 +235,7 @@ pub async fn prepare(cwd: &Path, opts: PrepareOpts<'_>) -> Result<()> {
         let record = PreparedDb {
             project: spec.name.clone(),
             source_digest: spec.source_digest.clone(),
+            ekos_version: EKOS_VERSION.to_string(),
             ledger_fingerprint: bench::ledger_fingerprint(&objects, &relationships),
             objects: objects.len(),
             relationships: relationships.len(),
@@ -421,66 +428,21 @@ pub async fn run(base: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<()>
     }
     let hold_hash = bench::split::ids_hash(&adapter.scenarios(Split::Hold)?);
     let prepared = read_prepared(&dirs);
-    let needs_pack = cfg.context == bench::ContextKind::EkosPack;
     let mut dbs = BTreeMap::new();
     for db_id in planned
         .iter()
         .map(|s| s.db_id.clone())
         .collect::<std::collections::BTreeSet<_>>()
     {
-        let db = Db::open(&adapter.database_path(&db_id))?;
-        let schema = SchemaInfo::read(&db)?;
-        let location = crate::home::location(&dirs.home(), TENANT, &db_id)?;
-        let (pack, fingerprint) = if location.config_path().is_file() {
-            let (objects, relationships) = read_ledger(&location)?;
-            (
-                Some(DbPack::from_ledger(&objects, &relationships)),
-                Some(bench::ledger_fingerprint(&objects, &relationships)),
-            )
-        } else if needs_pack {
-            bail!(
-                "no compiled project for {db_id} — run `ekos eval bench prepare --suite {}` first",
-                suite.name
-            );
-        } else {
-            (None, None)
-        };
-        if let (Some(fp), Some(p)) = (&fingerprint, &prepared)
-            && p.databases
-                .get(&db_id)
-                .is_some_and(|d| &d.ledger_fingerprint != fp)
-        {
-            eprintln!("warning: the {db_id} ledger changed since prepare");
-        }
-        let values_path = dirs.values().join(format!("{db_id}.json"));
-        let values = match std::fs::read_to_string(&values_path) {
-            Ok(text) => Some(serde_json::from_str::<ValueIndex>(&text)?),
-            Err(_) if cfg.value_lookup => bail!(
-                "no value index {} — run `ekos eval bench prepare` first",
-                values_path.display()
-            ),
-            Err(_) => None,
-        };
-        let profile_path = dirs.values().join(format!("{db_id}.profile.json"));
-        let profile = match std::fs::read_to_string(&profile_path) {
-            Ok(text) => Some(serde_json::from_str::<Profile>(&text)?),
-            Err(_) if cfg.profiles => bail!(
-                "no column profile {} — run `ekos eval bench prepare` first",
-                profile_path.display()
-            ),
-            Err(_) => None,
-        };
-        dbs.insert(
-            db_id,
-            DbHandle {
-                db,
-                schema,
-                pack,
-                values,
-                profile,
-                fingerprint,
-            },
-        );
+        let handle = open_db(
+            &dirs,
+            adapter.as_ref(),
+            &suite,
+            &cfg,
+            prepared.as_ref(),
+            &db_id,
+        )?;
+        dbs.insert(db_id, handle);
     }
     let rt = RunCtx {
         llm: llm.as_ref(),
@@ -541,6 +503,93 @@ pub async fn run(base: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<()>
         print!("{}", report.render());
         println!("Report: {}", path.display());
     }
+    Ok(())
+}
+
+/// One database as a run sees it: the file, its catalogue, the pack and fingerprint from its
+/// project's ledger, and the value index and profile `prepare` wrote.
+fn open_db(
+    dirs: &SuiteDirs,
+    adapter: &dyn BenchAdapter,
+    suite: &Suite,
+    cfg: &ExperimentConfig,
+    prepared: Option<&Prepared>,
+    db_id: &str,
+) -> Result<DbHandle> {
+    let db = Db::open(&adapter.database_path(db_id))?;
+    let schema = SchemaInfo::read(&db)?;
+    let location = crate::home::location(&dirs.home(), TENANT, db_id)?;
+    let (pack, fingerprint) = if location.config_path().is_file() {
+        let (objects, relationships) = read_ledger(&location)?;
+        (
+            Some(DbPack::from_ledger(&objects, &relationships)),
+            Some(bench::ledger_fingerprint(&objects, &relationships)),
+        )
+    } else if cfg.context == bench::ContextKind::EkosPack {
+        bail!(
+            "no compiled project for {db_id} — run `ekos eval bench prepare --suite {}` first",
+            suite.name
+        );
+    } else {
+        (None, None)
+    };
+    if let (Some(fp), Some(p)) = (&fingerprint, prepared)
+        && p.databases
+            .get(db_id)
+            .is_some_and(|d| &d.ledger_fingerprint != fp)
+    {
+        eprintln!("warning: the {db_id} ledger changed since prepare");
+    }
+    let values_path = dirs.values().join(format!("{db_id}.json"));
+    let values = match std::fs::read_to_string(&values_path) {
+        Ok(text) => Some(serde_json::from_str::<ValueIndex>(&text)?),
+        Err(_) if cfg.value_lookup => bail!(
+            "no value index {} — run `ekos eval bench prepare` first",
+            values_path.display()
+        ),
+        Err(_) => None,
+    };
+    let profile_path = dirs.values().join(format!("{db_id}.profile.json"));
+    let profile = match std::fs::read_to_string(&profile_path) {
+        Ok(text) => Some(serde_json::from_str::<Profile>(&text)?),
+        Err(_) if cfg.profiles => bail!(
+            "no column profile {} — run `ekos eval bench prepare` first",
+            profile_path.display()
+        ),
+        Err(_) => None,
+    };
+    Ok(DbHandle {
+        db,
+        schema,
+        pack,
+        values,
+        profile,
+        fingerprint,
+    })
+}
+
+/// `ekos eval bench context`: the schema text a cell shows the model for one database — from the
+/// project's ledger for an `ekos-pack` cell — before any question-specific value lookup.
+pub fn context(
+    cwd: &Path,
+    bench_dir: Option<&Path>,
+    suite_name: &str,
+    cell: &str,
+    db_id: &str,
+) -> Result<()> {
+    let root = bench_root(cwd, bench_dir);
+    let (suite, dirs, adapter) = open_suite(&root, suite_name)?;
+    let cfg = ExperimentConfig::load(&resolve_config(&dirs, cell))?;
+    let prepared = read_prepared(&dirs);
+    let handle = open_db(
+        &dirs,
+        adapter.as_ref(),
+        &suite,
+        &cfg,
+        prepared.as_ref(),
+        db_id,
+    )?;
+    print!("{}", adapter.schema_text(&cfg, &handle)?);
     Ok(())
 }
 

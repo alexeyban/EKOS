@@ -372,6 +372,8 @@ pub trait BenchAdapter {
         cfg: &ExperimentConfig,
         rt: &RunCtx<'_>,
     ) -> Result<Prediction>;
+    /// The schema text `cfg` shows the model for this database, before value lookup.
+    fn schema_text(&self, cfg: &ExperimentConfig, h: &DbHandle) -> Result<String>;
     fn score(
         &self,
         s: &BenchScenario,

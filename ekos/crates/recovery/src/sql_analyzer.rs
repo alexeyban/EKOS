@@ -140,13 +140,15 @@ impl CompilerPass for SqlAnalyzerPass {
         &self.pass_id
     }
 
+    /// `v6` = RFC 0241 §6: `COMMENT ON` reaches tables and columns declared with quoted
+    /// identifiers (their names keep the quotes; the comment's do not), which it silently missed.
     /// `v5` = RFC 0210: every `Table` records the `dialect` it was read under.
     /// `v4` = RFC 0176: per-statement fallback and `ALTER TABLE … ADD … FOREIGN KEY`.
     /// `v3` = RFC 0170 Phase 3: a seed row cites its own line. `v2` = RFC 0170: `Table` objects gained `check_constraints`, `seed_rows` and column
     /// `not_null`/`primary_key`/`unique`/`description_line`. `cache_inputs` hashes only the SQL, so
     /// without this a workspace recovered before 0170 keeps serving tables without them.
     fn version(&self) -> &str {
-        "v5"
+        "v6"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -947,13 +949,10 @@ fn apply_sql_comments(
     let mut applied = 0;
 
     for comment in comments {
-        let bare = comment.bare_table().to_lowercase();
+        let bare = unquoted(comment.bare_table()).to_lowercase();
         let Some(obj_index) = graph.objects.iter().position(|o| {
             o.kind == ObjectKind::Table
-                && o.name
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or(&o.name)
+                && unquoted(o.name.rsplit('.').next().unwrap_or(&o.name))
                     .eq_ignore_ascii_case(&bare)
         }) else {
             continue;
@@ -997,6 +996,14 @@ fn apply_sql_comments(
     applied
 }
 
+/// `"name"` → `name`. A table or column declared with a quoted identifier keeps its quotes in
+/// its object name, while `COMMENT ON` targets are read with them stripped (RFC 0241 §6).
+fn unquoted(name: &str) -> &str {
+    name.strip_prefix('"')
+        .and_then(|n| n.strip_suffix('"'))
+        .unwrap_or(name)
+}
+
 /// Writes `text` onto the matching entry of a `Table` object's `columns` property array, which is
 /// where `columns_json` records each column's name and data type. Returns whether a column
 /// matched — a comment on a column the DDL does not declare is dropped rather than inventing one.
@@ -1014,7 +1021,7 @@ fn apply_column_comment(
         let matches = entry
             .get("name")
             .and_then(|n| n.as_str())
-            .is_some_and(|n| n.eq_ignore_ascii_case(column));
+            .is_some_and(|n| unquoted(n).eq_ignore_ascii_case(unquoted(column)));
         if matches && let Some(map) = entry.as_object_mut() {
             map.insert(
                 "description".into(),
@@ -1444,6 +1451,35 @@ mod tests {
             other.get("description").is_none(),
             "only the named column may be described"
         );
+    }
+
+    /// RFC 0241 §6: a table and columns declared with quoted identifiers keep the quotes in their
+    /// names; `COMMENT ON` must still reach them. Every BIRD dictionary comment was dropped.
+    #[test]
+    fn comments_reach_tables_and_columns_declared_with_quoted_identifiers() {
+        let graph = graph_with_comments(
+            "CREATE TABLE \"qualifying\" (\"q3\" TEXT, \"Low Grade\" TEXT);\n\
+             COMMENT ON TABLE \"qualifying\" IS 'Qualifying sessions.';\n\
+             COMMENT ON COLUMN \"qualifying\".\"q3\" IS 'time in qualifying 3';\n\
+             COMMENT ON COLUMN \"qualifying\".\"Low Grade\" IS 'lowest grade';",
+        );
+        let t = graph
+            .objects
+            .iter()
+            .find(|o| o.kind == ObjectKind::Table)
+            .expect("table");
+        assert_eq!(
+            t.properties.get("description").and_then(|v| v.as_str()),
+            Some("Qualifying sessions.")
+        );
+        let cols = t.properties["columns"].as_array().unwrap();
+        let described: Vec<(&str, &str)> = cols
+            .iter()
+            .filter_map(|c| Some((c.get("name")?.as_str()?, c.get("description")?.as_str()?)))
+            .collect();
+        assert_eq!(described.len(), 2, "{cols:?}");
+        assert!(described.iter().any(|(_, d)| *d == "time in qualifying 3"));
+        assert!(described.iter().any(|(_, d)| *d == "lowest grade"));
     }
 
     #[test]

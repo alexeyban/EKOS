@@ -141,6 +141,7 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("eval bench prepare", Class::Local, false),
     ("eval bench run", Class::Local, true),
     ("eval bench compare", Class::Read, false),
+    ("eval bench context", Class::Read, false),
     ("eval bench export", Class::Local, false),
     ("migrate init", Class::Write, false),
     ("migrate discover", Class::External, false),

@@ -852,6 +852,19 @@ enum BenchCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Print the schema text a cell shows the model for one database (from the project's ledger)
+    Context {
+        #[arg(long)]
+        suite: String,
+        /// An experiment cell: a file stem under the suite's configs/ or a TOML path
+        #[arg(long)]
+        cell: String,
+        /// The database id, e.g. formula_1
+        #[arg(long)]
+        db: String,
+        #[arg(long, value_name = "DIR")]
+        bench_dir: Option<PathBuf>,
+    },
     /// Paired comparison of two reports: difference, bootstrap interval, flipped questions
     Compare {
         report_a: PathBuf,
@@ -1991,7 +2004,7 @@ fn emits_machine_output(command: &Commands) -> bool {
                 | BenchCommands::Prepare { json, .. }
                 | BenchCommands::Run { json, .. }
                 | BenchCommands::Compare { json, .. } => *json,
-                BenchCommands::Export { .. } => false,
+                BenchCommands::Export { .. } | BenchCommands::Context { .. } => false,
             },
         },
         _ => false,
@@ -3481,6 +3494,12 @@ async fn dispatch_bench(
             )
             .await
         }
+        BenchCommands::Context {
+            suite,
+            cell,
+            db,
+            bench_dir,
+        } => bench::context(cwd, bench_dir.as_deref(), &suite, &cell, &db),
         BenchCommands::Compare {
             report_a,
             report_b,

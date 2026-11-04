@@ -143,8 +143,16 @@ G − A-4k = +10.6, CI [+4.3, +16.9], McNemar p = 0.0014. By database the gain i
 
 formula_1 is worse under the pack. The cause, found later the same day, is that the profile
 reported NULLs but not empty strings: `qualifying.q3` has 4,935 NULL and 28 `''`. The model
-trusted "4,935 null" and counted the blanks. That explains 7 of the 9 losses. Profile v2 and
-cell G2 fix it; G2 is not measured yet (RFC 0241 §6).
+trusted "4,935 null" and counted the blanks. That explains 7 of the 9 losses.
+
+Profile v2 and cell G2 fix it. G2 on the hold-out split (run after that analysis, so labelled as
+such) scored **66.9%**: formula_1 26/33, back from 18, and +13.6 points over A-4k (CI +8.0 to
++19.5).
+
+While inspecting the pack, a second defect showed up: **no BIRD dictionary description ever
+reached the pack**. The SQL analyzer's `COMMENT ON` matching missed quoted identifiers, so all
+measured EKOS cells ran without column and value descriptions. It is fixed (`SqlAnalyzerPass` v6),
+and the fix is not measured yet (RFC 0241 §6).
 
 ### Decisions
 - **A-4k as the final baseline, not A.** A's 1,024-token cap cost it 9% of the tune split to
@@ -181,6 +189,10 @@ cell G2 fix it; G2 is not measured yet (RFC 0241 §6).
 - **The local 3B model (qwen2.5-coder:3b on a 4 GB GTX 1650)** takes about 30 s per question,
   executes only ~60% of its answers and scores 2–5%. It is useful only as a free check that the
   pipeline runs. A 16k context pushed 45% of the model to the CPU; 10k was faster.
+- **Quoted identifiers kept their quotes in object names, and `COMMENT ON` matching compared them
+  with the unquoted target**, so every comment on a quoted table or column was dropped without a
+  diagnostic. Unquoted DDL (LedgerSMB, RFC 0146) never showed it. `ekos eval bench context`
+  exists so the schema text a model sees can be read, not inferred.
 - **A true but incomplete profile is worse than none.** "4,935 null" made the model drop the
   `<> ''` guard it writes when shown raw DDL. When a profile states how values are missing, it
   must state every way they are missing.
