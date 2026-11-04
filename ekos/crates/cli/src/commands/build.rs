@@ -637,6 +637,30 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, ext: &Extensions) -> Resu
     run_selected(config, cwd, ext, None).await
 }
 
+/// `--source <name>` names one of the project's sources or databases.
+fn check_only_source(config: &EkosConfig, only: Option<&str>) -> Result<()> {
+    let Some(name) = only else {
+        return Ok(());
+    };
+    if config.sources.iter().any(|s| s.name == name)
+        || config.databases.iter().any(|d| d.name == name)
+    {
+        return Ok(());
+    }
+    let known: Vec<&str> = config
+        .sources
+        .iter()
+        .map(|s| s.name.as_str())
+        .chain(config.databases.iter().map(|d| d.name.as_str()))
+        .collect();
+    let known = if known.is_empty() {
+        "none".to_string()
+    } else {
+        known.join(", ")
+    };
+    anyhow::bail!("--source {name:?} is not a source of this project (sources: {known})")
+}
+
 /// `ekos build`, or with `only` (RFC 0178 Part 2, `--source <name>`) a build that re-observes
 /// one named source and leaves what is recorded for the others as it was.
 pub async fn run_selected(
@@ -645,25 +669,7 @@ pub async fn run_selected(
     ext: &Extensions,
     only: Option<&str>,
 ) -> Result<()> {
-    if let Some(name) = only
-        && !config.sources.iter().any(|s| s.name == name)
-        && !config.databases.iter().any(|d| d.name == name)
-    {
-        let known: Vec<&str> = config
-            .sources
-            .iter()
-            .map(|s| s.name.as_str())
-            .chain(config.databases.iter().map(|d| d.name.as_str()))
-            .collect();
-        anyhow::bail!(
-            "--source {name:?} is not a source of this project (sources: {})",
-            if known.is_empty() {
-                "none".to_string()
-            } else {
-                known.join(", ")
-            }
-        );
-    }
+    check_only_source(config, only)?;
     warn_about_git_sources(config, cwd);
     let ledger = open_store(config, cwd)?;
 

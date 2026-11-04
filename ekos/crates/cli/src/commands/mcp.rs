@@ -1555,6 +1555,33 @@ fn log_call(
     let _ = query_log::record(&config.ekos_dir(workspace), &entry);
 }
 
+/// RFC 0181: the read scope a call carries in `_meta`, if any. A scope that does not parse is an
+/// error, never "no scope": that would hand a restricted caller everything.
+fn request_scope(params: &Value) -> Result<Option<ReadScope>> {
+    match params.get("_meta").and_then(|m| m.get(READ_SCOPE_META)) {
+        Some(value) => ReadScope::from_value(value)
+            .map(Some)
+            .map_err(|e| anyhow::anyhow!("{READ_SCOPE_META}: {e}")),
+        None => Ok(None),
+    }
+}
+
+/// The cost class of a read call, for the usage log and the result cache: an EKL query by its
+/// parsed shape, any other tool by its name and arguments.
+fn classify_call(name: &str, arguments: &Value) -> (query_log::CostClass, String) {
+    if name != "ekos_ekl" {
+        return query_log::classify_tool(name, arguments);
+    }
+    match arguments
+        .get("query")
+        .and_then(Value::as_str)
+        .and_then(|q| ekl_parse(q).ok())
+    {
+        Some(ast) => query_log::classify_ekl(&ast),
+        None => (query_log::CostClass::Cheap, "unparsed".to_string()),
+    }
+}
+
 /// Execute a tools/call request. Tool failures (bad query, unknown id,
 /// missing ledger) are reported as `isError: true` results — readable by the
 /// agent — never as protocol errors.
@@ -1586,12 +1613,9 @@ fn tools_call(
     // RFC 0181 — before anything else, including the write tools below: who is this call for?
     // A scope that does not parse fails the call. Treating it as "no scope" would hand a
     // restricted caller everything.
-    let request_scope = match params.get("_meta").and_then(|m| m.get(READ_SCOPE_META)) {
-        Some(value) => match ReadScope::from_value(value) {
-            Ok(scope) => Some(scope),
-            Err(e) => return tool_err(&anyhow::anyhow!("{READ_SCOPE_META}: {e}")),
-        },
-        None => None,
+    let request_scope = match request_scope(params) {
+        Ok(scope) => scope,
+        Err(e) => return tool_err(&e),
     };
     let process_scope = match super::store::process_scope(config) {
         Ok(scope) => scope,
@@ -1628,18 +1652,7 @@ fn tools_call(
         };
     }
 
-    let (cost_class, reason) = if name == "ekos_ekl" {
-        match arguments
-            .get("query")
-            .and_then(Value::as_str)
-            .and_then(|q| ekl_parse(q).ok())
-        {
-            Some(ast) => query_log::classify_ekl(&ast),
-            None => (query_log::CostClass::Cheap, "unparsed".to_string()),
-        }
-    } else {
-        query_log::classify_tool(name, &arguments)
-    };
+    let (cost_class, reason) = classify_call(name, &arguments);
     let cacheable = is_cacheable(name, cost_class);
     let args_key = serde_json::to_string(&arguments).unwrap_or_default();
 

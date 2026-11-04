@@ -1,7 +1,11 @@
 //! Tests for `ekos setup` / `ekos uninstall` (RFC 0185 §3–4). Nothing here starts a service,
 //! runs another program or opens a browser: `Fake` records what would have run.
 
-use super::setup::*;
+use super::setup::{
+    Action, AgentAnswers, Answers, ChatAnswers, ConsoleAnswers, Effects, Layout, Machine, Os,
+    PATH_MARKER, ProjectAnswers, StartAnswers, apply, check, merge_agent_config, plan,
+    read_manifest, service_file, uninstall, uninstall_plan,
+};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 

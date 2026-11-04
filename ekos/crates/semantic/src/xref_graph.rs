@@ -95,69 +95,92 @@ pub(crate) fn check(
 
 /// Tarjan's strongly connected components, iterative, over ids in a stable order.
 fn components(nodes: &[Uuid], edges: &BTreeMap<Uuid, BTreeSet<Uuid>>) -> Vec<Vec<Uuid>> {
-    let mut index: HashMap<Uuid, usize> = HashMap::new();
-    let mut low: HashMap<Uuid, usize> = HashMap::new();
-    let mut on_stack: BTreeSet<Uuid> = BTreeSet::new();
-    let mut stack: Vec<Uuid> = Vec::new();
-    let mut out = Vec::new();
-    let mut next = 0usize;
     // Indexable successor lists: `nth` on a set would make each step linear in the degree.
     let adjacency: HashMap<Uuid, Vec<Uuid>> = edges
         .iter()
         .map(|(k, v)| (*k, v.iter().copied().collect()))
         .collect();
-    let empty: Vec<Uuid> = Vec::new();
+    let mut t = Tarjan::default();
     for &start in nodes {
-        if index.contains_key(&start) {
-            continue;
+        if !t.index.contains_key(&start) {
+            t.search(start, &adjacency);
         }
+    }
+    t.out
+}
+
+/// The bookkeeping of Tarjan's algorithm.
+#[derive(Default)]
+struct Tarjan {
+    index: HashMap<Uuid, usize>,
+    low: HashMap<Uuid, usize>,
+    on_stack: BTreeSet<Uuid>,
+    stack: Vec<Uuid>,
+    out: Vec<Vec<Uuid>>,
+    next: usize,
+}
+
+impl Tarjan {
+    /// Numbers `v` and puts it on the stack.
+    fn discover(&mut self, v: Uuid) {
+        self.index.insert(v, self.next);
+        self.low.insert(v, self.next);
+        self.next += 1;
+        self.stack.push(v);
+        self.on_stack.insert(v);
+    }
+
+    /// Lowers `v`'s low-link to at most `to`.
+    fn lower(&mut self, v: Uuid, to: usize) {
+        let lv = self.low.get_mut(&v).expect("visited");
+        *lv = (*lv).min(to);
+    }
+
+    /// `v` is finished: when it is its component's root, pops the component.
+    fn close(&mut self, v: Uuid) {
+        if self.low[&v] != self.index[&v] {
+            return;
+        }
+        let mut comp = Vec::new();
+        while let Some(w) = self.stack.pop() {
+            self.on_stack.remove(&w);
+            comp.push(w);
+            if w == v {
+                break;
+            }
+        }
+        self.out.push(comp);
+    }
+
+    /// Depth-first search from `start`, with an explicit stack instead of recursion.
+    fn search(&mut self, start: Uuid, adjacency: &HashMap<Uuid, Vec<Uuid>>) {
+        let empty: Vec<Uuid> = Vec::new();
         // (node, iterator position over its successors)
         let mut work: Vec<(Uuid, usize)> = vec![(start, 0)];
-        index.insert(start, next);
-        low.insert(start, next);
-        next += 1;
-        stack.push(start);
-        on_stack.insert(start);
+        self.discover(start);
         while let Some(&(v, pos)) = work.last() {
             let succ = adjacency.get(&v).unwrap_or(&empty);
             if let Some(&w) = succ.get(pos) {
                 if let Some(top) = work.last_mut() {
                     top.1 += 1;
                 }
-                if let std::collections::hash_map::Entry::Vacant(slot) = index.entry(w) {
-                    slot.insert(next);
-                    low.insert(w, next);
-                    next += 1;
-                    stack.push(w);
-                    on_stack.insert(w);
+                if !self.index.contains_key(&w) {
+                    self.discover(w);
                     work.push((w, 0));
-                } else if on_stack.contains(&w) {
-                    let lw = index[&w];
-                    let lv = low.get_mut(&v).expect("visited");
-                    *lv = (*lv).min(lw);
+                } else if self.on_stack.contains(&w) {
+                    let lw = self.index[&w];
+                    self.lower(v, lw);
                 }
             } else {
                 work.pop();
                 if let Some(&(parent, _)) = work.last() {
-                    let lv = low[&v];
-                    let lp = low.get_mut(&parent).expect("visited");
-                    *lp = (*lp).min(lv);
+                    let lv = self.low[&v];
+                    self.lower(parent, lv);
                 }
-                if low[&v] == index[&v] {
-                    let mut comp = Vec::new();
-                    while let Some(w) = stack.pop() {
-                        on_stack.remove(&w);
-                        comp.push(w);
-                        if w == v {
-                            break;
-                        }
-                    }
-                    out.push(comp);
-                }
+                self.close(v);
             }
         }
     }
-    out
 }
 
 fn cycles(

@@ -212,6 +212,50 @@ def append_only_warning(delta: ObserveDelta) -> str | None:
 _MAX_KEY = 128
 
 
+def _change_path(change: dict) -> list[str]:
+    """The change's `path`, or `ConfigError` when it is not a section and a key."""
+    path = change.get("path")
+    if (
+        not isinstance(path, list)
+        or len(path) < 2
+        or not all(isinstance(k, str) and 0 < len(k) <= _MAX_KEY for k in path)
+    ):
+        raise ConfigError("a setting is named by its section and key")
+    return path
+
+
+def _section_for(doc, path: list[str], create: bool):
+    """The table that holds `path`'s last key, creating missing tables on the way when `create`;
+    `None` when one is missing and `create` is off. A value on the way is a `ConfigError`."""
+    table = doc
+    for key in path[:-1]:
+        if key not in table:
+            if not create:
+                return None
+            table[key] = tomlkit.table()
+        nxt = table[key]
+        if not isinstance(nxt, (dict, tomlkit.items.Table)):
+            raise ConfigError(f"{'.'.join(path)}: {key} is a value, not a section")
+        table = nxt
+    return table
+
+
+def _apply_change(doc, change: dict) -> None:
+    path = _change_path(change)
+    value = change.get("value")
+    table = _section_for(doc, path, create=value is not None)
+    if table is None:
+        return
+    last = path[-1]
+    if last in table and isinstance(table[last], (tomlkit.items.Table, tomlkit.items.AoT)):
+        raise ConfigError(f"{'.'.join(path)} is a section; edit its settings one by one")
+    if value is None:
+        if last in table:
+            del table[last]
+    else:
+        table[last] = value
+
+
 def apply_changes(raw: str, changes: list[dict]) -> str:
     """`raw` with each change applied: `{"path": ["llm", "provider"], "value": ...}` sets a key
     (tables on the way are created), `value: None` removes it. Comments, order and keys the form
@@ -219,33 +263,5 @@ def apply_changes(raw: str, changes: list[dict]) -> str:
     value, is refused: the form edits settings, not structure."""
     doc = parse(raw)
     for change in changes:
-        path = change.get("path")
-        if (
-            not isinstance(path, list)
-            or len(path) < 2
-            or not all(isinstance(k, str) and 0 < len(k) <= _MAX_KEY for k in path)
-        ):
-            raise ConfigError("a setting is named by its section and key")
-        value = change.get("value")
-        table = doc
-        for key in path[:-1]:
-            if key not in table:
-                if value is None:
-                    table = None
-                    break
-                table[key] = tomlkit.table()
-            nxt = table[key]
-            if not isinstance(nxt, (dict, tomlkit.items.Table)):
-                raise ConfigError(f"{'.'.join(path)}: {key} is a value, not a section")
-            table = nxt
-        if table is None:
-            continue
-        last = path[-1]
-        if last in table and isinstance(table[last], (tomlkit.items.Table, tomlkit.items.AoT)):
-            raise ConfigError(f"{'.'.join(path)} is a section; edit its settings one by one")
-        if value is None:
-            if last in table:
-                del table[last]
-        else:
-            table[last] = value
+        _apply_change(doc, change)
     return tomlkit.dumps(doc)

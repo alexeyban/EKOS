@@ -3,7 +3,7 @@
 // (a package, then a step) that panels and buttons use, and code / graph / markdown views.
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { type ReactElement, useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
 import type { Me } from "../WorkspaceShell";
@@ -22,6 +22,7 @@ import {
   type ExtPage,
   type ExtPanel,
   type ExtParam,
+  type ExtView,
   withInputs,
 } from "./extension-view";
 import { Markdown } from "./markdown";
@@ -126,6 +127,8 @@ function GraphView({ data, view }: { data: unknown; view: Extract<ExtPanel["view
   );
 }
 
+type ViewOf<K extends ExtView["kind"]> = Extract<ExtView, { kind: K }>;
+
 function PanelView({
   panel,
   data,
@@ -140,89 +143,116 @@ function PanelView({
   onSelect: (param: ExtParam, value: string) => void;
 }) {
   const v = panel.view;
-  if (v.kind === "table") {
-    const rows = rowsOf(data, v);
-    if (rows.length === 0) return <p className="muted">{panel.empty}</p>;
-    const sel = selectable[0];
-    return (
-      <table className="lm-table">
-        <thead>
-          <tr>
-            {v.columns.map((c) => (
-              <th key={c.key}>{c.label}</th>
+  const empty = <p className="muted">{panel.empty}</p>;
+  switch (v.kind) {
+    case "table":
+      return <TableView view={v} data={data} empty={empty} sel={selectable[0]} chosen={chosen} onSelect={onSelect} />;
+    case "fields":
+      return <FieldsView view={v} data={data} empty={empty} />;
+    case "code":
+      return <CodeView view={v} data={data} empty={empty} />;
+    case "graph": {
+      const nodes = at(data, v.nodes);
+      return Array.isArray(nodes) && nodes.length > 0 ? <GraphView data={data} view={v} /> : empty;
+    }
+    case "markdown": {
+      const text = at(data, v.pointer);
+      return typeof text === "string" && text !== "" ? <Markdown text={text} /> : empty;
+    }
+    default: {
+      const text = at(data, v.pointer);
+      return typeof text === "string" && text !== "" ? <pre className="ext-text">{text}</pre> : empty;
+    }
+  }
+}
+
+function TableView({
+  view,
+  data,
+  empty,
+  sel,
+  chosen,
+  onSelect,
+}: {
+  view: ViewOf<"table">;
+  data: unknown;
+  empty: ReactElement;
+  sel: ExtParam | undefined;
+  chosen: Chosen;
+  onSelect: (param: ExtParam, value: string) => void;
+}) {
+  const rows = rowsOf(data, view);
+  if (rows.length === 0) return empty;
+  const rowProps = (row: unknown) => {
+    if (!sel) return {};
+    const value = show(at(row, sel.key));
+    return {
+      className: chosen[sel.name] === value ? "selectable selected" : "selectable",
+      onClick: () => onSelect(sel, value),
+      title: `choose this ${sel.label.toLowerCase()}`,
+    };
+  };
+  return (
+    <table className="lm-table">
+      <thead>
+        <tr>
+          {view.columns.map((c) => (
+            <th key={c.key}>{c.label}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr key={i} {...rowProps(row)}>
+            {view.columns.map((c) => (
+              <td key={c.key}>
+                <Value col={c} value={at(row, c.key)} />
+              </td>
             ))}
           </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, i) => {
-            const value = sel ? show(at(row, sel.key)) : "";
-            const active = sel !== undefined && chosen[sel.name] === value;
-            return (
-              <tr
-                key={i}
-                className={sel ? `selectable${active ? " selected" : ""}` : undefined}
-                onClick={sel ? () => onSelect(sel, value) : undefined}
-                title={sel ? `choose this ${sel.label.toLowerCase()}` : undefined}
-              >
-                {v.columns.map((c) => (
-                  <td key={c.key}>
-                    <Value col={c} value={at(row, c.key)} />
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    );
-  }
-  if (v.kind === "fields") {
-    const present = v.fields.filter((f) => at(data, f.key) !== undefined);
-    if (present.length === 0) return <p className="muted">{panel.empty}</p>;
-    return (
-      <dl className="ext-fields">
-        {present.map((f) => (
-          <div key={f.key}>
-            <dt className="muted small">{f.label}</dt>
-            <dd>
-              <Value col={f} value={at(data, f.key)} />
-            </dd>
-          </div>
         ))}
-      </dl>
-    );
-  }
-  if (v.kind === "code") {
-    const left = at(data, v.left);
-    const right = at(data, v.right);
-    if (typeof left !== "string" && typeof right !== "string") return <p className="muted">{panel.empty}</p>;
-    return (
-      <div className="ext-code">
-        <div>
-          <div className="muted small">{v.left_label}</div>
-          <pre className="ext-text">{typeof left === "string" && left !== "" ? left : "–"}</pre>
+      </tbody>
+    </table>
+  );
+}
+
+function FieldsView({ view, data, empty }: { view: ViewOf<"fields">; data: unknown; empty: ReactElement }) {
+  const present = view.fields.filter((f) => at(data, f.key) !== undefined);
+  if (present.length === 0) return empty;
+  return (
+    <dl className="ext-fields">
+      {present.map((f) => (
+        <div key={f.key}>
+          <dt className="muted small">{f.label}</dt>
+          <dd>
+            <Value col={f} value={at(data, f.key)} />
+          </dd>
         </div>
-        <div>
-          <div className="muted small">{v.right_label}</div>
-          <pre className="ext-text">{typeof right === "string" && right !== "" ? right : "–"}</pre>
-        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** A side of a code view: the text, or a dash when there is none. */
+function codeText(value: unknown): string {
+  return typeof value === "string" && value !== "" ? value : "–";
+}
+
+function CodeView({ view, data, empty }: { view: ViewOf<"code">; data: unknown; empty: ReactElement }) {
+  const left = at(data, view.left);
+  const right = at(data, view.right);
+  if (typeof left !== "string" && typeof right !== "string") return empty;
+  return (
+    <div className="ext-code">
+      <div>
+        <div className="muted small">{view.left_label}</div>
+        <pre className="ext-text">{codeText(left)}</pre>
       </div>
-    );
-  }
-  if (v.kind === "graph") {
-    const nodes = at(data, v.nodes);
-    if (!Array.isArray(nodes) || nodes.length === 0) return <p className="muted">{panel.empty}</p>;
-    return <GraphView data={data} view={v} />;
-  }
-  if (v.kind === "markdown") {
-    const text = at(data, v.pointer);
-    return typeof text === "string" && text !== "" ? <Markdown text={text} /> : <p className="muted">{panel.empty}</p>;
-  }
-  const text = at(data, v.pointer);
-  return typeof text === "string" && text !== "" ? (
-    <pre className="ext-text">{text}</pre>
-  ) : (
-    <p className="muted">{panel.empty}</p>
+      <div>
+        <div className="muted small">{view.right_label}</div>
+        <pre className="ext-text">{codeText(right)}</pre>
+      </div>
+    </div>
   );
 }
 

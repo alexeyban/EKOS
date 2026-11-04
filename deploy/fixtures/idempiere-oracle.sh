@@ -28,7 +28,8 @@ SHA256="e58d527ff432a23352e88a92e3b71e0045bbe8dc3b1dee38b4c6079229aee68f"
 mkdir -p "$CACHE"
 if [[ ! -f "$CACHE/$ZIP" ]]; then
   echo "downloading $ZIP"
-  curl -fL --retry 3 -o "$CACHE/$ZIP.part" "$URL"
+  # HTTPS all the way: SourceForge redirects to a mirror, and a redirect may not drop to HTTP.
+  curl -fL --proto '=https' --proto-redir '=https' --tlsv1.2 --retry 3 -o "$CACHE/$ZIP.part" "$URL"
   mv "$CACHE/$ZIP.part" "$CACHE/$ZIP"
 fi
 echo "$SHA256  $CACHE/$ZIP" | sha256sum -c -

@@ -104,10 +104,8 @@ def _check_change(body: SettingsChange) -> None:
             raise HTTPException(status_code=400, detail=f"{name} is not a secret")
 
 
-@router.put("/settings", responses={400: BAD_REQUEST, 409: CONFLICT})
-async def put_settings(body: SettingsChange, _: Principal = Depends(authz.allow_platform)) -> dict:
-    _check_change(body)
-    path = console_file.path()
+def _check_storage(body: SettingsChange, path) -> None:
+    """409 when the change needs a settings file or a keychain this console does not have."""
     if body.values and path is None:
         raise HTTPException(
             status_code=409,
@@ -119,23 +117,38 @@ async def put_settings(body: SettingsChange, _: Principal = Depends(authz.allow_
             detail="no keychain here; set the secret as an environment variable instead",
         )
 
+
+def _validated(values: dict) -> Settings:
+    """The settings the file would give with `values` applied (`None` removes one); 400 when
+    they do not validate."""
     content = console_file.read()
-    for name, value in body.values.items():
+    for name, value in values.items():
         if value is None:
             content.pop(name, None)
         else:
             content[name] = value
     with console_file.reading(content):
         try:
-            built = Settings()
+            return Settings()
         except (ValidationError, ValueError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    for name, value in body.secrets.items():
+
+def _store_secrets(secrets: dict) -> None:
+    for name, value in secrets.items():
         if value is None:
             keychain.delete_console(name)
         else:
             keychain.put_console(name, value)
+
+
+@router.put("/settings", responses={400: BAD_REQUEST, 409: CONFLICT})
+async def put_settings(body: SettingsChange, _: Principal = Depends(authz.allow_platform)) -> dict:
+    _check_change(body)
+    path = console_file.path()
+    _check_storage(body, path)
+    built = _validated(body.values)
+    _store_secrets(body.secrets)
     if body.values and path is not None:
         # The validated value, so `"300"` sent for a number is written as 300.
         typed = {

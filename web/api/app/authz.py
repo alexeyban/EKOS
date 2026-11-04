@@ -282,6 +282,8 @@ def workspace_for(principal: Principal, workspace_id: str) -> models.Workspace:
     return ws
 
 
+# Async on purpose: a sync FastAPI dependency runs in the thread pool, and this one only reads
+# the registry, so it runs on the event loop instead.
 async def require_workspace(  # NOSONAR(python:S7503)
     workspace_id: str, principal: Principal = Depends(authenticated)
 ) -> models.Workspace:

@@ -234,7 +234,7 @@ async def _import(
 @router.post(
     "/linkml/validate",
     dependencies=[Depends(allow("read"))],
-    responses={400: BAD_REQUEST, 502: BAD_GATEWAY},
+    responses={400: BAD_REQUEST, 409: CONFLICT, 502: BAD_GATEWAY},
 )
 async def validate_linkml(
     body: ImportIn,

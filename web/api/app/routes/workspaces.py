@@ -70,6 +70,9 @@ def _existing_workspace(raw: str, tenant: models.Tenant, settings: Settings) -> 
     return root
 
 
+EKOS_FAILED = {"description": "The ekos binary could not be run, or timed out"}
+
+
 async def _ekos(settings: Settings, argv: list[str], tenant: models.Tenant | None) -> None:
     """Run one `ekos` management command; a failure is the caller's 400 with the CLI's reason."""
     try:
@@ -128,7 +131,7 @@ async def list_workspaces(
     "",
     response_model=WorkspaceOut,
     status_code=201,
-    responses={400: BAD_REQUEST, 409: CONFLICT},
+    responses={400: BAD_REQUEST, 409: CONFLICT, 502: EKOS_FAILED},
 )
 async def register_workspace(
     body: WorkspaceCreate,
@@ -167,7 +170,11 @@ async def register_workspace(
     "/{workspace_id}",
     status_code=204,
     dependencies=[Depends(authz.allow("admin"))],
-    responses={404: NOT_FOUND},
+    responses={
+        400: {"description": "`ekos project remove` refused, with the CLI's reason"},
+        404: NOT_FOUND,
+        502: EKOS_FAILED,
+    },
 )
 async def deregister_workspace(
     workspace_id: str,

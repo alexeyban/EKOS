@@ -60,23 +60,22 @@ td.num { text-align:right; font-variant-numeric: tabular-nums; }
     <p class="help">You can close this page.</p>
   </section>
 </main>
-<script>
+<script type="module">
 const token = new URLSearchParams(location.search).get("t") || "";
 const $ = (id) => document.getElementById(id);
 let plan = null;
 
-function call(path, body) {
+async function call(path, body) {
   const init = { headers: { "x-setup-token": token } };
   if (body !== undefined) {
     init.method = "POST";
     init.headers["content-type"] = "application/json";
     init.body = JSON.stringify(body);
   }
-  return fetch(path, init).then(async (r) => {
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || r.statusText);
-    return data;
-  });
+  const r = await fetch(path, init);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || r.statusText);
+  return data;
 }
 
 function size(bytes) {
@@ -99,7 +98,7 @@ function render() {
   $("go").disabled = $("confirm").value.trim() !== word();
 }
 
-call("/api/plan").then((p) => {
+function showPlan(p) {
   plan = p;
   $("loading").classList.add("hidden");
   $("plan").classList.remove("hidden");
@@ -121,13 +120,7 @@ call("/api/plan").then((p) => {
     }));
   }
   render();
-}).catch((e) => {
-  $("loading").innerHTML = "";
-  const p = document.createElement("p");
-  p.className = "err";
-  p.textContent = "This uninstall link is not valid any more (" + e.message + "). Run ekos uninstall --ui again.";
-  $("loading").appendChild(p);
-});
+}
 
 $("purge").addEventListener("change", () => { $("confirm").value = ""; render(); });
 $("confirm").addEventListener("input", render);
@@ -152,6 +145,16 @@ $("go").addEventListener("click", () => {
     render();
   });
 });
+
+try {
+  showPlan(await call("/api/plan"));
+} catch (e) {
+  $("loading").innerHTML = "";
+  const p = document.createElement("p");
+  p.className = "err";
+  p.textContent = "This uninstall link is not valid any more (" + e.message + "). Run ekos uninstall --ui again.";
+  $("loading").appendChild(p);
+}
 </script>
 </body>
 </html>

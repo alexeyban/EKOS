@@ -251,7 +251,7 @@ pub async fn prepare(cwd: &Path, opts: PrepareOpts<'_>) -> Result<()> {
         );
         prepared.databases.insert(spec.db_id.clone(), record);
     }
-    std::fs::write(dirs.prepared(), serde_json::to_string_pretty(&prepared)?)?;
+    tokio::fs::write(dirs.prepared(), serde_json::to_string_pretty(&prepared)?).await?;
     if opts.json {
         println!("{}", serde_json::to_string_pretty(&prepared)?);
     } else {
@@ -267,20 +267,22 @@ pub async fn prepare(cwd: &Path, opts: PrepareOpts<'_>) -> Result<()> {
 
 async fn download(url: &str, path: &Path) -> Result<()> {
     eprintln!("Downloading {url}…");
+    use tokio::io::AsyncWriteExt;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        tokio::fs::create_dir_all(parent).await?;
     }
     let part = path.with_extension("part");
     let mut resp = reqwest::get(url)
         .await
         .and_then(reqwest::Response::error_for_status)
         .with_context(|| format!("downloading {url}"))?;
-    let mut file = std::fs::File::create(&part)?;
+    let mut file = tokio::fs::File::create(&part).await?;
     while let Some(chunk) = resp.chunk().await? {
-        std::io::Write::write_all(&mut file, &chunk)?;
+        file.write_all(&chunk).await?;
     }
+    file.flush().await?;
     drop(file);
-    std::fs::rename(&part, path)?;
+    tokio::fs::rename(&part, path).await?;
     Ok(())
 }
 
@@ -397,7 +399,7 @@ pub async fn run(base: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<()>
     let mut run_config = base.clone();
     run_config.llm = llm_config;
     let llm_dir = dirs.data.join("llm").join("artifacts");
-    std::fs::create_dir_all(&llm_dir)?;
+    tokio::fs::create_dir_all(&llm_dir).await?;
     let llm =
         super::recover::build_llm_provider_for(&run_config, ekos_recovery::Task::NlSql, &llm_dir);
     check_not_mock(

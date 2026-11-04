@@ -15,9 +15,9 @@ use crate::xref::{
     Diagnostic, DiagnosticKind, Options, Severity, SourceRef, TargetSpec, custom_kind,
     locate_object, looks_like_migration, normalize, str_prop, tail_of,
 };
-use ekos_kir::{KirId, KirObject, RelationshipKind};
+use ekos_kir::{KirObject, RelationshipKind};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use uuid::Uuid;
 
 /// Whether a family's reachability can be decided from what its analyzer records.
@@ -284,23 +284,29 @@ fn estate<'a>(objects: &'a [KirObject], opts: &Options<'_>) -> Estate<'a> {
     e
 }
 
-pub(crate) fn check(objects: &[KirObject], opts: &Options<'_>) -> Reach {
-    let estate = estate(objects, opts);
-    let by_id: HashMap<KirId, &KirObject> = objects.iter().map(|o| (o.id, o)).collect();
+/// Caller → callees over `Calls` edges, self-calls left out.
+fn call_graph(opts: &Options<'_>) -> BTreeMap<Uuid, BTreeSet<Uuid>> {
     let mut calls: BTreeMap<Uuid, BTreeSet<Uuid>> = BTreeMap::new();
     for r in opts.relationships {
         if r.kind == RelationshipKind::Calls && r.from != r.to {
             calls.entry(r.from.0).or_default().insert(r.to.0);
         }
     }
+    calls
+}
 
-    // Roots: every family's entry points, plus every non-symbol caller (a view, a trigger, code
-    // the check does not model) — they run whether or not something calls them.
+/// Roots, with why: every family's entry points, plus every non-symbol caller (a view, a trigger,
+/// code the check does not model) — they run whether or not something calls them.
+fn roots(
+    objects: &[KirObject],
+    estate: &Estate<'_>,
+    calls: &BTreeMap<Uuid, BTreeSet<Uuid>>,
+) -> BTreeMap<Uuid, String> {
     let mut roots: BTreeMap<Uuid, String> = BTreeMap::new();
     for o in objects {
         match family_of(o) {
             Some(f) if f.support() == Support::Supported && !f.excluded(o) => {
-                if let Some(why) = f.entry_point(o, &estate) {
+                if let Some(why) = f.entry_point(o, estate) {
                     roots.insert(o.id.0, why);
                 }
             }
@@ -320,6 +326,14 @@ pub(crate) fn check(objects: &[KirObject], opts: &Options<'_>) -> Reach {
             roots.insert(o.id.0, "called from a migration script".into());
         }
     }
+    roots
+}
+
+/// Everything the roots reach over `calls`, the roots included.
+fn reached_from(
+    roots: &BTreeMap<Uuid, String>,
+    calls: &BTreeMap<Uuid, BTreeSet<Uuid>>,
+) -> BTreeSet<Uuid> {
     let mut reached: BTreeSet<Uuid> = roots.keys().copied().collect();
     let mut queue: VecDeque<Uuid> = roots.keys().copied().collect();
     while let Some(u) = queue.pop_front() {
@@ -329,6 +343,92 @@ pub(crate) fn check(objects: &[KirObject], opts: &Options<'_>) -> Reach {
             }
         }
     }
+    reached
+}
+
+/// A family's counters before any symbol is counted.
+fn new_family_reach(f: &dyn ReachabilityRules) -> FamilyReach {
+    let mut s = FamilyReach::default();
+    match f.support() {
+        Support::Supported => s.supported = true,
+        Support::Unsupported(why) => s.unsupported_because = Some(why.to_string()),
+    }
+    s
+}
+
+/// The diagnostic for a supported symbol no root reaches: dynamic when the family says it may
+/// still be called in a way the graph cannot show, unreachable otherwise.
+fn unreached(
+    opts: &Options<'_>,
+    o: &KirObject,
+    f: &dyn ReachabilityRules,
+    estate: &Estate<'_>,
+    stats: &mut FamilyReach,
+) -> Diagnostic {
+    let (kind, severity, confidence, reason) = match f.dynamic(o, estate) {
+        Some(why) => {
+            stats.dynamic += 1;
+            (
+                DiagnosticKind::DynamicReferenceUnknown,
+                Severity::Info,
+                0.2,
+                format!("no entry point reaches it, but {why}"),
+            )
+        }
+        None => {
+            stats.unreachable += 1;
+            (
+                DiagnosticKind::UnreachableSymbol,
+                Severity::Warning,
+                0.6,
+                "no entry point, view, trigger or caller reaches it".to_string(),
+            )
+        }
+    };
+    let located = locate_object(opts, o);
+    let file = str_prop(o, "source_path").or_else(|| located.as_ref().map(|l| l.0.clone()));
+    let key = format!(
+        "{}|{}|{}",
+        f.family(),
+        file.as_deref().unwrap_or(""),
+        o.name.to_lowercase()
+    );
+    Diagnostic {
+        kind,
+        severity,
+        confidence,
+        source: SourceRef {
+            object_id: o.id,
+            object_kind: o.kind.to_string(),
+            object_name: o.name.clone(),
+            file,
+            line: crate::xref::u32_prop(o.properties.get("line"))
+                .or_else(|| located.and_then(|l| l.1)),
+            extractor: format!("{}-reachability", f.family()),
+            access: "reach".to_string(),
+        },
+        target_spec: TargetSpec {
+            written: o.name.clone(),
+            normalized: o.name.to_lowercase(),
+            expected: "an entry point".to_string(),
+            namespace: None,
+        },
+        candidates: Vec::new(),
+        evidence: o.evidence.clone(),
+        coverage_gap: false,
+        cross_system: false,
+        reason,
+        fingerprint: ekos_common::ContentHash::of_str(&format!("xref/v1|{}|{key}", kind.as_str()))
+            .as_str()
+            .to_string(),
+    }
+}
+
+pub(crate) fn check(objects: &[KirObject], opts: &Options<'_>) -> Reach {
+    let estate = estate(objects, opts);
+    let calls = call_graph(opts);
+    let roots = roots(objects, &estate, &calls);
+    let reached = reached_from(&roots, &calls);
 
     let mut families: BTreeMap<String, FamilyReach> = BTreeMap::new();
     let mut diagnostics = Vec::new();
@@ -336,14 +436,9 @@ pub(crate) fn check(objects: &[KirObject], opts: &Options<'_>) -> Reach {
         let Some(f) = family_of(o) else {
             continue;
         };
-        let stats = families.entry(f.family().to_string()).or_insert_with(|| {
-            let mut s = FamilyReach::default();
-            match f.support() {
-                Support::Supported => s.supported = true,
-                Support::Unsupported(why) => s.unsupported_because = Some(why.to_string()),
-            }
-            s
-        });
+        let stats = families
+            .entry(f.family().to_string())
+            .or_insert_with(|| new_family_reach(f));
         if f.excluded(o) {
             continue;
         }
@@ -358,66 +453,7 @@ pub(crate) fn check(objects: &[KirObject], opts: &Options<'_>) -> Reach {
             stats.reachable += 1;
             continue;
         }
-        let (kind, severity, confidence, reason) = match f.dynamic(o, &estate) {
-            Some(why) => {
-                stats.dynamic += 1;
-                (
-                    DiagnosticKind::DynamicReferenceUnknown,
-                    Severity::Info,
-                    0.2,
-                    format!("no entry point reaches it, but {why}"),
-                )
-            }
-            None => {
-                stats.unreachable += 1;
-                (
-                    DiagnosticKind::UnreachableSymbol,
-                    Severity::Warning,
-                    0.6,
-                    "no entry point, view, trigger or caller reaches it".to_string(),
-                )
-            }
-        };
-        let located = locate_object(opts, o);
-        let file = str_prop(o, "source_path").or_else(|| located.as_ref().map(|l| l.0.clone()));
-        let key = format!(
-            "{}|{}|{}",
-            f.family(),
-            file.as_deref().unwrap_or(""),
-            o.name.to_lowercase()
-        );
-        diagnostics.push(Diagnostic {
-            kind,
-            severity,
-            confidence,
-            source: SourceRef {
-                object_id: o.id,
-                object_kind: o.kind.to_string(),
-                object_name: o.name.clone(),
-                file,
-                line: crate::xref::u32_prop(o.properties.get("line"))
-                    .or_else(|| located.and_then(|l| l.1)),
-                extractor: format!("{}-reachability", f.family()),
-                access: "reach".to_string(),
-            },
-            target_spec: TargetSpec {
-                written: o.name.clone(),
-                normalized: o.name.to_lowercase(),
-                expected: "an entry point".to_string(),
-                namespace: None,
-            },
-            candidates: Vec::new(),
-            evidence: o.evidence.clone(),
-            coverage_gap: false,
-            cross_system: false,
-            reason,
-            fingerprint: ekos_common::ContentHash::of_str(&format!(
-                "xref/v1|{}|{key}",
-                kind.as_str()
-            ))
-            .as_str()
-            .to_string(),
-        });
+        diagnostics.push(unreached(opts, o, f, &estate, stats));
     }
     for s in families.values_mut() {
         if s.supported && s.symbols > 0 {
@@ -425,7 +461,6 @@ pub(crate) fn check(objects: &[KirObject], opts: &Options<'_>) -> Reach {
             s.dynamic_share = Some(s.dynamic as f64 / s.symbols as f64);
         }
     }
-    let _ = by_id;
     Reach {
         diagnostics,
         families,

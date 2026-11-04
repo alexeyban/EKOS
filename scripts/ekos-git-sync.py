@@ -55,6 +55,24 @@ class ConfigError(ValueError):
     pass
 
 
+def _parse_item(item: str, seen: set[str]) -> Repo:
+    """One `name=url[#branch]` entry, checked against the names already listed."""
+    if "=" not in item:
+        raise ConfigError(f"{item!r}: expected name=url[#branch]")
+    name, rest = (s.strip() for s in item.split("=", 1))
+    if not _NAME.fullmatch(name) or name in (".", ".."):
+        raise ConfigError(f"{name!r} is not a directory name")
+    if name in seen:
+        raise ConfigError(f"{name!r} is listed twice")
+    url, _, branch = rest.partition("#")
+    url = url.strip()
+    if not url.startswith(("https://", "file://", "/")):
+        raise ConfigError(f"{name}: only https:// remotes are supported")
+    if re.match(r"https://[^/]*@", url):
+        raise ConfigError(f"{name}: put the token in EKOS_GIT_SYNC_TOKEN, not in the URL")
+    return Repo(name, url, branch.strip() or None)
+
+
 def parse_repos(spec: str) -> list[Repo]:
     repos: list[Repo] = []
     seen: set[str] = set()
@@ -62,21 +80,9 @@ def parse_repos(spec: str) -> list[Repo]:
         item = raw.strip()
         if not item or item.startswith("#"):
             continue
-        if "=" not in item:
-            raise ConfigError(f"{item!r}: expected name=url[#branch]")
-        name, rest = (s.strip() for s in item.split("=", 1))
-        if not _NAME.fullmatch(name) or name in (".", ".."):
-            raise ConfigError(f"{name!r} is not a directory name")
-        if name in seen:
-            raise ConfigError(f"{name!r} is listed twice")
-        url, _, branch = rest.partition("#")
-        url = url.strip()
-        if not (url.startswith("https://") or url.startswith("file://") or url.startswith("/")):
-            raise ConfigError(f"{name}: only https:// remotes are supported")
-        if re.match(r"https://[^/]*@", url):
-            raise ConfigError(f"{name}: put the token in EKOS_GIT_SYNC_TOKEN, not in the URL")
-        seen.add(name)
-        repos.append(Repo(name, url, branch.strip() or None))
+        repo = _parse_item(item, seen)
+        seen.add(repo.name)
+        repos.append(repo)
     if not repos:
         raise ConfigError("EKOS_GIT_SYNC_REPOS lists no repository")
     return repos

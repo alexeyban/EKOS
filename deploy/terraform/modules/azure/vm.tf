@@ -87,7 +87,10 @@ resource "azurerm_managed_disk" "home" {
   storage_account_type = "Premium_LRS"
   create_option        = "Empty"
   disk_size_gb         = var.home_size_gb
-  tags                 = local.tags
+  # Attached to the VM only: no export or import over a SAS URL, from anywhere.
+  public_network_access_enabled = false
+  network_access_policy         = "DenyAll"
+  tags                          = local.tags
 }
 
 resource "azurerm_linux_virtual_machine" "vm" {

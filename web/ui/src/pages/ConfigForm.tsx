@@ -57,8 +57,7 @@ export function ConfigForm({
     }
     const text = edits[key]?.text ?? showField(kind, current);
     const set = (t: string) => setEdits({ ...edits, [key]: { path, text: t, kind } });
-    const def = resolved.default;
-    const hint = def !== undefined && def !== null && typeof def !== "object" ? `default: ${String(def)}` : "";
+    const hint = defaultHint(resolved.default);
     return (
       <div key={key} className="cfg-field">
         <label htmlFor={`cfg-${key}`}>
@@ -66,32 +65,7 @@ export function ConfigForm({
           {current !== undefined && <span className="chip small">set</span>}
           {edits[key] && <span className="chip warn small">changed</span>}
         </label>
-        {kind.kind === "complex" ? (
-          <span className="muted small">edit this one in the text below</span>
-        ) : kind.kind === "bool" ? (
-          <select id={`cfg-${key}`} value={text} onChange={(e) => set(e.target.value)}>
-            <option value="">{hint || "not set"}</option>
-            <option value="true">true</option>
-            <option value="false">false</option>
-          </select>
-        ) : kind.kind === "choice" ? (
-          <select id={`cfg-${key}`} value={text} onChange={(e) => set(e.target.value)}>
-            <option value="">{hint || "not set"}</option>
-            {kind.options.map((o) => (
-              <option key={o}>{o}</option>
-            ))}
-          </select>
-        ) : kind.kind === "list" ? (
-          <textarea id={`cfg-${key}`} placeholder="one per line" value={text} onChange={(e) => set(e.target.value)} />
-        ) : (
-          <input
-            id={`cfg-${key}`}
-            type={kind.kind === "number" ? "number" : "text"}
-            placeholder={hint}
-            value={text}
-            onChange={(e) => set(e.target.value)}
-          />
-        )}
+        <FieldControl id={`cfg-${key}`} kind={kind} text={text} hint={hint} onChange={set} />
         {resolved.description && <div className="muted small">{resolved.description}</div>}
       </div>
     );
@@ -134,4 +108,58 @@ export function ConfigForm({
       {apply.isError && <p className="err">{String(apply.error)}</p>}
     </section>
   );
+}
+
+/** "default: …" for a scalar default, nothing otherwise. */
+function defaultHint(def: unknown): string {
+  return def !== undefined && def !== null && typeof def !== "object" ? `default: ${String(def)}` : "";
+}
+
+/** The input for one setting, by its kind; a complex value is edited in the text instead. */
+function FieldControl({
+  id,
+  kind,
+  text,
+  hint,
+  onChange,
+}: {
+  id: string;
+  kind: Kind;
+  text: string;
+  hint: string;
+  onChange: (text: string) => void;
+}) {
+  switch (kind.kind) {
+    case "complex":
+      return <span className="muted small">edit this one in the text below</span>;
+    case "bool":
+      return (
+        <select id={id} value={text} onChange={(e) => onChange(e.target.value)}>
+          <option value="">{hint || "not set"}</option>
+          <option value="true">true</option>
+          <option value="false">false</option>
+        </select>
+      );
+    case "choice":
+      return (
+        <select id={id} value={text} onChange={(e) => onChange(e.target.value)}>
+          <option value="">{hint || "not set"}</option>
+          {kind.options.map((o) => (
+            <option key={o}>{o}</option>
+          ))}
+        </select>
+      );
+    case "list":
+      return <textarea id={id} placeholder="one per line" value={text} onChange={(e) => onChange(e.target.value)} />;
+    default:
+      return (
+        <input
+          id={id}
+          type={kind.kind === "number" ? "number" : "text"}
+          placeholder={hint}
+          value={text}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
+  }
 }

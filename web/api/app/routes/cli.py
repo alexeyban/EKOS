@@ -30,6 +30,8 @@ router = APIRouter(tags=["commands"])
 
 FORBIDDEN = {"description": "Not allowed for this person, or not run from the web"}
 CONFLICT = {"description": "Needs the command's name typed as a confirmation"}
+CATALOGUE_FAILED = {"description": "The ekos binary did not give its command list"}
+SCHEMA_FAILED = {"description": "The ekos binary did not give the ekos.toml schema"}
 
 
 class CliRun(BaseModel):
@@ -45,7 +47,7 @@ async def _catalogue(settings: Settings) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"cannot read the command list: {exc}") from exc
 
 
-@router.get("/config-schema")
+@router.get("/config-schema", responses={502: SCHEMA_FAILED})
 async def config_schema(
     _: Principal = Depends(authz.authenticated), settings: Settings = Depends(get_settings)
 ) -> dict:
@@ -58,7 +60,7 @@ async def config_schema(
         ) from exc
 
 
-@router.get("/workspaces/{workspace_id}/cli", responses={404: NOT_FOUND})
+@router.get("/workspaces/{workspace_id}/cli", responses={404: NOT_FOUND, 502: CATALOGUE_FAILED})
 async def list_cli(
     ws: models.Workspace = Depends(require_workspace),
     principal: Principal = Depends(authz.authenticated),
@@ -87,7 +89,14 @@ def _allowed_dirs(ws: models.Workspace, settings: Settings) -> list[Path]:
 
 @router.post(
     "/workspaces/{workspace_id}/cli",
-    responses={403: FORBIDDEN, 404: NOT_FOUND, 409: CONFLICT, 422: UNPROCESSABLE, 429: TOO_MANY},
+    responses={
+        403: FORBIDDEN,
+        404: NOT_FOUND,
+        409: CONFLICT,
+        422: UNPROCESSABLE,
+        429: TOO_MANY,
+        502: CATALOGUE_FAILED,
+    },
 )
 async def run_cli(
     body: CliRun,

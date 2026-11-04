@@ -186,7 +186,7 @@ export function at(value: unknown, pointer: string): unknown {
   if (!pointer.startsWith("/")) return undefined;
   let cur: unknown = value;
   for (const raw of pointer.slice(1).split("/")) {
-    const key = raw.replace(/~1/g, "/").replace(/~0/g, "~");
+    const key = raw.replaceAll("~1", "/").replaceAll("~0", "~");
     if (Array.isArray(cur)) {
       const i = Number(key);
       cur = Number.isInteger(i) ? cur[i] : undefined;

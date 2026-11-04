@@ -223,6 +223,7 @@ async def _lifespan(app: FastAPI):
             lease.release()
 
 
+# Async on purpose: Starlette runs a sync exception handler on a thread-pool thread.
 async def _timed_out(_request, exc: TimeoutError) -> JSONResponse:
     """A call to a workspace's knowledge server (or another process) that did not answer in time
     is a gateway timeout, not a crash: the first query after a large commit on a network disk
@@ -242,6 +243,14 @@ def cookie_is_https_only(settings) -> bool:
     return settings.oidc_enabled and settings.oidc_redirect_uri.lower().startswith("https://")
 
 
+def _wrap_outside_middleware(app: FastAPI, wrapper) -> None:
+    """Put `wrapper` around the app's whole middleware stack. Starlette builds the stack on the
+    first request from `build_middleware_stack`, so wrapping that keeps `wrapper` outside every
+    middleware added with `add_middleware`."""
+    build = app.build_middleware_stack
+    app.build_middleware_stack = lambda: wrapper(build())
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="EKOS Console API", version="0.1.0", lifespan=_lifespan)
@@ -253,6 +262,8 @@ def create_app() -> FastAPI:
         same_site="lax",
         https_only=cookie_is_https_only(settings),
     )
+    # Added last, so it is the outermost of the middleware chain and every response the chain
+    # gives carries its headers.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.dev_origin],
@@ -261,9 +272,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Outermost, so nothing answers a request from elsewhere, not even a 404.
+    # Outside the whole chain, CORS included, so nothing answers a request from elsewhere, not
+    # even a 404 or a CORS preflight.
     if settings.local:
-        app.add_middleware(LoopbackOnly)
+        _wrap_outside_middleware(app, LoopbackOnly)
 
     app.add_exception_handler(TimeoutError, _timed_out)
 

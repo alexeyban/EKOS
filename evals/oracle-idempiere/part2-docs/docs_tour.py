@@ -1,13 +1,25 @@
 """RFC 0230 Phase 2 exit: step 2 on the Documentation page — Generate and Preview publish in the
 browser. Publish itself is not clicked: a real publish to a public wiki waits for the maintainer."""
-import json, os, subprocess, sys, time
+import json, os, subprocess, sys, tempfile, time
+from pathlib import Path
 sys.path.insert(0, "/home/legion/PycharmProjects/EKOS/deploy/e2e")
 from package_browser_common import check, chromium, finish
 from playwright.sync_api import sync_playwright
 
+
+def out_dir(raw: str) -> str:
+    """The output directory, resolved, refused unless it is under the working directory, the home
+    directory or the temporary directory: a screenshot never lands somewhere else by a typo."""
+    p = Path(raw).expanduser().resolve()
+    bases = (Path.cwd().resolve(), Path.home().resolve(), Path(tempfile.gettempdir()).resolve())
+    if not any(p.is_relative_to(b) for b in bases):
+        sys.exit(f"{raw}: the output directory must be under {', '.join(map(str, bases))}")
+    return str(p)
+
+
 BASE = "http://127.0.0.1:18765"
 WS = "idemdocs"
-OUT = sys.argv[1]
+OUT = out_dir(sys.argv[1])
 LONG = 180_000
 errors: list[str] = []
 os.makedirs(OUT, exist_ok=True)

@@ -349,7 +349,7 @@ pub fn queries(family: ViewFamily) -> Vec<Query> {
 }
 
 fn cell(row: &[Option<String>], i: usize) -> Option<&str> {
-    row.get(i).and_then(|c| c.as_deref())
+    row.get(i).and_then(Option::as_deref)
 }
 
 fn text(row: &[Option<String>], i: usize) -> String {

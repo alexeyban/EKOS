@@ -51,6 +51,41 @@ def _targets(targets: list[str]) -> list[str]:
     return targets
 
 
+def _pii_options(verdict: str, mask: str | None) -> list[str]:
+    opts = [f"--{verdict}"]
+    if mask is not None:
+        if verdict != "confirm" or mask not in _MASKS:
+            raise ReviewError(f"a mask ({', '.join(_MASKS)}) goes with a confirmation")
+        opts.append(f"--mask={mask}")
+    return opts
+
+
+def _write_behaviour_options(reason: str | None, overrides: dict[str, str] | None) -> list[str]:
+    if not overrides:
+        return ["--confirm"]
+    if not reason:
+        raise ReviewError("an override needs a reason")
+    opts = []
+    for k, v in overrides.items():
+        if k not in _OVERRIDE_FIELDS:
+            raise ReviewError(f"cannot override {k!r}")
+        v = _clean(k, v)
+        if not v:
+            raise ReviewError(f"{k} needs a value")
+        opts.append(f"--set={k}={v}")
+    return opts
+
+
+def _identity_options(verdict: str, reason: str | None) -> list[str]:
+    """An identity decision carries its reason as `--note`, never `--reason`."""
+    opts = [f"--{verdict}"]
+    if verdict == "reject" and not reason:
+        raise ReviewError("say why the match is wrong")
+    if reason:
+        opts.append(f"--note={reason}")
+    return opts
+
+
 def decide_argv(
     subject: str,
     targets: list[str],
@@ -72,30 +107,11 @@ def decide_argv(
     if subject == "scope":
         argv.append(f"--{verdict}")
     elif subject == "pii":
-        argv.append(f"--{verdict}")
-        if mask is not None:
-            if verdict != "confirm" or mask not in _MASKS:
-                raise ReviewError(f"a mask ({', '.join(_MASKS)}) goes with a confirmation")
-            argv.append(f"--mask={mask}")
+        argv.extend(_pii_options(verdict, mask))
     elif subject == "write-behaviour":
-        if overrides:
-            if not reason:
-                raise ReviewError("an override needs a reason")
-            for k, v in overrides.items():
-                if k not in _OVERRIDE_FIELDS:
-                    raise ReviewError(f"cannot override {k!r}")
-                v = _clean(k, v)
-                if not v:
-                    raise ReviewError(f"{k} needs a value")
-                argv.append(f"--set={k}={v}")
-        else:
-            argv.append("--confirm")
+        argv.extend(_write_behaviour_options(reason, overrides))
     else:  # identity
-        argv.append(f"--{verdict}")
-        if verdict == "reject" and not reason:
-            raise ReviewError("say why the match is wrong")
-        if reason:
-            argv.append(f"--note={reason}")
+        argv.extend(_identity_options(verdict, reason))
         reason = None
     if reason:
         argv.append(f"--reason={reason}")

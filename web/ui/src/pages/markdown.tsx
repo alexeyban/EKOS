@@ -14,56 +14,85 @@ export type Block =
 function cells(line: string): string[] {
   return line
     .trim()
-    .replace(/^\||\|$/g, "")
+    .replaceAll(/^\||\|$/g, "")
     .split(/(?<!\\)\|/)
-    .map((c) => c.trim().replace(/\\\|/g, "|"));
+    .map((c) => c.trim().replaceAll("\\|", "|"));
 }
+
+/** A block read from `lines` at some index, and the index after it (`block` is null for
+ * a skipped blank line). */
+type Read = { block: Block | null; next: number };
+
+const LIST_ITEM = /^\s*[-*]\s+/;
+const TABLE_ROW = /^\s*\|/;
+// `\s*(?:\|\s*)?` rather than `\s*\|?\s*`: the two adjacent `\s*` backtrack quadratically.
+const TABLE_RULE = /^\s*(?:\|\s*)?:?-{3,}/;
+// `\s+(\S.*)?$` rather than `\s+(.*)$`: `\s+` and `.*` overlap, so a failing match backtracks.
+const HEADING = /^(#{1,6})\s+(\S.*)?$/;
+const PARAGRAPH_END = /^(#{1,6}\s|```|\s*[-*]\s|\s*\|)/;
+
+function fenceAt(lines: string[], i: number): Read | null {
+  const fence = lines[i].match(/^```\s*([\w-]*)/);
+  if (!fence) return null;
+  const body: string[] = [];
+  let j = i + 1;
+  while (j < lines.length && !lines[j].startsWith("```")) body.push(lines[j++]);
+  return { block: { kind: "code", lang: fence[1], text: body.join("\n") }, next: j + 1 };
+}
+
+function headingAt(lines: string[], i: number): Read | null {
+  const h = HEADING.exec(lines[i]);
+  if (!h) return null;
+  return { block: { kind: "heading", level: h[1].length, text: h[2] ?? "" }, next: i + 1 };
+}
+
+function tableAt(lines: string[], i: number): Read | null {
+  if (!TABLE_ROW.test(lines[i]) || i + 1 >= lines.length || !TABLE_RULE.test(lines[i + 1])) return null;
+  const header = cells(lines[i]);
+  let j = i + 2;
+  const rows: string[][] = [];
+  while (j < lines.length && TABLE_ROW.test(lines[j])) rows.push(cells(lines[j++]));
+  return { block: { kind: "table", header, rows }, next: j };
+}
+
+function listAt(lines: string[], i: number): Read | null {
+  if (!LIST_ITEM.test(lines[i])) return null;
+  const items: string[] = [];
+  let j = i;
+  while (j < lines.length && LIST_ITEM.test(lines[j])) items.push(lines[j++].replace(LIST_ITEM, ""));
+  return { block: { kind: "list", items }, next: j };
+}
+
+function blankAt(lines: string[], i: number): Read | null {
+  return lines[i].trim() === "" ? { block: null, next: i + 1 } : null;
+}
+
+/** The first line is always taken: a line no reader accepts (`| a |` with no rule under it)
+ * still ends a paragraph, and taking nothing would never advance. */
+function paragraphAt(lines: string[], i: number): Read {
+  const para: string[] = [lines[i]];
+  let j = i + 1;
+  while (j < lines.length && lines[j].trim() !== "" && !PARAGRAPH_END.test(lines[j])) para.push(lines[j++]);
+  return { block: { kind: "paragraph", text: para.join(" ") }, next: j };
+}
+
+/** Tried in order at each line; a paragraph is what is left. */
+const READERS = [fenceAt, headingAt, tableAt, listAt, blankAt];
 
 /** Splits Markdown into blocks. */
 export function parseMarkdown(text: string): Block[] {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const lines = text.replaceAll("\r\n", "\n").split("\n");
   const out: Block[] = [];
   let i = 0;
   while (i < lines.length) {
-    const line = lines[i];
-    const fence = line.match(/^```\s*([\w-]*)/);
-    if (fence) {
-      const body: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith("```")) body.push(lines[i++]);
-      i++;
-      out.push({ kind: "code", lang: fence[1], text: body.join("\n") });
-      continue;
+    let read: Read | null = null;
+    for (const reader of READERS) {
+      read = reader(lines, i);
+      if (read) break;
     }
-    const h = line.match(/^(#{1,6})\s+(.*)$/);
-    if (h) {
-      out.push({ kind: "heading", level: h[1].length, text: h[2] });
-      i++;
-      continue;
-    }
-    if (/^\s*\|/.test(line) && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])) {
-      const header = cells(line);
-      i += 2;
-      const rows: string[][] = [];
-      while (i < lines.length && /^\s*\|/.test(lines[i])) rows.push(cells(lines[i++]));
-      out.push({ kind: "table", header, rows });
-      continue;
-    }
-    if (/^\s*[-*]\s+/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*[-*]\s+/, ""));
-      out.push({ kind: "list", items });
-      continue;
-    }
-    if (line.trim() === "") {
-      i++;
-      continue;
-    }
-    const para: string[] = [];
-    while (i < lines.length && lines[i].trim() !== "" && !/^(#{1,6}\s|```|\s*[-*]\s|\s*\|)/.test(lines[i])) {
-      para.push(lines[i++]);
-    }
-    out.push({ kind: "paragraph", text: para.join(" ") });
+    read ??= paragraphAt(lines, i);
+    if (read.block) out.push(read.block);
+    i = read.next;
   }
   return out;
 }

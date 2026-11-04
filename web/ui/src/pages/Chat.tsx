@@ -33,18 +33,27 @@ export function itemsOf(messages: Stored[]): Item[] {
   const out: Item[] = [];
   for (const m of messages) {
     if (m.role === "user") out.push({ kind: "user", text: m.content });
-    else if (m.role === "assistant") {
-      for (const c of m.tool_calls ?? []) out.push({ kind: "tool", id: c.id, name: c.name, args: c.arguments });
-      if (m.content && !(m.tool_calls ?? []).length) out.push({ kind: "answer", text: m.content });
-    } else {
-      const t = out.find((i) => i.kind === "tool" && i.id === m.tool_call_id);
-      if (t && t.kind === "tool") {
-        t.ok = m.ok !== false;
-        t.result = m.content.slice(0, 400);
-      }
-    }
+    else if (m.role === "assistant") out.push(...assistantItems(m));
+    else attachResult(out, m);
   }
   return out;
+}
+
+/** An assistant message's tool calls, or its answer when it made none. */
+function assistantItems(m: Extract<Stored, { role: "assistant" }>): Item[] {
+  const calls = m.tool_calls ?? [];
+  const items: Item[] = calls.map((c) => ({ kind: "tool", id: c.id, name: c.name, args: c.arguments }));
+  if (m.content && !calls.length) items.push({ kind: "answer", text: m.content });
+  return items;
+}
+
+/** Puts a tool result on the call it answers. */
+function attachResult(out: Item[], m: Extract<Stored, { role: "tool" }>): void {
+  const t = out.find((i) => i.kind === "tool" && i.id === m.tool_call_id);
+  if (t && t.kind === "tool") {
+    t.ok = m.ok !== false;
+    t.result = m.content.slice(0, 400);
+  }
 }
 
 /** Complete `data:` events in `buffer`, and what is left of it. */
@@ -56,6 +65,61 @@ export function splitEvents(buffer: string): [unknown[], string] {
     .filter((l): l is string => !!l)
     .map((l) => JSON.parse(l.slice(6)));
   return [events, rest];
+}
+
+type Usage = { input: number; output: number };
+
+/** What one streamed event changes on the page. */
+interface EventSink {
+  setCurrent: (id: string) => void;
+  setItems: (f: (xs: Item[]) => Item[]) => void;
+  setUsage: (f: (u: Usage) => Usage) => void;
+}
+
+function applyEvent(e: Record<string, unknown>, sink: EventSink): void {
+  switch (e.type) {
+    case "conversation":
+      sink.setCurrent(String(e.id));
+      break;
+    case "tool_call":
+      sink.setItems((xs) => [...xs, { kind: "tool", id: String(e.id), name: String(e.name), args: e.arguments }]);
+      break;
+    case "tool_result":
+      sink.setItems((xs) =>
+        xs.map((x) => (x.kind === "tool" && x.id === e.id ? { ...x, ok: Boolean(e.ok), result: String(e.summary) } : x)),
+      );
+      break;
+    case "text":
+      sink.setItems((xs) => [...xs, { kind: "answer", text: String(e.text) }]);
+      break;
+    case "usage":
+      sink.setUsage((u) => ({ input: u.input + Number(e.input ?? 0), output: u.output + Number(e.output ?? 0) }));
+      break;
+    case "error":
+      sink.setItems((xs) => [...xs, { kind: "error", text: String(e.message) }]);
+      break;
+  }
+}
+
+/** Reads a Server-Sent Events body to its end, handing each event to `onEvent`. */
+async function readEvents(body: ReadableStream<Uint8Array>, onEvent: (e: Record<string, unknown>) => void): Promise<void> {
+  const reader = body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const [events, rest] = splitEvents(buf);
+    buf = rest;
+    for (const e of events as Record<string, unknown>[]) onEvent(e);
+  }
+}
+
+/** The error a refused chat request carries: the server's `detail`, else the status line. */
+async function refusal(res: Response): Promise<Error> {
+  const j = await res.json().catch(() => ({}));
+  return new Error(typeof j.detail === "string" ? j.detail : `${res.status} ${res.statusText}`);
 }
 
 export function Chat() {
@@ -97,33 +161,8 @@ export function Chat() {
         body: JSON.stringify({ message: text, conversation_id: current }),
         signal: ctrl.signal,
       });
-      if (!res.ok || !res.body) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(typeof j.detail === "string" ? j.detail : `${res.status} ${res.statusText}`);
-      }
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const [events, rest] = splitEvents(buf);
-        buf = rest;
-        for (const e of events as Record<string, unknown>[]) {
-          if (e.type === "conversation") setCurrent(String(e.id));
-          else if (e.type === "tool_call")
-            setItems((xs) => [...xs, { kind: "tool", id: String(e.id), name: String(e.name), args: e.arguments }]);
-          else if (e.type === "tool_result")
-            setItems((xs) =>
-              xs.map((x) => (x.kind === "tool" && x.id === e.id ? { ...x, ok: Boolean(e.ok), result: String(e.summary) } : x)),
-            );
-          else if (e.type === "text") setItems((xs) => [...xs, { kind: "answer", text: String(e.text) }]);
-          else if (e.type === "usage")
-            setUsage((u) => ({ input: u.input + Number(e.input ?? 0), output: u.output + Number(e.output ?? 0) }));
-          else if (e.type === "error") setItems((xs) => [...xs, { kind: "error", text: String(e.message) }]);
-        }
-      }
+      if (!res.ok || !res.body) throw await refusal(res);
+      await readEvents(res.body, (e) => applyEvent(e, { setCurrent, setItems, setUsage }));
     } catch (err) {
       if ((err as Error).name !== "AbortError") setItems((xs) => [...xs, { kind: "error", text: String((err as Error).message) }]);
     } finally {

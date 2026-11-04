@@ -152,6 +152,66 @@ fn promote_source_manifest(config: &EkosConfig, cwd: &Path) {
     }
 }
 
+/// `ckm:<content hash>` of the CKM file, the provenance a commit stamps on entries the compiler
+/// made itself (RFC 0135 Part B).
+async fn ckm_hash(model_path: &Path) -> Option<String> {
+    let path = ekos_common::compress::resolve_auto(model_path)?;
+    let bytes = tokio::fs::read(path).await.ok()?;
+    Some(format!(
+        "ckm:{}",
+        ekos_common::ContentHash::of(&bytes).as_str()
+    ))
+}
+
+/// Every evidence record of the CKM, with a progress line (RFC 0142). Returns how many.
+fn write_evidence(ledger: &dyn KnowledgeStore, model: &CkModel) -> Result<usize> {
+    let total = model.evidence_index.len();
+    let progress = ProgressLine::for_phase("writing evidence");
+    let mut written = 0usize;
+    for ev_record in model.evidence_index.values() {
+        ledger.append_evidence(&evidence_record_to_kir(ev_record))?;
+        written += 1;
+        progress.tick(written, total);
+    }
+    progress.finish();
+    Ok(written)
+}
+
+/// RFC 0172: the conflicts step, when `[conflicts]` is on.
+fn conflicts_step(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+    compiled: &[ekos_kir::KirId],
+) -> Result<Option<crate::commands::conflicts::ConflictStats>> {
+    if !config.conflicts.enabled {
+        return Ok(None);
+    }
+    crate::commands::conflicts::commit_step(config, cwd, ledger, compiled).map(Some)
+}
+
+/// RFC 0233: the integrity index, when `[xref]` is on — error counts by severity and the share of
+/// references resolved.
+#[allow(clippy::type_complexity)]
+fn xref_step(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+) -> Result<
+    Option<(
+        std::collections::BTreeMap<ekos_semantic::xref::Severity, usize>,
+        Option<f64>,
+    )>,
+> {
+    if !config.xref.enabled {
+        return Ok(None);
+    }
+    let step = phase_note("checking cross-references");
+    let stats = crate::commands::check::commit_step(config, cwd, ledger)?;
+    step.done();
+    Ok(Some(stats))
+}
+
 /// [`run`] with RFC 0149 extensions: each one's `after_commit` step runs over the fully
 /// committed ledger, after `[llm-description]` and before `[embeddings]`.
 pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensions) -> Result<()> {
@@ -177,21 +237,13 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     // The CKM content hash stands in for per-`KnowledgeArtifact` provenance until `compile`
     // propagates that (RFC 0135 §B scope line).
     let run_id = ekos_ledger::provenance::new_run_id();
-    let ckm_hash = match ekos_common::compress::resolve_auto(&model_path) {
-        Some(p) => tokio::fs::read(p)
-            .await
-            .ok()
-            .map(|b| format!("ckm:{}", ekos_common::ContentHash::of(&b).as_str())),
-        None => None,
-    };
+    let ckm_hash = ckm_hash(&model_path).await;
     let write_ctx = |stage: &'static str| ekos_ledger::provenance::WriteContext {
         run_id: run_id.clone(),
         stage: stage.to_string(),
         source_artifact_id: ckm_hash.clone(),
     };
     ledger.set_write_context(Some(write_ctx("commit")));
-
-    let mut evidence_written = 0usize;
 
     // RFC 0135 Part B follow-up — stamp each committed object/relationship with its own
     // originating `KnowledgeArtifact` id(s) (`ckm_*.source_artifact_ids`, threaded through
@@ -213,15 +265,7 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     // silence, which is what makes a healthy run indistinguishable from a hang.
 
     // Write evidence first (objects may reference evidence IDs).
-    let ev_total = model.evidence_index.len();
-    let ev_progress = ProgressLine::for_phase("writing evidence");
-    for ev_record in model.evidence_index.values() {
-        let kir_ev = evidence_record_to_kir(ev_record);
-        ledger.append_evidence(&kir_ev)?;
-        evidence_written += 1;
-        ev_progress.tick(evidence_written, ev_total);
-    }
-    ev_progress.finish();
+    let evidence_written = write_evidence(&*ledger, &model)?;
 
     // Write canonical objects.
     let source_index = source_index(config, cwd);
@@ -278,17 +322,10 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     };
     // RFC 0172: label mismatches need the business-semantics items just written; the manifest of
     // current conflicts needs both.
-    let conflict_stats = if config.conflicts.enabled {
+    if config.conflicts.enabled {
         ledger.set_write_context(Some(write_ctx("commit:conflicts")));
-        Some(crate::commands::conflicts::commit_step(
-            config,
-            cwd,
-            &*ledger,
-            &compiled_conflicts,
-        )?)
-    } else {
-        None
-    };
+    }
+    let conflict_stats = conflicts_step(config, cwd, &*ledger, &compiled_conflicts)?;
     // RFC 0212: how each table is updated and deleted — after the conflicts step, from the same
     // whole-ledger read of code, routines, live catalog and dictionary.
     ledger.set_write_context(Some(write_ctx("commit:write-behaviour")));
@@ -299,14 +336,7 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     // RFC 0233: the integrity index — every reference the steps above could not link, with
     // evidence. Read-only over the ledger; written to a file under the state directory, never to
     // the ledger (the findings are derived and change every commit).
-    let xref_stats = if config.xref.enabled {
-        let step = phase_note("checking cross-references");
-        let stats = crate::commands::check::commit_step(config, cwd, &*ledger)?;
-        step.done();
-        Some(stats)
-    } else {
-        None
-    };
+    let xref_stats = xref_step(config, cwd, &*ledger)?;
     ledger.set_write_context(Some(write_ctx("commit:llm-description")));
 
     // RFC 0088: real, evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` for every

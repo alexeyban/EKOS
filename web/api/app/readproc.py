@@ -90,21 +90,25 @@ def _check_allowed(argv: list[str]) -> None:
         return
     for prefix, pattern in _POSITIONAL.items():
         if tuple(argv[: len(prefix)]) == prefix:
-            extra = argv[len(prefix) :]
-            if len(extra) != 1 or not pattern.match(extra[0]):
-                raise ReadProcError(f"disallowed arguments {extra!r}")
+            _check_one_positional(argv[len(prefix) :], pattern)
             return
     for prefix, allowed_flags in _ALLOWED.items():
-        if tuple(argv[: len(prefix)]) != prefix:
-            continue
-        extra = argv[len(prefix) :]
-        i = 0
-        while i < len(extra):
-            if extra[i] not in allowed_flags:
-                raise ReadProcError(f"disallowed argument {extra[i]!r}")
-            i += 2  # skip the flag's value
-        return
+        if tuple(argv[: len(prefix)]) == prefix:
+            _check_flag_pairs(argv[len(prefix) :], allowed_flags)
+            return
     raise ReadProcError(f"argv not on the read-only allowlist: {argv}")
+
+
+def _check_one_positional(extra: list[str], pattern: re.Pattern[str]) -> None:
+    if len(extra) != 1 or not pattern.match(extra[0]):
+        raise ReadProcError(f"disallowed arguments {extra!r}")
+
+
+def _check_flag_pairs(extra: list[str], allowed_flags: frozenset[str]) -> None:
+    """`extra` is `<flag> <value>` pairs, each flag one of `allowed_flags`."""
+    for flag in extra[::2]:  # every other item is the flag's value
+        if flag not in allowed_flags:
+            raise ReadProcError(f"disallowed argument {flag!r}")
 
 
 async def read_text(

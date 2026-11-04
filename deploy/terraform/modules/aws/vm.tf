@@ -101,7 +101,10 @@ resource "aws_instance" "vm" {
   vpc_security_group_ids = [aws_security_group.vm[0].id]
   iam_instance_profile   = aws_iam_instance_profile.vm[0].name
   key_name               = var.ssh_key_name != "" ? var.ssh_key_name : null
-  tags                   = merge(local.tags, { Name = "${var.name}-vm" })
+  # A VM is always public (`exposure = "private"` is refused for it): the console is served on its
+  # Elastic IP, and the boot script needs the internet before that address is associated.
+  associate_public_ip_address = true
+  tags                        = merge(local.tags, { Name = "${var.name}-vm" })
 
   root_block_device {
     volume_size = 50

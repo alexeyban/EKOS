@@ -53,7 +53,7 @@ pub fn licences(config: &EkosConfig, cwd: &Path) -> BTreeMap<String, String> {
 fn licence_at(root: &Path) -> Option<&'static str> {
     let mut names: Vec<_> = std::fs::read_dir(root)
         .ok()?
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .map(|e| e.file_name().to_string_lossy().to_string())
         .filter(|n| {
             let u = n.to_ascii_uppercase();

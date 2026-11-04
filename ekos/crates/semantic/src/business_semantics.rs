@@ -897,32 +897,97 @@ fn derived_name(
 
 // ── Synthesis ───────────────────────────────────────────────────────────────────────────────
 
-/// Synthesize every RFC 0170 hypothesis from `graph` (the committed ledger's objects and
-/// relationships).
-pub fn synthesize(
-    graph: &KirGraph,
-    cfg: &SemanticsConfig,
-    rationale: Option<&dyn RationaleSource>,
-) -> SemanticsOutput {
-    let mut stats = SemanticsStats::default();
+/// A `(table index, column)` pair.
+type ColKey = (usize, String);
+/// Candidate meanings per coded value.
+type Meanings = BTreeMap<String, Vec<Meaning>>;
+/// Code labels per `(table, column)`: value → best label, for naming concepts.
+type Labels = BTreeMap<ColKey, BTreeMap<String, String>>;
+/// A concept without a description: (id, key, name, sites).
+type Undocumented<'a> = (KirId, String, String, Vec<&'a Site>);
+/// A built concept: (id, key, sites).
+type BuiltConcept<'a> = (KirId, String, Vec<&'a Site>);
+/// Potential conflicts by key: (conflict type, members).
+type ConflictGroups = BTreeMap<String, (&'static str, Vec<ConflictMember>)>;
 
-    // Tables, indexed by name. Views are not tables: a coded column is a stored column.
-    let tables: Vec<TableInfo> = graph
-        .objects
-        .iter()
-        .filter(|o| o.kind == ObjectKind::Table)
-        .map(table_info)
-        .collect();
+/// What the synthesis steps share: the tables, and the per-column facts read from them and their
+/// sites.
+struct Facts<'a> {
+    tables: &'a [TableInfo<'a>],
+    /// (table, column) → value → usage sites.
+    coded: BTreeMap<ColKey, BTreeMap<String, Vec<&'a Site>>>,
+    /// Declared domains: `CHECK (… IN …)` and dbt `accepted_values`.
+    check_domain: BTreeMap<ColKey, BTreeSet<String>>,
+    fks: BTreeMap<ColKey, (usize, String)>,
+    /// Row keys: a column compared against many distinct literals, or a primary-key/unique column.
+    key_like: BTreeSet<ColKey>,
+    /// Application constants grouped by prefix: `BC_AP => 1, BC_AR => 2` is the group `BC`.
+    groups: BTreeMap<String, Vec<Constant>>,
+}
+
+impl<'a> Facts<'a> {
+    fn new(
+        graph: &KirGraph,
+        cfg: &SemanticsConfig,
+        tables: &'a [TableInfo<'a>],
+        sites: &'a [Site],
+        index: &NameIndex,
+        by_id: &HashMap<Uuid, usize>,
+    ) -> Self {
+        let mut fks = foreign_keys(graph, by_id);
+        add_dbt_references(tables, index, by_id, &mut fks);
+        let coded = coded_values(tables, sites);
+        let mut check_domain = check_domains(tables);
+        add_accepted_values(tables, &mut check_domain);
+        let key_like = key_like_columns(tables, &coded, cfg.max_enum_values);
+        Facts {
+            tables,
+            coded,
+            check_domain,
+            fks,
+            key_like,
+            groups: constant_groups(graph),
+        }
+    }
+
+    fn is_key(&self, t: usize, c: &str) -> bool {
+        is_key_column(self.tables, t, c)
+    }
+
+    /// Every coded column: compared in code, CHECK-constrained, or referencing a seeded lookup.
+    fn coded_columns(&self) -> BTreeSet<ColKey> {
+        let mut columns: BTreeSet<ColKey> = self.coded.keys().cloned().collect();
+        columns.extend(self.check_domain.keys().cloned());
+        for ((ti, col), (lt, _)) in &self.fks {
+            if self.tables[*lt].obj.properties.contains_key("seed_rows") {
+                columns.insert((*ti, col.clone()));
+            }
+        }
+        columns.retain(|k| !self.key_like.contains(k));
+        columns
+    }
+}
+
+/// A primary-key or unique column.
+fn is_key_column(tables: &[TableInfo], t: usize, c: &str) -> bool {
+    tables[t].columns.get(c).is_some_and(|c| c.key)
+}
+
+/// Tables by name and by id.
+fn index_tables(tables: &[TableInfo]) -> (NameIndex, HashMap<Uuid, usize>) {
     let mut index = NameIndex::default();
     let mut by_id: HashMap<Uuid, usize> = HashMap::new();
     for (i, t) in tables.iter().enumerate() {
         index.add_object(t.obj);
         by_id.insert(t.obj.id.0, i);
     }
-    let mut sites = collect_sites(graph, &tables, &index, &by_id, &mut stats);
-    // A ledger hands objects back in no particular order. Everything downstream — which sites an
-    // item cites when it has more than `MAX_EVIDENCE`, evidence ids by index, signatures — must not
-    // depend on it, or every commit rewrites the busiest items.
+    (index, by_id)
+}
+
+/// A ledger hands objects back in no particular order. Everything downstream — which sites an
+/// item cites when it has more than `MAX_EVIDENCE`, evidence ids by index, signatures — must not
+/// depend on it, or every commit rewrites the busiest items.
+fn sort_sites(sites: &mut [Site]) {
     sites.sort_by(|a, b| {
         (&a.path, a.p.line, &a.carrier_name, a.carrier.0, &a.p).cmp(&(
             &b.path,
@@ -932,8 +997,15 @@ pub fn synthesize(
             &b.p,
         ))
     });
-    let mut fks = foreign_keys(graph, &by_id);
-    // A dbt `relationships` test declares the same thing a foreign key does (RFC 0170 Phase 3).
+}
+
+/// A dbt `relationships` test declares the same thing a foreign key does (RFC 0170 Phase 3).
+fn add_dbt_references(
+    tables: &[TableInfo],
+    index: &NameIndex,
+    by_id: &HashMap<Uuid, usize>,
+    fks: &mut BTreeMap<ColKey, (usize, String)>,
+) {
     for (ti, t) in tables.iter().enumerate() {
         for c in raw_columns(t.obj) {
             let (Some(col), Some(r)) = (c["name"].as_str(), c.get("references")) else {
@@ -950,15 +1022,16 @@ pub fn synthesize(
             }
         }
     }
+}
 
-    let mut b = Builder {
-        out: SemanticsOutput::default(),
-    };
-
-    // ── Coded values per column ───────────────────────────────────────────────────────────
-    // (table, column) → value → usage sites.
-    let mut coded: BTreeMap<(usize, String), BTreeMap<String, Vec<&Site>>> = BTreeMap::new();
-    for s in &sites {
+/// Coded values per column: the literals of `IN`/`NOT IN` sites, except on quantity and boolean
+/// columns.
+fn coded_values<'a>(
+    tables: &[TableInfo],
+    sites: &'a [Site],
+) -> BTreeMap<ColKey, BTreeMap<String, Vec<&'a Site>>> {
+    let mut coded: BTreeMap<ColKey, BTreeMap<String, Vec<&Site>>> = BTreeMap::new();
+    for s in sites {
         if !matches!(s.p.op.as_str(), "in" | "not_in") {
             continue;
         }
@@ -982,8 +1055,12 @@ pub fn synthesize(
                 .push(s);
         }
     }
-    // `CHECK (kind IN ('A', 'L'))` declares a column's whole domain.
-    let mut check_domain: BTreeMap<(usize, String), BTreeSet<String>> = BTreeMap::new();
+    coded
+}
+
+/// `CHECK (kind IN ('A', 'L'))` declares a column's whole domain.
+fn check_domains(tables: &[TableInfo]) -> BTreeMap<ColKey, BTreeSet<String>> {
+    let mut check_domain: BTreeMap<ColKey, BTreeSet<String>> = BTreeMap::new();
     for (ti, t) in tables.iter().enumerate() {
         let Some(Value::Array(checks)) = t.obj.properties.get("check_constraints") else {
             continue;
@@ -1005,8 +1082,14 @@ pub fn synthesize(
             }
         }
     }
+    check_domain
+}
 
-    // A dbt `accepted_values` test declares a domain the same way.
+/// A dbt `accepted_values` test declares a domain the same way.
+fn add_accepted_values(
+    tables: &[TableInfo],
+    check_domain: &mut BTreeMap<ColKey, BTreeSet<String>>,
+) {
     for (ti, t) in tables.iter().enumerate() {
         for c in raw_columns(t.obj) {
             let (Some(col), Some(Value::Array(vals))) =
@@ -1020,332 +1103,498 @@ pub fn synthesize(
                 .extend(vals.iter().filter_map(|v| v.as_str().map(str::to_string)));
         }
     }
+}
 
-    // Row keys: a column compared against many distinct literals, or a primary-key/unique column.
-    let is_key = |t: usize, c: &str| tables[t].columns.get(c).is_some_and(|c| c.key);
-    let key_like: BTreeSet<(usize, String)> = coded
+/// Row keys: a column compared against many distinct literals, or a primary-key/unique column.
+fn key_like_columns(
+    tables: &[TableInfo],
+    coded: &BTreeMap<ColKey, BTreeMap<String, Vec<&Site>>>,
+    max_enum_values: usize,
+) -> BTreeSet<ColKey> {
+    coded
         .iter()
-        .filter(|((t, c), vals)| vals.len() > cfg.max_enum_values || is_key(*t, c))
+        .filter(|((t, c), vals)| vals.len() > max_enum_values || is_key_column(tables, *t, c))
         .map(|(k, _)| k.clone())
-        .collect();
-    stats.key_like_columns = key_like.len();
+        .collect()
+}
 
-    // Every coded column: compared in code, CHECK-constrained, or referencing a seeded lookup.
-    let mut columns: BTreeSet<(usize, String)> = coded.keys().cloned().collect();
-    columns.extend(check_domain.keys().cloned());
-    for ((ti, col), (lt, _)) in &fks {
-        if tables[*lt].obj.properties.contains_key("seed_rows") {
-            columns.insert((*ti, col.clone()));
+/// Synthesize every RFC 0170 hypothesis from `graph` (the committed ledger's objects and
+/// relationships).
+pub fn synthesize(
+    graph: &KirGraph,
+    cfg: &SemanticsConfig,
+    rationale: Option<&dyn RationaleSource>,
+) -> SemanticsOutput {
+    let mut b = Builder {
+        out: SemanticsOutput::default(),
+    };
+
+    // Tables, indexed by name. Views are not tables: a coded column is a stored column.
+    let tables: Vec<TableInfo> = graph
+        .objects
+        .iter()
+        .filter(|o| o.kind == ObjectKind::Table)
+        .map(table_info)
+        .collect();
+    let (index, by_id) = index_tables(&tables);
+    let mut sites = collect_sites(graph, &tables, &index, &by_id, &mut b.out.stats);
+    sort_sites(&mut sites);
+    let facts = Facts::new(graph, cfg, &tables, &sites, &index, &by_id);
+    b.out.stats.key_like_columns = facts.key_like.len();
+
+    let (labels, unexplained) = enum_meanings(&mut b, &facts);
+
+    let mut concepts = view_concepts(graph, &tables, &sites);
+    add_recurring_concepts(&mut concepts, cfg, &facts, &sites, &labels);
+    let (mut undocumented, built) = emit_concepts(&mut b, &tables, &concepts);
+    emit_conflicts(&mut b, &tables, &concepts);
+
+    emit_dbt_constraints(&mut b, &tables);
+    emit_check_constraints(&mut b, &tables);
+
+    let glossary = glossary_entries(graph);
+    let (glossed, unmatched) = attach_glossary(&mut b, &tables, &glossary);
+    undocumented.retain(|(id, ..)| !glossed.contains(&id.0));
+
+    // ── Rationale (git blame) ───────────────────────────────────────────────────────────────
+    let mut explained: BTreeSet<Uuid> = BTreeSet::new();
+    for (id, key, ss) in &built {
+        blame_into(&mut b, rationale, &mut explained, *id, key, ss);
+    }
+
+    // ── SemanticGap ─────────────────────────────────────────────────────────────────────────
+    let gaps: Vec<GapDraft> = unexplained
+        .into_iter()
+        .map(|u| value_gap(&tables, u))
+        .chain(
+            undocumented
+                .into_iter()
+                .filter(|(id, ..)| !explained.contains(&id.0))
+                .map(concept_gap),
+        )
+        .collect();
+    for gap in gaps {
+        emit_gap(&mut b, &tables, rationale, &mut explained, gap);
+    }
+    for g in unmatched {
+        emit_term_gap(&mut b, g);
+    }
+
+    b.out.stats.rationale_links = b
+        .out
+        .objects
+        .iter()
+        .filter(|o| kind_name(o) == Some(RATIONALE))
+        .count();
+    suggest_mappings(&mut b.out, cfg);
+    sign_items(&mut b.out);
+    cite_endpoint_evidence(&mut b.out);
+    b.out
+}
+
+/// Evidence for one usage site: its canonical predicate, carrier and clause.
+fn site_evidence(b: &mut Builder, owner: &str, n: usize, s: &Site, tables: &[TableInfo]) -> KirId {
+    b.evidence(
+        owner,
+        n,
+        &s.path,
+        site_line(s),
+        format!(
+            "{} ({}, {:?})",
+            s.canonical(tables),
+            s.carrier_name,
+            s.p.clause
+        ),
+    )
+}
+
+// ── EnumMeaning per (table, column, value) ─────────────────────────────────────────────────
+
+/// One `EnumMeaning` per value of every coded column. Returns the code labels found, per column,
+/// and the values used in logic that nothing explains.
+fn enum_meanings<'a>(b: &mut Builder, f: &Facts<'a>) -> (Labels, Vec<Unexplained<'a>>) {
+    let mut labels = Labels::new();
+    let mut unexplained = Vec::new();
+    for (ti, col) in &f.coded_columns() {
+        column_enum_meanings(b, f, *ti, col, &mut labels, &mut unexplained);
+    }
+    (labels, unexplained)
+}
+
+/// The `EnumMeaning`s of one coded column; none when it has no known value.
+fn column_enum_meanings<'a>(
+    b: &mut Builder,
+    f: &Facts<'a>,
+    ti: usize,
+    col: &str,
+    labels: &mut Labels,
+    unexplained: &mut Vec<Unexplained<'a>>,
+) {
+    let (mut meanings, declared) = column_meanings(f, ti, col);
+    let key = (ti, col.to_string());
+    let mut values: BTreeSet<String> = meanings.keys().cloned().collect();
+    if let Some(v) = f.coded.get(&key) {
+        values.extend(v.keys().cloned());
+    }
+    if let Some(v) = f.check_domain.get(&key) {
+        values.extend(v.iter().cloned());
+    }
+    if values.is_empty() {
+        return;
+    }
+    b.out.stats.coded_columns += 1;
+    let col_labels = labels.entry(key).or_default();
+    for value in values {
+        let ms = meanings.remove(&value).unwrap_or_default();
+        let declared_in = declared.get(&value).cloned();
+        let best = enum_value(b, f, (ti, col), value.clone(), ms, declared_in, unexplained);
+        if let Some(label) = best {
+            col_labels.insert(value, label);
         }
     }
-    columns.retain(|k| !key_like.contains(k));
+}
 
-    // Application constants grouped by prefix: `BC_AP => 1, BC_AR => 2` is the group `BC`.
-    let groups = constant_groups(graph);
-
-    // ── EnumMeaning per (table, column, value) ─────────────────────────────────────────────
-    // Labels per (table, column), for naming concepts.
-    let mut labels: BTreeMap<(usize, String), BTreeMap<String, String>> = BTreeMap::new();
-    // (table, column, value, usage sites, lookup table that seeds it without a label)
-    let mut unexplained: Vec<Unexplained> = Vec::new();
-    for (ti, col) in &columns {
-        let t = &tables[*ti];
-        let mut meanings: BTreeMap<String, Vec<Meaning>> = BTreeMap::new();
-        // Values a lookup table seeds without any label column: declared, not explained.
-        let mut declared: BTreeMap<String, String> = BTreeMap::new();
-
-        // Column comment legend.
-        if let Some(c) = t.columns.get(col)
-            && let Some(text) = &c.description
-        {
-            for (code, label) in comment_legend(text) {
-                let value = match_value(
-                    &code,
-                    coded.get(&(*ti, col.clone())),
-                    check_domain.get(&(*ti, col.clone())),
-                );
-                meanings.entry(value).or_default().push(Meaning {
-                    label,
-                    source: "column_comment",
-                    confidence: 0.9,
-                    path: c.description_path.clone().unwrap_or_default(),
-                    line: c.description_line,
-                    detail: format!("COMMENT ON COLUMN {}.{col} IS {text}", t.name()),
-                });
-            }
-        }
-        // Lookup seed through a foreign key.
-        if let Some((lt, key_col)) = fks.get(&(*ti, col.clone()))
-            && let Some(Value::Array(rows)) = tables[*lt].obj.properties.get("seed_rows")
-        {
-            for row in rows {
-                let Some(values) = row.get("values").and_then(Value::as_object) else {
-                    continue;
-                };
-                let Some(key) = values.get(key_col).and_then(Value::as_str) else {
-                    continue;
-                };
-                let label = seed_label(values, key_col);
-                let code = seed_code(key);
-                let Some(label) = label else {
-                    declared.insert(code, tables[*lt].name());
-                    continue;
-                };
-                meanings.entry(code).or_default().push(Meaning {
-                    label,
-                    source: "lookup_seed",
-                    confidence: 0.8,
-                    path: row
-                        .get("path")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    line: row.get("line").and_then(Value::as_u64).map(|l| l as u32),
-                    detail: format!(
-                        "{}.{col} → {}.{key_col}; seeded row {}",
-                        t.name(),
-                        tables[*lt].name(),
-                        Value::Object(values.clone())
-                    ),
-                });
-            }
-        }
-        // The lookup table's own key: `oe_class.id = 2` means what `oe_class`'s seeded row 2 says.
-        if let Some(Value::Array(rows)) = t.obj.properties.get("seed_rows")
-            && !fks.contains_key(&(*ti, col.clone()))
-        {
-            for row in rows {
-                let Some(values) = row.get("values").and_then(Value::as_object) else {
-                    continue;
-                };
-                let (Some(key), Some(label)) = (
-                    values.get(col).and_then(Value::as_str),
-                    seed_label(values, col),
-                ) else {
-                    continue;
-                };
-                meanings.entry(seed_code(key)).or_default().push(Meaning {
-                    label,
-                    source: "lookup_seed",
-                    confidence: 0.8,
-                    path: row
-                        .get("path")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string(),
-                    line: row.get("line").and_then(Value::as_u64).map(|l| l as u32),
-                    detail: format!("{}: seeded row {}", t.name(), Value::Object(values.clone())),
-                });
-            }
-        }
-        // Application constants (`use constant EC_CUSTOMER => 2`): a group whose names agree with
-        // this column's seeded labels, or whose prefix is the column's initials and whose values
-        // overlap its codes, names those codes.
-        {
-            let mut known_values: BTreeSet<String> = meanings.keys().cloned().collect();
-            if let Some(m) = coded.get(&(*ti, col.clone())) {
-                known_values.extend(m.keys().cloned());
-            }
-            if let Some(d) = check_domain.get(&(*ti, col.clone())) {
-                known_values.extend(d.iter().cloned());
-            }
-            let labels_now: BTreeMap<String, String> = meanings
-                .iter()
-                .filter_map(|(v, ms)| ms.first().map(|m| (v.clone(), m.label.clone())))
-                .collect();
-            if let Some((prefix, how)) =
-                match_constant_group(&groups, col, &known_values, &labels_now)
-            {
-                for c in &groups[&prefix] {
-                    meanings.entry(c.value.clone()).or_default().push(Meaning {
-                        label: c.suffix.clone(),
-                        source: "app_constant",
-                        confidence: match how {
-                            "labels" => 0.6,
-                            "name" => 0.5,
-                            _ => 0.4,
-                        },
-                        path: c.path.clone(),
-                        line: Some(c.line),
-                        detail: format!(
-                            "use constant {} => {} ({}; matched by {how})",
-                            c.name, c.value, c.package
-                        ),
-                    });
-                }
-            }
-        }
-        // dbt var names: `account_number = '{{ var("acc_ar") }}'` says '1200' is the AR account.
-        if let Some(vals) = coded.get(&(*ti, col.clone())) {
-            for (v, used) in vals {
-                let mut seen = BTreeSet::new();
-                for s in used {
-                    if let Some(var) = &s.var_label
-                        && seen.insert(var.clone())
-                    {
-                        meanings.entry(v.clone()).or_default().push(Meaning {
-                            label: var.clone(),
-                            source: "dbt_var",
-                            confidence: 0.4,
-                            path: s.path.clone(),
-                            line: site_line(s),
-                            detail: format!(
-                                "{} — the value of dbt var `{var}` ({})",
-                                s.canonical(&tables),
-                                s.carrier_name
-                            ),
-                        });
-                    }
-                }
-            }
-        }
-        // CASE branch labels.
-        if let Some(vals) = coded.get(&(*ti, col.clone())) {
-            for (v, used) in vals {
-                let mut seen = BTreeSet::new();
-                for s in used {
-                    if s.p.clause == Clause::Case
-                        && s.p.values.len() == 1
-                        && let Some(label) = &s.p.label
-                        && seen.insert(label.clone())
-                    {
-                        meanings.entry(v.clone()).or_default().push(Meaning {
-                            label: unquote(label),
-                            source: "case_label",
-                            confidence: 0.5,
-                            path: s.path.clone(),
-                            line: site_line(s),
-                            detail: format!(
-                                "CASE WHEN {} THEN {label} ({})",
-                                s.canonical(&tables),
-                                s.carrier_name
-                            ),
-                        });
-                    }
-                }
-            }
-        }
-
-        let mut values: BTreeSet<String> = meanings.keys().cloned().collect();
-        if let Some(v) = coded.get(&(*ti, col.clone())) {
-            values.extend(v.keys().cloned());
-        }
-        if let Some(v) = check_domain.get(&(*ti, col.clone())) {
-            values.extend(v.iter().cloned());
-        }
-        if values.is_empty() {
-            continue;
-        }
-        stats.coded_columns += 1;
-        let col_labels = labels.entry((*ti, col.clone())).or_default();
-        for value in values {
-            let used: Vec<&Site> = coded
-                .get(&(*ti, col.clone()))
-                .and_then(|m| m.get(&value))
-                .cloned()
-                .unwrap_or_default();
-            let mut ms = meanings.remove(&value).unwrap_or_default();
-            ms.sort_by(|a, b| {
-                b.confidence
-                    .total_cmp(&a.confidence)
-                    .then(a.label.cmp(&b.label))
-            });
-            ms.dedup_by(|a, b| a.label == b.label && a.source == b.source);
-            let key = format!("enum-meaning:{}:{col}:{value}", t.obj.id);
-            let name = format!("{}.{col} = {value}", t.name());
-            let best = ms.first().cloned();
-            if let Some(m) = &best {
-                col_labels.insert(value.clone(), m.label.clone());
-                stats.enum_values_explained += 1;
-            }
-            stats.enum_values += 1;
-            let in_check = check_domain
-                .get(&(*ti, col.clone()))
-                .is_some_and(|d| d.contains(&value));
-            let idx = b.object(
-                &key,
-                name.clone(),
-                ENUM_MEANING,
-                vec![
-                    ("table", json!(t.name())),
-                    ("column", json!(col)),
-                    ("value", json!(value)),
-                    (
-                        "label",
-                        best.as_ref().map(|m| json!(m.label)).unwrap_or(Value::Null),
-                    ),
-                    (
-                        "confidence",
-                        json!(best.as_ref().map_or(0.0, |m| m.confidence)),
-                    ),
-                    (
-                        "meanings",
-                        json!(ms.iter().map(|m| json!({
+/// Builds the `EnumMeaning` of one value of `(ti, col)`, and records the value as unexplained
+/// when logic uses it but no source names it. Returns its best label.
+fn enum_value<'a>(
+    b: &mut Builder,
+    f: &Facts<'a>,
+    (ti, col): (usize, &str),
+    value: String,
+    mut ms: Vec<Meaning>,
+    declared_in: Option<String>,
+    unexplained: &mut Vec<Unexplained<'a>>,
+) -> Option<String> {
+    let t = &f.tables[ti];
+    let ck = (ti, col.to_string());
+    let used: Vec<&Site> = f
+        .coded
+        .get(&ck)
+        .and_then(|m| m.get(&value))
+        .cloned()
+        .unwrap_or_default();
+    ms.sort_by(|a, b| {
+        b.confidence
+            .total_cmp(&a.confidence)
+            .then(a.label.cmp(&b.label))
+    });
+    ms.dedup_by(|a, b| a.label == b.label && a.source == b.source);
+    let key = format!("enum-meaning:{}:{col}:{value}", t.obj.id);
+    let name = format!("{}.{col} = {value}", t.name());
+    let best = ms.first().cloned();
+    if best.is_some() {
+        b.out.stats.enum_values_explained += 1;
+    }
+    b.out.stats.enum_values += 1;
+    let in_check = f.check_domain.get(&ck).is_some_and(|d| d.contains(&value));
+    let idx = b.object(
+        &key,
+        name,
+        ENUM_MEANING,
+        vec![
+            ("table", json!(t.name())),
+            ("column", json!(col)),
+            ("value", json!(value)),
+            (
+                "label",
+                best.as_ref().map(|m| json!(m.label)).unwrap_or(Value::Null),
+            ),
+            (
+                "confidence",
+                json!(best.as_ref().map_or(0.0, |m| m.confidence)),
+            ),
+            (
+                "meanings",
+                json!(
+                    ms.iter()
+                        .map(|m| json!({
                             "label": m.label, "source": m.source, "confidence": m.confidence,
                             "path": m.path, "line": m.line,
-                        })).collect::<Vec<_>>()),
-                    ),
-                    ("usage_sites", json!(used.len())),
-                    ("in_check_constraint", json!(in_check)),
-                ],
-            );
-            let mut evs = Vec::new();
-            for (n, m) in ms.iter().enumerate().take(MAX_EVIDENCE) {
-                evs.push(b.evidence(&key, n, &m.path, m.line, m.detail.clone()));
-            }
-            for (n, s) in used
-                .iter()
-                .enumerate()
-                .take(MAX_EVIDENCE.saturating_sub(evs.len()))
+                        }))
+                        .collect::<Vec<_>>()
+                ),
+            ),
+            ("usage_sites", json!(used.len())),
+            ("in_check_constraint", json!(in_check)),
+        ],
+    );
+    let mut evs = Vec::new();
+    for (n, m) in ms.iter().enumerate().take(MAX_EVIDENCE) {
+        evs.push(b.evidence(&key, n, &m.path, m.line, m.detail.clone()));
+    }
+    for (n, s) in used
+        .iter()
+        .enumerate()
+        .take(MAX_EVIDENCE.saturating_sub(evs.len()))
+    {
+        evs.push(site_evidence(b, &key, 100 + n, s, f.tables));
+    }
+    let id = b.out.objects[idx].id;
+    b.out.objects[idx].evidence = evs;
+    b.relate(DESCRIBES, id, t.obj.id);
+    if best.is_none() && !used.is_empty() {
+        unexplained.push(Unexplained {
+            table: ti,
+            column: col.to_string(),
+            value,
+            used,
+            declared_in,
+        });
+    }
+    best.map(|m| m.label)
+}
+
+/// Every candidate meaning of `(ti, col)`'s values, and the values a lookup table seeds without
+/// any label column (declared, not explained).
+fn column_meanings(f: &Facts, ti: usize, col: &str) -> (Meanings, BTreeMap<String, String>) {
+    let mut meanings = Meanings::new();
+    let mut declared = BTreeMap::new();
+    comment_meanings(f, ti, col, &mut meanings);
+    fk_seed_meanings(f, ti, col, &mut meanings, &mut declared);
+    own_seed_meanings(f, ti, col, &mut meanings);
+    constant_meanings(f, ti, col, &mut meanings);
+    dbt_var_meanings(f, ti, col, &mut meanings);
+    case_label_meanings(f, ti, col, &mut meanings);
+    (meanings, declared)
+}
+
+/// The column comment's legend: `A=asset,L=liability`.
+fn comment_meanings(f: &Facts, ti: usize, col: &str, meanings: &mut Meanings) {
+    let t = &f.tables[ti];
+    let Some(c) = t.columns.get(col) else {
+        return;
+    };
+    let Some(text) = &c.description else {
+        return;
+    };
+    let key = (ti, col.to_string());
+    for (code, label) in comment_legend(text) {
+        let value = match_value(&code, f.coded.get(&key), f.check_domain.get(&key));
+        meanings.entry(value).or_default().push(Meaning {
+            label,
+            source: "column_comment",
+            confidence: 0.9,
+            path: c.description_path.clone().unwrap_or_default(),
+            line: c.description_line,
+            detail: format!("COMMENT ON COLUMN {}.{col} IS {text}", t.name()),
+        });
+    }
+}
+
+/// Where a seeded row was written.
+fn seed_row_location(row: &Value) -> (String, Option<u32>) {
+    (
+        row.get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        row.get("line").and_then(Value::as_u64).map(|l| l as u32),
+    )
+}
+
+/// Lookup seed through a foreign key: the referenced table's seeded rows label the codes. A row
+/// with no label column only declares its code.
+fn fk_seed_meanings(
+    f: &Facts,
+    ti: usize,
+    col: &str,
+    meanings: &mut Meanings,
+    declared: &mut BTreeMap<String, String>,
+) {
+    let t = &f.tables[ti];
+    let Some((lt, key_col)) = f.fks.get(&(ti, col.to_string())) else {
+        return;
+    };
+    let lookup = &f.tables[*lt];
+    let Some(Value::Array(rows)) = lookup.obj.properties.get("seed_rows") else {
+        return;
+    };
+    for row in rows {
+        let Some(values) = row.get("values").and_then(Value::as_object) else {
+            continue;
+        };
+        let Some(key) = values.get(key_col).and_then(Value::as_str) else {
+            continue;
+        };
+        let label = seed_label(values, key_col);
+        let code = seed_code(key);
+        let Some(label) = label else {
+            declared.insert(code, lookup.name());
+            continue;
+        };
+        let (path, line) = seed_row_location(row);
+        meanings.entry(code).or_default().push(Meaning {
+            label,
+            source: "lookup_seed",
+            confidence: 0.8,
+            path,
+            line,
+            detail: format!(
+                "{}.{col} → {}.{key_col}; seeded row {}",
+                t.name(),
+                lookup.name(),
+                Value::Object(values.clone())
+            ),
+        });
+    }
+}
+
+/// The lookup table's own key: `oe_class.id = 2` means what `oe_class`'s seeded row 2 says.
+fn own_seed_meanings(f: &Facts, ti: usize, col: &str, meanings: &mut Meanings) {
+    let t = &f.tables[ti];
+    let Some(Value::Array(rows)) = t.obj.properties.get("seed_rows") else {
+        return;
+    };
+    if f.fks.contains_key(&(ti, col.to_string())) {
+        return;
+    }
+    for row in rows {
+        let Some(values) = row.get("values").and_then(Value::as_object) else {
+            continue;
+        };
+        let (Some(key), Some(label)) = (
+            values.get(col).and_then(Value::as_str),
+            seed_label(values, col),
+        ) else {
+            continue;
+        };
+        let (path, line) = seed_row_location(row);
+        meanings.entry(seed_code(key)).or_default().push(Meaning {
+            label,
+            source: "lookup_seed",
+            confidence: 0.8,
+            path,
+            line,
+            detail: format!("{}: seeded row {}", t.name(), Value::Object(values.clone())),
+        });
+    }
+}
+
+/// Application constants (`use constant EC_CUSTOMER => 2`): a group whose names agree with this
+/// column's seeded labels, or whose prefix is the column's initials and whose values overlap its
+/// codes, names those codes.
+fn constant_meanings(f: &Facts, ti: usize, col: &str, meanings: &mut Meanings) {
+    let key = (ti, col.to_string());
+    let mut known_values: BTreeSet<String> = meanings.keys().cloned().collect();
+    if let Some(m) = f.coded.get(&key) {
+        known_values.extend(m.keys().cloned());
+    }
+    if let Some(d) = f.check_domain.get(&key) {
+        known_values.extend(d.iter().cloned());
+    }
+    let labels_now: BTreeMap<String, String> = meanings
+        .iter()
+        .filter_map(|(v, ms)| ms.first().map(|m| (v.clone(), m.label.clone())))
+        .collect();
+    let Some((prefix, how)) = match_constant_group(&f.groups, col, &known_values, &labels_now)
+    else {
+        return;
+    };
+    let confidence = match how {
+        "labels" => 0.6,
+        "name" => 0.5,
+        _ => 0.4,
+    };
+    for c in &f.groups[&prefix] {
+        meanings.entry(c.value.clone()).or_default().push(Meaning {
+            label: c.suffix.clone(),
+            source: "app_constant",
+            confidence,
+            path: c.path.clone(),
+            line: Some(c.line),
+            detail: format!(
+                "use constant {} => {} ({}; matched by {how})",
+                c.name, c.value, c.package
+            ),
+        });
+    }
+}
+
+/// dbt var names: `account_number = '{{ var("acc_ar") }}'` says '1200' is the AR account.
+fn dbt_var_meanings(f: &Facts, ti: usize, col: &str, meanings: &mut Meanings) {
+    let Some(vals) = f.coded.get(&(ti, col.to_string())) else {
+        return;
+    };
+    for (v, used) in vals {
+        let mut seen = BTreeSet::new();
+        for s in used {
+            if let Some(var) = &s.var_label
+                && seen.insert(var.clone())
             {
-                evs.push(b.evidence(
-                    &key,
-                    100 + n,
-                    &s.path,
-                    site_line(s),
-                    format!(
-                        "{} ({}, {:?})",
-                        s.canonical(&tables),
-                        s.carrier_name,
-                        s.p.clause
+                meanings.entry(v.clone()).or_default().push(Meaning {
+                    label: var.clone(),
+                    source: "dbt_var",
+                    confidence: 0.4,
+                    path: s.path.clone(),
+                    line: site_line(s),
+                    detail: format!(
+                        "{} — the value of dbt var `{var}` ({})",
+                        s.canonical(f.tables),
+                        s.carrier_name
                     ),
-                ));
-            }
-            let id = b.out.objects[idx].id;
-            b.out.objects[idx].evidence = evs;
-            b.relate(DESCRIBES, id, t.obj.id);
-            if best.is_none() && !used.is_empty() {
-                let lookup = declared.get(&value).cloned();
-                unexplained.push(Unexplained {
-                    table: *ti,
-                    column: col.clone(),
-                    value,
-                    used,
-                    declared_in: lookup,
                 });
             }
         }
     }
+}
 
-    // ── BusinessConcept ─────────────────────────────────────────────────────────────────────
-    let filter_clause = |c: Clause| {
-        matches!(
-            c,
-            Clause::Where | Clause::Having | Clause::JoinOn | Clause::Condition
-        )
+/// CASE branch labels.
+fn case_label_meanings(f: &Facts, ti: usize, col: &str, meanings: &mut Meanings) {
+    let Some(vals) = f.coded.get(&(ti, col.to_string())) else {
+        return;
     };
-    // definition text → (key, origin, sites, view object)
-    struct Concept<'a> {
-        origin: &'static str,
-        view: Option<&'a KirObject>,
-        atoms: BTreeSet<String>,
-        sites: Vec<&'a Site>,
-        name: String,
-        table: usize,
+    for (v, used) in vals {
+        let mut seen = BTreeSet::new();
+        for s in used {
+            if s.p.clause == Clause::Case
+                && s.p.values.len() == 1
+                && let Some(label) = &s.p.label
+                && seen.insert(label.clone())
+            {
+                meanings.entry(v.clone()).or_default().push(Meaning {
+                    label: unquote(label),
+                    source: "case_label",
+                    confidence: 0.5,
+                    path: s.path.clone(),
+                    line: site_line(s),
+                    detail: format!(
+                        "CASE WHEN {} THEN {label} ({})",
+                        s.canonical(f.tables),
+                        s.carrier_name
+                    ),
+                });
+            }
+        }
     }
-    let mut concepts: BTreeMap<String, Concept> = BTreeMap::new();
+}
 
-    // Views: the outermost WHERE's resolved top-level conjuncts define "rows of the view".
+// ── BusinessConcept ─────────────────────────────────────────────────────────────────────────
+
+/// A `BusinessConcept` before it is built, keyed by its definition text.
+struct Concept<'a> {
+    origin: &'static str,
+    view: Option<&'a KirObject>,
+    atoms: BTreeSet<String>,
+    sites: Vec<&'a Site>,
+    name: String,
+    table: usize,
+}
+
+/// A clause that filters rows.
+fn is_filter_clause(c: Clause) -> bool {
+    matches!(
+        c,
+        Clause::Where | Clause::Having | Clause::JoinOn | Clause::Condition
+    )
+}
+
+/// Views: the outermost WHERE's resolved top-level conjuncts define "rows of the view".
+fn view_concepts<'a>(
+    graph: &'a KirGraph,
+    tables: &[TableInfo],
+    sites: &'a [Site],
+) -> BTreeMap<String, Concept<'a>> {
+    let mut concepts: BTreeMap<String, Concept> = BTreeMap::new();
     let views: BTreeMap<Uuid, &KirObject> = graph
         .objects
         .iter()
@@ -1353,13 +1602,13 @@ pub fn synthesize(
         .map(|o| (o.id.0, o))
         .collect();
     let mut view_sites: BTreeMap<Uuid, Vec<&Site>> = BTreeMap::new();
-    for s in &sites {
+    for s in sites {
         if s.carrier_is_view && s.p.clause == Clause::Where && s.p.top_level && !s.p.subquery {
             view_sites.entry(s.carrier.0).or_default().push(s);
         }
     }
     for (vid, vs) in &view_sites {
-        let atoms: BTreeSet<String> = vs.iter().map(|s| s.canonical(&tables)).collect();
+        let atoms: BTreeSet<String> = vs.iter().map(|s| s.canonical(tables)).collect();
         let def = atoms.iter().cloned().collect::<Vec<_>>().join(" AND ");
         let view = views[vid];
         concepts.entry(def).or_insert(Concept {
@@ -1371,15 +1620,25 @@ pub fn synthesize(
             table: vs[0].table,
         });
     }
+    concepts
+}
 
-    // Recurring single predicates.
+/// Recurring single predicates: one that defines a view widens that view's concept; one seen in at
+/// least `min_sites` carriers is a concept of its own.
+fn add_recurring_concepts<'a>(
+    concepts: &mut BTreeMap<String, Concept<'a>>,
+    cfg: &SemanticsConfig,
+    f: &Facts<'a>,
+    sites: &'a [Site],
+    labels: &Labels,
+) {
     let mut by_canon: BTreeMap<String, Vec<&Site>> = BTreeMap::new();
-    for s in &sites {
-        if filter_clause(s.p.clause)
-            && !key_like.contains(&(s.table, s.column.clone()))
-            && !is_key(s.table, &s.column)
+    for s in sites {
+        if is_filter_clause(s.p.clause)
+            && !f.key_like.contains(&(s.table, s.column.clone()))
+            && !f.is_key(s.table, &s.column)
         {
-            by_canon.entry(s.canonical(&tables)).or_default().push(s);
+            by_canon.entry(s.canonical(f.tables)).or_default().push(s);
         }
     }
     for (canon, ss) in by_canon {
@@ -1402,7 +1661,7 @@ pub fn synthesize(
         }
         let s0 = ss[0];
         let name = derived_name(
-            &tables[s0.table].name(),
+            &f.tables[s0.table].name(),
             &s0.column,
             &s0.p.op,
             &s0.p.values,
@@ -1422,120 +1681,141 @@ pub fn synthesize(
             },
         );
     }
+}
 
-    let mut undocumented: Vec<(KirId, String, String, Vec<&Site>)> = Vec::new();
-    let mut concept_ids: Vec<(KirId, String, Vec<&Site>)> = Vec::new();
-    for (def, c) in &concepts {
+/// Builds every concept. Returns the ones with no description, and every one built.
+fn emit_concepts<'a>(
+    b: &mut Builder,
+    tables: &[TableInfo],
+    concepts: &BTreeMap<String, Concept<'a>>,
+) -> (Vec<Undocumented<'a>>, Vec<BuiltConcept<'a>>) {
+    let mut undocumented = Vec::new();
+    let mut built = Vec::new();
+    for (def, c) in concepts {
         let key = format!("business-concept:{def}");
-        let carriers: BTreeSet<Uuid> = c.sites.iter().map(|s| s.carrier.0).collect();
-        let description = c
-            .view
-            .and_then(|v| v.properties.get("description"))
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        let confidence = match c.origin {
-            "view" if description.is_some() => 0.6,
-            "view" => 0.5,
-            _ => (0.3 + 0.05 * carriers.len() as f64).min(0.6),
-        };
-        let tables_named: BTreeSet<String> =
-            c.sites.iter().map(|s| tables[s.table].name()).collect();
-        let mut seen_in: Vec<String> = c
-            .sites
-            .iter()
-            .map(|s| s.carrier_name.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        seen_in.truncate(50);
-        let idx = b.object(
-            &key,
-            c.name.clone(),
-            CONCEPT,
-            vec![
-                ("definition", json!(def)),
-                ("predicates", json!(c.atoms)),
-                ("table", json!(tables[c.table].name())),
-                ("tables", json!(tables_named)),
-                ("origin", json!(c.origin)),
-                (
-                    "name_source",
-                    json!(if c.origin == "view" {
-                        "view"
-                    } else {
-                        "derived"
-                    }),
-                ),
-                ("view", json!(c.view.map(|v| v.name.clone()))),
-                ("description", json!(description)),
-                ("sites", json!(c.sites.len())),
-                ("carriers", json!(carriers.len())),
-                ("seen_in", json!(seen_in)),
-                ("confidence", json!(confidence)),
-            ],
-        );
-        let id = b.out.objects[idx].id;
-        let mut evs = Vec::new();
-        for (n, s) in c.sites.iter().enumerate().take(MAX_EVIDENCE) {
-            evs.push(b.evidence(
-                &key,
-                n,
-                &s.path,
-                site_line(s),
-                format!(
-                    "{} ({}, {:?})",
-                    s.canonical(&tables),
-                    s.carrier_name,
-                    s.p.clause
-                ),
-            ));
-        }
-        b.out.objects[idx].evidence = evs;
-        for t in c.sites.iter().map(|s| s.table).collect::<BTreeSet<_>>() {
-            b.relate(DESCRIBES, id, tables[t].obj.id);
-        }
-        for carrier in &carriers {
-            b.relate(EVIDENCED_BY, id, KirId(*carrier));
-        }
-        stats.concepts += 1;
-        if c.origin == "view" {
-            stats.concepts_from_views += 1;
-        }
-        if description.is_none() {
+        let (id, described) = emit_concept(b, tables, &key, def, c);
+        if !described {
             undocumented.push((id, key.clone(), c.name.clone(), c.sites.clone()));
         }
-        concept_ids.push((id, key, c.sites.clone()));
+        built.push((id, key, c.sites.clone()));
     }
+    (undocumented, built)
+}
 
-    // ── ConceptConflict ─────────────────────────────────────────────────────────────────────
-    // Two kinds, both narrow on purpose. `IN` sets on one column that merely differ are usually
-    // different concepts (asset vs income accounts), not a disagreement, so they are not flagged.
-    //  - threshold: one column, the same comparison direction, different literals — "overdue" as
-    //    `> 90` in one place and `> 60` in another;
-    //  - name: one name for different definitions.
-    let mut conflicts: BTreeMap<String, (&'static str, Vec<ConflictMember>)> = BTreeMap::new();
-    for (def, c) in &concepts {
+/// Builds one `BusinessConcept`; returns its id and whether its view describes it.
+fn emit_concept(
+    b: &mut Builder,
+    tables: &[TableInfo],
+    key: &str,
+    def: &str,
+    c: &Concept,
+) -> (KirId, bool) {
+    let carriers: BTreeSet<Uuid> = c.sites.iter().map(|s| s.carrier.0).collect();
+    let description = c
+        .view
+        .and_then(|v| v.properties.get("description"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let confidence = match c.origin {
+        "view" if description.is_some() => 0.6,
+        "view" => 0.5,
+        _ => (0.3 + 0.05 * carriers.len() as f64).min(0.6),
+    };
+    let tables_named: BTreeSet<String> = c.sites.iter().map(|s| tables[s.table].name()).collect();
+    let mut seen_in: Vec<String> = c
+        .sites
+        .iter()
+        .map(|s| s.carrier_name.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    seen_in.truncate(50);
+    let name_source = if c.origin == "view" {
+        "view"
+    } else {
+        "derived"
+    };
+    let idx = b.object(
+        key,
+        c.name.clone(),
+        CONCEPT,
+        vec![
+            ("definition", json!(def)),
+            ("predicates", json!(c.atoms)),
+            ("table", json!(tables[c.table].name())),
+            ("tables", json!(tables_named)),
+            ("origin", json!(c.origin)),
+            ("name_source", json!(name_source)),
+            ("view", json!(c.view.map(|v| v.name.clone()))),
+            ("description", json!(description)),
+            ("sites", json!(c.sites.len())),
+            ("carriers", json!(carriers.len())),
+            ("seen_in", json!(seen_in)),
+            ("confidence", json!(confidence)),
+        ],
+    );
+    let id = b.out.objects[idx].id;
+    let mut evs = Vec::new();
+    for (n, s) in c.sites.iter().enumerate().take(MAX_EVIDENCE) {
+        evs.push(site_evidence(b, key, n, s, tables));
+    }
+    b.out.objects[idx].evidence = evs;
+    for t in c.sites.iter().map(|s| s.table).collect::<BTreeSet<_>>() {
+        b.relate(DESCRIBES, id, tables[t].obj.id);
+    }
+    for carrier in &carriers {
+        b.relate(EVIDENCED_BY, id, KirId(*carrier));
+    }
+    b.out.stats.concepts += 1;
+    if c.origin == "view" {
+        b.out.stats.concepts_from_views += 1;
+    }
+    (id, description.is_some())
+}
+
+// ── ConceptConflict ─────────────────────────────────────────────────────────────────────────
+
+/// Two kinds, both narrow on purpose. `IN` sets on one column that merely differ are usually
+/// different concepts (asset vs income accounts), not a disagreement, so they are not flagged.
+///  - threshold: one column, the same comparison direction, different literals — "overdue" as
+///    `> 90` in one place and `> 60` in another;
+///  - name: one name for different definitions.
+fn emit_conflicts(b: &mut Builder, tables: &[TableInfo], concepts: &BTreeMap<String, Concept>) {
+    for (key, (conflict_type, members)) in conflict_groups(tables, concepts) {
+        if members.len() >= 2 {
+            emit_conflict(b, &key, conflict_type, &members);
+        }
+    }
+}
+
+/// The direction of a threshold comparison.
+fn threshold_direction(op: &str) -> Option<&'static str> {
+    match op {
+        ">" | ">=" => Some("above"),
+        "<" | "<=" => Some("below"),
+        _ => None,
+    }
+}
+
+/// Concepts grouped by what they could conflict over: a threshold's column and direction, a name.
+fn conflict_groups(tables: &[TableInfo], concepts: &BTreeMap<String, Concept>) -> ConflictGroups {
+    let mut conflicts = ConflictGroups::new();
+    for (def, c) in concepts {
         let id = kid(&format!("business-concept:{def}"));
         if c.atoms.len() == 1
             && let Some(s0) = c.sites.first()
             && s0.p.values.len() == 1
+            && let Some(dir) = threshold_direction(s0.p.op.as_str())
         {
-            let dir = match s0.p.op.as_str() {
-                ">" | ">=" => Some("above"),
-                "<" | "<=" => Some("below"),
-                _ => None,
-            };
-            if let Some(dir) = dir {
-                conflicts
-                    .entry(format!(
-                        "threshold:{}.{}:{dir}",
-                        tables[s0.table].name(),
-                        s0.column
-                    ))
-                    .or_insert(("threshold", Vec::new()))
-                    .1
-                    .push((id, c.name.clone(), def.clone()));
-            }
+            conflicts
+                .entry(format!(
+                    "threshold:{}.{}:{dir}",
+                    tables[s0.table].name(),
+                    s0.column
+                ))
+                .or_insert(("threshold", Vec::new()))
+                .1
+                .push((id, c.name.clone(), def.clone()));
         }
         conflicts
             .entry(format!("name:{}", c.name))
@@ -1543,58 +1823,70 @@ pub fn synthesize(
             .1
             .push((id, c.name.clone(), def.clone()));
     }
-    for (key, (conflict_type, members)) in conflicts {
-        if members.len() < 2 {
-            continue;
-        }
-        let names: Vec<String> = members.iter().map(|m| m.1.clone()).collect();
-        let defs: Vec<String> = members.iter().map(|m| m.2.clone()).collect();
-        let question = match conflict_type {
-            "threshold" => format!(
-                "Which threshold is the business rule? The code uses {} — one meaning, or several?",
-                defs.join(" vs ")
-            ),
-            _ => format!(
-                "`{}` names {} different definitions: {}. Which is it?",
-                names[0],
-                defs.len(),
-                defs.join(" vs ")
-            ),
-        };
-        let okey = format!("concept-conflict:{key}");
-        let idx = b.object(
-            &okey,
-            format!("conflict: {}", defs.join(" vs ")),
-            CONFLICT,
-            vec![
-                ("conflict_type", json!(conflict_type)),
-                ("concepts", json!(names)),
-                ("definitions", json!(defs)),
-                ("question", json!(question)),
-                ("confidence", json!(0.5)),
-            ],
-        );
-        let id = b.out.objects[idx].id;
-        // Its evidence is its members': each concept's first cited site.
-        let evs: Vec<KirId> = members
-            .iter()
-            .filter_map(|(cid, _, _)| {
-                b.out
-                    .objects
-                    .iter()
-                    .find(|o| o.id == *cid)
-                    .and_then(|o| o.evidence.first().copied())
-            })
-            .collect();
-        b.out.objects[idx].evidence = evs;
-        for (cid, _, _) in &members {
-            b.relate(CONFLICTS_WITH, id, *cid);
-        }
-        stats.conflicts += 1;
-    }
+    conflicts
+}
 
-    // ── ConstraintCandidate per dbt test (RFC 0170 Phase 3) ────────────────────────────────
-    for t in &tables {
+/// Builds one `ConceptConflict` over `members`.
+fn emit_conflict(
+    b: &mut Builder,
+    key: &str,
+    conflict_type: &'static str,
+    members: &[ConflictMember],
+) {
+    let names: Vec<String> = members.iter().map(|m| m.1.clone()).collect();
+    let defs: Vec<String> = members.iter().map(|m| m.2.clone()).collect();
+    let question = match conflict_type {
+        "threshold" => format!(
+            "Which threshold is the business rule? The code uses {} — one meaning, or several?",
+            defs.join(" vs ")
+        ),
+        _ => format!(
+            "`{}` names {} different definitions: {}. Which is it?",
+            names[0],
+            defs.len(),
+            defs.join(" vs ")
+        ),
+    };
+    let okey = format!("concept-conflict:{key}");
+    let idx = b.object(
+        &okey,
+        format!("conflict: {}", defs.join(" vs ")),
+        CONFLICT,
+        vec![
+            ("conflict_type", json!(conflict_type)),
+            ("concepts", json!(names)),
+            ("definitions", json!(defs)),
+            ("question", json!(question)),
+            ("confidence", json!(0.5)),
+        ],
+    );
+    let id = b.out.objects[idx].id;
+    // Its evidence is its members': each concept's first cited site.
+    let evs: Vec<KirId> = members
+        .iter()
+        .filter_map(|(cid, _, _)| {
+            b.out
+                .objects
+                .iter()
+                .find(|o| o.id == *cid)
+                .and_then(|o| o.evidence.first().copied())
+        })
+        .collect();
+    b.out.objects[idx].evidence = evs;
+    for (cid, _, _) in members {
+        b.relate(CONFLICTS_WITH, id, *cid);
+    }
+    b.out.stats.conflicts += 1;
+}
+
+// ── ConstraintCandidate ─────────────────────────────────────────────────────────────────────
+
+/// What a dbt test asserts: (constraint type, expression, structured predicates).
+type DbtConstraint = (&'static str, String, Vec<Value>);
+
+/// `ConstraintCandidate` per dbt test (RFC 0170 Phase 3).
+fn emit_dbt_constraints(b: &mut Builder, tables: &[TableInfo]) {
+    for t in tables {
         for c in raw_columns(t.obj) {
             let Some(col) = c["name"].as_str().map(str::to_lowercase) else {
                 continue;
@@ -1604,179 +1896,217 @@ pub fn synthesize(
                 .map(|a| a.iter().filter_map(Value::as_str).collect())
                 .unwrap_or_default();
             for test in tests {
-                let site = |op: &str, values: Vec<String>| {
-                    serde_json::to_value(PredicateSite {
-                        relation: Some(t.name()),
-                        scope: Vec::new(),
-                        column: col.clone(),
-                        op: op.into(),
-                        values,
-                        clause: Clause::Check,
-                        top_level: true,
-                        subquery: false,
-                        label: None,
-                        line: 0,
-                    })
-                    .unwrap_or_default()
-                };
-                let (constraint_type, expression, structured) = match test {
-                    "not_null" => (
-                        "not_null",
-                        format!("{col} IS NOT NULL"),
-                        vec![site("is_not_null", vec![])],
-                    ),
-                    "unique" => ("unique", format!("{col} is unique"), vec![]),
-                    "accepted_values" => {
-                        let vals: Vec<String> = c["accepted_values"]
-                            .as_array()
-                            .map(|a| {
-                                a.iter()
-                                    .filter_map(|v| v.as_str().map(str::to_string))
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        (
-                            "enum",
-                            canonical_text(&col, "in", &vals),
-                            vec![site("in", vals)],
-                        )
-                    }
-                    "relationships" => (
-                        "relationship",
-                        format!(
-                            "{col} references {}.{}",
-                            c["references"]["table"].as_str().unwrap_or("?"),
-                            c["references"]["column"].as_str().unwrap_or("?")
-                        ),
-                        vec![],
-                    ),
-                    _ => continue,
-                };
-                let key = format!("constraint-candidate:dbt:{}:{col}:{test}", t.obj.id);
-                let path = c["dbt_path"].as_str().unwrap_or_default().to_string();
-                let line = c["dbt_line"].as_u64().map(|l| l as u32);
-                let preds: Vec<String> = structured
-                    .iter()
-                    .filter_map(|v| serde_json::from_value::<PredicateSite>(v.clone()).ok())
-                    .map(|p| p.canonical())
-                    .collect();
-                let idx = b.object(
-                    &key,
-                    format!("{} dbt {test} ({col})", t.name()),
-                    CONSTRAINT,
-                    vec![
-                        ("table", json!(t.name())),
-                        ("constraint_name", json!(format!("dbt:{test}"))),
-                        ("expression", json!(expression)),
-                        ("constraint_type", json!(constraint_type)),
-                        ("source", json!("dbt_test")),
-                        ("columns", json!([col.clone()])),
-                        ("predicates", json!(preds)),
-                        ("structured", json!(structured)),
-                        ("confidence", json!(0.9)),
-                    ],
-                );
-                let ev = b.evidence(
-                    &key,
-                    0,
-                    &path,
-                    line,
-                    format!("dbt test `{test}` on {}.{col}", t.name()),
-                );
-                b.out.objects[idx].evidence.push(ev);
-                let id = b.out.objects[idx].id;
-                b.relate(DESCRIBES, id, t.obj.id);
-                stats.constraints += 1;
+                if let Some(constraint) = dbt_test_constraint(t, c, &col, test) {
+                    emit_dbt_constraint(b, t, c, &col, test, constraint);
+                }
             }
         }
     }
+}
 
-    // ── ConstraintCandidate per CHECK ───────────────────────────────────────────────────────
-    for t in &tables {
+/// A dbt test's `CHECK`-clause predicate on `col`, as stored.
+fn dbt_check_site(t: &TableInfo, col: &str, op: &str, values: Vec<String>) -> Value {
+    serde_json::to_value(PredicateSite {
+        relation: Some(t.name()),
+        scope: Vec::new(),
+        column: col.to_string(),
+        op: op.into(),
+        values,
+        clause: Clause::Check,
+        top_level: true,
+        subquery: false,
+        label: None,
+        line: 0,
+    })
+    .unwrap_or_default()
+}
+
+/// What dbt test `test` on column entry `c` asserts; `None` for a test that is not a constraint.
+fn dbt_test_constraint(t: &TableInfo, c: &Value, col: &str, test: &str) -> Option<DbtConstraint> {
+    Some(match test {
+        "not_null" => (
+            "not_null",
+            format!("{col} IS NOT NULL"),
+            vec![dbt_check_site(t, col, "is_not_null", vec![])],
+        ),
+        "unique" => ("unique", format!("{col} is unique"), vec![]),
+        "accepted_values" => {
+            let vals: Vec<String> = c["accepted_values"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            (
+                "enum",
+                canonical_text(col, "in", &vals),
+                vec![dbt_check_site(t, col, "in", vals)],
+            )
+        }
+        "relationships" => (
+            "relationship",
+            format!(
+                "{col} references {}.{}",
+                c["references"]["table"].as_str().unwrap_or("?"),
+                c["references"]["column"].as_str().unwrap_or("?")
+            ),
+            vec![],
+        ),
+        _ => return None,
+    })
+}
+
+/// Builds the `ConstraintCandidate` of one dbt test.
+fn emit_dbt_constraint(
+    b: &mut Builder,
+    t: &TableInfo,
+    c: &Value,
+    col: &str,
+    test: &str,
+    (constraint_type, expression, structured): DbtConstraint,
+) {
+    let key = format!("constraint-candidate:dbt:{}:{col}:{test}", t.obj.id);
+    let path = c["dbt_path"].as_str().unwrap_or_default().to_string();
+    let line = c["dbt_line"].as_u64().map(|l| l as u32);
+    let preds: Vec<String> = structured
+        .iter()
+        .filter_map(|v| serde_json::from_value::<PredicateSite>(v.clone()).ok())
+        .map(|p| p.canonical())
+        .collect();
+    let idx = b.object(
+        &key,
+        format!("{} dbt {test} ({col})", t.name()),
+        CONSTRAINT,
+        vec![
+            ("table", json!(t.name())),
+            ("constraint_name", json!(format!("dbt:{test}"))),
+            ("expression", json!(expression)),
+            ("constraint_type", json!(constraint_type)),
+            ("source", json!("dbt_test")),
+            ("columns", json!([col])),
+            ("predicates", json!(preds)),
+            ("structured", json!(structured)),
+            ("confidence", json!(0.9)),
+        ],
+    );
+    let ev = b.evidence(
+        &key,
+        0,
+        &path,
+        line,
+        format!("dbt test `{test}` on {}.{col}", t.name()),
+    );
+    b.out.objects[idx].evidence.push(ev);
+    let id = b.out.objects[idx].id;
+    b.relate(DESCRIBES, id, t.obj.id);
+    b.out.stats.constraints += 1;
+}
+
+/// `ConstraintCandidate` per CHECK.
+fn emit_check_constraints(b: &mut Builder, tables: &[TableInfo]) {
+    for t in tables {
         let Some(Value::Array(checks)) = t.obj.properties.get("check_constraints") else {
             continue;
         };
         for (n, c) in checks.iter().enumerate() {
-            let expression = c
-                .get("expression")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            let preds: Vec<PredicateSite> = c
-                .get("predicates")
-                .and_then(Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|p| serde_json::from_value(p.clone()).ok())
-                        .collect()
-                })
-                .unwrap_or_default();
-            let top: Vec<&PredicateSite> = preds.iter().filter(|p| p.top_level).collect();
-            let constraint_type = if top.is_empty() {
-                "other"
-            } else if top
-                .iter()
-                .all(|p| matches!(p.op.as_str(), "<" | "<=" | ">" | ">=" | "between"))
-            {
-                "range"
-            } else if top.len() == 1 && top[0].op == "in" {
-                "enum"
-            } else if top.iter().all(|p| p.op == "like") {
-                "pattern"
-            } else if top.iter().all(|p| p.op == "is_not_null") {
-                "not_null"
-            } else {
-                "other"
-            };
-            let key = format!("constraint-candidate:{}:{n}:{expression}", t.obj.id);
-            let path = c.get("path").and_then(Value::as_str).unwrap_or_default();
-            let line = c.get("line").and_then(Value::as_u64).map(|l| l as u32);
-            let idx = b.object(
-                &key,
-                format!("{} CHECK ({expression})", t.name()),
-                CONSTRAINT,
-                vec![
-                    ("table", json!(t.name())),
-                    (
-                        "constraint_name",
-                        c.get("name").cloned().unwrap_or(Value::Null),
-                    ),
-                    ("expression", json!(expression)),
-                    ("constraint_type", json!(constraint_type)),
-                    (
-                        "columns",
-                        json!(
-                            top.iter()
-                                .map(|p| p.column.clone())
-                                .collect::<BTreeSet<_>>()
-                        ),
-                    ),
-                    (
-                        "predicates",
-                        json!(top.iter().map(|p| p.canonical()).collect::<Vec<_>>()),
-                    ),
-                    ("structured", json!(preds)),
-                    ("confidence", json!(0.95)),
-                ],
-            );
-            let ev = b.evidence(
-                &key,
-                0,
-                path,
-                line,
-                format!("CHECK ({expression}) on {}", t.name()),
-            );
-            b.out.objects[idx].evidence.push(ev);
-            let id = b.out.objects[idx].id;
-            b.relate(DESCRIBES, id, t.obj.id);
-            stats.constraints += 1;
+            emit_check_constraint(b, t, n, c);
         }
     }
+}
 
-    // ── Glossary (RFC 0170 Phase 3) ─────────────────────────────────────────────────────────
-    // A glossary term attaches to a concept or a code label with exactly the same words; one that
-    // matches nothing recovered — no concept, code or table — is a reverse gap: written down, but
-    // no trace in code.
-    let glossary = glossary_entries(graph);
+/// What a CHECK's top-level predicates constrain: a range, an enum, a pattern, non-null, or other.
+fn check_constraint_type(top: &[&PredicateSite]) -> &'static str {
+    if top.is_empty() {
+        "other"
+    } else if top
+        .iter()
+        .all(|p| matches!(p.op.as_str(), "<" | "<=" | ">" | ">=" | "between"))
+    {
+        "range"
+    } else if top.len() == 1 && top[0].op == "in" {
+        "enum"
+    } else if top.iter().all(|p| p.op == "like") {
+        "pattern"
+    } else if top.iter().all(|p| p.op == "is_not_null") {
+        "not_null"
+    } else {
+        "other"
+    }
+}
+
+/// Builds the `ConstraintCandidate` of the `n`th CHECK of `t`.
+fn emit_check_constraint(b: &mut Builder, t: &TableInfo, n: usize, c: &Value) {
+    let expression = c
+        .get("expression")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let preds: Vec<PredicateSite> = c
+        .get("predicates")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|p| serde_json::from_value(p.clone()).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let top: Vec<&PredicateSite> = preds.iter().filter(|p| p.top_level).collect();
+    let constraint_type = check_constraint_type(&top);
+    let key = format!("constraint-candidate:{}:{n}:{expression}", t.obj.id);
+    let path = c.get("path").and_then(Value::as_str).unwrap_or_default();
+    let line = c.get("line").and_then(Value::as_u64).map(|l| l as u32);
+    let idx = b.object(
+        &key,
+        format!("{} CHECK ({expression})", t.name()),
+        CONSTRAINT,
+        vec![
+            ("table", json!(t.name())),
+            (
+                "constraint_name",
+                c.get("name").cloned().unwrap_or(Value::Null),
+            ),
+            ("expression", json!(expression)),
+            ("constraint_type", json!(constraint_type)),
+            (
+                "columns",
+                json!(
+                    top.iter()
+                        .map(|p| p.column.clone())
+                        .collect::<BTreeSet<_>>()
+                ),
+            ),
+            (
+                "predicates",
+                json!(top.iter().map(|p| p.canonical()).collect::<Vec<_>>()),
+            ),
+            ("structured", json!(preds)),
+            ("confidence", json!(0.95)),
+        ],
+    );
+    let ev = b.evidence(
+        &key,
+        0,
+        path,
+        line,
+        format!("CHECK ({expression}) on {}", t.name()),
+    );
+    b.out.objects[idx].evidence.push(ev);
+    let id = b.out.objects[idx].id;
+    b.relate(DESCRIBES, id, t.obj.id);
+    b.out.stats.constraints += 1;
+}
+
+// ── Glossary (RFC 0170 Phase 3) ─────────────────────────────────────────────────────────────
+
+/// A glossary term attaches to a concept or a code label with exactly the same words; one that
+/// matches nothing recovered — no concept, code or table — is a reverse gap: written down, but
+/// no trace in code. Returns the ids of the items documented and the entries that matched nothing.
+fn attach_glossary<'g>(
+    b: &mut Builder,
+    tables: &[TableInfo],
+    glossary: &'g [GlossEntry],
+) -> (BTreeSet<Uuid>, Vec<&'g GlossEntry>) {
     let table_words: BTreeSet<String> = tables.iter().map(|t| words_key(&t.name())).collect();
     let mut glossed: BTreeSet<Uuid> = BTreeSet::new();
     let mut unmatched: Vec<&GlossEntry> = Vec::new();
@@ -1785,225 +2115,241 @@ pub fn synthesize(
         if key.is_empty() {
             continue;
         }
-        let mut hit = table_words.contains(&key);
-        for idx in 0..b.out.objects.len() {
-            let o = &b.out.objects[idx];
-            let target = match kind_name(o) {
-                Some(k) if k == CONCEPT => words_key(&o.name),
-                Some(k) if k == ENUM_MEANING => o
-                    .properties
-                    .get("label")
-                    .and_then(Value::as_str)
-                    .map(words_key)
-                    .unwrap_or_default(),
-                _ => continue,
-            };
-            if target != key {
-                continue;
-            }
-            hit = true;
-            let owner_key = format!("glossary:{}:{gi}", o.id);
-            let ev = b.evidence(
-                &owner_key,
-                0,
-                &g.path,
-                (g.line > 0).then_some(g.line),
-                format!("glossary: {} — {}", g.term, g.definition),
-            );
-            let o = &mut b.out.objects[idx];
-            o.evidence.push(ev);
-            let entry =
-                json!({"term": g.term, "definition": g.definition, "path": g.path, "line": g.line});
-            match o.properties.get_mut("glossary") {
-                Some(Value::Array(a)) => a.push(entry),
-                _ => {
-                    o.properties.insert("glossary".into(), json!([entry]));
-                }
-            }
-            if kind_name(o) == Some(CONCEPT)
-                && o.properties.get("description").is_none_or(Value::is_null)
-            {
-                o.properties
-                    .insert("description".into(), json!(g.definition));
-                o.properties
-                    .insert("description_source".into(), json!("glossary"));
-            }
-            glossed.insert(o.id.0);
-        }
-        if !hit {
+        let documented = gloss_items(b, gi, g, &key, &mut glossed);
+        if !documented && !table_words.contains(&key) {
             unmatched.push(g);
         }
     }
-    undocumented.retain(|(id, ..)| !glossed.contains(&id.0));
+    (glossed, unmatched)
+}
 
-    // ── Rationale (git blame) ───────────────────────────────────────────────────────────────
-    let mut explained: BTreeSet<Uuid> = BTreeSet::new();
-    for (id, key, ss) in &concept_ids {
-        blame_into(&mut b, rationale, &mut explained, *id, key, ss);
+/// The words a glossary term must equal to document an item: a concept's name, a code's label.
+fn gloss_target(o: &KirObject) -> Option<String> {
+    match kind_name(o) {
+        Some(k) if k == CONCEPT => Some(words_key(&o.name)),
+        Some(k) if k == ENUM_MEANING => Some(
+            o.properties
+                .get("label")
+                .and_then(Value::as_str)
+                .map(words_key)
+                .unwrap_or_default(),
+        ),
+        _ => None,
     }
+}
 
-    // ── SemanticGap ─────────────────────────────────────────────────────────────────────────
-    let mut gaps: Vec<GapDraft> = Vec::new();
-    for Unexplained {
-        table: ti,
-        column: col,
-        value,
-        used,
-        declared_in: lookup,
-    } in unexplained
-    {
-        let t = &tables[ti];
-        let carriers: BTreeSet<String> = used.iter().map(|s| s.carrier_name.clone()).collect();
-        let declared = lookup
-            .as_ref()
-            .map(|l| format!(" `{l}` seeds it, but with no label or description column."))
-            .unwrap_or_default();
-        gaps.push(GapDraft {
-            key: format!("semantic-gap:value:{}:{col}:{value}", t.obj.id),
-            name: format!("{}.{col} = {value}: meaning unknown", t.name()),
-            props: vec![
-                ("gap_type", json!("unexplained_value")),
-                ("table", json!(t.name())),
-                ("column", json!(col)),
-                ("value", json!(value)),
-                ("usage_sites", json!(used.len())),
-                ("seen_in", json!(carriers)),
-                ("declared_in", json!(lookup)),
-                (
-                    "question",
-                    json!(format!(
-                        "What does {}.{col} = {value} mean? It is used in logic ({} site(s)) but no \
-                         comment, lookup row or CASE label explains it.{declared}",
-                        t.name(),
-                        used.len()
-                    )),
-                ),
-            ],
-            subject: t.obj.id,
-            used,
-        });
-    }
-    for (id, _key, name, ss) in undocumented {
-        if explained.contains(&id.0) {
+/// Attaches glossary entry `gi` to every item whose words are `key`; true when one matched.
+fn gloss_items(
+    b: &mut Builder,
+    gi: usize,
+    g: &GlossEntry,
+    key: &str,
+    glossed: &mut BTreeSet<Uuid>,
+) -> bool {
+    let mut hit = false;
+    for idx in 0..b.out.objects.len() {
+        let o = &b.out.objects[idx];
+        if gloss_target(o).as_deref() != Some(key) {
             continue;
         }
-        gaps.push(GapDraft {
-            key: format!("semantic-gap:concept:{id}"),
-            name: format!("{name}: no documented rationale"),
-            props: vec![
-                ("gap_type", json!("undocumented_concept")),
-                ("concept", json!(name)),
-                (
-                    "question",
-                    json!(format!(
-                        "Why does the code filter this way ({name})? No comment or commit explains it."
-                    )),
-                ),
-            ],
-            subject: id,
-            used: ss,
-        });
-    }
-    for GapDraft {
-        key,
-        name,
-        props,
-        subject,
-        used,
-    } in gaps
-    {
-        let idx = b.object(&key, name, GAP, props);
-        let mut evs = Vec::new();
-        for (n, s) in used.iter().enumerate().take(MAX_EVIDENCE) {
-            evs.push(b.evidence(
-                &key,
-                n,
-                &s.path,
-                site_line(s),
-                format!(
-                    "{} ({}, {:?})",
-                    s.canonical(&tables),
-                    s.carrier_name,
-                    s.p.clause
-                ),
-            ));
-        }
-        b.out.objects[idx].evidence = evs;
-        let id = b.out.objects[idx].id;
-        b.relate(DESCRIBES, id, subject);
-        // Who introduced an unexplained value is who to ask.
-        if b.out.objects[idx].properties.get("gap_type") == Some(&json!("unexplained_value")) {
-            blame_into(&mut b, rationale, &mut explained, id, &key, &used);
-        }
-        stats.gaps += 1;
-    }
-
-    for g in unmatched {
-        let key = format!("semantic-gap:term:{}:{}", g.path, words_key(&g.term));
-        let idx = b.object(
-            &key,
-            format!("glossary term “{}”: no trace in code", g.term),
-            GAP,
-            vec![
-                ("gap_type", json!("unmapped_term")),
-                ("term", json!(g.term)),
-                ("definition", json!(g.definition)),
-                (
-                    "question",
-                    json!(format!(
-                        "The glossary defines “{}” ({}), but no recovered concept, code or table \
-                         matches it. Which code implements it — or is the definition only on paper?",
-                        g.term, g.definition
-                    )),
-                ),
-            ],
-        );
+        hit = true;
+        let owner_key = format!("glossary:{}:{gi}", o.id);
         let ev = b.evidence(
-            &key,
+            &owner_key,
             0,
             &g.path,
             (g.line > 0).then_some(g.line),
             format!("glossary: {} — {}", g.term, g.definition),
         );
-        b.out.objects[idx].evidence.push(ev);
-        let (id, owner) = (b.out.objects[idx].id, g.owner);
-        b.relate(DESCRIBES, id, owner);
-        stats.gaps += 1;
+        let o = &mut b.out.objects[idx];
+        o.evidence.push(ev);
+        add_gloss(o, g);
+        glossed.insert(o.id.0);
     }
+    hit
+}
 
-    stats.rationale_links = b
-        .out
-        .objects
-        .iter()
-        .filter(|o| kind_name(o) == Some(RATIONALE))
-        .count();
-    // RFC 0170 Phase 4: ontology mapping suggestions — a concept by its name, a code by its label.
-    if !cfg.ontology.terms.is_empty() {
-        for o in &mut b.out.objects {
-            let name = match kind_name(o) {
-                Some(k) if k == CONCEPT => o.name.clone(),
-                Some(k) if k == ENUM_MEANING => {
-                    match o.properties.get("label").and_then(Value::as_str) {
-                        Some(l) => l.to_string(),
-                        None => continue,
-                    }
-                }
-                _ => continue,
-            };
-            let suggestions = cfg.ontology.suggest(&name);
-            if !suggestions.is_empty() {
-                o.properties
-                    .insert("mapping_suggestions".into(), json!(suggestions));
-                stats.mapping_suggestions += suggestions.len();
-            }
+/// Records a glossary entry on an item; a concept with no description takes its definition.
+fn add_gloss(o: &mut KirObject, g: &GlossEntry) {
+    let entry = json!({"term": g.term, "definition": g.definition, "path": g.path, "line": g.line});
+    match o.properties.get_mut("glossary") {
+        Some(Value::Array(a)) => a.push(entry),
+        _ => {
+            o.properties.insert("glossary".into(), json!([entry]));
         }
     }
+    if kind_name(o) == Some(CONCEPT) && o.properties.get("description").is_none_or(Value::is_null) {
+        o.properties
+            .insert("description".into(), json!(g.definition));
+        o.properties
+            .insert("description_source".into(), json!("glossary"));
+    }
+}
 
-    // RFC 0170 Phase 2: what each item asserts and rests on, for the review lifecycle.
-    let ev_by_id: HashMap<Uuid, &KirEvidence> =
-        b.out.evidence.iter().map(|e| (e.id.0, e)).collect();
-    let sigs: Vec<String> = b
-        .out
+// ── SemanticGap ─────────────────────────────────────────────────────────────────────────────
+
+/// The gap of a value used in logic that nothing explains.
+fn value_gap<'a>(tables: &[TableInfo], u: Unexplained<'a>) -> GapDraft<'a> {
+    let Unexplained {
+        table: ti,
+        column: col,
+        value,
+        used,
+        declared_in: lookup,
+    } = u;
+    let t = &tables[ti];
+    let carriers: BTreeSet<String> = used.iter().map(|s| s.carrier_name.clone()).collect();
+    let declared = lookup
+        .as_ref()
+        .map(|l| format!(" `{l}` seeds it, but with no label or description column."))
+        .unwrap_or_default();
+    GapDraft {
+        key: format!("semantic-gap:value:{}:{col}:{value}", t.obj.id),
+        name: format!("{}.{col} = {value}: meaning unknown", t.name()),
+        props: vec![
+            ("gap_type", json!("unexplained_value")),
+            ("table", json!(t.name())),
+            ("column", json!(col)),
+            ("value", json!(value)),
+            ("usage_sites", json!(used.len())),
+            ("seen_in", json!(carriers)),
+            ("declared_in", json!(lookup)),
+            (
+                "question",
+                json!(format!(
+                    "What does {}.{col} = {value} mean? It is used in logic ({} site(s)) but no \
+                     comment, lookup row or CASE label explains it.{declared}",
+                    t.name(),
+                    used.len()
+                )),
+            ),
+        ],
+        subject: t.obj.id,
+        used,
+    }
+}
+
+/// The gap of a concept no comment or commit explains.
+fn concept_gap((id, _key, name, ss): Undocumented<'_>) -> GapDraft<'_> {
+    GapDraft {
+        key: format!("semantic-gap:concept:{id}"),
+        name: format!("{name}: no documented rationale"),
+        props: vec![
+            ("gap_type", json!("undocumented_concept")),
+            ("concept", json!(name)),
+            (
+                "question",
+                json!(format!(
+                    "Why does the code filter this way ({name})? No comment or commit explains it."
+                )),
+            ),
+        ],
+        subject: id,
+        used: ss,
+    }
+}
+
+/// Builds one `SemanticGap`.
+fn emit_gap(
+    b: &mut Builder,
+    tables: &[TableInfo],
+    rationale: Option<&dyn RationaleSource>,
+    explained: &mut BTreeSet<Uuid>,
+    gap: GapDraft,
+) {
+    let GapDraft {
+        key,
+        name,
+        props,
+        subject,
+        used,
+    } = gap;
+    let idx = b.object(&key, name, GAP, props);
+    let mut evs = Vec::new();
+    for (n, s) in used.iter().enumerate().take(MAX_EVIDENCE) {
+        evs.push(site_evidence(b, &key, n, s, tables));
+    }
+    b.out.objects[idx].evidence = evs;
+    let id = b.out.objects[idx].id;
+    b.relate(DESCRIBES, id, subject);
+    // Who introduced an unexplained value is who to ask.
+    if b.out.objects[idx].properties.get("gap_type") == Some(&json!("unexplained_value")) {
+        blame_into(b, rationale, explained, id, &key, &used);
+    }
+    b.out.stats.gaps += 1;
+}
+
+/// The gap of a glossary term no recovered concept, code or table matches.
+fn emit_term_gap(b: &mut Builder, g: &GlossEntry) {
+    let key = format!("semantic-gap:term:{}:{}", g.path, words_key(&g.term));
+    let idx = b.object(
+        &key,
+        format!("glossary term “{}”: no trace in code", g.term),
+        GAP,
+        vec![
+            ("gap_type", json!("unmapped_term")),
+            ("term", json!(g.term)),
+            ("definition", json!(g.definition)),
+            (
+                "question",
+                json!(format!(
+                    "The glossary defines “{}” ({}), but no recovered concept, code or table \
+                     matches it. Which code implements it — or is the definition only on paper?",
+                    g.term, g.definition
+                )),
+            ),
+        ],
+    );
+    let ev = b.evidence(
+        &key,
+        0,
+        &g.path,
+        (g.line > 0).then_some(g.line),
+        format!("glossary: {} — {}", g.term, g.definition),
+    );
+    b.out.objects[idx].evidence.push(ev);
+    let (id, owner) = (b.out.objects[idx].id, g.owner);
+    b.relate(DESCRIBES, id, owner);
+    b.out.stats.gaps += 1;
+}
+
+// ── Finishing ───────────────────────────────────────────────────────────────────────────────
+
+/// The name an ontology term is matched against: a concept's name, a code's label.
+fn mapping_name(o: &KirObject) -> Option<String> {
+    match kind_name(o) {
+        Some(k) if k == CONCEPT => Some(o.name.clone()),
+        Some(k) if k == ENUM_MEANING => o
+            .properties
+            .get("label")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        _ => None,
+    }
+}
+
+/// RFC 0170 Phase 4: ontology mapping suggestions — a concept by its name, a code by its label.
+fn suggest_mappings(out: &mut SemanticsOutput, cfg: &SemanticsConfig) {
+    if cfg.ontology.terms.is_empty() {
+        return;
+    }
+    for o in &mut out.objects {
+        let Some(name) = mapping_name(o) else {
+            continue;
+        };
+        let suggestions = cfg.ontology.suggest(&name);
+        if !suggestions.is_empty() {
+            o.properties
+                .insert("mapping_suggestions".into(), json!(suggestions));
+            out.stats.mapping_suggestions += suggestions.len();
+        }
+    }
+}
+
+/// RFC 0170 Phase 2: what each item asserts and rests on, for the review lifecycle.
+fn sign_items(out: &mut SemanticsOutput) {
+    let ev_by_id: HashMap<Uuid, &KirEvidence> = out.evidence.iter().map(|e| (e.id.0, e)).collect();
+    let sigs: Vec<String> = out
         .objects
         .iter()
         .map(|o| {
@@ -2015,12 +2361,9 @@ pub fn synthesize(
             crate::semantics_review::signature(o, &evs)
         })
         .collect();
-    for (o, sig) in b.out.objects.iter_mut().zip(sigs) {
+    for (o, sig) in out.objects.iter_mut().zip(sigs) {
         o.properties.insert("signature".into(), json!(sig));
     }
-    cite_endpoint_evidence(&mut b.out);
-    b.out.stats = stats;
-    b.out
 }
 
 /// Every link this layer makes joins one of its own items to something else, and rests on what

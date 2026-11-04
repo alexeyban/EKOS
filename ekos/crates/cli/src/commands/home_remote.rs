@@ -123,7 +123,7 @@ pub fn download(_target: &Target, _dir: &Path) -> Result<PathBuf> {
 
 #[cfg(feature = "object-storage")]
 mod imp {
-    use super::*;
+    use super::{Path, PathBuf, Result, Target, bail, is_remote, newest};
     use anyhow::Context;
     use ekos_segment_backend::ObjectStoreBackend;
     use ekos_segment_backend::object_store::path::Path as ObjPath;

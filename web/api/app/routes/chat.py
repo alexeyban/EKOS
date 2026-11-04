@@ -23,7 +23,7 @@ from ..chat import agent, providers
 from ..deps import mcp_for_workspace, require_workspace
 from ..mcp_client import McpToolError, ScopedMcp
 from ..settings import Settings, get_settings
-from ._responses import NOT_FOUND
+from ._responses import NOT_FOUND, UNPROCESSABLE
 from .mcp_gateway import _Caller
 
 router = APIRouter(tags=["chat"])
@@ -117,10 +117,50 @@ def _sse(event: dict) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
+def _provider_for(settings: Settings, ws: models.Workspace):
+    """The configured chat provider, or 409 when it is paid per call and the workspace's tenant
+    has metered calls off, or when the settings do not make a provider."""
+    if providers.is_metered(settings.chat_provider, settings.chat_base_url):
+        tenant = models.get_tenant(ws.tenant_id)
+        if tenant is None or not tenant.allow_metered:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{settings.chat_provider} is paid per call and metered calls are off for "
+                f"tenant {ws.tenant_id}; a platform owner turns them on in Admin",
+            )
+    try:
+        return providers.from_settings(settings)
+    except providers.ProviderError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _conversation_for(
+    conversation_id: str | None, message: str, ws: models.Workspace, principal: Principal
+) -> models.Conversation:
+    """The caller's own conversation by id, or a new one titled by the message."""
+    if conversation_id:
+        return _mine(conversation_id, ws, principal)
+    conv = models.Conversation(
+        id=uuid.uuid4().hex, workspace_id=ws.id, owner=_owner(principal), title=message[:80]
+    )
+    models.add(conv)
+    return conv
+
+
+async def _offered_tools(backend: ScopedMcp, caller: _Caller) -> list[dict]:
+    """The server's tools the model may be offered: read tools the caller may call."""
+    return [
+        t
+        for t in await backend.list_tools()
+        if mcp_policy.action_for(str(t.get("name", ""))) == "read"
+        and caller.may(str(t.get("name", "")))
+    ]
+
+
 @router.post(
     "/workspaces/{workspace_id}/chat",
     dependencies=[Depends(authz.allow("read", scoped=True))],
-    responses={404: NOT_FOUND, 409: CONFLICT},
+    responses={404: NOT_FOUND, 409: CONFLICT, 422: UNPROCESSABLE},
 )
 async def chat(
     body: ChatIn,
@@ -138,35 +178,12 @@ async def chat(
     message = body.message.strip()
     if not message:
         raise HTTPException(status_code=422, detail="an empty message")
-    if providers.is_metered(settings.chat_provider, settings.chat_base_url):
-        tenant = models.get_tenant(ws.tenant_id)
-        if tenant is None or not tenant.allow_metered:
-            raise HTTPException(
-                status_code=409,
-                detail=f"{settings.chat_provider} is paid per call and metered calls are off for "
-                f"tenant {ws.tenant_id}; a platform owner turns them on in Admin",
-            )
-    try:
-        provider = providers.from_settings(settings)
-    except providers.ProviderError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    if body.conversation_id:
-        conv = _mine(body.conversation_id, ws, principal)
-    else:
-        conv = models.Conversation(
-            id=uuid.uuid4().hex, workspace_id=ws.id, owner=_owner(principal), title=message[:80]
-        )
-        models.add(conv)
+    provider = _provider_for(settings, ws)
+    conv = _conversation_for(body.conversation_id, message, ws, principal)
 
     # The gateway's own check of who may call which tool; the client is the scoped one.
     caller = _Caller(principal, ws, request.app.state.supervisor)
-    offered = [
-        t
-        for t in await backend.list_tools()
-        if mcp_policy.action_for(str(t.get("name", ""))) == "read"
-        and caller.may(str(t.get("name", "")))
-    ]
+    offered = await _offered_tools(backend, caller)
     names = {str(t["name"]) for t in offered}
     spec = [
         {

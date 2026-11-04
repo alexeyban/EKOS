@@ -146,70 +146,87 @@ fn blank_clauses(chars: &mut [char], toks: &[Tok], stmt_end: usize) {
     let mut i = 0;
     while i < toks.len() {
         let t = &toks[i];
-        // FOR TIMESTAMP|VERSION AS OF <expr>
-        if is_word(t, "FOR")
-            && toks.get(i + 1).is_some_and(|n| {
-                is_word(n, "TIMESTAMP") || is_word(n, "VERSION") || is_word(n, "SYSTEM_TIME")
-            })
-            && toks.get(i + 2).is_some_and(|n| is_word(n, "AS"))
-            && toks.get(i + 3).is_some_and(|n| is_word(n, "OF"))
-        {
-            let mut j = i + 4;
-            let mut depth = 0i32;
-            // The expression's first token is never a clause end (`TIMESTAMP '...'`).
-            let mut first = true;
-            while j < toks.len() {
-                let u = &toks[j];
-                match u.symbol {
-                    '(' => depth += 1,
-                    ')' if depth == 0 => break,
-                    ')' => depth -= 1,
-                    ',' | ';' if depth == 0 => break,
-                    _ => {}
-                }
-                if depth == 0
-                    && !first
-                    && u.word.as_deref().is_some_and(|w| CLAUSE_END.contains(&w))
-                {
-                    break;
-                }
-                first = false;
-                j += 1;
-            }
+        if is_time_travel(toks, i) {
+            // FOR TIMESTAMP|VERSION AS OF <expr>
+            let j = time_travel_end(toks, i + 4);
             let end = toks.get(j).map_or(stmt_end, |u| u.start);
             blank(chars, t.start, end);
             i = j;
-            continue;
-        }
-        // TABLESAMPLE BERNOULLI|SYSTEM ( ... )
-        if is_word(t, "TABLESAMPLE")
-            && toks
-                .get(i + 1)
-                .is_some_and(|n| is_word(n, "BERNOULLI") || is_word(n, "SYSTEM"))
-            && toks.get(i + 2).is_some_and(|n| n.symbol == '(')
-        {
-            let mut j = i + 2;
-            let mut depth = 0i32;
-            while j < toks.len() {
-                match toks[j].symbol {
-                    '(' => depth += 1,
-                    ')' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
-                j += 1;
-            }
+        } else if is_tablesample(toks, i) {
+            // TABLESAMPLE BERNOULLI|SYSTEM ( ... )
+            let j = closing_paren(toks, i + 2);
             let end = toks.get(j).map_or(stmt_end, |u| u.end);
             blank(chars, t.start, end);
             i = j + 1;
-            continue;
+        } else {
+            i += 1;
         }
-        i += 1;
     }
+}
+
+/// `FOR TIMESTAMP|VERSION|SYSTEM_TIME AS OF` starts at token `i`.
+fn is_time_travel(toks: &[Tok], i: usize) -> bool {
+    is_word(&toks[i], "FOR")
+        && toks.get(i + 1).is_some_and(|n| {
+            is_word(n, "TIMESTAMP") || is_word(n, "VERSION") || is_word(n, "SYSTEM_TIME")
+        })
+        && toks.get(i + 2).is_some_and(|n| is_word(n, "AS"))
+        && toks.get(i + 3).is_some_and(|n| is_word(n, "OF"))
+}
+
+/// The token that ends a time-travel expression starting at `from`: a top-level `,` `;` or
+/// unmatched `)`, or a clause keyword. The expression's first token is never a clause end
+/// (`TIMESTAMP '...'`).
+fn time_travel_end(toks: &[Tok], from: usize) -> usize {
+    let mut j = from;
+    let mut depth = 0i32;
+    let mut first = true;
+    while j < toks.len() {
+        let u = &toks[j];
+        match u.symbol {
+            '(' => depth += 1,
+            ')' if depth == 0 => break,
+            ')' => depth -= 1,
+            ',' | ';' if depth == 0 => break,
+            _ => {}
+        }
+        let clause_end = u.word.as_deref().is_some_and(|w| CLAUSE_END.contains(&w));
+        if depth == 0 && !first && clause_end {
+            break;
+        }
+        first = false;
+        j += 1;
+    }
+    j
+}
+
+/// `TABLESAMPLE BERNOULLI|SYSTEM (` starts at token `i`.
+fn is_tablesample(toks: &[Tok], i: usize) -> bool {
+    is_word(&toks[i], "TABLESAMPLE")
+        && toks
+            .get(i + 1)
+            .is_some_and(|n| is_word(n, "BERNOULLI") || is_word(n, "SYSTEM"))
+        && toks.get(i + 2).is_some_and(|n| n.symbol == '(')
+}
+
+/// The token closing the parenthesis opened at `open`, or past the end when it never closes.
+fn closing_paren(toks: &[Tok], open: usize) -> usize {
+    let mut j = open;
+    let mut depth = 0i32;
+    while j < toks.len() {
+        match toks[j].symbol {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    j
 }
 
 /// Spaces over `[start, end)`, keeping line breaks.

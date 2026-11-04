@@ -17,4 +17,4 @@ SELECT '10 not in', count() FROM e WHERE kind NOT IN (1, 5);
 CREATE VIEW v AS SELECT `e`.`id`, sumOrNull(`l`.`amount`) AS `total` FROM `e` AS `e` LEFT OUTER JOIN `l` AS `l` ON (`l`.`entity_id` = `e`.`id`) WHERE (`e`.`kind` IN (1, 2)) GROUP BY `e`.`id` ORDER BY `total` DESC NULLS FIRST SETTINGS join_use_nulls = 1, prefer_column_name_to_alias = 1;
 SELECT '11 view', id, total FROM v;
 CREATE VIEW u AS SELECT `id` FROM `e` UNION DISTINCT (SELECT `l`.`entity_id` FROM `l` LEFT OUTER JOIN `e` ON (`e`.`id` = `l`.`entity_id`) SETTINGS join_use_nulls = 1);
-SELECT '12 union view', groupArray(id) FROM (SELECT id FROM u ORDER BY id);
+SELECT '12 union view', groupArray(id) FROM (SELECT id FROM u ORDER BY id ASC);

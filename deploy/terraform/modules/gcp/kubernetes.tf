@@ -38,6 +38,14 @@ resource "google_container_cluster" "this" {
   # VPC-native; GKE picks the pod and service ranges.
   ip_allocation_policy {}
 
+  # Nodes without public addresses: traffic arrives through the load balancer and leaves through
+  # Cloud NAT (main.tf). The control plane keeps its public endpoint, so Terraform and Helm run
+  # from outside the network.
+  private_cluster_config {
+    enable_private_nodes    = true
+    enable_private_endpoint = false
+  }
+
   # Only Workload Identity and OAuth tokens; never a client certificate.
   master_auth {
     client_certificate_config {

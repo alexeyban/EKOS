@@ -99,6 +99,15 @@ def _with_keychain(env: dict[str, str], tenant: models.Tenant) -> dict[str, str]
     return env
 
 
+def _named_for_other_tenants(tenant: models.Tenant) -> set[str]:
+    """Every variable some tenant other than `tenant` was given."""
+    others: set[str] = set()
+    for other in models.list_tenants():
+        if other.id != tenant.id:
+            others |= set(other.model_env or []) | set(other.source_env or [])
+    return others
+
+
 def for_tenant(
     tenant: models.Tenant | None,
     settings: Settings | None = None,
@@ -124,10 +133,7 @@ def for_tenant(
 
     compat = tenant.id == models.DEFAULT_TENANT and not settings.production
     if compat:
-        others: set[str] = set()
-        for other in models.list_tenants():
-            if other.id != tenant.id:
-                others |= set(other.model_env or []) | set(other.source_env or [])
+        others = _named_for_other_tenants(tenant)
         env = {
             k: v
             for k, v in environ.items()

@@ -62,7 +62,7 @@ pub fn bootstrap_mean(xs: &[f64]) -> Interval {
         }
         means.push(sum / n as f64);
     }
-    means.sort_by(|a, b| a.total_cmp(b));
+    means.sort_by(f64::total_cmp);
     Interval {
         n,
         mean,

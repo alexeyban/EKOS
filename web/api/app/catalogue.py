@@ -86,6 +86,63 @@ def _path_value(raw: str, base: Path, allowed: list[Path], arg_id: str) -> str:
     return str(p)
 
 
+def _is_empty(value: Any) -> bool:
+    return value is None or value == "" or value == []
+
+
+def _flag_option(spec: dict[str, Any], value: Any) -> list[str]:
+    """`--long` for a set flag, nothing for an unset one."""
+    if not isinstance(value, bool):
+        raise ArgvError(f"{spec['id']} is a flag: true or false")
+    return [f"--{spec['long']}"] if value else []
+
+
+def _checked_value(spec: dict[str, Any], item: Any, base: Path, allowed: list[Path]) -> str:
+    """One value of a valued argument as text, or `ArgvError` saying why it cannot be."""
+    aid = spec["id"]
+    if not isinstance(item, (str, int, float)) or isinstance(item, bool):
+        raise ArgvError(f"{aid}: a value is text or a number")
+    text = str(item)
+    if "\x00" in text:
+        raise ArgvError(f"{aid}: a value cannot hold a NUL byte")
+    if spec["possible"] and text not in spec["possible"]:
+        raise ArgvError(f"{aid} is one of {', '.join(spec['possible'])}")
+    if spec["kind"] == "path":
+        text = _path_value(text, base, allowed, aid)
+    return text
+
+
+def _checked_values(spec: dict[str, Any], value: Any, base: Path, allowed: list[Path]) -> list[str]:
+    """Every value given for a valued argument, each checked."""
+    items = value if isinstance(value, list) else [value]
+    if len(items) > 1 and not spec["multiple"]:
+        raise ArgvError(f"{spec['id']} takes one value")
+    return [_checked_value(spec, item, base, allowed) for item in items]
+
+
+def _options_and_positionals(
+    entry: dict[str, Any], values: dict[str, Any], base: Path, allowed: list[Path]
+) -> tuple[list[str], list[tuple[int, list[str]]]]:
+    """Every argument of `entry` given in `values`, checked: options, and positionals by index."""
+    options: list[str] = []
+    positionals: list[tuple[int, list[str]]] = []
+    for spec in entry["args"]:
+        value = values.get(spec["id"])
+        if _is_empty(value):
+            if spec["required"]:
+                raise ArgvError(f"{spec['id']} is required")
+            continue
+        if spec["kind"] == "flag":
+            options.extend(_flag_option(spec, value))
+            continue
+        out = _checked_values(spec, value, base, allowed)
+        if spec["long"]:
+            options.extend(f"--{spec['long']}={v}" for v in out)
+        else:
+            positionals.append((spec["index"] or 0, out))
+    return options, positionals
+
+
 def build_argv(
     entry: dict[str, Any],
     args: dict[str, Any],
@@ -103,41 +160,7 @@ def build_argv(
     if entry["class"] == "review" and REVIEWER_ARG in specs:
         values[REVIEWER_ARG] = reviewer
 
-    options: list[str] = []
-    positionals: list[tuple[int, list[str]]] = []
-    for spec in entry["args"]:
-        aid = spec["id"]
-        value = values.get(aid)
-        if value is None or value == "" or value == []:
-            if spec["required"]:
-                raise ArgvError(f"{aid} is required")
-            continue
-        if spec["kind"] == "flag":
-            if not isinstance(value, bool):
-                raise ArgvError(f"{aid} is a flag: true or false")
-            if value:
-                options.append(f"--{spec['long']}")
-            continue
-        items = value if isinstance(value, list) else [value]
-        if len(items) > 1 and not spec["multiple"]:
-            raise ArgvError(f"{aid} takes one value")
-        out = []
-        for item in items:
-            if not isinstance(item, (str, int, float)) or isinstance(item, bool):
-                raise ArgvError(f"{aid}: a value is text or a number")
-            text = str(item)
-            if "\x00" in text:
-                raise ArgvError(f"{aid}: a value cannot hold a NUL byte")
-            if spec["possible"] and text not in spec["possible"]:
-                raise ArgvError(f"{aid} is one of {', '.join(spec['possible'])}")
-            if spec["kind"] == "path":
-                text = _path_value(text, base, allowed, aid)
-            out.append(text)
-        if spec["long"]:
-            options.extend(f"--{spec['long']}={v}" for v in out)
-        else:
-            positionals.append((spec["index"] or 0, out))
-
+    options, positionals = _options_and_positionals(entry, values, base, allowed)
     argv = list(entry["path"]) + options
     if positionals:
         argv.append("--")

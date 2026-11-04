@@ -20,7 +20,7 @@ import json
 import os
 import uuid
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 from urllib.parse import urlparse
 
 import httpx
@@ -71,7 +71,7 @@ class _Base:
     max_tokens: int
     timeout: float = 180.0
 
-    name = "base"
+    name: ClassVar[str] = "base"
 
     def request(
         self, system: str, messages: list[dict], tools: list[dict]
@@ -93,6 +93,37 @@ class _Base:
         return self.parse(r.json())
 
 
+def _anthropic_blocks(m: dict) -> list[dict]:
+    """An assistant message as Anthropic content blocks: its text, then its tool calls."""
+    blocks: list[dict] = []
+    if m.get("content"):
+        blocks.append({"type": "text", "text": m["content"]})
+    for c in m.get("tool_calls", []):
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": c["id"],
+                "name": c["name"],
+                "input": c["arguments"],
+            }
+        )
+    return blocks
+
+
+def _append_tool_result(out: list[dict], m: dict) -> None:
+    """A tool result as an Anthropic `tool_result` block in a user message."""
+    block = {
+        "type": "tool_result",
+        "tool_use_id": m["tool_call_id"],
+        "content": m["content"],
+    }
+    # Results of one assistant turn go back together in one user message.
+    if out and out[-1]["role"] == "user" and isinstance(out[-1]["content"], list):
+        out[-1]["content"].append(block)
+    else:
+        out.append({"role": "user", "content": [block]})
+
+
 class Anthropic(_Base):
     name = "anthropic"
 
@@ -102,30 +133,9 @@ class Anthropic(_Base):
             if m["role"] == "user":
                 out.append({"role": "user", "content": m["content"]})
             elif m["role"] == "assistant":
-                blocks: list[dict] = []
-                if m.get("content"):
-                    blocks.append({"type": "text", "text": m["content"]})
-                for c in m.get("tool_calls", []):
-                    blocks.append(
-                        {
-                            "type": "tool_use",
-                            "id": c["id"],
-                            "name": c["name"],
-                            "input": c["arguments"],
-                        }
-                    )
-                out.append({"role": "assistant", "content": blocks})
+                out.append({"role": "assistant", "content": _anthropic_blocks(m)})
             elif m["role"] == "tool":
-                block = {
-                    "type": "tool_result",
-                    "tool_use_id": m["tool_call_id"],
-                    "content": m["content"],
-                }
-                # Results of one assistant turn go back together in one user message.
-                if out and out[-1]["role"] == "user" and isinstance(out[-1]["content"], list):
-                    out[-1]["content"].append(block)
-                else:
-                    out.append({"role": "user", "content": [block]})
+                _append_tool_result(out, m)
         body = {
             "model": self.model,
             "max_tokens": self.max_tokens,

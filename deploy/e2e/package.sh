@@ -22,13 +22,19 @@ export HOME="$WORK/user" EKOS_CONSOLE_KEYCHAIN=off
 mkdir -p "$HOME"
 unset EKOS_HOME EKOS_CONSOLE_PYTHON EKOS_CONSOLE_APP_DIR
 pass=0; fail=0
-check() { if eval "$2"; then echo "PASS  $1"; pass=$((pass+1)); else echo "FAIL  $1"; fail=$((fail+1)); fi; }
+check() {
+  local name="$1" test="$2"
+  if eval "$test"; then echo "PASS  $name"; pass=$((pass+1)); else echo "FAIL  $name"; fail=$((fail+1)); fi
+}
+# The exit status of the stage just run, as a check.
+stage_passed='[[ $rc -eq 0 ]]'
+
 cleanup() {
   for h in "$HOME/.ekos" "$WORK/home2"; do
-    [ -x "$h/bin/ekos" ] && "$h/bin/ekos" --home "$h" console stop >/dev/null 2>&1 || true
+    [[ -x "$h/bin/ekos" ]] && "$h/bin/ekos" --home "$h" console stop >/dev/null 2>&1 || true
   done
-  [ -n "${WIZARD_PID:-}" ] && kill "$WIZARD_PID" 2>/dev/null || true
-  [ "${EKOS_E2E_KEEP:-}" = 1 ] && echo "kept $WORK" || rm -rf "$WORK"
+  [[ -n "${WIZARD_PID:-}" ]] && kill "$WIZARD_PID" 2>/dev/null || true
+  [[ "${EKOS_E2E_KEEP:-}" = 1 ]] && echo "kept $WORK" || rm -rf "$WORK"
 }
 trap cleanup EXIT
 # Every console and wizard in this check listens on this machine's loopback, over plain HTTP.
@@ -36,14 +42,14 @@ LOCAL="http://127.0.0.1"  # NOSONAR
 free_port() { python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])'; }
 
 echo "== 1. assemble"
-ui="$REPO/web/ui/dist"; [ -d "$ui" ] || ui=""
+ui="$REPO/web/ui/dist"; [[ -d "$ui" ]] || ui=""
 archive="$(HOME="$REAL_HOME" EKOS_PACKAGE_WORKTREE="${EKOS_PACKAGE_WORKTREE:-1}" \
   "$REPO/scripts/package-full.sh" x86_64-unknown-linux-gnu "$BIN" "$WORK/out" 0.0.0-e2e $ui | tail -1)"
 check "the package is assembled" '[ -f "$archive" ]'
 mkdir -p "$WORK/unpacked" && tar -xzf "$archive" -C "$WORK/unpacked"
 PKG="$WORK/unpacked/ekos-0.0.0-e2e-x86_64-unknown-linux-gnu-full"
 check "it has the binary, a Python, the console, its UI, a starter" \
-  '[ -x "$PKG/bin/ekos" ] && [ -x "$PKG/console/python/bin/python3" ] && [ -f "$PKG/console/app/main.py" ] && [ -f "$PKG/console/ui/index.html" ] && [ -x "$PKG/setup.sh" ]'
+  '[[ -x "$PKG/bin/ekos" ]] && [[ -x "$PKG/console/python/bin/python3" ]] && [[ -f "$PKG/console/app/main.py" ]] && [[ -f "$PKG/console/ui/index.html" ]] && [[ -x "$PKG/setup.sh" ]]'
 
 echo "== 2. setup from answers"
 mkdir -p "$WORK/src/shop/db"
@@ -89,14 +95,14 @@ link="$(grep -o "$LOCAL:[0-9]*/[^ ]*code=[0-9a-f]*" "$WORK/open.txt")"
 rc=0
 (cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link" E2E_BASE="$LOCAL:$PORT" \
   uv run --quiet python "$HERE/package_console.py") || rc=$?
-check "the console stage passed" '[ $rc -eq 0 ]'
+check "the console stage passed" "$stage_passed"
 
 "$E" console open --no-browser > "$WORK/open2.txt"
 link2="$(grep -o "$LOCAL:[0-9]*/[^ ]*code=[0-9a-f]*" "$WORK/open2.txt")"
 rc=0
 (cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link2" E2E_BASE="$LOCAL:$PORT" \
   PYTHONPATH="$HERE" uv run --quiet --with playwright python "$HERE/package_browser.py") || rc=$?
-check "the browser stage passed" '[ $rc -eq 0 ]'
+check "the browser stage passed" "$stage_passed"
 
 echo "== 4. the browser wizard"
 WPORT="$(free_port)"
@@ -110,7 +116,7 @@ rc=0
 (cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_WIZARD="$wlink" E2E_HOME2="$WORK/home2" \
   E2E_PORT2="$P2" E2E_SOURCE="$WORK/src/shop" \
   uv run --quiet --with playwright python "$HERE/package_wizard.py") || rc=$?
-check "the wizard stage passed" '[ $rc -eq 0 ]'
+check "the wizard stage passed" "$stage_passed"
 check "the wizard installed and started a second console" \
   '"$WORK/home2/bin/ekos" --home "$WORK/home2" console status | grep -q running'
 wait "$WIZARD_PID" 2>/dev/null || true; WIZARD_PID=""
@@ -121,7 +127,7 @@ link3="$(grep -o "$LOCAL:[0-9]*/[^ ]*code=[0-9a-f]*" "$WORK/open3.txt")"
 rc=0
 (cd "$REPO/web/api" && HOME="$REAL_HOME" E2E_LINK="$link3" E2E_BASE="$LOCAL:$PORT" \
   PYTHONPATH="$HERE" uv run --quiet --with playwright python "$HERE/package_uninstall.py") || rc=$?
-check "the uninstall stage passed" '[ $rc -eq 0 ]'
+check "the uninstall stage passed" "$stage_passed"
 check "the program is gone, the projects stay" '[ ! -e "$HOME/.ekos/bin" ] && [ ! -e "$HOME/.ekos/console" ] && [ -f "$HOME/.ekos/data/default/shop/ekos.toml" ]'
 check "the PATH line and agent entries are gone" \
   '! grep -q "added by ekos setup" "$HOME/.profile" && ! grep -q ekos-shop "$HOME/.config/Claude/claude_desktop_config.json"'
@@ -130,4 +136,4 @@ check "the console stopped" '! curl -fs "$LOCAL:$PORT/api/health" >/dev/null'
 check "--purge removes the second home" '[ ! -e "$WORK/home2" ]'
 
 echo; echo "$pass passed, $fail failed"
-[ "$fail" -eq 0 ]
+[[ "$fail" -eq 0 ]]

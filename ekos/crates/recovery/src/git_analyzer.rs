@@ -86,6 +86,43 @@ impl GitAnalyzerPass {
         }
     }
 
+    /// A `Person` per contributor the repository artifact lists, with their commit count. Returns
+    /// each name's id, for the commits' authorship.
+    fn add_contributors(&self, ctx: &PassContext, graph: &mut KirGraph) -> HashMap<String, KirId> {
+        let mut ids = HashMap::new();
+        let Some(repo_id) = &self.repo_artifact_id else {
+            return ids;
+        };
+        let Ok(Some(json)) = ctx.artifact_store.read(repo_id) else {
+            return ids;
+        };
+        let Some(contributors) = json["data"]["contributors"].as_array() else {
+            return ids;
+        };
+        for c in contributors {
+            let Some(name) = c["name"].as_str() else {
+                continue;
+            };
+            let id = contributor_kir_id(name);
+            let ev = KirEvidence::new(
+                SourceLocation::file("git:contributors"),
+                format!("contributor: {name}"),
+            );
+            let ev_id = graph.add_evidence(ev);
+            let mut obj = KirObject::new(name, ObjectKind::Person).with_evidence(ev_id);
+            obj.id = id;
+            obj.properties
+                .insert("role".into(), serde_json::json!("contributor"));
+            if let Some(commits) = c["commits"].as_u64() {
+                obj.properties
+                    .insert("commit_count".into(), serde_json::json!(commits));
+            }
+            graph.objects.push(obj);
+            ids.insert(name.to_string(), id);
+        }
+        ids
+    }
+
     /// RFC 0219: add one commit to every ticket its message names. Files are linked only for a
     /// commit within the coupling limit (a sweep says nothing about the ticket).
     fn record_tickets(
@@ -165,33 +202,7 @@ impl CompilerPass for GitAnalyzerPass {
         let mut graph = KirGraph::new();
 
         // ── Gather contributor names (from repo artifact if present) ─────────
-        let mut contributor_ids: HashMap<String, KirId> = HashMap::new();
-
-        if let Some(ref repo_id) = self.repo_artifact_id
-            && let Ok(Some(json)) = ctx.artifact_store.read(repo_id)
-            && let Some(contributors) = json["data"]["contributors"].as_array()
-        {
-            for c in contributors {
-                if let Some(name) = c["name"].as_str() {
-                    let id = contributor_kir_id(name);
-                    let ev = KirEvidence::new(
-                        SourceLocation::file("git:contributors"),
-                        format!("contributor: {name}"),
-                    );
-                    let ev_id = graph.add_evidence(ev);
-                    let mut obj = KirObject::new(name, ObjectKind::Person).with_evidence(ev_id);
-                    obj.id = id;
-                    obj.properties
-                        .insert("role".into(), serde_json::json!("contributor"));
-                    if let Some(commits) = c["commits"].as_u64() {
-                        obj.properties
-                            .insert("commit_count".into(), serde_json::json!(commits));
-                    }
-                    graph.objects.push(obj);
-                    contributor_ids.insert(name.to_string(), id);
-                }
-            }
-        }
+        let contributor_ids = self.add_contributors(ctx, &mut graph);
 
         // ── Process each commit artifact → KirEvent ──────────────────────────
         // Per file pair: how many commits changed both, and the first few of their SHAs (what

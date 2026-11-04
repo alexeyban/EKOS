@@ -172,9 +172,11 @@ Refusing to install. Report this at https://github.com/$REPO/issues"
 # a pipeline run) cannot be overwritten ("Text file busy"), but it can be replaced by a rename,
 # and keeps running from the old file.
 place_binary() {
-    cp "$1" "$2.new.$$"
-    chmod 755 "$2.new.$$"
-    mv -f "$2.new.$$" "$2"
+    place_src=$1
+    place_dest=$2
+    cp "$place_src" "$place_dest.new.$$"
+    chmod 755 "$place_dest.new.$$"
+    mv -f "$place_dest.new.$$" "$place_dest"
 }
 
 # ── The full package (RFC 0185) ───────────────────────────────────────────────

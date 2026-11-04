@@ -96,6 +96,8 @@ resource "google_compute_instance" "vm" {
 
   metadata = {
     enable-oslogin = "TRUE"
+    # SSH is OS Login only: keys in the project's metadata never reach this VM.
+    block-project-ssh-keys = "TRUE"
     user-data = templatefile("${path.module}/../../templates/cloud-init.yaml.tftpl", {
       compose   = file("${path.module}/../../templates/docker-compose.vm.yml")
       caddyfile = file("${path.module}/../../templates/Caddyfile")

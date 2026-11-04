@@ -1223,7 +1223,7 @@ details.cfg-sub {
 }
 .chat-tool pre {
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   font-size: 0.8rem;
 }
 .chat-input {

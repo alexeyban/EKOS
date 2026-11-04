@@ -166,7 +166,7 @@ code { font-family: ui-monospace, monospace; font-size:.9em; }
     <button id="next" type="button">Next</button>
   </div>
 </main>
-<script>
+<script type="module">
 const token = new URLSearchParams(location.search).get("t") || "";
 const H = { "x-setup-token": token, "content-type": "application/json" };
 const $ = (id) => document.getElementById(id);
@@ -184,8 +184,7 @@ function show() {
   steps.forEach((s, i) => s.classList.toggle("hidden", i !== at));
   $("nav").innerHTML = steps.map((s, i) => `<span class="${i === at ? "on" : ""}">${s.dataset.step}</span>`).join("");
   $("back").classList.toggle("hidden", at === 0 || at === steps.length - 1);
-  const review = steps[at].dataset.step === "Review";
-  $("next").textContent = review ? "Install" : at === steps.length - 1 ? "Close" : "Next";
+  $("next").textContent = nextLabel();
   $("team").classList.toggle("hidden", $("mode").value !== "team");
   $("project").classList.toggle("hidden", !$("want-project").checked);
   $("chat").classList.toggle("hidden", $("chat_provider").value === "");
@@ -193,6 +192,11 @@ function show() {
   $("mode-help").textContent = $("mode").value === "local"
     ? "Listens on this machine only. Sign in with `ekos console open`."
     : "Put a reverse proxy with TLS in front if others reach it over the network.";
+}
+
+function nextLabel() {
+  if (steps[at].dataset.step === "Review") return "Install";
+  return at === steps.length - 1 ? "Close" : "Next";
 }
 
 function answers() {
@@ -236,7 +240,13 @@ async function checkPath(id) {
   const c = await call("/api/check-path", { path: v });
   const gb = c.free_bytes != null ? ` · ${(c.free_bytes / 1e9).toFixed(1)} GB free` : "";
   $(id + "-check").className = "note " + (c.writable && c.absolute ? "ok" : "err");
-  $(id + "-check").textContent = !c.absolute ? "use a full path" : !c.writable ? "not writable" : (c.exists ? "exists" : "will be created") + gb;
+  $(id + "-check").textContent = pathNote(c, gb);
+}
+
+function pathNote(c, gb) {
+  if (!c.absolute) return "use a full path";
+  if (!c.writable) return "not writable";
+  return (c.exists ? "exists" : "will be created") + gb;
 }
 
 async function load() {
@@ -264,7 +274,10 @@ async function load() {
   show();
 }
 
-$("mode").onchange = () => { if ($("mode").value === "local") $("host").value = "127.0.0.1"; show(); };
+$("mode").onchange = () => {
+  if ($("mode").value === "local") $("host").value = "127.0.0.1";
+  show();
+};
 $("want-project").onchange = () => { refreshProjects(); show(); };
 $("chat_provider").onchange = () => {
   const p = $("chat_provider").value;
@@ -295,7 +308,7 @@ $("next").onclick = async () => {
     $("plan-error").textContent = ""; $("plan").innerHTML = "";
     try {
       const p = await call("/api/plan", answers());
-      $("plan").innerHTML = p.actions.map((x) => `<li>${x.replace(/</g, "&lt;")}</li>`).join("");
+      $("plan").innerHTML = p.actions.map((x) => `<li>${escapeLt(x)}</li>`).join("");
       $("next").disabled = false;
     } catch (e) { $("plan-error").textContent = e.message; at++; show(); $("next").disabled = true; return; }
   }
@@ -303,11 +316,18 @@ $("next").onclick = async () => {
 };
 $("back").addEventListener("click", () => { $("next").disabled = false; });
 
+function escapeLt(text) { return text.replaceAll("<", "&lt;"); }
+
+function stepItem(s) {
+  const note = s.message ? ` — <span class="help">${escapeLt(s.message)}</span>` : "";
+  return `<li class="${s.ok ? "ok" : "err"}">${s.ok ? "✓" : "✗"} ${escapeLt(s.action)}${note}</li>`;
+}
+
 async function install() {
   at = steps.length - 1; show(); $("next").disabled = true;
   try {
     const r = await call("/api/apply", answers());
-    $("steps").innerHTML = r.steps.map((s) => `<li class="${s.ok ? "ok" : "err"}">${s.ok ? "✓" : "✗"} ${s.action.replace(/</g, "&lt;")}${s.message ? ` — <span class="help">${s.message.replace(/</g, "&lt;")}</span>` : ""}</li>`).join("");
+    $("steps").innerHTML = r.steps.map(stepItem).join("");
     const failed = r.steps.some((s) => !s.ok);
     $("done-title").textContent = failed ? "Stopped at a step that failed" : "EKOS is set up";
     $("done-next").innerHTML = failed ? "Fix what it says and run <code>ekos setup</code> again; finished steps are not repeated twice." :
@@ -318,7 +338,11 @@ async function install() {
   $("next").disabled = false;
 }
 
-load().catch((e) => { document.querySelector("main").innerHTML = `<h1>EKOS setup</h1><p class="err">${e.message}</p>`; });
+try {
+  await load();
+} catch (e) {
+  document.querySelector("main").innerHTML = `<h1>EKOS setup</h1><p class="err">${e.message}</p>`;
+}
 </script>
 </body>
 </html>

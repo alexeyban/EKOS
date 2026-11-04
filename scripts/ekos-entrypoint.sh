@@ -14,6 +14,7 @@ if [ -n "${EKOS_SECRETS_DIR:-}" ] && [ -d "$EKOS_SECRETS_DIR" ]; then
         name=$(basename "$file")
         case "$name" in
             ''|[0-9]*|*[!A-Za-z0-9_]*) continue ;;
+            *) ;;
         esac
         # Already in the environment: the platform's value wins.
         if eval "[ -n \"\${$name+x}\" ]"; then

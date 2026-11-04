@@ -5,15 +5,30 @@ Init & compile → census vs compiled, all in a browser. Phase A starts the run;
     IDEMPIERE_DOCS=<docs checkout> ORACLE_CONNECT=localhost:51521/XEPDB1 EKOS_RO_PASSWORD=… \
       uv run --with playwright python sources_tour.py a <out>   # then, after the run: … b <out>
 """
-import json, os, sys
+import json, os, sys, tempfile
+from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../deploy/e2e"))
 from package_browser_common import check, chromium, finish
 from playwright.sync_api import sync_playwright, expect
 
+
+def out_dir(raw: str) -> str:
+    """The output directory, resolved, refused unless it is under the working directory, the home
+    directory or the temporary directory: a screenshot never lands somewhere else by a typo."""
+    p = Path(raw).expanduser().resolve()
+    bases = (Path.cwd().resolve(), Path.home().resolve(), Path(tempfile.gettempdir()).resolve())
+    if not any(p.is_relative_to(b) for b in bases):
+        sys.exit(f"{raw}: the output directory must be under {', '.join(map(str, bases))}")
+    return str(p)
+
+
 BASE = os.environ.get("EKOS_CONSOLE_URL", "http://127.0.0.1:18765")
 WS = "idemconsole"
-OUT = sys.argv[2]
+OUT = out_dir(sys.argv[2])
 PHASE = sys.argv[1]
+if PHASE not in ("a", "b"):
+    sys.exit(f"{PHASE}: the phase is a or b")
+RUN_ID_FILE = os.path.join(OUT, "run_id")
 LONG = 300_000
 errors: list[str] = []
 
@@ -78,11 +93,11 @@ with sync_playwright() as p:
         page.get_by_role("button", name="Init & compile").click()
         page.wait_for_url("**/runs/**", timeout=LONG)
         run_id = page.url.rstrip("/").split("/")[-1]
-        open(os.path.join(OUT, "run_id"), "w").write(run_id)
+        open(RUN_ID_FILE, "w").write(run_id)
         check(True, f"analysis started: run {run_id}")
         shot(page, "02-run-started")
     else:
-        run_id = open(os.path.join(OUT, "run_id")).read().strip()
+        run_id = open(RUN_ID_FILE).read().strip()
         run = page.request.get(f"{BASE}/api/runs/{run_id}").json()
         check(run["status"] == "succeeded", "the analysis run succeeded", json.dumps({k: run[k] for k in ("status", "exit_code")}))
         page.goto(f"{BASE}/runs/{run_id}")

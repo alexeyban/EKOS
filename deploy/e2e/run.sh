@@ -112,7 +112,10 @@ EOF
 
 export EKOS_SOURCES="$WORK/sources" EKOS_PORT="$EKOS_E2E_PORT"
 dc() { docker compose -p ekos-e2e -f "$REPO/deploy/docker-compose.yml" -f "$WORK/override.yml" "$@"; }
-py() { (cd "$REPO/web/api" && PYTHONPATH="$HERE" uv run --quiet python "$HERE/$1"); }
+py() {
+  local script="$1"
+  (cd "$REPO/web/api" && PYTHONPATH="$HERE" uv run --quiet python "$HERE/$script")
+}
 wait_up() {
   for _ in $(seq 1 60); do
     curl -sf "http://127.0.0.1:${EKOS_E2E_PORT}/api/health" >/dev/null && return 0
@@ -123,7 +126,7 @@ wait_up() {
   return 1
 }
 cleanup() {
-  if [ "${EKOS_E2E_KEEP:-}" = 1 ]; then
+  if [[ "${EKOS_E2E_KEEP:-}" = 1 ]]; then
     echo "left running (project ekos-e2e, files in $WORK)"
   else
     dc down -v >/dev/null 2>&1 || true
@@ -164,12 +167,12 @@ dc exec -T ekos sh -c '
     c=$(tr "\0" " " < $p/cmdline 2>/dev/null) || continue
     case "$c" in *"mcp serve"*) ;; *) continue ;; esac
     t=$(echo "$c" | sed -n "s/.*--tenant \([a-z]*\).*/\1/p")
-    [ -n "$t" ] || continue   # this shell: its own command line holds the words searched for
+    [[ -n "$t" ]] || continue   # this shell: its own command line holds the words searched for
     e=$(tr "\0" "\n" < $p/environ | grep -E "MODEL_KEY|EKOS_CONSOLE" | sed "s/=.*//" | tr "\n" " ")
     echo "  $t: $e"
     case "$t" in
-      acme)   [ "$e" = "ACME_MODEL_KEY " ] || bad=1 ;;
-      globex) [ "$e" = "GLOBEX_MODEL_KEY " ] || bad=1 ;;
+      acme)   [[ "$e" = "ACME_MODEL_KEY " ]] || bad=1 ;;
+      globex) [[ "$e" = "GLOBEX_MODEL_KEY " ]] || bad=1 ;;
     esac
   done
   exit $bad' && echo "PASS  each server holds its own tenant's variable and none of the console's"

@@ -7,7 +7,7 @@
 #
 #   scripts/audit.sh            # fails on any vulnerability or stale lockfile
 #
-# Unmaintained-crate warnings are printed but do not fail the run: they are tracked in TODO.md and
+# Unmaintained-crate warnings are printed but do not fail the run: the roadmap at the repo root tracks them, and
 # replacing a crate is a planned change, not something to force under a red gate.
 set -euo pipefail
 

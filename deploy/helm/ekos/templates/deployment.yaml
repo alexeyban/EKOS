@@ -26,6 +26,9 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "ekos.serviceAccount" . }}
+      # Nothing in the pod calls the Kubernetes API; workload identity and the secrets CSI driver
+      # bring their own tokens.
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountToken }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}

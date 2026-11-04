@@ -22,6 +22,7 @@ from ..auth import Principal
 from ..deps import get_supervisor
 from ..mcp_client import McpError, McpToolError, ScopedMcp
 from ..supervisor import McpSupervisor, _NotReady
+from ._responses import NOT_FOUND
 from .workspaces import workspace_id_for
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
@@ -176,7 +177,14 @@ async def no_stream(tenant_id: str, project: str) -> Response:
     return Response(status_code=405, headers={"Allow": "POST"})
 
 
-@router.post("/{tenant_id}/{project}")
+@router.post(
+    "/{tenant_id}/{project}",
+    responses={
+        400: {"description": "The body is not JSON, or a batch is empty or too long"},
+        404: NOT_FOUND,
+        413: {"description": "The request body is larger than the gateway accepts"},
+    },
+)
 async def mcp(
     tenant_id: str,
     project: str,

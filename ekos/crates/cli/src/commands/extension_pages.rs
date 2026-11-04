@@ -2,7 +2,7 @@
 //! command catalogue so that a panel can only ever run a read command with fixed flags.
 
 use crate::commands::catalogue::{Class, Entry};
-use crate::extension::{ConsolePage, Extensions, View};
+use crate::extension::{Action, ConsolePage, Extensions, Panel, View};
 use anyhow::{Result, bail};
 use serde_json::{Value, json};
 
@@ -43,142 +43,175 @@ pub fn check_page(ext: &str, page: &ConsolePage, catalogue: &[Entry]) -> Result<
         if !seen.insert(panel.id) {
             bail!("{at}: two panels with this id");
         }
-        let Some((entry, rest)) = entry_for(catalogue, &panel.command) else {
-            bail!(
-                "{at}: `{}` is not a catalogue command",
-                panel.command.join(" ")
-            );
-        };
-        if entry.class != Class::Read {
-            bail!(
-                "{at}: `{}` is {:?}; a panel only runs read commands",
-                entry.path.join(" "),
-                entry.class
-            );
-        }
-        for name in &panel.params {
-            if !page.params.iter().any(|p| p.name == *name) {
-                bail!("{at}: selection `{name}` is not declared on the page");
-            }
-            let takes = entry
-                .args
-                .iter()
-                .any(|a| a.kind == "value" && a.long.as_deref() == Some(*name));
-            if !takes {
-                bail!(
-                    "{at}: `{}` has no value option `--{name}` for the selection",
-                    entry.path.join(" ")
-                );
-            }
-        }
-        if let Some(required) = entry
-            .args
-            .iter()
-            .find(|a| a.required && !panel.params.iter().any(|p| a.long.as_deref() == Some(*p)))
-        {
-            bail!(
-                "{at}: `{}` needs `{}`, which a panel cannot give",
-                entry.path.join(" "),
-                required.id
-            );
-        }
-        for flag in rest {
-            let known = flag.strip_prefix("--").is_some_and(|f| {
-                entry
-                    .args
-                    .iter()
-                    .any(|a| a.kind == "flag" && a.long.as_deref() == Some(f))
-            });
-            if !known {
-                bail!("{at}: `{flag}` is not a flag of `{}`", entry.path.join(" "));
-            }
-        }
-        match &panel.view {
-            View::Table { rows, columns } => {
-                check_pointer(rows, &at)?;
-                for c in columns {
-                    check_pointer(c.key, &at)?;
-                }
-            }
-            View::Fields { fields } => {
-                for f in fields {
-                    check_pointer(f.key, &at)?;
-                }
-            }
-            View::Text { pointer } | View::Markdown { pointer } => check_pointer(pointer, &at)?,
-            View::Code { left, right, .. } => {
-                check_pointer(left, &at)?;
-                check_pointer(right, &at)?;
-            }
-            View::Graph {
-                nodes,
-                edges,
-                id,
-                label,
-                group,
-                badge,
-                from,
-                to,
-            } => {
-                for p in [nodes, edges, id, label, group, badge, from, to] {
-                    check_pointer(p, &at)?;
-                }
-            }
-        }
+        check_panel(&at, page, panel, catalogue)?;
     }
     for action in &page.actions {
         let at = format!("{at}, action {}", action.label);
-        let Some(entry) = catalogue.iter().find(|e| e.path == action.command) else {
+        check_action(&at, page, action, catalogue)?;
+    }
+    Ok(())
+}
+
+/// A panel runs a read command, gives it only declared selections and known flags, and reads
+/// its result through JSON pointers.
+fn check_panel(at: &str, page: &ConsolePage, panel: &Panel, catalogue: &[Entry]) -> Result<()> {
+    let Some((entry, rest)) = entry_for(catalogue, &panel.command) else {
+        bail!(
+            "{at}: `{}` is not a catalogue command",
+            panel.command.join(" ")
+        );
+    };
+    if entry.class != Class::Read {
+        bail!(
+            "{at}: `{}` is {:?}; a panel only runs read commands",
+            entry.path.join(" "),
+            entry.class
+        );
+    }
+    check_panel_args(at, page, panel, entry, rest)?;
+    check_view(at, &panel.view)
+}
+
+/// The panel's selections are value options of its command, every required argument is one of
+/// them, and the fixed rest of its argv is flags the command has.
+fn check_panel_args(
+    at: &str,
+    page: &ConsolePage,
+    panel: &Panel,
+    entry: &Entry,
+    rest: &[&str],
+) -> Result<()> {
+    for name in &panel.params {
+        if !page.params.iter().any(|p| p.name == *name) {
+            bail!("{at}: selection `{name}` is not declared on the page");
+        }
+        let takes = entry
+            .args
+            .iter()
+            .any(|a| a.kind == "value" && a.long.as_deref() == Some(*name));
+        if !takes {
             bail!(
-                "{at}: `{}` is not a catalogue command",
-                action.command.join(" ")
+                "{at}: `{}` has no value option `--{name}` for the selection",
+                entry.path.join(" ")
             );
-        };
-        if entry.class == Class::Local {
-            bail!("{at}: `{}` is not run from the web", entry.path.join(" "));
         }
-        for (arg, param) in &action.binds {
-            if !entry.args.iter().any(|a| a.id == *arg && a.kind != "flag") {
-                bail!("{at}: `{}` has no argument `{arg}`", entry.path.join(" "));
-            }
-            if !page.params.iter().any(|p| p.name == *param) {
-                bail!("{at}: selection `{param}` is not declared on the page");
-            }
-        }
-        for flag in &action.flags {
-            if !entry
+    }
+    if let Some(required) = entry
+        .args
+        .iter()
+        .find(|a| a.required && !panel.params.iter().any(|p| a.long.as_deref() == Some(*p)))
+    {
+        bail!(
+            "{at}: `{}` needs `{}`, which a panel cannot give",
+            entry.path.join(" "),
+            required.id
+        );
+    }
+    for flag in rest {
+        let known = flag.strip_prefix("--").is_some_and(|f| {
+            entry
                 .args
                 .iter()
-                .any(|a| a.kind == "flag" && a.long.as_deref() == Some(*flag))
-            {
-                bail!(
-                    "{at}: `--{flag}` is not a flag of `{}`",
-                    entry.path.join(" ")
-                );
+                .any(|a| a.kind == "flag" && a.long.as_deref() == Some(f))
+        });
+        if !known {
+            bail!("{at}: `{flag}` is not a flag of `{}`", entry.path.join(" "));
+        }
+    }
+    Ok(())
+}
+
+/// Every pointer a view reads is a JSON pointer.
+fn check_view(at: &str, view: &View) -> Result<()> {
+    match view {
+        View::Table { rows, columns } => {
+            check_pointer(rows, at)?;
+            for c in columns {
+                check_pointer(c.key, at)?;
             }
         }
-        for (arg, _) in &action.inputs {
-            if !entry.args.iter().any(|a| a.id == *arg && a.kind != "flag") {
-                bail!(
-                    "{at}: input `{arg}` is not a value argument of `{}`",
-                    entry.path.join(" ")
-                );
-            }
-            if action.binds.iter().any(|(b, _)| b == arg) {
-                bail!("{at}: `{arg}` is both bound and typed");
+        View::Fields { fields } => {
+            for f in fields {
+                check_pointer(f.key, at)?;
             }
         }
-        if let Some(required) = entry.args.iter().find(|a| {
-            a.required
-                && !action.binds.iter().any(|(b, _)| *b == a.id)
-                && !action.inputs.iter().any(|(i, _)| *i == a.id)
-        }) {
+        View::Text { pointer } | View::Markdown { pointer } => check_pointer(pointer, at)?,
+        View::Code { left, right, .. } => {
+            check_pointer(left, at)?;
+            check_pointer(right, at)?;
+        }
+        View::Graph {
+            nodes,
+            edges,
+            id,
+            label,
+            group,
+            badge,
+            from,
+            to,
+        } => {
+            for p in [nodes, edges, id, label, group, badge, from, to] {
+                check_pointer(p, at)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// An action runs a command the web may run, binds declared selections to its value arguments,
+/// sets only its flags, types only value arguments that are not bound, and leaves no required
+/// argument unset.
+fn check_action(at: &str, page: &ConsolePage, action: &Action, catalogue: &[Entry]) -> Result<()> {
+    let Some(entry) = catalogue.iter().find(|e| e.path == action.command) else {
+        bail!(
+            "{at}: `{}` is not a catalogue command",
+            action.command.join(" ")
+        );
+    };
+    if entry.class == Class::Local {
+        bail!("{at}: `{}` is not run from the web", entry.path.join(" "));
+    }
+    for (arg, param) in &action.binds {
+        if !entry.args.iter().any(|a| a.id == *arg && a.kind != "flag") {
+            bail!("{at}: `{}` has no argument `{arg}`", entry.path.join(" "));
+        }
+        if !page.params.iter().any(|p| p.name == *param) {
+            bail!("{at}: selection `{param}` is not declared on the page");
+        }
+    }
+    for flag in &action.flags {
+        if !entry
+            .args
+            .iter()
+            .any(|a| a.kind == "flag" && a.long.as_deref() == Some(*flag))
+        {
             bail!(
-                "{at}: `{}` needs `{}`, which an action cannot give",
-                entry.path.join(" "),
-                required.id
+                "{at}: `--{flag}` is not a flag of `{}`",
+                entry.path.join(" ")
             );
         }
+    }
+    for (arg, _) in &action.inputs {
+        if !entry.args.iter().any(|a| a.id == *arg && a.kind != "flag") {
+            bail!(
+                "{at}: input `{arg}` is not a value argument of `{}`",
+                entry.path.join(" ")
+            );
+        }
+        if action.binds.iter().any(|(b, _)| b == arg) {
+            bail!("{at}: `{arg}` is both bound and typed");
+        }
+    }
+    if let Some(required) = entry.args.iter().find(|a| {
+        a.required
+            && !action.binds.iter().any(|(b, _)| *b == a.id)
+            && !action.inputs.iter().any(|(i, _)| *i == a.id)
+    }) {
+        bail!(
+            "{at}: `{}` needs `{}`, which an action cannot give",
+            entry.path.join(" "),
+            required.id
+        );
     }
     Ok(())
 }

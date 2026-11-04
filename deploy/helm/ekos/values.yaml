@@ -37,6 +37,8 @@ csi:
 serviceAccount:
   create: true
   name: ""
+  # Whether the pod gets the service account's API token. Nothing in it calls the Kubernetes API.
+  automountToken: false
   annotations: {}
   labels: {}
 
@@ -63,12 +65,14 @@ gitSync:
   depth: 0
   username: x-access-token
   resources:
-    requests: {cpu: 50m, memory: 64Mi}
-    limits: {memory: 512Mi}
+    requests: {cpu: 50m, memory: 64Mi, ephemeral-storage: 256Mi}
+    limits: {memory: 512Mi, ephemeral-storage: 2Gi}
 
+# Ephemeral storage is the container's own disk (temporary files, logs); the home and the
+# sources are on the volume. 1Gi is also what GKE Autopilot requests when none is given.
 resources:
-  requests: {cpu: "1", memory: 4Gi}
-  limits: {memory: 8Gi}
+  requests: {cpu: "1", memory: 4Gi, ephemeral-storage: 1Gi}
+  limits: {memory: 8Gi, ephemeral-storage: 8Gi}
 
 service:
   type: ClusterIP

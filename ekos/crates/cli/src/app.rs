@@ -2092,28 +2092,8 @@ where
             crate::commands::init_logging(&ekos_compiler_core::EkosConfig::default());
             return dispatch_project(subcommand, &home_dir?, tenant_flag);
         }
-        Commands::Extensions { json: _ } => {
-            let mut root = extensions.extend_cli(cli_command())?;
-            root.build();
-            let cat =
-                crate::commands::catalogue::catalogue_with(&root, &extensions.command_classes());
-            let out = crate::commands::extension_pages::describe(&extensions, &cat)?;
-            println!("{}", serde_json::to_string(&out)?);
-            return Ok(());
-        }
-        Commands::Catalogue { json: _ } => {
-            let mut root = extensions.extend_cli(cli_command())?;
-            root.build();
-            let out = serde_json::json!({
-                "version": env!("CARGO_PKG_VERSION"),
-                "commands": crate::commands::catalogue::catalogue_with(
-                    &root,
-                    &extensions.command_classes(),
-                ),
-            });
-            println!("{}", serde_json::to_string(&out)?);
-            return Ok(());
-        }
+        Commands::Extensions { json: _ } => return print_extensions(&extensions),
+        Commands::Catalogue { json: _ } => return print_catalogue(&extensions),
         Commands::Setup {
             answers,
             dry_run,
@@ -2130,49 +2110,13 @@ where
             port,
             detach,
         } => {
-            if ui {
-                let home = home_dir?;
-                if detach {
-                    return crate::commands::console::detach_uninstall_page(&home, port);
-                }
-                let machine = crate::commands::setup::Machine::detect(&std::env::current_exe()?)?;
-                let page = crate::commands::uninstall_server::UninstallPage::new(
-                    crate::commands::setup_server::new_token(),
-                    home,
-                    machine,
-                    std::sync::Arc::new(crate::commands::setup::RealEffects),
-                );
-                return crate::commands::uninstall_server::serve(page, port, !no_browser).await;
-            }
-            if purge && !yes {
-                bail!("--purge deletes every project in the home; add --yes to confirm");
-            }
-            let home = home_dir?;
-            let machine = crate::commands::setup::Machine::detect(&std::env::current_exe()?)?;
-            let steps = crate::commands::setup::uninstall(
-                &home,
-                purge,
-                &machine,
-                &crate::commands::setup::RealEffects,
-            )?;
-            print_steps(&steps);
-            return Ok(());
+            return run_uninstall(home_dir?, purge, yes, ui, no_browser, port, detach).await;
         }
         Commands::Console { subcommand } => {
             if cli.project.is_some() {
                 bail!("`ekos console` serves the whole home; --project does not apply");
             }
-            let home = home_dir?;
-            use crate::commands::console;
-            return match subcommand {
-                ConsoleCommands::Run => console::run(&home),
-                ConsoleCommands::Start => console::start(&home),
-                ConsoleCommands::Stop => console::stop(&home),
-                ConsoleCommands::Restart => console::restart(&home),
-                ConsoleCommands::Status => console::status(&home),
-                ConsoleCommands::Open { no_browser } => console::open(&home, no_browser),
-                ConsoleCommands::Logs { lines } => console::logs(&home, lines),
-            };
+            return run_console(&home_dir?, subcommand);
         }
         Commands::Home { subcommand } => {
             if cli.project.is_some() {
@@ -2181,35 +2125,7 @@ where
                 );
             }
             crate::commands::init_logging(&ekos_compiler_core::EkosConfig::default());
-            let home = home_dir?;
-            let invoked_from = std::env::current_dir()?;
-            let tenant = tenant_flag.as_deref();
-            return match subcommand {
-                HomeCommands::Backup { out, to } => match to {
-                    Some(url) => crate::commands::home_backup::run_backup_to(&home, tenant, &url),
-                    None => crate::commands::home_backup::run_backup(
-                        &home,
-                        tenant,
-                        out.map(|o| invoked_from.join(o)),
-                    ),
-                },
-                HomeCommands::Restore {
-                    archive,
-                    from,
-                    force,
-                } => match (archive, from) {
-                    (_, Some(url)) => {
-                        crate::commands::home_backup::run_restore_from(&home, &url, tenant, force)
-                    }
-                    (Some(archive), None) => crate::commands::home_backup::run_restore(
-                        &home,
-                        &invoked_from.join(archive),
-                        tenant,
-                        force,
-                    ),
-                    (None, None) => unreachable!("clap requires an archive or --from"),
-                },
-            };
+            return run_home(&home_dir?, tenant_flag.as_deref(), subcommand);
         }
         other => other,
     };
@@ -2564,6 +2480,106 @@ fn print_steps(steps: &[crate::commands::setup::Step]) {
 }
 
 /// `ekos setup`: the wizard, or `--answers` applied without one (RFC 0185 §3).
+/// `ekos extensions --json`: every extension's console pages, checked against the catalogue.
+fn print_extensions(extensions: &Extensions) -> Result<()> {
+    let mut root = extensions.extend_cli(cli_command())?;
+    root.build();
+    let cat = crate::commands::catalogue::catalogue_with(&root, &extensions.command_classes());
+    let out = crate::commands::extension_pages::describe(extensions, &cat)?;
+    println!("{}", serde_json::to_string(&out)?);
+    Ok(())
+}
+
+/// `ekos commands --json`: every command, its arguments and its class (RFC 0186).
+fn print_catalogue(extensions: &Extensions) -> Result<()> {
+    let mut root = extensions.extend_cli(cli_command())?;
+    root.build();
+    let out = serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "commands": crate::commands::catalogue::catalogue_with(
+            &root,
+            &extensions.command_classes(),
+        ),
+    });
+    println!("{}", serde_json::to_string(&out)?);
+    Ok(())
+}
+
+/// `ekos uninstall` (RFC 0185 §4, RFC 0188): the page in the browser with `--ui`, else the steps
+/// in the terminal.
+async fn run_uninstall(
+    home: std::path::PathBuf,
+    purge: bool,
+    yes: bool,
+    ui: bool,
+    no_browser: bool,
+    port: u16,
+    detach: bool,
+) -> Result<()> {
+    if ui {
+        if detach {
+            return crate::commands::console::detach_uninstall_page(&home, port);
+        }
+        let machine = crate::commands::setup::Machine::detect(&std::env::current_exe()?)?;
+        let page = crate::commands::uninstall_server::UninstallPage::new(
+            crate::commands::setup_server::new_token(),
+            home,
+            machine,
+            std::sync::Arc::new(crate::commands::setup::RealEffects),
+        );
+        return crate::commands::uninstall_server::serve(page, port, !no_browser).await;
+    }
+    if purge && !yes {
+        bail!("--purge deletes every project in the home; add --yes to confirm");
+    }
+    let machine = crate::commands::setup::Machine::detect(&std::env::current_exe()?)?;
+    let steps = crate::commands::setup::uninstall(
+        &home,
+        purge,
+        &machine,
+        &crate::commands::setup::RealEffects,
+    )?;
+    print_steps(&steps);
+    Ok(())
+}
+
+/// `ekos console …` (RFC 0185).
+fn run_console(home: &std::path::Path, subcommand: ConsoleCommands) -> Result<()> {
+    use crate::commands::console;
+    match subcommand {
+        ConsoleCommands::Run => console::run(home),
+        ConsoleCommands::Start => console::start(home),
+        ConsoleCommands::Stop => console::stop(home),
+        ConsoleCommands::Restart => console::restart(home),
+        ConsoleCommands::Status => console::status(home),
+        ConsoleCommands::Open { no_browser } => console::open(home, no_browser),
+        ConsoleCommands::Logs { lines } => console::logs(home, lines),
+    }
+}
+
+/// `ekos home backup|restore` (RFC 0183, RFC 0232).
+fn run_home(home: &std::path::Path, tenant: Option<&str>, subcommand: HomeCommands) -> Result<()> {
+    use crate::commands::home_backup;
+    let invoked_from = std::env::current_dir()?;
+    match subcommand {
+        HomeCommands::Backup { out, to } => match to {
+            Some(url) => home_backup::run_backup_to(home, tenant, &url),
+            None => home_backup::run_backup(home, tenant, out.map(|o| invoked_from.join(o))),
+        },
+        HomeCommands::Restore {
+            archive,
+            from,
+            force,
+        } => match (archive, from) {
+            (_, Some(url)) => home_backup::run_restore_from(home, &url, tenant, force),
+            (Some(archive), None) => {
+                home_backup::run_restore(home, &invoked_from.join(archive), tenant, force)
+            }
+            (None, None) => unreachable!("clap requires an archive or --from"),
+        },
+    }
+}
+
 async fn run_setup(
     home: std::path::PathBuf,
     answers: Option<std::path::PathBuf>,

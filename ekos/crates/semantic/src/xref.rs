@@ -1086,92 +1086,28 @@ pub fn check_name(candidates: &[KirObject], name: &str) -> NameCheck {
 
 /// Run the check over every object of a compiled ledger.
 pub fn check(objects: &[KirObject], opts: &Options<'_>) -> Report {
-    let targets = Targets::build(objects);
     let mut metrics = Metrics::default();
     let mut found: BTreeMap<String, Diagnostic> = BTreeMap::new();
-    // One reference per (source, target, access): a routine reading a table in ten statements
-    // is one reference.
-    let mut seen: BTreeSet<(uuid::Uuid, String, &str)> = BTreeSet::new();
-
-    // Every relation name some reference uses, resolved or not: a table named this way is used.
-    let mut referenced: BTreeSet<String> = BTreeSet::new();
-    for r in collect(objects, opts) {
-        let normalized = normalize(&r.written);
-        if !seen.insert((r.source.id.0, normalized.clone(), r.access)) {
-            continue;
-        }
-        if r.expects == Expect::Relation {
-            referenced.insert(tail_of(&normalized).to_string());
-        }
-        if let (Some(live), Some(file)) = (opts.live_files, r.file.as_ref())
-            && !is_live(r.source)
-            && !live.contains(file)
-        {
-            metrics.stale_sources += 1;
-            continue;
-        }
-        if is_dynamic(&normalized) {
-            metrics.dynamic += 1;
-            continue;
-        }
-        let builtin = match r.expects {
-            Expect::Relation => is_system_relation(&normalized),
-            Expect::Routine { dialect } => crate::xref_builtins::is_builtin(&normalized, dialect),
-            Expect::Module => false,
-        };
-        if builtin {
-            metrics.system += 1;
-            continue;
-        }
-        let (outcome, diagnostic) = match r.expects {
-            Expect::Relation => judge(&r, &normalized, &targets, opts),
-            Expect::Routine { .. } => judge_call(&r, &normalized, &targets),
-            // `collect` gathers no imports; `xref_imports` judges them below.
-            Expect::Module => continue,
-        };
-        metrics.all.add(outcome);
-        if r.cross_system {
-            metrics.cross_system.add(outcome);
-        }
-        metrics
-            .by_extractor
-            .entry(r.extractor.to_string())
-            .or_default()
-            .add(outcome);
-        if let Some(mut d) = diagnostic {
-            if let Some(s) = opts.severity.get(&d.kind) {
-                d.severity = *s;
-            }
-            found.entry(d.fingerprint.clone()).or_insert(d);
-        }
-    }
+    let referenced = check_references(objects, opts, &mut metrics, &mut found);
 
     let imports = crate::xref_imports::check(objects, opts);
     metrics.external += imports.external;
     for res in imports.results {
-        metrics.all.add(res.outcome);
-        metrics
-            .by_extractor
-            .entry(res.reference.extractor.to_string())
-            .or_default()
-            .add(res.outcome);
+        add_outcome(&mut metrics, res.reference.extractor, res.outcome);
         if let Some(f) = res.finding {
-            let mut d = diagnostic(&res.reference, &res.normalized, f);
-            if let Some(s) = opts.severity.get(&d.kind) {
-                d.severity = *s;
-            }
-            found.entry(d.fingerprint.clone()).or_insert(d);
+            record(
+                &mut found,
+                opts,
+                diagnostic(&res.reference, &res.normalized, f),
+            );
         }
     }
 
     let graph = crate::xref_graph::check(objects, opts, &referenced);
     metrics.cycles = graph.cycles;
     metrics.orphans = graph.orphans;
-    for mut d in graph.diagnostics {
-        if let Some(s) = opts.severity.get(&d.kind) {
-            d.severity = *s;
-        }
-        found.entry(d.fingerprint.clone()).or_insert(d);
+    for d in graph.diagnostics {
+        record(&mut found, opts, d);
     }
 
     // Without relationships there is no call graph to traverse.
@@ -1181,11 +1117,8 @@ pub fn check(objects: &[KirObject], opts: &Options<'_>) -> Report {
         crate::xref_reach::check(objects, opts)
     };
     metrics.reachability = reach.families;
-    for mut d in reach.diagnostics {
-        if let Some(s) = opts.severity.get(&d.kind) {
-            d.severity = *s;
-        }
-        found.entry(d.fingerprint.clone()).or_insert(d);
+    for d in reach.diagnostics {
+        record(&mut found, opts, d);
     }
 
     metrics.resolution_rate = metrics.all.resolution_rate();
@@ -1204,6 +1137,95 @@ pub fn check(objects: &[KirObject], opts: &Options<'_>) -> Report {
         diagnostics,
         metrics,
     }
+}
+
+/// Keeps a diagnostic under its fingerprint (the first one wins), with `[xref.severity]` applied.
+fn record(found: &mut BTreeMap<String, Diagnostic>, opts: &Options<'_>, mut d: Diagnostic) {
+    if let Some(s) = opts.severity.get(&d.kind) {
+        d.severity = *s;
+    }
+    found.entry(d.fingerprint.clone()).or_insert(d);
+}
+
+/// Counts one judged reference, overall and for its extractor.
+fn add_outcome(metrics: &mut Metrics, extractor: &str, outcome: Outcome) {
+    metrics.all.add(outcome);
+    metrics
+        .by_extractor
+        .entry(extractor.to_string())
+        .or_default()
+        .add(outcome);
+}
+
+/// Judges every reference `collect` gathers. Returns every relation name some reference uses,
+/// resolved or not: a table named this way is used.
+fn check_references(
+    objects: &[KirObject],
+    opts: &Options<'_>,
+    metrics: &mut Metrics,
+    found: &mut BTreeMap<String, Diagnostic>,
+) -> BTreeSet<String> {
+    let targets = Targets::build(objects);
+    // One reference per (source, target, access): a routine reading a table in ten statements
+    // is one reference.
+    let mut seen: BTreeSet<(uuid::Uuid, String, &str)> = BTreeSet::new();
+    let mut referenced: BTreeSet<String> = BTreeSet::new();
+    for r in collect(objects, opts) {
+        let normalized = normalize(&r.written);
+        if !seen.insert((r.source.id.0, normalized.clone(), r.access)) {
+            continue;
+        }
+        if r.expects == Expect::Relation {
+            referenced.insert(tail_of(&normalized).to_string());
+        }
+        if not_checked(&r, &normalized, opts, metrics) {
+            continue;
+        }
+        let (outcome, diagnostic) = match r.expects {
+            Expect::Relation => judge(&r, &normalized, &targets, opts),
+            Expect::Routine { .. } => judge_call(&r, &normalized, &targets),
+            // `collect` gathers no imports; `xref_imports` judges them below.
+            Expect::Module => continue,
+        };
+        add_outcome(metrics, r.extractor, outcome);
+        if r.cross_system {
+            metrics.cross_system.add(outcome);
+        }
+        if let Some(d) = diagnostic {
+            record(found, opts, d);
+        }
+    }
+    referenced
+}
+
+/// A reference counted but not judged: its source file is gone since the last commit, its name is
+/// built at run time, or it names a system relation or built-in routine.
+fn not_checked(
+    r: &Reference<'_>,
+    normalized: &str,
+    opts: &Options<'_>,
+    metrics: &mut Metrics,
+) -> bool {
+    if let (Some(live), Some(file)) = (opts.live_files, r.file.as_ref())
+        && !is_live(r.source)
+        && !live.contains(file)
+    {
+        metrics.stale_sources += 1;
+        return true;
+    }
+    if is_dynamic(normalized) {
+        metrics.dynamic += 1;
+        return true;
+    }
+    let builtin = match r.expects {
+        Expect::Relation => is_system_relation(normalized),
+        Expect::Routine { dialect } => crate::xref_builtins::is_builtin(normalized, dialect),
+        Expect::Module => false,
+    };
+    if builtin {
+        metrics.system += 1;
+    }
+    builtin
 }
 
 /// Every candidate has the same full name and kind: one relation defined several times — an

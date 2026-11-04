@@ -26,12 +26,12 @@ command -v uv >/dev/null || { echo "needs uv (https://docs.astral.sh/uv/)" >&2; 
 release="$(awk '$1=="RELEASE"{print $2}' "$lock")"
 pyver="$(awk '$1=="VERSION"{print $2}' "$lock")"
 sha="$(awk -v t="$target" '$1==t{print $2}' "$lock")"
-[ -n "$sha" ] || { echo "no Python for $target in $lock" >&2; exit 2; }
+[[ -n "$sha" ]] || { echo "no Python for $target in $lock" >&2; exit 2; }
 
 windows=0
-case "$target" in *windows*) windows=1 ;; esac
+case "$target" in *windows*) windows=1 ;; *) ;; esac
 program="${EKOS_PACKAGE_PROGRAM:-ekos}"
-exe="$program"; [ "$windows" = 1 ] && exe="$program.exe"
+exe="$program"; [[ "$windows" = 1 ]] && exe="$program.exe"
 
 name="${program}-${version}-${target}-full"
 stage="$out/$name"
@@ -42,13 +42,13 @@ chmod 755 "$stage/bin/$exe"
 # ── Python, verified before it is unpacked ────────────────────────────────────
 asset="cpython-${pyver}+${release}-${target}-install_only.tar.gz"
 mkdir -p "$cache/python"
-if [ ! -f "$cache/python/$asset" ]; then
+if [[ ! -f "$cache/python/$asset" ]]; then
   curl -fsSL --proto '=https' --tlsv1.2 -o "$cache/python/$asset.part" \
     "https://github.com/astral-sh/python-build-standalone/releases/download/${release}/${asset//+/%2B}"
   mv "$cache/python/$asset.part" "$cache/python/$asset"
 fi
 actual="$(sha256sum "$cache/python/$asset" | cut -d' ' -f1)"
-if [ "$actual" != "$sha" ]; then
+if [[ "$actual" != "$sha" ]]; then
   echo "checksum mismatch for $asset: expected $sha, got $actual" >&2
   rm -f "$cache/python/$asset"
   exit 1
@@ -58,7 +58,7 @@ tar -xzf "$cache/python/$asset" -C "$stage/console"   # → console/python/
 # ── the console's dependencies, for the target platform ───────────────────────
 src="$(mktemp -d)"
 trap 'rm -rf "$src"' EXIT
-if [ "${EKOS_PACKAGE_WORKTREE:-}" = 1 ]; then
+if [[ "${EKOS_PACKAGE_WORKTREE:-}" = 1 ]]; then
   # Testing a change before it is committed. A package to hand out is built from HEAD.
   mkdir -p "$src/web/api" "$src/web/ui"
   (cd "$repo/web/api" && tar --exclude=.venv --exclude=__pycache__ --exclude=.pytest_cache \
@@ -75,14 +75,14 @@ uv pip install --quiet --target "$stage/console/site-packages" \
 # ── the console and its UI ────────────────────────────────────────────────────
 cp -R "$src/web/api/app" "$stage/console/app"
 find "$stage/console/app" -name __pycache__ -prune -exec rm -rf {} +
-if [ -z "$ui" ]; then
+if [[ -z "$ui" ]]; then
   (cd "$src/web/ui" && npm ci --ignore-scripts --silent && npm run build --silent >/dev/null)
   ui="$src/web/ui/dist"
 fi
 cp -R "$ui" "$stage/console/ui"
 
 # ── starters ─────────────────────────────────────────────────────────────────
-if [ "$windows" = 1 ]; then
+if [[ "$windows" = 1 ]]; then
   printf '@echo off\r\ncd /d "%%~dp0"\r\nbin\\ekos.exe setup %%*\r\n' > "$stage/setup.cmd"
 else
   cat > "$stage/setup.sh" <<'EOF'
@@ -103,12 +103,13 @@ xattr -dr com.apple.quarantine . 2>/dev/null
 exec ./bin/ekos setup
 EOF
       chmod 755 "$stage/setup.command" ;;
+    *) ;;  # Linux packages get setup.sh only
   esac
 fi
 # The starters run this package's own binary.
-if [ "$program" != ekos ]; then
+if [[ "$program" != ekos ]]; then
   for f in "$stage/setup.cmd" "$stage/setup.sh" "$stage/setup.command"; do
-    [ -f "$f" ] && sed -i.bak -e "s#bin/ekos #bin/$program #g" -e "s#bin\\\\ekos.exe#bin\\\\$program.exe#g" \
+    [[ -f "$f" ]] && sed -i.bak -e "s#bin/ekos #bin/$program #g" -e "s#bin\\\\ekos.exe#bin\\\\$program.exe#g" \
       -e "s#bin/ekos\$#bin/$program#" -e "s#EKOS setup wizard#$program setup wizard#" "$f" && rm -f "$f.bak"
   done
 fi
@@ -120,7 +121,7 @@ cp "$repo/LICENSE" "$stage/"
 
 # ── a check on this machine when it can run the target ───────────────────────
 host="$(uname -m)-$(uname -s)"
-if [ "$target" = "x86_64-unknown-linux-gnu" ] && [ "$host" = "x86_64-Linux" ]; then
+if [[ "$target" = "x86_64-unknown-linux-gnu" ]] && [[ "$host" = "x86_64-Linux" ]]; then
   PYTHONPATH="$stage/console:$stage/console/site-packages" PYTHONNOUSERSITE=1 \
     "$stage/console/python/bin/python3" -c "import app.main, keyring, uvicorn; print('console imports')"
   "$stage/bin/$exe" --version >/dev/null
@@ -128,9 +129,9 @@ fi
 
 # ── archive ──────────────────────────────────────────────────────────────────
 rm -f "$out/$name.tar.gz" "$out/$name.zip"
-if [ "$windows" = 1 ]; then
+if [[ "$windows" = 1 ]]; then
   (cd "$out" && python3 -m zipfile -c "$name.zip" "$name")
 else
   tar -C "$out" -czf "$out/$name.tar.gz" "$name"
 fi
-echo "$out/$name.$([ "$windows" = 1 ] && echo zip || echo tar.gz)"
+echo "$out/$name.$([[ "$windows" = 1 ]] && echo zip || echo tar.gz)"

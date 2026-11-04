@@ -945,7 +945,7 @@ fn area_pages(m: &Model, pages: &mut Vec<EstatePage>) -> Vec<(String, usize, usi
         let inside: BTreeSet<String> = names
             .iter()
             .filter(|n| m.in_scope(n))
-            .map(|n| n.to_string())
+            .map(ToString::to_string)
             .collect();
         summary.push((area.clone(), names.len(), inside.len()));
         let mut b = format!("{} table(s), {} in scope.\n\n", names.len(), inside.len());

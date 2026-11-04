@@ -182,7 +182,7 @@ impl Machine {
             shell: std::env::var("SHELL").ok(),
             program: exe
                 .file_stem()
-                .and_then(|n| n.to_str())
+                .and_then(std::ffi::OsStr::to_str)
                 .filter(|n| !n.is_empty())
                 .unwrap_or("ekos")
                 .to_string(),
@@ -903,180 +903,18 @@ pub fn apply(
     fx: &dyn Effects,
 ) -> Result<Vec<Step>> {
     let layout = Layout::of(answers, m);
-    let os = m.os;
     let mut manifest = read_manifest(&layout.home);
     manifest.program_dir = layout.program_dir.clone();
     std::fs::create_dir_all(layout.home.join("data"))?;
     let mut steps = Vec::new();
+    let cx = ApplyCx {
+        answers,
+        m,
+        layout: &layout,
+        fx,
+    };
     for action in actions {
-        let result: Result<String> = (|| match action {
-            Action::CopyPackage { from, to } => {
-                for part in ["bin", "console"] {
-                    if from.join(part).is_dir() {
-                        copy_dir(&from.join(part), &to.join(part))?;
-                    }
-                }
-                Ok(String::new())
-            }
-            Action::WriteConsoleConfig { path, values } => {
-                write_console_toml(path, values)?;
-                Ok(String::new())
-            }
-            Action::StoreSecret { field } => {
-                // The bundled Python stores it, so the console and setup share one keychain
-                // layout. The value goes on standard input, never on a command line.
-                let (python, env) = keychain_command(&layout, os)?;
-                let args: Vec<String> = ["-m", "app.keychain_cli", "put", "console", field]
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect();
-                fx.run_env(
-                    &python,
-                    &args,
-                    &env,
-                    Some(&answers.console.oidc_client_secret),
-                )
-                .map(|_| String::new())
-            }
-            Action::StoreKey { name } => {
-                let (python, env) = keychain_command(&layout, os)?;
-                let args: Vec<String> = ["-m", "app.keychain_cli", "put", "env", name]
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect();
-                fx.run_env(&python, &args, &env, Some(&answers.chat.api_key))
-                    .map(|_| String::new())
-            }
-            Action::AddToPath { bin, files } => {
-                let changed = add_path_lines(bin, files)?;
-                for f in files {
-                    if !manifest.path_files.contains(f) {
-                        manifest.path_files.push(f.clone());
-                    }
-                }
-                Ok(if changed.is_empty() {
-                    "already there".into()
-                } else {
-                    "open a new terminal to use it".into()
-                })
-            }
-            Action::AddToWindowsPath { bin } => {
-                let script = format!(
-                    "$p=[Environment]::GetEnvironmentVariable('Path','User'); \
-                     if (-not ($p -split ';' -contains '{b}')) {{ \
-                     [Environment]::SetEnvironmentVariable('Path', ($p.TrimEnd(';') + ';{b}').TrimStart(';'), 'User') }}",
-                    b = bin.display()
-                );
-                fx.run(
-                    Path::new("powershell"),
-                    &["-NoProfile".into(), "-Command".into(), script],
-                    None,
-                )?;
-                manifest.windows_path = Some(bin.clone());
-                Ok("open a new terminal to use it".into())
-            }
-            Action::CreateProject {
-                name,
-                sources,
-                detect,
-            } => {
-                let mut args = vec![
-                    "--home".to_string(),
-                    layout.home.display().to_string(),
-                    "project".into(),
-                    "add".into(),
-                    name.clone(),
-                ];
-                for s in sources {
-                    args.push("--source".into());
-                    args.push(s.clone());
-                }
-                if *detect {
-                    args.push("--detect".into());
-                }
-                fx.run(&setup_exe(&layout, m), &args, None)
-            }
-            Action::RegisterClaudeCode {
-                name,
-                command,
-                args,
-            } => {
-                let mut a = vec![
-                    "mcp".to_string(),
-                    "add".into(),
-                    "-s".into(),
-                    "user".into(),
-                    name.clone(),
-                    "--".into(),
-                    command.display().to_string(),
-                ];
-                a.extend(args.iter().cloned());
-                // `mcp add` refuses a name it has; a second setup run replaces the entry.
-                let _ = fx.run(
-                    Path::new("claude"),
-                    &[
-                        "mcp".into(),
-                        "remove".into(),
-                        "-s".into(),
-                        "user".into(),
-                        name.clone(),
-                    ],
-                    None,
-                );
-                fx.run(Path::new("claude"), &a, None)?;
-                if !manifest.claude_code.contains(name) {
-                    manifest.claude_code.push(name.clone());
-                }
-                Ok(String::new())
-            }
-            Action::MergeAgentConfig {
-                path,
-                section,
-                name,
-                entry,
-                ..
-            } => {
-                merge_agent_config(path, section, name, entry)?;
-                let record = (path.clone(), section.clone(), name.clone());
-                if !manifest.agent_configs.contains(&record) {
-                    manifest.agent_configs.push(record);
-                }
-                Ok("restart that program to pick it up".into())
-            }
-            Action::InstallService { os, path, content } => {
-                install_service(*os, path.as_deref(), content, fx)?;
-                manifest.service = Some(format!("{os:?}").to_lowercase());
-                manifest.service_file = path.clone();
-                Ok(String::new())
-            }
-            Action::StartConsole => {
-                // A login service just installed may already have started it.
-                let conf = super::console::server_conf(&layout.home, &|_| None)?;
-                if super::console::healthy(&conf.host, conf.port) {
-                    return Ok(format!("already running at {}", super::console::url(&conf)));
-                }
-                fx.run(
-                    &layout.exe(os),
-                    &[
-                        "--home".into(),
-                        layout.home.display().to_string(),
-                        "console".into(),
-                        "start".into(),
-                    ],
-                    None,
-                )
-            }
-            Action::OpenConsole => fx.run(
-                &layout.exe(os),
-                &[
-                    "--home".into(),
-                    layout.home.display().to_string(),
-                    "console".into(),
-                    "open".into(),
-                ],
-                None,
-            ),
-        })();
+        let result = apply_one(&cx, action, &mut manifest);
         let ok = result.is_ok();
         steps.push(Step {
             action: action.describe(),
@@ -1092,6 +930,189 @@ pub fn apply(
         }
     }
     Ok(steps)
+}
+
+/// What one action needs from `apply`.
+struct ApplyCx<'a> {
+    answers: &'a Answers,
+    m: &'a Machine,
+    layout: &'a Layout,
+    fx: &'a dyn Effects,
+}
+
+/// Perform one action, recording in `manifest` what `uninstall` will have to undo. Returns the
+/// message shown for the step.
+fn apply_one(cx: &ApplyCx<'_>, action: &Action, manifest: &mut Manifest) -> Result<String> {
+    match action {
+        Action::CopyPackage { from, to } => {
+            for part in ["bin", "console"] {
+                if from.join(part).is_dir() {
+                    copy_dir(&from.join(part), &to.join(part))?;
+                }
+            }
+            Ok(String::new())
+        }
+        Action::WriteConsoleConfig { path, values } => {
+            write_console_toml(path, values)?;
+            Ok(String::new())
+        }
+        Action::StoreSecret { field } => {
+            // The bundled Python stores it, so the console and setup share one keychain
+            // layout. The value goes on standard input, never on a command line.
+            let (python, env) = keychain_command(cx.layout, cx.m.os)?;
+            let args: Vec<String> = ["-m", "app.keychain_cli", "put", "console", field]
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            cx.fx
+                .run_env(
+                    &python,
+                    &args,
+                    &env,
+                    Some(&cx.answers.console.oidc_client_secret),
+                )
+                .map(|_| String::new())
+        }
+        Action::StoreKey { name } => {
+            let (python, env) = keychain_command(cx.layout, cx.m.os)?;
+            let args: Vec<String> = ["-m", "app.keychain_cli", "put", "env", name]
+                .iter()
+                .map(ToString::to_string)
+                .collect();
+            cx.fx
+                .run_env(&python, &args, &env, Some(&cx.answers.chat.api_key))
+                .map(|_| String::new())
+        }
+        Action::AddToPath { bin, files } => {
+            let changed = add_path_lines(bin, files)?;
+            for f in files {
+                if !manifest.path_files.contains(f) {
+                    manifest.path_files.push(f.clone());
+                }
+            }
+            Ok(if changed.is_empty() {
+                "already there".into()
+            } else {
+                "open a new terminal to use it".into()
+            })
+        }
+        Action::AddToWindowsPath { bin } => {
+            let script = format!(
+                "$p=[Environment]::GetEnvironmentVariable('Path','User'); \
+                 if (-not ($p -split ';' -contains '{b}')) {{ \
+                 [Environment]::SetEnvironmentVariable('Path', ($p.TrimEnd(';') + ';{b}').TrimStart(';'), 'User') }}",
+                b = bin.display()
+            );
+            cx.fx.run(
+                Path::new("powershell"),
+                &["-NoProfile".into(), "-Command".into(), script],
+                None,
+            )?;
+            manifest.windows_path = Some(bin.clone());
+            Ok("open a new terminal to use it".into())
+        }
+        Action::CreateProject {
+            name,
+            sources,
+            detect,
+        } => {
+            let mut args = vec![
+                "--home".to_string(),
+                cx.layout.home.display().to_string(),
+                "project".into(),
+                "add".into(),
+                name.clone(),
+            ];
+            for s in sources {
+                args.push("--source".into());
+                args.push(s.clone());
+            }
+            if *detect {
+                args.push("--detect".into());
+            }
+            cx.fx.run(&setup_exe(cx.layout, cx.m), &args, None)
+        }
+        Action::RegisterClaudeCode {
+            name,
+            command,
+            args,
+        } => {
+            let mut a = vec![
+                "mcp".to_string(),
+                "add".into(),
+                "-s".into(),
+                "user".into(),
+                name.clone(),
+                "--".into(),
+                command.display().to_string(),
+            ];
+            a.extend(args.iter().cloned());
+            // `mcp add` refuses a name it has; a second setup run replaces the entry.
+            let _ = cx.fx.run(
+                Path::new("claude"),
+                &[
+                    "mcp".into(),
+                    "remove".into(),
+                    "-s".into(),
+                    "user".into(),
+                    name.clone(),
+                ],
+                None,
+            );
+            cx.fx.run(Path::new("claude"), &a, None)?;
+            if !manifest.claude_code.contains(name) {
+                manifest.claude_code.push(name.clone());
+            }
+            Ok(String::new())
+        }
+        Action::MergeAgentConfig {
+            path,
+            section,
+            name,
+            entry,
+            ..
+        } => {
+            merge_agent_config(path, section, name, entry)?;
+            let record = (path.clone(), section.clone(), name.clone());
+            if !manifest.agent_configs.contains(&record) {
+                manifest.agent_configs.push(record);
+            }
+            Ok("restart that program to pick it up".into())
+        }
+        Action::InstallService { os, path, content } => {
+            install_service(*os, path.as_deref(), content, cx.fx)?;
+            manifest.service = Some(format!("{os:?}").to_lowercase());
+            manifest.service_file = path.clone();
+            Ok(String::new())
+        }
+        Action::StartConsole => {
+            // A login service just installed may already have started it.
+            let conf = super::console::server_conf(&cx.layout.home, &|_| None)?;
+            if super::console::healthy(&conf.host, conf.port) {
+                return Ok(format!("already running at {}", super::console::url(&conf)));
+            }
+            cx.fx.run(
+                &cx.layout.exe(cx.m.os),
+                &[
+                    "--home".into(),
+                    cx.layout.home.display().to_string(),
+                    "console".into(),
+                    "start".into(),
+                ],
+                None,
+            )
+        }
+        Action::OpenConsole => cx.fx.run(
+            &cx.layout.exe(cx.m.os),
+            &[
+                "--home".into(),
+                cx.layout.home.display().to_string(),
+                "console".into(),
+                "open".into(),
+            ],
+            None,
+        ),
+    }
 }
 
 /// The binary that runs follow-up commands: the installed one when it exists, else this one.

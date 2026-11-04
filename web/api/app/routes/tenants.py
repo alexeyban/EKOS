@@ -239,6 +239,11 @@ def _check_rule(body: BindingIn) -> None:
             detail="a rule goes with the viewer role: reviewing, operating and administering "
             "need the whole project",
         )
+    _check_rule_target(body)
+
+
+def _check_rule_target(body: BindingIn) -> None:
+    """What a rule names: an object id, or a source name and a path pattern."""
     if body.object is not None:
         if body.source or body.path:
             raise HTTPException(
@@ -351,37 +356,44 @@ async def delete_binding(tenant_id: str, binding_id: str) -> None:
     models.delete_binding(binding_id)
 
 
+def _member_entry(people: dict[str, dict[str, Any]], user_id: str) -> dict[str, Any] | None:
+    """The person's row in `people`, added on first sight; None for an unknown user."""
+    if user_id not in people:
+        user = models.get_user(user_id)
+        if user is None:
+            return None
+        people[user_id] = {
+            "id": user.id,
+            "email": user.email,
+            "signed_in": bool(user.subject),
+            "last_login_at": _iso(user.last_login_at),
+            "roles": [],
+        }
+    return people[user_id]
+
+
+def _bound_users(b: models.RoleBinding) -> tuple[list[str], str | None] | None:
+    """The users a binding reaches and the group it reaches them through; None for a binding
+    that is not to a user or a group."""
+    if b.principal_kind == "user":
+        return [b.principal_id], None
+    if b.principal_kind == "group":
+        group = models.get_group(b.principal_id)
+        return models.group_members(b.principal_id), (group.name if group else b.principal_id)
+    return None
+
+
 @router.get("/{tenant_id}/members", dependencies=[Depends(_ADMIN)])
 async def list_members(tenant_id: str) -> list[dict]:
     """Every person with a binding in this tenant, directly or through a group with members."""
     people: dict[str, dict[str, Any]] = {}
-
-    def entry(user_id: str) -> dict[str, Any] | None:
-        if user_id not in people:
-            user = models.get_user(user_id)
-            if user is None:
-                return None
-            people[user_id] = {
-                "id": user.id,
-                "email": user.email,
-                "signed_in": bool(user.subject),
-                "last_login_at": _iso(user.last_login_at),
-                "roles": [],
-            }
-        return people[user_id]
-
     for b in models.list_bindings(tenant_id):
-        via = None
-        if b.principal_kind == "user":
-            ids = [b.principal_id]
-        elif b.principal_kind == "group":
-            group = models.get_group(b.principal_id)
-            via = group.name if group else b.principal_id
-            ids = models.group_members(b.principal_id)
-        else:
+        bound = _bound_users(b)
+        if bound is None:
             continue
+        ids, via = bound
         for user_id in ids:
-            person = entry(user_id)
+            person = _member_entry(people, user_id)
             if person is not None:
                 person["roles"].append({"role": b.role, "workspace_id": b.workspace_id, "via": via})
     return sorted(people.values(), key=lambda p: p["email"])

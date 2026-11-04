@@ -67,7 +67,11 @@ async def _read(settings: Settings, ws: models.Workspace, argv: list[str]):
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.get("/sources", dependencies=[Depends(allow("read"))], responses={502: BAD_GATEWAY})
+@router.get(
+    "/sources",
+    dependencies=[Depends(allow("read"))],
+    responses={400: BAD_REQUEST, 502: BAD_GATEWAY},
+)
 async def sources(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),

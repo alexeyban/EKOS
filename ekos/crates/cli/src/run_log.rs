@@ -110,8 +110,12 @@ impl RunLog {
     pub fn finish(&self, outcome: &Result<()>) {
         let i = &self.inner;
         let n = |c: &AtomicU64| Value::from(c.load(Ordering::Relaxed));
-        let not_copied =
-            std::mem::take(&mut *i.not_copied.lock().unwrap_or_else(|p| p.into_inner()));
+        let not_copied = std::mem::take(
+            &mut *i
+                .not_copied
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
         if !not_copied.is_empty() {
             let total: u64 = not_copied.values().sum();
             self.write(
@@ -177,7 +181,11 @@ impl RunLog {
             Value::from(self.inner.cmd.as_str()),
             self.inner.started.elapsed().as_millis()
         ));
-        let mut out = self.inner.out.lock().unwrap_or_else(|p| p.into_inner());
+        let mut out = self
+            .inner
+            .out
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         // A run log that cannot be written must not fail the command.
         let _ = out.write_all(line.as_bytes()).and_then(|()| out.flush());
     }
@@ -205,7 +213,7 @@ impl RunLog {
                     .inner
                     .not_copied
                     .lock()
-                    .unwrap_or_else(|p| p.into_inner());
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 *rest.entry(target.to_string()).or_default() += 1;
                 return;
             }

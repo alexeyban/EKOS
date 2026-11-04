@@ -43,11 +43,14 @@ ARG EKOS_FEATURES="object-storage"
 # is a full compile whenever anything under ekos/ changes.
 #
 # A build arg is also an environment variable inside RUN, and cargo reads CARGO_BUILD_JOBS itself:
-# an empty one fails with "could not parse ``", so it is unset when not given.
-RUN cd ekos \
-    && if [ -z "$CARGO_BUILD_JOBS" ]; then unset CARGO_BUILD_JOBS; fi \
-    && cargo build --release --locked -p ekos ${CARGO_BUILD_JOBS:+--jobs "$CARGO_BUILD_JOBS"} \
-        ${EKOS_FEATURES:+--features "$EKOS_FEATURES"} \
+# an empty one fails with "could not parse ``", so it is unset when not given. The optional
+# arguments are collected in "$@", so each stays one quoted word.
+WORKDIR /src/ekos
+RUN if [ -z "$CARGO_BUILD_JOBS" ]; then unset CARGO_BUILD_JOBS; fi \
+    && set -- \
+    && if [ -n "${CARGO_BUILD_JOBS:-}" ]; then set -- "$@" --jobs "$CARGO_BUILD_JOBS"; fi \
+    && if [ -n "${EKOS_FEATURES:-}" ]; then set -- "$@" --features "$EKOS_FEATURES"; fi \
+    && cargo build --release --locked -p ekos "$@" \
     && cp target/release/ekos /ekos-bin
 
 # ── 2. The console UI ─────────────────────────────────────────────────────────

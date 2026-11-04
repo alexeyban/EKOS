@@ -109,34 +109,258 @@ impl PythonModules {
     }
 }
 
-pub(crate) fn check<'a>(objects: &'a [KirObject], opts: &Options<'_>) -> Imports<'a> {
-    let by_id: HashMap<KirId, &KirObject> = objects.iter().map(|o| (o.id, o)).collect();
-    let declared = declared_ids(opts.relationships);
-    let declaring = crate::xref::declaring_files(objects, opts.relationships);
-    let defined = |o: &KirObject| declared.contains(&o.id.0);
-    let mut perl_roots = BTreeSet::new();
-    let mut elixir_roots = BTreeSet::new();
-    let mut perl_defined: Vec<&KirObject> = Vec::new();
-    let mut elixir_defined: Vec<&KirObject> = Vec::new();
-    let mut files: BTreeSet<&str> = BTreeSet::new();
-    for o in objects {
-        match (&o.kind, custom_kind(o)) {
-            (_, Some("PerlPackage")) if defined(o) => {
-                perl_roots.insert(root(&o.name, "::"));
-                perl_defined.push(o);
+/// What one import comes to.
+enum Verdict {
+    /// Checked: the extractor that read it, its outcome, and the finding when it does not resolve.
+    Checked(&'static str, Outcome, Option<Finding>),
+    /// Outside the workspace: counted, not checked.
+    External,
+    /// Not an import this check reads.
+    Skipped,
+}
+
+/// What the workspace defines: the namespaces an internal import falls under, and what it can
+/// resolve to.
+struct Workspace<'a, 'o> {
+    declared: BTreeSet<uuid::Uuid>,
+    perl_roots: BTreeSet<String>,
+    elixir_roots: BTreeSet<String>,
+    perl_defined: Vec<&'a KirObject>,
+    elixir_defined: Vec<&'a KirObject>,
+    files: BTreeSet<&'a str>,
+    python: PythonModules,
+    excluded: Excluded<'o>,
+}
+
+impl<'a, 'o> Workspace<'a, 'o> {
+    fn build(objects: &'a [KirObject], opts: &Options<'o>) -> Self {
+        let mut ws = Workspace {
+            declared: declared_ids(opts.relationships),
+            perl_roots: BTreeSet::new(),
+            elixir_roots: BTreeSet::new(),
+            perl_defined: Vec::new(),
+            elixir_defined: Vec::new(),
+            files: BTreeSet::new(),
+            python: PythonModules::default(),
+            excluded: Excluded::build(opts.unobserved_files),
+        };
+        for o in objects {
+            match (&o.kind, custom_kind(o)) {
+                (_, Some("PerlPackage")) if ws.defined(o) => {
+                    ws.perl_roots.insert(root(&o.name, "::"));
+                    ws.perl_defined.push(o);
+                }
+                (_, Some("ElixirModule")) if ws.defined(o) => {
+                    ws.elixir_roots.insert(root(&o.name, "."));
+                    ws.elixir_defined.push(o);
+                }
+                (ObjectKind::File, _) => {
+                    ws.files.insert(o.name.as_str());
+                }
+                _ => {}
             }
-            (_, Some("ElixirModule")) if defined(o) => {
-                elixir_roots.insert(root(&o.name, "."));
-                elixir_defined.push(o);
-            }
-            (ObjectKind::File, _) => {
-                files.insert(o.name.as_str());
-            }
-            _ => {}
+        }
+        ws.python = PythonModules::build(&ws.files);
+        ws
+    }
+
+    fn defined(&self, o: &KirObject) -> bool {
+        self.declared.contains(&o.id.0)
+    }
+
+    /// The verdict on an import of `to` written in `file`.
+    fn verdict(&self, to: &KirObject, file: Option<&str>) -> Verdict {
+        match custom_kind(to) {
+            Some("PerlPackage") => self.perl(to, file),
+            Some("ElixirModule") => self.elixir(to, file),
+            Some("JsModule") => self.js(to, file),
+            Some("PythonModule") => self.python(to),
+            _ => Verdict::Skipped,
         }
     }
-    let python = PythonModules::build(&files);
-    let excluded = Excluded::build(opts.unobserved_files);
+
+    /// Perl `use`/`require`.
+    fn perl(&self, to: &KirObject, file: Option<&str>) -> Verdict {
+        if self.defined(to) {
+            Verdict::Checked("perl-use", Outcome::Resolved, None)
+        } else if let Some(path) = self.excluded.perl.get(&to.name) {
+            Verdict::Checked(
+                "perl-use",
+                Outcome::Unresolved,
+                Some(excluded_finding(path)),
+            )
+        } else if self.perl_roots.contains(&root(&to.name, "::")) {
+            let f = missing(
+                &to.name,
+                format!(
+                    "no file defines package `{}`, though `{}::` packages are defined here",
+                    to.name,
+                    root(&to.name, "::")
+                ),
+                &self.perl_defined,
+                file,
+            );
+            Verdict::Checked("perl-use", Outcome::Unresolved, Some(f))
+        } else {
+            Verdict::External
+        }
+    }
+
+    /// Elixir `alias`/`import`/`use`.
+    fn elixir(&self, to: &KirObject, file: Option<&str>) -> Verdict {
+        if self.defined(to) {
+            Verdict::Checked("elixir-alias", Outcome::Resolved, None)
+        } else if self.elixir_roots.contains(&root(&to.name, ".")) {
+            let f = missing(
+                &to.name,
+                format!(
+                    "no file defines module `{}`, though `{}.` modules are defined here",
+                    to.name,
+                    root(&to.name, ".")
+                ),
+                &self.elixir_defined,
+                file,
+            );
+            Verdict::Checked("elixir-alias", Outcome::Unresolved, Some(f))
+        } else {
+            Verdict::External
+        }
+    }
+
+    /// A JavaScript import; only a relative specifier is internal.
+    fn js(&self, to: &KirObject, file: Option<&str>) -> Verdict {
+        let spec = to.name.as_str();
+        let (Some(file), true) = (file, spec.starts_with("./") || spec.starts_with("../")) else {
+            return Verdict::External;
+        };
+        let dir = file.rsplit_once('/').map_or("", |(d, _)| d);
+        let Some(base) = normalize_path(&format!("{dir}/{spec}")) else {
+            return Verdict::Skipped;
+        };
+        // A stylesheet or image import resolves through a loader EKOS does not observe.
+        let ext = base
+            .rsplit('/')
+            .next()
+            .and_then(|f| f.rsplit_once('.'))
+            .map(|x| x.1);
+        if ext.is_some_and(|e| !JS_EXTENSIONS.contains(&e)) {
+            return Verdict::External;
+        }
+        let found = self.files.contains(base.as_str())
+            || JS_EXTENSIONS.iter().any(|e| {
+                self.files.contains(format!("{base}.{e}").as_str())
+                    || self.files.contains(format!("{base}/index.{e}").as_str())
+            });
+        let hidden = std::iter::once(base.clone())
+            .chain(
+                JS_EXTENSIONS
+                    .iter()
+                    .flat_map(|e| [format!("{base}.{e}"), format!("{base}/index.{e}")]),
+            )
+            .find(|p| self.excluded.files.is_some_and(|f| f.contains(p)));
+        if found {
+            Verdict::Checked("js-import", Outcome::Resolved, None)
+        } else if let Some(path) = hidden {
+            Verdict::Checked(
+                "js-import",
+                Outcome::Unresolved,
+                Some(excluded_finding(&path)),
+            )
+        } else {
+            Verdict::Checked(
+                "js-import",
+                Outcome::Unresolved,
+                Some(js_missing(file, &base)),
+            )
+        }
+    }
+
+    /// A Python `import`; internal when its first name is a package of the workspace.
+    fn python(&self, to: &KirObject) -> Verdict {
+        let name = to.name.as_str();
+        let first = name.split('.').next().unwrap_or(name);
+        if !self.python.roots.contains(first) {
+            return Verdict::External;
+        }
+        // `from a.b import c` is recorded as `a.b.c`: `c` may be a module or a name in `a.b`.
+        let parent = name.rsplit_once('.').map(|x| x.0);
+        let hidden = self
+            .excluded
+            .python
+            .get(name)
+            .or_else(|| parent.and_then(|p| self.excluded.python.get(p)));
+        if self.python.names.contains(name) || parent.is_some_and(|p| self.python.names.contains(p))
+        {
+            Verdict::Checked("python-import", Outcome::Resolved, None)
+        } else if let Some(path) = hidden {
+            Verdict::Checked(
+                "python-import",
+                Outcome::Unresolved,
+                Some(excluded_finding(path)),
+            )
+        } else {
+            let f = Finding {
+                kind: DiagnosticKind::UnresolvedReference,
+                // The analyzer drops a relative import's dots, so `from .x import y` reads
+                // as `x.y`: a warning, not an error.
+                severity: Severity::Warning,
+                confidence: 0.6,
+                reason: format!(
+                    "`{first}` is a package of this workspace, but no file makes `{name}` \
+                     or its parent importable"
+                ),
+                candidates: Vec::new(),
+                coverage_gap: false,
+                expected: "module",
+                namespace: None,
+            };
+            Verdict::Checked("python-import", Outcome::Unresolved, Some(f))
+        }
+    }
+}
+
+/// A relative JS import of `base` from `file` that no observed file satisfies.
+fn js_missing(file: &str, base: &str) -> Finding {
+    Finding {
+        kind: DiagnosticKind::UnresolvedReference,
+        severity: if is_test_path(file) {
+            Severity::Info
+        } else {
+            Severity::Error
+        },
+        confidence: if is_test_path(file) { 0.3 } else { 0.8 },
+        reason: format!("no observed file at `{base}` (with any script extension or `/index`)"),
+        candidates: Vec::new(),
+        coverage_gap: false,
+        expected: "module",
+        namespace: None,
+    }
+}
+
+/// Where an import is written: its evidence's location, else the importing object's file.
+fn import_location(
+    opts: &Options<'_>,
+    rel: &ekos_kir::KirRelationship,
+    from: &KirObject,
+    declaring: &HashMap<uuid::Uuid, String>,
+) -> (Option<String>, Option<u32>) {
+    let located = rel
+        .evidence
+        .first()
+        .and_then(|e| opts.locate.and_then(|f| f(e)));
+    let file = located
+        .as_ref()
+        .map(|l| l.0.clone())
+        .or_else(|| str_prop(from, "source_path"))
+        .or_else(|| declaring.get(&from.id.0).cloned())
+        .or_else(|| (from.kind == ObjectKind::File).then(|| from.name.clone()));
+    (file, located.and_then(|l| l.1))
+}
+
+pub(crate) fn check<'a>(objects: &'a [KirObject], opts: &Options<'_>) -> Imports<'a> {
+    let by_id: HashMap<KirId, &KirObject> = objects.iter().map(|o| (o.id, o)).collect();
+    let declaring = crate::xref::declaring_files(objects, opts.relationships);
+    let ws = Workspace::build(objects, opts);
 
     let mut out = Imports {
         results: Vec::new(),
@@ -150,183 +374,28 @@ pub(crate) fn check<'a>(objects: &'a [KirObject], opts: &Options<'_>) -> Imports
         let (Some(from), Some(to)) = (by_id.get(&rel.from), by_id.get(&rel.to)) else {
             continue;
         };
-        let located = rel
-            .evidence
-            .first()
-            .and_then(|e| opts.locate.and_then(|f| f(e)));
-        let file = located
-            .as_ref()
-            .map(|l| l.0.clone())
-            .or_else(|| str_prop(from, "source_path"))
-            .or_else(|| declaring.get(&from.id.0).cloned())
-            .or_else(|| (from.kind == ObjectKind::File).then(|| from.name.clone()));
-        let line = located.and_then(|l| l.1);
-        let reference = |extractor: &'static str| Reference {
-            source: from,
-            written: to.name.clone(),
-            access: "import",
-            extractor,
-            file: file.clone(),
-            line,
-            cross_system: false,
-            uncertain: false,
-            against_foreign: false,
-            expects: Expect::Module,
-        };
-        let (extractor, outcome, finding) = match custom_kind(to) {
-            Some("PerlPackage") => {
-                if defined(to) {
-                    ("perl-use", Outcome::Resolved, None)
-                } else if let Some(path) = excluded.perl.get(&to.name) {
-                    (
-                        "perl-use",
-                        Outcome::Unresolved,
-                        Some(excluded_finding(path)),
-                    )
-                } else if perl_roots.contains(&root(&to.name, "::")) {
-                    let f = missing(
-                        &to.name,
-                        format!(
-                            "no file defines package `{}`, though `{}::` packages are defined here",
-                            to.name,
-                            root(&to.name, "::")
-                        ),
-                        &perl_defined,
-                        file.as_deref(),
-                    );
-                    ("perl-use", Outcome::Unresolved, Some(f))
-                } else {
-                    out.external += 1;
-                    continue;
-                }
+        let (file, line) = import_location(opts, rel, from, &declaring);
+        let (extractor, outcome, finding) = match ws.verdict(to, file.as_deref()) {
+            Verdict::Checked(extractor, outcome, finding) => (extractor, outcome, finding),
+            Verdict::External => {
+                out.external += 1;
+                continue;
             }
-            Some("ElixirModule") => {
-                if defined(to) {
-                    ("elixir-alias", Outcome::Resolved, None)
-                } else if elixir_roots.contains(&root(&to.name, ".")) {
-                    let f = missing(
-                        &to.name,
-                        format!(
-                            "no file defines module `{}`, though `{}.` modules are defined here",
-                            to.name,
-                            root(&to.name, ".")
-                        ),
-                        &elixir_defined,
-                        file.as_deref(),
-                    );
-                    ("elixir-alias", Outcome::Unresolved, Some(f))
-                } else {
-                    out.external += 1;
-                    continue;
-                }
-            }
-            Some("JsModule") => {
-                let spec = to.name.as_str();
-                let (Some(file), true) = (
-                    file.as_deref(),
-                    spec.starts_with("./") || spec.starts_with("../"),
-                ) else {
-                    out.external += 1;
-                    continue;
-                };
-                let dir = file.rsplit_once('/').map_or("", |(d, _)| d);
-                let Some(base) = normalize_path(&format!("{dir}/{spec}")) else {
-                    continue;
-                };
-                // A stylesheet or image import resolves through a loader EKOS does not observe.
-                let ext = base
-                    .rsplit('/')
-                    .next()
-                    .and_then(|f| f.rsplit_once('.'))
-                    .map(|x| x.1);
-                if ext.is_some_and(|e| !JS_EXTENSIONS.contains(&e)) {
-                    out.external += 1;
-                    continue;
-                }
-                let found = files.contains(base.as_str())
-                    || JS_EXTENSIONS.iter().any(|e| {
-                        files.contains(format!("{base}.{e}").as_str())
-                            || files.contains(format!("{base}/index.{e}").as_str())
-                    });
-                let hidden = std::iter::once(base.clone())
-                    .chain(
-                        JS_EXTENSIONS
-                            .iter()
-                            .flat_map(|e| [format!("{base}.{e}"), format!("{base}/index.{e}")]),
-                    )
-                    .find(|p| excluded.files.is_some_and(|f| f.contains(p)));
-                if found {
-                    ("js-import", Outcome::Resolved, None)
-                } else if let Some(path) = hidden {
-                    (
-                        "js-import",
-                        Outcome::Unresolved,
-                        Some(excluded_finding(&path)),
-                    )
-                } else {
-                    let f = Finding {
-                        kind: DiagnosticKind::UnresolvedReference,
-                        severity: if is_test_path(file) {
-                            Severity::Info
-                        } else {
-                            Severity::Error
-                        },
-                        confidence: if is_test_path(file) { 0.3 } else { 0.8 },
-                        reason: format!(
-                            "no observed file at `{base}` (with any script extension or `/index`)"
-                        ),
-                        candidates: Vec::new(),
-                        coverage_gap: false,
-                        expected: "module",
-                        namespace: None,
-                    };
-                    ("js-import", Outcome::Unresolved, Some(f))
-                }
-            }
-            Some("PythonModule") => {
-                let name = to.name.as_str();
-                let first = name.split('.').next().unwrap_or(name);
-                if !python.roots.contains(first) {
-                    out.external += 1;
-                    continue;
-                }
-                // `from a.b import c` is recorded as `a.b.c`: `c` may be a module or a name in `a.b`.
-                let parent = name.rsplit_once('.').map(|x| x.0);
-                let hidden = excluded
-                    .python
-                    .get(name)
-                    .or_else(|| parent.and_then(|p| excluded.python.get(p)));
-                if python.names.contains(name) || parent.is_some_and(|p| python.names.contains(p)) {
-                    ("python-import", Outcome::Resolved, None)
-                } else if let Some(path) = hidden {
-                    (
-                        "python-import",
-                        Outcome::Unresolved,
-                        Some(excluded_finding(path)),
-                    )
-                } else {
-                    let f = Finding {
-                        kind: DiagnosticKind::UnresolvedReference,
-                        // The analyzer drops a relative import's dots, so `from .x import y` reads
-                        // as `x.y`: a warning, not an error.
-                        severity: Severity::Warning,
-                        confidence: 0.6,
-                        reason: format!(
-                            "`{first}` is a package of this workspace, but no file makes `{name}` \
-                             or its parent importable"
-                        ),
-                        candidates: Vec::new(),
-                        coverage_gap: false,
-                        expected: "module",
-                        namespace: None,
-                    };
-                    ("python-import", Outcome::Unresolved, Some(f))
-                }
-            }
-            _ => continue,
+            Verdict::Skipped => continue,
         };
         out.results.push(ImportResult {
-            reference: reference(extractor),
+            reference: Reference {
+                source: from,
+                written: to.name.clone(),
+                access: "import",
+                extractor,
+                file,
+                line,
+                cross_system: false,
+                uncertain: false,
+                against_foreign: false,
+                expects: Expect::Module,
+            },
             normalized: to.name.to_lowercase(),
             outcome,
             finding,
