@@ -1,6 +1,44 @@
 # Changelog
 
-## Unreleased (on `main` since v1.1.0)
+## v1.2.0 — 2026-11-04
+
+RFCs 0190–0241, devlogs 273–318. Upgrading: the first `ekos commit` after upgrading writes one
+round of new object versions (evidence ids are now derived from content), and `ekos recover`
+re-runs passes whose versions changed.
+
+**New capabilities**
+- **Benchmarks** (RFC 0240 / 0241): `ekos eval bench list|prepare|run|compare|export`. BIRD
+  Mini-Dev 1024 is checked in as a suite. `prepare` verifies the pinned archives, builds one
+  project per database and scans every ledger for leaked questions, gold SQL and evidence. `run`
+  scores by execution like the official scorer (parity checked on 704 predictions), with bootstrap
+  intervals, outcome categories, and billed vs cached tokens. `compare` is a paired comparison
+  (bootstrap + McNemar); `export` writes BIRD's prediction format; `context` prints what a cell
+  shows the model. With Claude Haiku 5.5 on the hold-out split, the EKOS cell scored 63.9%
+  against 53.3% for raw DDL; with empty-string profiles, 66.9%.
+- **Live PostgreSQL and ClickHouse as project databases** (RFC 0235), next to Oracle (RFC 0211):
+  `[[databases]] kind = …`, `ekos database add|list|test|remove`, a read-only catalog reconciled
+  against the database's own counts.
+- **Oracle / iDempiere estates** (RFCs 0209–0228): a Java analyzer and application model, Oracle
+  SQL and PL/SQL, schema history, a live Oracle catalog with profiles, write behaviour per table,
+  tickets. Also the seven-step workflow: review and digest-bound sign-off (`ekos review`,
+  `ekos workflow status`, `ekos_signoff_status`), source-estate documentation
+  (`docs generate --layout estate`), run logs for every changing command, and an iDempiere exit
+  eval.
+- **Cross-reference integrity** (RFC 0233): `ekos check refs` (broken references, cycles,
+  reachability, SARIF), `ekos check explain`, the read-only `ekos_xref_check` MCP tool.
+- **Clouds** (RFC 0232): `ekos home backup --to` / `restore --from` (S3, Azure Blob, GCS),
+  Terraform modules for Azure, Google Cloud and AWS (VM, containers, Kubernetes), a Helm chart, a
+  console instance lease, scheduled backups, git-synced sources.
+- **LLM routing** (RFC 0197): routes per task, OpenCode Zen wire formats, a usage log,
+  `[llm] budget-usd`, a data policy.
+- **Extensions** (RFCs 0190–0207): command groups and console pages from extensions, extension
+  binaries under their own name. EKOS Lakehouse and the Pentaho translator live in their own
+  repository.
+
+**Fixes and changes since v1.1.0**
+- **Fixed:** `COMMENT ON TABLE|COLUMN` never reached a table or column declared with a quoted
+  identifier (`CREATE TABLE "orders" ("status" …)`): the descriptions were dropped without a
+  diagnostic. Takes effect at the next `ekos recover` (`SqlAnalyzerPass` v6).
 
 - **Security / external review (issues #10–#20, devlog_283):**
   - **Fixed:** redaction gaps. Crate `//!` doc comments were sent to the LLM unredacted, `[llm-description]` re-read files excluded by `[security]`, and `git blame` commit subjects reached the ledger unredacted. Every re-reader now goes through `ekos_common::redaction::read_redacted` (exclusion, then redaction), and blame summaries are redacted.
