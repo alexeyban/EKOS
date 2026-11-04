@@ -33,6 +33,16 @@ p.desc{ margin:0.5rem 0 0 0; color:var(--ink-soft); font-size:0.95rem; line-heig
   <h1>Presentations</h1>
   <ul>
     <li>
+      <a class="deck" href="presentations/bird-mini-dev-benchmark.html">BIRD Mini-Dev on EKOS</a>
+      <p class="desc">Text-to-SQL on BIRD Mini-Dev 1024 (500 questions, 11 SQLite databases) with
+      <strong>Claude Haiku 5.5</strong>. The same model on the same 302 hold-out questions scores
+      <strong>53.3%</strong> on raw DDL and <strong>63.9&ndash;66.9%</strong> on the pack EKOS compiles from each
+      database. Every question with the SQL it generated and its verdict; the schema text the model saw; tokens and
+      cost (<strong>$2.39</strong> for 2,865 calls); memory and duration; the code and configuration; and the
+      scorer&rsquo;s parity with BIRD&rsquo;s official evaluator.</p>
+      <div class="rfc">RFC 0240 &middot; 0241 &middot; devlog_318</div>
+    </li>
+    <li>
       <a class="deck" href="presentations/ledgersmb-analytics-migration.html">LedgerSMB to ClickHouse, Checked Not Trusted</a>
       <p class="desc">EKOS Migrate end to end on a real ERP: LedgerSMB's schema and PL/pgSQL logic, 18 months of
       synthetic books posted through LedgerSMB's own procedures, 30/30 tables validated V1&ndash;V3, eight

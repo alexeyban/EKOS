@@ -12,6 +12,8 @@ site and documentation: **[ekos.dev](https://ekos.dev)**. Install: **[ekos.dev/d
 
 Unlike traditional enterprise systems that manage data, documents or metadata independently, EKOS treats the entire enterprise as a living knowledge system — a permanently evolving semantic model that can be trusted by both humans and AI.
 
+**Text-to-SQL benchmark:** on [BIRD Mini-Dev](https://bird-bench.github.io/) (release 1024, 302 hold-out questions over 11 databases), the same model, Claude Haiku 5.5, scores **53.3%** execution accuracy on raw DDL and **63.9–66.9%** on the knowledge EKOS compiles from each database (+10.6 to +13.6 points, significant on paired questions), for about a tenth of a cent per question. Every question, the SQL it produced, tokens, cost and the scorer's parity with BIRD's official evaluator: [BIRD Mini-Dev on EKOS](https://alexeyban.github.io/EKOS/presentations/bird-mini-dev-benchmark.html).
+
 **First benchmark:** on a real 2,022-file open-source repo ([plausible/analytics](https://github.com/plausible/analytics)), cold ingestion takes 34 seconds, and answering real questions from the compiled ledger costs **67-93% fewer tokens** than raw grep-based search over the source — measured with a standard tokenizer (`tiktoken`), not a hand-rolled estimate, with the one case grep wins included rather than hidden. Full methodology, every command, and every raw output: [The First Benchmark Number](https://alexeyban.github.io/EKOS/presentations/token-benchmark.html).
 
 ## About
@@ -2553,6 +2555,7 @@ All significant architectural decisions begin as RFCs in `docs/rfcs/`. No featur
 
 Live decks at [alexeyban.github.io/EKOS](https://alexeyban.github.io/EKOS/presentations.html) — every claim in them is reproduced live against real repos, not staged:
 
+- [BIRD Mini-Dev on EKOS](https://alexeyban.github.io/EKOS/presentations/bird-mini-dev-benchmark.html) — the BIRD Text-to-SQL benchmark (Mini-Dev 1024, 11 databases) with Claude Haiku 5.5: 53.3% on raw DDL against 63.9–66.9% on EKOS's compiled pack. Every hold-out question with its generated SQL and verdict, the schema text the model saw, tokens and cost, memory and duration, code and configuration (RFC 0240/0241).
 - [Full-Stack Test Run](https://alexeyban.github.io/EKOS/presentations/full-stack-test-run.html) — an autonomous 22-act pass over the distributed storage stack (RFC 0111/0113), the compiled-knowledge query engine (RFC 0118/0119–0126), and the MCP protocol (RFC 0013/0115): coordinator fencing, gateway failover, RRF fusion, REASON citation checks, the vector arm on a real embedding model, and the write-vs-read-only-gateway safety assertion. Three partitioned-store bugs it surfaced, fixed and re-verified in the same run.
 - [Claude Code + EKOS](https://alexeyban.github.io/EKOS/presentations/claude-code-with-ekos.html) — how Claude Code searches and analyzes a codebase through EKOS's MCP server instead of raw grep/Read, with a measured with-vs-without comparison and real token/usage numbers.
 - [The AI-Native Enterprise Knowledge Compiler](https://alexeyban.github.io/EKOS/presentations/ai-native-knowledge-compiler-pitch.html) — the startup pitch, audited live by Claude Code using EKOS's own MCP server.
