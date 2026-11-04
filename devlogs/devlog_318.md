@@ -181,8 +181,12 @@ formula_1 is worse under the pack; that is not examined yet.
 - **Value lookup is easy to make harmful.** Exact-value hints on list columns, question words
   that are also values ("What" is a card name) and one line per column all hurt. v2 fixed the
   harm but is not shown to help.
-- **The auto-mode classifier blocks running the official BIRD evaluator code** from a session.
-  The parity test exists, but a human has to run it.
+- **Official-scorer parity:** 704 recorded predictions (reports G, A-4k and C) gave identical EX
+  verdicts to `bird-bench/mini_dev`'s scorer. It ran on Python 3.10 / SQLite 3.37.2, once the user
+  asked for it explicitly; the auto-mode classifier had blocked it before. The one Soft-F1
+  difference is a SQLite version effect: SQLite before 3.45 has a fixed parser stack and rejects
+  16 nested `replace(…)` calls ("parser stack overflow"), while the bundled 3.46 runs them. The
+  test lists such cases apart. A reported number should name the scorer's SQLite version.
 
 ---
 

@@ -168,8 +168,8 @@ analysis.
 - [x] Cells A–D and C′ run on Mini-Dev with the same model and settings; each report carries the
       config, prompt hash, ledger fingerprint, n, interval, tokens and cost. (A 100-question
       hold-out sample per cell, Zen Haiku 5.5 and local qwen2.5-coder:3b; see §7.)
-- [ ] EX parity with the official evaluator on the sample. (The test exists; it has not been run —
-      see §7.)
+- [x] EX parity with the official evaluator on the sample: 704 recorded predictions (three reports),
+      identical EX verdicts — see §7.
 - [x] `compare C A` and `compare D B` print the paired result.
 
 ## 6. Open questions
@@ -274,7 +274,24 @@ tune / 60% hold-out. Hold-out hash check: advisory (mark and print). Scorer: inv
 These hold-out results motivated RFC 0241, which tuned on the tune split only: on the full
 hold-out split it reached 63.9% against 53.3% for the baseline (+10.6, CI +4.3 to +16.9).
 
-**Parity run (needs a human):** with a `bird-bench/mini_dev` checkout, run
+**Parity, run 2026-11-04** against `bird-bench/mini_dev` at `1c49a375`, with the evaluator on
+Python 3.10 / SQLite 3.37.2:
+
+| Report | Questions | EX mismatches | Soft-F1 mismatches | Engine-version differences |
+|---|---|---|---|---|
+| G (hold, final) | 302 | 0 | 0 | 0 |
+| A-4k (hold) | 302 | 0 | 0 | 1 |
+| C (hold sample) | 100 | 0 | 0 | 0 |
+
+The one difference is A-4k question 217. Its prediction nests 16 `replace(…)` calls. SQLite
+before 3.45 has a fixed parser stack and fails it with "parser stack overflow", which the official
+scorer counts as 0; the bundled SQLite 3.46 grows the stack and runs it. The answer is wrong in
+both (EX false), so only Soft-F1 differed: 0.2 here, 0.0 there. The test now reports such cases
+separately and still fails on any other mismatch. A correct answer that hits the same limit would
+be EX-correct here and wrong under an old evaluator, so the scorer's SQLite version belongs in any
+reported number.
+
+To run it again, with a `bird-bench/mini_dev` checkout:
 
 ```
 EKOS_BIRD_EVALUATOR=<checkout>/evaluation EKOS_BIRD_SUITE_DIR=$PWD/evals/bench/bird-mini-dev \
@@ -282,5 +299,4 @@ EKOS_BIRD_REPORT=<a report> cargo test --manifest-path ekos/Cargo.toml -p ekos-e
   --test bird_parity -- --nocapture
 ```
 
-The session that built this could not start the official evaluator's code.
 

@@ -32,18 +32,20 @@ from evaluation_f1 import calculate_f1_score
 
 pred, _ = package_sqls(predicted, db_root, mode="pred")
 gt, dbs = package_sqls(gold, db_root, mode="gt")
+import sqlite3
 out = []
 for p, g, db in zip(pred, gt, dbs):
+    error = None
     try:
         ex = execute_sql(p, g, db, "SQLite", calculate_ex)
-    except Exception:
-        ex = 0
+    except Exception as e:
+        ex, error = 0, str(e)
     try:
         f1 = execute_sql(p, g, db, "SQLite", calculate_f1_score)
-    except Exception:
-        f1 = 0.0
-    out.append({"ex": ex, "f1": f1})
-print(json.dumps(out))
+    except Exception as e:
+        f1, error = 0.0, error or str(e)
+    out.append({"ex": ex, "f1": f1, "error": error})
+print(json.dumps({"sqlite": sqlite3.sqlite_version, "verdicts": out}))
 "#;
 
 const FUNC_TIMEOUT_SHIM: &str = "class FunctionTimedOut(Exception):\n    pass\n\n\
@@ -98,12 +100,41 @@ fn ex_and_soft_f1_verdicts_match_the_official_evaluator() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let official: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap();
+    let official: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let official_sqlite = official["sqlite"].as_str().unwrap_or("?").to_string();
+    let official = official["verdicts"].as_array().unwrap().clone();
     assert_eq!(official.len(), report.questions.len());
 
     let mut ex_mismatch = Vec::new();
     let mut f1_mismatch = Vec::new();
+    // A query the evaluator's SQLite cannot parse but ours can: SQLite before 3.45 has a fixed
+    // parser stack ("parser stack overflow" on deep nesting); the bundled 3.46 grows it. That is
+    // an engine-version difference, reported, not a scorer mismatch.
+    let mut engine_differences = Vec::new();
     for (q, o) in report.questions.iter().zip(&official) {
+        if o["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("parser stack overflow"))
+            && q.score.executed
+        {
+            engine_differences.push(format!(
+                "{}: the evaluator's SQLite {official_sqlite} overflowed its parser stack; ours \
+                 ran it ({})",
+                q.id,
+                if q.score.ex {
+                    "EX differs"
+                } else {
+                    "EX false in both"
+                }
+            ));
+            if q.score.ex {
+                ex_mismatch.push(format!(
+                    "{}: ours true, official false (parser stack)",
+                    q.id
+                ));
+            }
+            continue;
+        }
         let official_ex = o["ex"].as_i64().unwrap() == 1;
         if official_ex != q.score.ex {
             ex_mismatch.push(format!(
@@ -121,11 +152,16 @@ fn ex_and_soft_f1_verdicts_match_the_official_evaluator() {
     }
     let correct = report.questions.iter().filter(|q| q.score.ex).count();
     eprintln!(
-        "parity over {} questions ({correct} correct): {} EX and {} Soft-F1 mismatches",
+        "parity over {} questions ({correct} correct), evaluator SQLite {official_sqlite}: {} EX \
+         and {} Soft-F1 mismatches, {} engine-version differences",
         report.questions.len(),
         ex_mismatch.len(),
-        f1_mismatch.len()
+        f1_mismatch.len(),
+        engine_differences.len()
     );
+    for d in &engine_differences {
+        eprintln!("  engine difference — {d}");
+    }
     assert!(
         ex_mismatch.is_empty(),
         "EX verdicts differ: {ex_mismatch:#?}"

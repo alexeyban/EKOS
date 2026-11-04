@@ -6999,7 +6999,7 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] Cells A–D, C′ on a 100-question hold-out sample: Zen Haiku 5.5 and local qwen2.5-coder:3b
 - [x] RFC 0241: column profiles, value lookup v2, ekos-v1 prompt + result checks, failure categories, billed vs cached tokens
 - [x] Final hold-out (302 q): G 63.9% vs A-4k 53.3%, +10.6 [+4.3, +16.9]; spend $1.67 of $2
-- [ ] Run the official-scorer parity test (`crates/evals/tests/bird_parity.rs`) — needs a human (the session's classifier blocks the evaluator code)
+- [x] Official-scorer parity: 704 predictions, identical EX verdicts; 1 SQLite-version difference (parser stack, 3.37 vs 3.46), reported apart (2026-11-04)
 - [ ] formula_1 is worse under the pack (55 vs 79): find out why
 - [ ] Few-shot examples from `bird23-train-filtered` (new suite, train split only)
 - [ ] `bird-dev` and the cleaned `bird-sql-dev-1106` suites; the PostgreSQL variant of Mini-Dev (exercises RFC 0235)
