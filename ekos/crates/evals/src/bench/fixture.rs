@@ -233,6 +233,7 @@ fn cell(name: &str, context: ContextKind, evidence: bool, value_lookup: bool) ->
         ves_iterations: 1,
         timeout_seconds: 10,
         profiles: false,
+        profile_version: 1,
         value_lookup_version: 1,
         prompt: super::PromptKind::Baseline,
         result_checks: false,

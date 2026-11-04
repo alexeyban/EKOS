@@ -173,12 +173,12 @@ impl DbPack {
 
     /// The pack as schema text: DDL-shaped, each column annotated with what the ledger knows.
     pub fn render(&self) -> String {
-        self.render_with(None, true)
+        self.render_with(None, Shown::default())
     }
 
     /// The pack with each column's profile (RFC 0241) appended to its comment; `examples`
     /// false leaves the example values out (one of the varied renderings).
-    pub fn render_with(&self, profile: Option<&Profile>, examples: bool) -> String {
+    pub fn render_with(&self, profile: Option<&Profile>, shown: Shown) -> String {
         let mut out = String::new();
         for t in &self.tables {
             if let Some(d) = &t.description {
@@ -206,7 +206,7 @@ impl DbPack {
                     notes.push(one_line(d));
                 }
                 if let Some(cp) = profile.and_then(|p| p.column(&t.name, &c.name)) {
-                    notes.push(cp.describe(examples));
+                    notes.push(cp.describe(shown));
                 }
                 if !notes.is_empty() {
                     out.push_str(&format!(" -- {}", notes.join(" | ")));
@@ -378,10 +378,34 @@ const LIST_SHARE: f64 = 0.05;
 const LIST_MAX_CHARS: usize = 60;
 const EXAMPLE_CHARS: usize = 40;
 
+/// What a column's profile line shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shown {
+    pub examples: bool,
+    /// RFC 0241 profile v2: the count of empty-string values, and that they mean "missing".
+    pub empties: bool,
+}
+
+impl Default for Shown {
+    fn default() -> Self {
+        Self {
+            examples: true,
+            empties: false,
+        }
+    }
+}
+
+/// The profile file's format; `prepare` rebuilds a file older than this.
+pub const PROFILE_VERSION: u32 = 2;
+
 /// What the data says about one column.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ColumnProfile {
     pub nulls: u64,
+    /// Text values that are empty or blank: a second way a value is missing ("no Q3 time" is
+    /// `''` in BIRD's formula_1, not NULL). Profile v2.
+    #[serde(default)]
+    pub empty: u64,
     pub distinct: u64,
     pub unique: bool,
     pub examples: Vec<String>,
@@ -391,10 +415,16 @@ pub struct ColumnProfile {
 
 impl ColumnProfile {
     /// `12% null; 6412 distinct; examples: 'a', 'b'` (or `unique`, `list of values: …`).
-    pub fn describe(&self, examples: bool) -> String {
+    pub fn describe(&self, shown: Shown) -> String {
         let mut parts = Vec::new();
         if self.nulls > 0 {
             parts.push(format!("{} null", self.nulls));
+        }
+        if shown.empties && self.empty > 0 {
+            parts.push(format!(
+                "{} empty strings ('' also means missing: exclude with <> '' as well as IS NOT NULL)",
+                self.empty
+            ));
         }
         parts.push(if self.unique {
             format!("unique ({} values)", self.distinct)
@@ -404,7 +434,7 @@ impl ColumnProfile {
         if self.list_valued {
             parts.push("comma-separated list: match one element with LIKE '%x%'".into());
         }
-        if examples && !self.examples.is_empty() {
+        if shown.examples && !self.examples.is_empty() {
             let ex: Vec<String> = self
                 .examples
                 .iter()
@@ -457,8 +487,15 @@ pub struct TableProfile {
 /// and kept beside the value index — never in a ledger.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Profile {
+    /// [`PROFILE_VERSION`] when built; files from before versioning read as 1.
+    #[serde(default = "profile_v1")]
+    pub version: u32,
     /// Lower-case table name → profile.
     pub tables: BTreeMap<String, TableProfile>,
+}
+
+fn profile_v1() -> u32 {
+    1
 }
 
 impl Profile {
@@ -472,10 +509,13 @@ impl Profile {
             let mut columns = BTreeMap::new();
             for (c, _, _) in &schema.tables[&t.to_lowercase()] {
                 let qc = quote(c);
-                let (nulls, distinct): (i64, i64) = conn.query_row(
-                    &format!("SELECT COUNT(*) - COUNT({qc}), COUNT(DISTINCT {qc}) FROM {qt}"),
+                let (nulls, distinct, empty): (i64, i64, i64) = conn.query_row(
+                    &format!(
+                        "SELECT COUNT(*) - COUNT({qc}), COUNT(DISTINCT {qc}), \
+                         COALESCE(SUM(typeof({qc}) = 'text' AND trim({qc}) = ''), 0) FROM {qt}"
+                    ),
                     [],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )?;
                 let mut stmt = conn.prepare(&format!(
                     "SELECT DISTINCT CAST({qc} AS TEXT) FROM {qt} WHERE {qc} IS NOT NULL LIMIT 2000"
@@ -487,6 +527,7 @@ impl Profile {
                 let list_valued = is_list_column(&sample);
                 let examples = sample
                     .iter()
+                    .filter(|v| !v.trim().is_empty())
                     .take(3)
                     .map(|v| v.chars().take(EXAMPLE_CHARS).collect())
                     .collect();
@@ -494,6 +535,7 @@ impl Profile {
                     c.to_lowercase(),
                     ColumnProfile {
                         nulls: nulls as u64,
+                        empty: empty as u64,
                         distinct: distinct as u64,
                         unique: distinct > 0 && distinct == rows - nulls && nulls == 0,
                         examples,
@@ -509,7 +551,10 @@ impl Profile {
                 },
             );
         }
-        Ok(Profile { tables })
+        Ok(Profile {
+            version: PROFILE_VERSION,
+            tables,
+        })
     }
 
     pub fn table(&self, t: &str) -> Option<&TableProfile> {
@@ -521,14 +566,14 @@ impl Profile {
     }
 
     /// The profiles as a comment block, to follow raw DDL.
-    pub fn render_block(&self, schema: &SchemaInfo) -> String {
+    pub fn render_block(&self, schema: &SchemaInfo, shown: Shown) -> String {
         let mut out = String::from("-- Column profiles:\n");
         for t in &schema.table_names {
             let Some(tp) = self.table(t) else { continue };
             out.push_str(&format!("-- {} ({} rows)\n", quote(t), tp.rows));
             for (c, _, _) in &schema.tables[&t.to_lowercase()] {
                 if let Some(cp) = tp.columns.get(&c.to_lowercase()) {
-                    out.push_str(&format!("--   {}: {}\n", quote(c), cp.describe(true)));
+                    out.push_str(&format!("--   {}: {}\n", quote(c), cp.describe(shown)));
                 }
             }
         }
@@ -934,15 +979,55 @@ mod tests {
             }],
             joins: vec![],
         };
-        let text = pack.render_with(Some(&p), true);
+        let text = pack.render_with(Some(&p), Shown::default());
         assert!(text.contains("-- 6 rows"), "{text}");
         assert!(
             text.contains("card types | 4 distinct; comma-separated list"),
             "{text}"
         );
         assert!(text.contains("e.g. 'Sorcery'"), "{text}");
-        assert!(!pack.render_with(Some(&p), false).contains("e.g."));
-        assert!(p.render_block(&schema).contains("-- `cards` (6 rows)"));
+        let no_examples = Shown {
+            examples: false,
+            ..Shown::default()
+        };
+        assert!(!pack.render_with(Some(&p), no_examples).contains("e.g."));
+        assert!(
+            p.render_block(&schema, Shown::default())
+                .contains("-- `cards` (6 rows)")
+        );
+    }
+
+    #[test]
+    fn profile_v2_counts_empty_strings_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("q.sqlite");
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE qualifying (id INTEGER PRIMARY KEY, q3 TEXT);
+             INSERT INTO qualifying VALUES (1,'1:35.554'),(2,''),(3,NULL),(4,'  '),(5,'1:36.001');",
+        )
+        .unwrap();
+        drop(c);
+        let db = Db::open(&path).unwrap();
+        let schema = SchemaInfo::read(&db).unwrap();
+        let p = Profile::build(&db, &schema).unwrap();
+        assert_eq!(p.version, PROFILE_VERSION);
+        let q3 = p.column("qualifying", "q3").unwrap();
+        assert_eq!((q3.nulls, q3.empty), (1, 2));
+        assert!(q3.examples.iter().all(|e| !e.trim().is_empty()), "{q3:?}");
+        let v2 = Shown {
+            empties: true,
+            ..Shown::default()
+        };
+        assert!(
+            q3.describe(v2)
+                .contains("2 empty strings ('' also means missing")
+        );
+        // Profile v1 rendering is unchanged, so earlier cells stay reproducible.
+        assert!(!q3.describe(Shown::default()).contains("empty"));
+        // A file written before versioning reads as v1.
+        let old: Profile = serde_json::from_str(r#"{"tables":{}}"#).unwrap();
+        assert_eq!(old.version, 1);
     }
 
     #[test]

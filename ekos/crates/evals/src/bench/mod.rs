@@ -128,6 +128,10 @@ pub struct ExperimentConfig {
     /// RFC 0241: column profiles (rows, nulls, distinct, examples, list-valued) in the pack.
     #[serde(default, skip_serializing_if = "is_false")]
     pub profiles: bool,
+    /// RFC 0241: `2` also shows each column's empty-string count and that `''` means missing
+    /// (formula_1 stores "no Q3 time" as `''`, and a profile saying "4,935 null" misled).
+    #[serde(default = "one_u32", skip_serializing_if = "is_one")]
+    pub profile_version: u32,
     /// RFC 0241: `1` — the RFC 0240 lookup; `2` — one line per value with all its columns,
     /// list columns marked for `LIKE`, one-word values only when capitalised or quoted.
     #[serde(default = "one_u32", skip_serializing_if = "is_one")]

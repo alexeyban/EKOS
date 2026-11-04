@@ -141,7 +141,10 @@ G − A-4k = +10.6, CI [+4.3, +16.9], McNemar p = 0.0014. By database the gain i
 | toxicology | 95 | 68 |
 | formula_1 | **55** | **79** |
 
-formula_1 is worse under the pack; that is not examined yet.
+formula_1 is worse under the pack. The cause, found later the same day, is that the profile
+reported NULLs but not empty strings: `qualifying.q3` has 4,935 NULL and 28 `''`. The model
+trusted "4,935 null" and counted the blanks. That explains 7 of the 9 losses. Profile v2 and
+cell G2 fix it; G2 is not measured yet (RFC 0241 §6).
 
 ### Decisions
 - **A-4k as the final baseline, not A.** A's 1,024-token cap cost it 9% of the tune split to
@@ -178,6 +181,9 @@ formula_1 is worse under the pack; that is not examined yet.
 - **The local 3B model (qwen2.5-coder:3b on a 4 GB GTX 1650)** takes about 30 s per question,
   executes only ~60% of its answers and scores 2–5%. It is useful only as a free check that the
   pipeline runs. A 16k context pushed 45% of the model to the CPU; 10k was faster.
+- **A true but incomplete profile is worse than none.** "4,935 null" made the model drop the
+  `<> ''` guard it writes when shown raw DDL. When a profile states how values are missing, it
+  must state every way they are missing.
 - **Value lookup is easy to make harmful.** Exact-value hints on list columns, question words
   that are also values ("What" is a card name) and one line per column all hurt. v2 fixed the
   harm but is not shown to help.

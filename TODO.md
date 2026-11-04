@@ -7000,7 +7000,8 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] RFC 0241: column profiles, value lookup v2, ekos-v1 prompt + result checks, failure categories, billed vs cached tokens
 - [x] Final hold-out (302 q): G 63.9% vs A-4k 53.3%, +10.6 [+4.3, +16.9]; spend $1.67 of $2
 - [x] Official-scorer parity: 704 predictions, identical EX verdicts; 1 SQLite-version difference (parser stack, 3.37 vs 3.46), reported apart (2026-11-04)
-- [ ] formula_1 is worse under the pack (55 vs 79): find out why
+- [x] formula_1 is worse under the pack (55 vs 79): profile reported NULLs but not `''` (7 of 9 losses) — profile v2 + cell G2 (RFC 0241 §6)
+- [ ] Measure G2 on the tune split (~$0.20, needs budget), then one hold-out run marked as post-analysis
 - [ ] Few-shot examples from `bird23-train-filtered` (new suite, train split only)
 - [ ] `bird-dev` and the cleaned `bird-sql-dev-1106` suites; the PostgreSQL variant of Mini-Dev (exercises RFC 0235)
 - [ ] Ollama provider: honour `[llm] base-url` (it reads only `OLLAMA_BASE_URL`)

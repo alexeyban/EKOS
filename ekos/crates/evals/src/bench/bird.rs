@@ -13,7 +13,7 @@ use super::context::ValueMatch;
 use super::context::{
     DbPack, SchemaInfo, ValueIndex, extract_sql, join_pairs, raw_ddl, render_values, sql_shape,
 };
-use super::context::{Profile, render_value_groups};
+use super::context::{PROFILE_VERSION, Profile, Shown, render_value_groups};
 use super::leakage::{self, normalise};
 use super::report::BenchReport;
 use super::sqlexec::{self, Db, Row};
@@ -531,19 +531,29 @@ fn render_schema(
     h: &super::DbHandle,
     pack: Option<&DbPack>,
     profile: Option<&Profile>,
+    empties: bool,
 ) -> Result<String> {
-    let raw = |with_profile: bool| -> Result<String> {
+    let shown = Shown {
+        examples: true,
+        empties,
+    };
+    let raw = || -> Result<String> {
         let mut text = raw_ddl(&h.db)?;
-        if with_profile && let Some(prof) = profile {
-            text.push_str(&prof.render_block(&h.schema));
+        if let Some(prof) = profile {
+            text.push_str(&prof.render_block(&h.schema, shown));
         }
         Ok(text)
     };
     Ok(match (variant, context, pack) {
-        (0, ContextKind::RawDdl, _) => raw(true)?,
-        (0, ContextKind::EkosPack, Some(pack)) => pack.render_with(profile, true),
-        (1, _, Some(pack)) => pack.render_with(profile, false),
-        _ => raw(true)?,
+        (0, ContextKind::EkosPack, Some(pack)) => pack.render_with(profile, shown),
+        (1, _, Some(pack)) => pack.render_with(
+            profile,
+            Shown {
+                examples: false,
+                ..shown
+            },
+        ),
+        _ => raw()?,
     })
 }
 
@@ -815,7 +825,11 @@ impl BenchAdapter for BirdAdapter {
                 std::fs::write(&values_path, serde_json::to_string(&index)?)?;
             }
             let profile_path = self.dirs.values().join(format!("{db_id}.profile.json"));
-            if ctx.force || !profile_path.is_file() {
+            let current = std::fs::read_to_string(&profile_path)
+                .ok()
+                .and_then(|t| serde_json::from_str::<Profile>(&t).ok())
+                .is_some_and(|p| p.version >= PROFILE_VERSION);
+            if ctx.force || !current {
                 let schema = SchemaInfo::read(&db)?;
                 let profile = Profile::build(&db, &schema)?;
                 std::fs::write(&profile_path, serde_json::to_string(&profile)?)?;
@@ -879,7 +893,14 @@ impl BenchAdapter for BirdAdapter {
         let started = Instant::now();
         for i in 0..cfg.n {
             let variant = if cfg.vary_context { i % 3 } else { 0 };
-            let mut schema_text = render_schema(cfg.context, variant, h, h.pack.as_ref(), profile)?;
+            let mut schema_text = render_schema(
+                cfg.context,
+                variant,
+                h,
+                h.pack.as_ref(),
+                profile,
+                cfg.profile_version >= 2,
+            )?;
             schema_text.push_str(&values_text);
             let prompt = fill_prompt_with(template, "SQLite", &schema_text, &block);
             if let Some(c) = answer_candidate(rt, cfg, h, &prompt, &mut p).await? {

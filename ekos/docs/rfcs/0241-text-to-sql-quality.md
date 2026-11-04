@@ -171,3 +171,41 @@ tokens). That figure is read from the router's usage log, not estimated.
 - Look at formula_1.
 - A stronger model, once a budget exists.
 - The official-scorer parity run on these reports, which a human has to start.
+
+## 6. Why formula_1 is worse under the pack (2026-11-04)
+
+On the final hold-out run, G scored 55% on formula_1 against 79% for A-4k: it lost 9 questions
+and gained 1. This analysis read hold-out results, so the fix below is a new cell (G2) that has
+to be validated on the tune split before any new hold-out run, and that run will be marked as
+following hold-out analysis.
+
+**Cause, for 7 of the 9.** `qualifying.q2/q3` record "no time" two ways: NULL, and the empty
+string. `q3` has 4,935 NULLs and 28 `''`.
+
+- Profile v1 reported only the NULLs (`4935 null`), and the ekos-v1 prompt tells the model the
+  comments give each column's null count. The model took NULL as the only missing marker, so
+  `COUNT(q3)` and `MIN(q3)` counted or chose the `''` rows. In question 284 the fastest Q3 time
+  came back as `''` for 9 drivers.
+- With raw DDL, the same model wrote `q3 <> ''` in every one of those 7 questions, as the gold
+  SQL does.
+- The other two losses are a filter error (288) and lap times compared as text (255).
+
+The pack stated a true but incomplete fact, and the model trusted it over its own caution.
+
+**How common.** 44 of the 500 gold queries guard against empty strings: 18 in formula_1, 6 in
+card_games, 6 in student_club, 5 in thrombosis_prediction. Sixteen columns in six databases hold
+empty strings, among them `qualifying.q2/q3`, `trans.k_symbol` (53,433), `patient.sex` (13) and
+`patient.admission` (34).
+
+**Fix: profile v2 (`profile-version = 2`).**
+
+- The profile file (now versioned; `prepare` rebuilds an older file) counts blank text values per
+  column.
+- A v2 line says `28 empty strings ('' also means missing: exclude with <> '' as well as IS NOT
+  NULL)`.
+- Example values never include a blank.
+- Cells E–H keep the v1 rendering, so their results stay reproducible. Cell `G2` is G with v2.
+
+**Status.** Built and unit-tested. Not yet measured: the RFC 0241 budget is spent, and measuring
+G2 on the tune split costs about $0.20.
+

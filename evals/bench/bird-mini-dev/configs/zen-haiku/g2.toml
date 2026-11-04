@@ -1,0 +1,25 @@
+# RFC 0241 — G with profile v2. Motivated by the formula_1 hold-out analysis; validate on the tune split.
+name = "G2"
+description = "G with profile v2: empty-string counts, and that '' means missing"
+context = "ekos-pack"
+evidence = false
+value-lookup = true
+few-shot = 0
+n = 1
+r = 1
+max-tokens = 4096
+ves-iterations = 3
+timeout-seconds = 30
+profiles = true
+profile-version = 2
+value-lookup-version = 2
+prompt = "ekos-v1"
+result-checks = true
+vary-context = false
+
+[llm]
+# OpenCode Zen, Claude Haiku 5.5 ($0.10 / $0.50 per million tokens). Metered: needs --allow-metered.
+provider = "zen"
+model = "claude-haiku-5-5"
+api-key-env = "OPENCODE_API_KEY"
+budget-usd = 0.6
