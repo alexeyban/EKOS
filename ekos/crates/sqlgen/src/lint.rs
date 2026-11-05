@@ -237,7 +237,7 @@ fn unknown_names(a: &Analysis, schema: &Schema, out: &mut Vec<Finding>) {
                             .map(move |c| format!("{}.{}", t.name, c.name))
                     })
                     .collect();
-                let near = nearest(&u.column, all.iter().map(|s| s.as_str()));
+                let near = nearest(&u.column, all.iter().map(String::as_str));
                 (near, None)
             }
         };

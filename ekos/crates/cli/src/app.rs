@@ -843,6 +843,10 @@ enum BenchCommands {
         /// A fixed, hash-ordered sample of N questions of the split, spread over its databases
         #[arg(long)]
         sample: Option<usize>,
+        /// Only these question ids of the split, comma-separated (a model screen on chosen
+        /// questions)
+        #[arg(long, value_delimiter = ',')]
+        questions: Vec<String>,
         /// Replace the cell's [llm] model for this run (recorded in the report)
         #[arg(long)]
         model: Option<String>,
@@ -3605,6 +3609,7 @@ async fn dispatch_bench(
             split,
             limit,
             sample,
+            questions,
             model,
             allow_metered,
             bench_dir,
@@ -3621,6 +3626,7 @@ async fn dispatch_bench(
                     split: split.parse()?,
                     limit,
                     sample,
+                    questions: &questions,
                     model: model.as_deref(),
                     allow_metered,
                     reports_dir,

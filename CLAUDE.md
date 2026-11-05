@@ -292,6 +292,32 @@ the phase that needs them, not all up front (see `TODO.md` Phase -1 for the rati
 Every PR must satisfy: tests passing, documentation, benchmarks (performance-relevant changes
 only), no public API break, compiler diagnostics, logging, examples.
 
+## SonarCloud after every push to main
+
+`.github/workflows/sonar.yml` analyses `main` after every push: coverage, then the scan, then the
+quality gate. **After each commit you push to `main`, finish the job:**
+
+1. **Wait** for the SonarCloud run of that commit: `gh run list --workflow sonar.yml --commit <sha>`,
+   then `gh run watch <id> --exit-status`.
+2. **Read the result.** These need no token:
+   - the gate: `curl -s 'https://sonarcloud.io/api/qualitygates/project_status?projectKey=alexeyban_EKOS'`;
+   - the open new-code issues: `curl -s 'https://sonarcloud.io/api/issues/search?componentKeys=alexeyban_EKOS&inNewCodePeriod=true&resolved=false&ps=500'`;
+   - the per-file uncovered new lines (`api/measures/component_tree … metricSort=new_uncovered_lines`).
+
+   First check that the analysed revision (`api/project_analyses/search?project=alexeyban_EKOS&ps=1`)
+   is your commit.
+3. **Fix every issue in code you touched**, and any new bug, vulnerability or security hotspot,
+   then push again (which re-runs the analysis). Before pushing, run
+   `scripts/cognitive-complexity.sh` locally: it catches S3776 before Sonar does.
+4. **An issue that is deliberate is not silenced in code without a reason.**
+   - Plain `# NOSONAR` / `// NOSONAR` goes on the line, with the reason on the line above.
+   - An accept in SonarCloud (`issues/do_transition transition=accept` plus a comment) is a
+     write to an external service. Write it as a script for the person to run.
+5. **Report** the gate and anything left open, with the reason.
+
+A failing **coverage step** (not the scan) is a CI fault: fix the workflow first. The first run
+failed on the runner's Python 3.14; `UV_PYTHON` is pinned for that reason.
+
 ## Coding Rules
 
 - Rust 2024 edition

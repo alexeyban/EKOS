@@ -334,3 +334,44 @@ overlaps it by construction. By §5's rule the final set is therefore the Mini-D
 - **Gold-free detectors** (§2.2) catch few of the remaining errors. Most wrong answers run, return
   the right shape, and mean something else. What helped was letting the model look at the data
   and its own result.
+
+## 7. Choosing the model (2026-11-05)
+
+### 7.1 Screen: 10 tune questions
+
+The questions were 7 that Haiku K2 got wrong and 3 it got right: ids
+491, 146, 393, 71, 159, 245, 181 | 481, 121, 60, chosen with seed 242 and spread over databases.
+Every run used cell K2, with the model overridden by `--model`.
+
+| Model | Hard (7) | Easy (3) | $/question | s/question | Note |
+|---|---|---|---|---|---|
+| claude-haiku-5-5 | 0 | 3 | 0.0026 | ~9 | reference; 0/7 by construction |
+| claude-sonnet-5-5 | 4 | 2 | 0.061 | 18 | tools on 5 of 10 |
+| qwen3.6-plus | 3 | 2 | 0.035 | 164 | long reasoning: 4.7× Sonnet's output tokens |
+| kimi-k2.7-code | — | — | — | — | Zen: "endpoint unavailable" (k2.6: "access disabled") |
+| nemotron-3.5-super-vl-free | — | — | — | — | Zen: free usage limit reached (429). Data-collecting: BIRD only, cell `k2-free` |
+
+The screen cost $0.96. Ten questions chosen from Haiku's failures overstate any challenger; they
+pick a candidate, they prove nothing.
+
+### 7.2 Sonnet vs Haiku: 100 tune questions (`--sample 100`)
+
+| Cell | EX | Cost | Mean latency |
+|---|---|---|---|
+| K2-sonnet (claude-sonnet-5-5) | **87.0** | $5.32 ($0.053/question) | 13.2 s |
+| K2 (claude-haiku-5-5) | 78.0 | ~$0.26 at full price ($0.0026/question) | ~9 s |
+
+- **Paired:** +9.0 points. The bootstrap interval, [+1, +17], excludes zero; McNemar's p is
+  0.064.
+- **Flips:** Sonnet turned 14 answers right that Haiku had wrong, and 5 the other way.
+- **Cost:** Sonnet costs about **20× more per question**.
+
+**Reading.**
+
+- The model is the largest lever left. This one step (+9 on these 100) is as large as the
+  agent's.
+- For production text-to-SQL, route `[llm.tasks.nl-sql]` to Sonnet when accuracy matters more than
+  cost; other tasks keep cheaper models.
+- A cheaper middle way, not built: answer with Haiku, and escalate to Sonnet only questions whose
+  checks or verify step find a problem.
+- No hold-out claim is made: the hold-out was inspected (§6.4).

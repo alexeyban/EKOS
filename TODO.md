@@ -7019,3 +7019,6 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [ ] dbt-regeneration benchmark (RFC 0242 §2.4): needs a dbt project with seeds or a fixture database
 - [ ] Live probes for MySQL / SQL Server / Snowflake / Databricks (no live plugin yet)
 - [ ] A fresh text-to-SQL test set: Mini-Dev's hold-out was inspected on 2026-11-05
+- [x] Model screen (10 q) + Sonnet vs Haiku on 100 tune q: 87.0 vs 78.0 (+9, CI [+1, +17], McNemar p=0.064), Sonnet ~20× cost (devlog_320)
+- [ ] Haiku → Sonnet escalation on findings (cheaper than all-Sonnet), measured on the same 100 questions
+- [x] SonarCloud in CI (`.github/workflows/sonar.yml`): every push to main + weekly; quality gate enforced; fix-after-push rule in CLAUDE.md

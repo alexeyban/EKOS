@@ -359,6 +359,8 @@ pub struct RunOpts<'a> {
     pub limit: Option<usize>,
     /// A deterministic hash-ordered subset of the split (see `split::sample`).
     pub sample: Option<usize>,
+    /// Only these question ids of the split (empty: all).
+    pub questions: &'a [String],
     /// Replaces the cell's `[llm] model` (recorded in the report's config and hash).
     pub model: Option<&'a str>,
     /// Required for any route that is not a local Ollama model.
@@ -424,6 +426,15 @@ pub async fn run(base: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<()>
     }
     if let Some(limit) = opts.limit {
         planned.truncate(limit);
+    }
+    if !opts.questions.is_empty() {
+        planned = select_questions(planned, opts.questions, opts.split)?;
+    }
+    if ekos_recovery::pricing::collects_data(&model) {
+        eprintln!(
+            "warning: {model} is a free model whose provider may keep prompts — fine for a public \
+             benchmark, never for a client's schema"
+        );
     }
     if planned.is_empty() {
         bail!("no questions in split {} of {}", opts.split, suite.name);
@@ -506,6 +517,27 @@ pub async fn run(base: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<()>
         println!("Report: {}", path.display());
     }
     Ok(())
+}
+
+/// The questions with these ids, in the split's order; an id not in the split is an error.
+fn select_questions(
+    planned: Vec<bench::BenchScenario>,
+    ids: &[String],
+    split: Split,
+) -> Result<Vec<bench::BenchScenario>> {
+    let wanted: std::collections::BTreeSet<&str> = ids.iter().map(|s| s.trim()).collect();
+    let missing: Vec<&str> = wanted
+        .iter()
+        .copied()
+        .filter(|id| !planned.iter().any(|s| s.id == *id))
+        .collect();
+    if !missing.is_empty() {
+        bail!("question ids not in split {split}: {}", missing.join(", "));
+    }
+    Ok(planned
+        .into_iter()
+        .filter(|s| wanted.contains(s.id.as_str()))
+        .collect())
 }
 
 /// One database as a run sees it: the file, its catalogue, the pack and fingerprint from its
@@ -750,4 +782,33 @@ pub fn render_history(runs: &[(PathBuf, BenchReport)]) -> String {
         ));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scenario(id: &str) -> bench::BenchScenario {
+        bench::BenchScenario {
+            id: id.into(),
+            db_id: "db".into(),
+            question: String::new(),
+            evidence: String::new(),
+            gold_sql: String::new(),
+            difficulty: String::new(),
+        }
+    }
+
+    #[test]
+    fn questions_selects_exactly_those_ids_in_split_order() {
+        let planned = vec![scenario("1"), scenario("5"), scenario("9")];
+        let ids = vec!["9".to_string(), " 1".to_string()];
+        let got = select_questions(planned.clone(), &ids, Split::Tune).unwrap();
+        assert_eq!(
+            got.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["1", "9"]
+        );
+        let e = select_questions(planned, &["2".to_string()], Split::Tune).unwrap_err();
+        assert!(e.to_string().contains("not in split tune: 2"), "{e}");
+    }
 }

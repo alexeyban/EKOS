@@ -429,7 +429,7 @@ impl Schema {
         let words: Vec<String> = question
             .split(|c: char| !c.is_alphanumeric() && c != '_')
             .filter(|w| w.len() >= 3)
-            .map(|w| w.to_lowercase())
+            .map(str::to_lowercase)
             .collect();
         let score = |t: &Table| -> usize {
             let mut text = t.name.to_lowercase();
