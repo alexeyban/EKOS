@@ -97,6 +97,10 @@ jobs:
       # Last: every pytest run rewrites coverage.xml, so nothing may run pytest after it.
       - name: API coverage
         working-directory: web/api
+        env:
+          # The console's supported Python, as in ci.yml: the runner's default (3.14) has no
+          # wheel for every dependency, and --no-build refuses to compile one.
+          UV_PYTHON: "3.12"
         run: |
           uv sync --frozen --no-build --no-install-project
           uv run --no-sync --no-build pytest -q -o faulthandler_timeout=300
