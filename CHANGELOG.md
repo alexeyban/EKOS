@@ -1,5 +1,39 @@
 # Changelog
 
+## v1.3.0 — 2026-11-05
+
+RFCs 0242–0244, devlogs 319–320.
+
+**New capabilities**
+- **Writing and checking SQL against compiled knowledge** (RFC 0242/0243):
+  - `ekos sql check [FILE] [--database NAME | --sqlite FILE]` lints a query against the ledger's
+    tables, columns, keys and foreign keys and the dialect's rules. With a database it also runs
+    read-only probes: the result, value spellings, rows repeated by joins, ties.
+  - `ekos sql generate "<question>"` is a tool-using agent whose every draft is checked before
+    it is final.
+  - The read-only MCP tool `ekos_sql_check` gives a dialect's writing rules, or checks a drafted
+    query.
+  - Every SQL dialect plugin states its engine's facts and generation notes.
+  - The PostgreSQL, ClickHouse and Oracle plugins run probes behind a single-SELECT guard and a
+    read-only session. PostgreSQL also refuses a role that can write.
+  - A `text-to-sql` skill for Claude Code.
+- **Text-to-SQL agent on BIRD** (RFC 0242):
+  - The cells `strategy = "loop" | "agent"` add `verify`; `ekos eval bench checks` replays the
+    checks over a report.
+  - BIRD Mini-Dev hold-out, Claude Haiku 5.5: 76.2% with the agent, against 53.3% on raw DDL.
+  - On 100 tune questions, Claude Sonnet 5.5 with the agent scored 87.0%.
+- **BIRD-Test submission support** (RFC 0244):
+  - suite `bird-dev` (BIRD New Dev 2025-11-06);
+  - test-set questions without gold SQL are predicted, not scored;
+  - `eval bench run` checkpoints every answer, and `--resume` continues an interrupted run;
+  - profile queries have a deadline, for giant databases;
+  - `eval bench run --questions <ids>`.
+- **SQLite dialect plugin** (`plugins/sql-dialect-sqlite`).
+
+**Changes**
+- SonarCloud analysis runs in CI on every push to `main` and weekly, with the quality gate
+  enforced (`.github/workflows/sonar.yml`).
+
 ## v1.2.0 — 2026-11-04
 
 RFCs 0190–0241, devlogs 273–318. Upgrading: the first `ekos commit` after upgrading writes one
