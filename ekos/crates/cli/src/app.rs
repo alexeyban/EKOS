@@ -847,6 +847,10 @@ enum BenchCommands {
         /// questions)
         #[arg(long, value_delimiter = ',')]
         questions: Vec<String>,
+        /// Continue an interrupted run from its checkpoint (`<reports>/<stamp>-<cell>-<split>.partial.jsonl`):
+        /// answered questions are not asked again (RFC 0244)
+        #[arg(long, value_name = "FILE")]
+        resume: Option<PathBuf>,
         /// Replace the cell's [llm] model for this run (recorded in the report)
         #[arg(long)]
         model: Option<String>,
@@ -3610,6 +3614,7 @@ async fn dispatch_bench(
             limit,
             sample,
             questions,
+            resume,
             model,
             allow_metered,
             bench_dir,
@@ -3627,6 +3632,7 @@ async fn dispatch_bench(
                     limit,
                     sample,
                     questions: &questions,
+                    resume,
                     model: model.as_deref(),
                     allow_metered,
                     reports_dir,

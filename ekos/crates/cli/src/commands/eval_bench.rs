@@ -361,6 +361,9 @@ pub struct RunOpts<'a> {
     pub sample: Option<usize>,
     /// Only these question ids of the split (empty: all).
     pub questions: &'a [String],
+    /// RFC 0244: a checkpoint (`*.partial.jsonl`) of an interrupted run of the same cell; its
+    /// questions are not asked again.
+    pub resume: Option<PathBuf>,
     /// Replaces the cell's `[llm] model` (recorded in the report's config and hash).
     pub model: Option<&'a str>,
     /// Required for any route that is not a local Ollama model.
@@ -477,19 +480,54 @@ pub async fn run(base: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<()>
         opts.split
     );
     let started_at = chrono::Utc::now().to_rfc3339();
-    let mut correct = 0usize;
-    let outcome = bench::run(adapter.as_ref(), &planned, &cfg, &rt, &mut |i, total, r| {
-        correct += r.score.ex as usize;
+    let (checkpoint_path, done) = match &opts.resume {
+        Some(path) => (path.clone(), read_checkpoint(path, &cfg.hash())?),
+        None => {
+            std::fs::create_dir_all(&reports_dir)?;
+            let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S");
+            let name = format!(
+                "{stamp}-{}-{}.partial.jsonl",
+                cfg.name.to_lowercase(),
+                opts.split
+            );
+            (reports_dir.join(name), Vec::new())
+        }
+    };
+    let mut checkpoint = open_checkpoint(&checkpoint_path, &cfg.hash())?;
+    if !done.is_empty() {
         eprintln!(
-            "  [{i}/{total}] q{} {:<26} {} {:>6} ms  running EX {:.1}%",
-            r.id,
-            r.db_id,
-            if r.score.ex { "✓" } else { "✗" },
-            r.prediction.latency_ms,
-            correct as f64 * 100.0 / i as f64
+            "Resuming from {}: {} questions already answered.",
+            checkpoint_path.display(),
+            done.len()
         );
-    })
+    }
+    let mut correct = 0usize;
+    let outcome = bench::run_from(
+        adapter.as_ref(),
+        &planned,
+        &cfg,
+        &rt,
+        done,
+        &mut |i, total, r| {
+            correct += r.score.ex as usize;
+            if let Err(e) = append_checkpoint(&mut checkpoint, r) {
+                eprintln!(
+                    "warning: checkpoint {} not written: {e}",
+                    checkpoint_path.display()
+                );
+            }
+            eprintln!(
+                "  [{i}/{total}] q{} {:<26} {} {:>6} ms  running EX {:.1}%",
+                r.id,
+                r.db_id,
+                if r.score.ex { "✓" } else { "✗" },
+                r.prediction.latency_ms,
+                correct as f64 * 100.0 / i as f64
+            );
+        },
+    )
     .await;
+    eprintln!("Checkpoint: {}", checkpoint_path.display());
     let report = BenchReport::assemble(
         RunMeta {
             suite: &suite,
@@ -517,6 +555,66 @@ pub async fn run(base: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<()>
         println!("Report: {}", path.display());
     }
     Ok(())
+}
+
+/// The first line of a checkpoint: which cell it belongs to.
+const CHECKPOINT_VERSION: u32 = 1;
+
+/// Opens a checkpoint for appending, writing its header when it is new.
+fn open_checkpoint(path: &Path, config_hash: &str) -> Result<std::fs::File> {
+    use std::io::Write;
+    let new = !path.is_file();
+    // A crash can cut the last line short; the next result must not be glued onto it.
+    let torn = !new
+        && std::fs::read(path)
+            .ok()
+            .is_some_and(|b| !b.is_empty() && !b.ends_with(b"\n"));
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("opening checkpoint {}", path.display()))?;
+    if new {
+        writeln!(
+            f,
+            "{}",
+            serde_json::json!({ "checkpoint": CHECKPOINT_VERSION, "config_hash": config_hash })
+        )?;
+    } else if torn {
+        writeln!(f)?;
+    }
+    Ok(f)
+}
+
+fn append_checkpoint(f: &mut std::fs::File, r: &bench::QuestionResult) -> Result<()> {
+    use std::io::Write;
+    writeln!(f, "{}", serde_json::to_string(r)?)?;
+    f.flush()?;
+    Ok(())
+}
+
+/// The results a checkpoint holds; refuses one written for another cell configuration. A last
+/// line cut short by a crash is ignored.
+fn read_checkpoint(path: &Path, config_hash: &str) -> Result<Vec<bench::QuestionResult>> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading checkpoint {}", path.display()))?;
+    let mut lines = text.lines();
+    let header: serde_json::Value = lines
+        .next()
+        .map(serde_json::from_str)
+        .transpose()?
+        .unwrap_or_default();
+    if header["config_hash"].as_str() != Some(config_hash) {
+        bail!(
+            "checkpoint {} was written by another cell configuration (hash {}); resume with the \
+             same cell, or start a new run",
+            path.display(),
+            header["config_hash"].as_str().unwrap_or("?")
+        );
+    }
+    Ok(lines
+        .filter_map(|l| serde_json::from_str::<bench::QuestionResult>(l).ok())
+        .collect())
 }
 
 /// The questions with these ids, in the split's order; an id not in the split is an error.
@@ -797,6 +895,43 @@ mod tests {
             gold_sql: String::new(),
             difficulty: String::new(),
         }
+    }
+
+    fn result(id: &str) -> bench::QuestionResult {
+        bench::QuestionResult {
+            id: id.into(),
+            db_id: "db".into(),
+            difficulty: String::new(),
+            prediction: Default::default(),
+            score: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_checkpoint_round_trips_and_refuses_another_cell() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("run.partial.jsonl");
+        let mut f = open_checkpoint(&path, "hash-a").unwrap();
+        append_checkpoint(&mut f, &result("1")).unwrap();
+        append_checkpoint(&mut f, &result("2")).unwrap();
+        drop(f);
+        // A crash mid-line leaves a fragment, which is ignored.
+        std::fs::write(
+            &path,
+            std::fs::read_to_string(&path).unwrap() + "{\"id\":\"3\",",
+        )
+        .unwrap();
+        let done = read_checkpoint(&path, "hash-a").unwrap();
+        assert_eq!(
+            done.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(),
+            vec!["1", "2"]
+        );
+        let e = read_checkpoint(&path, "hash-b").unwrap_err();
+        assert!(e.to_string().contains("another cell configuration"), "{e}");
+        // Reopening appends after the existing lines; no second header.
+        let mut f = open_checkpoint(&path, "hash-a").unwrap();
+        append_checkpoint(&mut f, &result("4")).unwrap();
+        assert_eq!(read_checkpoint(&path, "hash-a").unwrap().len(), 3);
     }
 
     #[test]

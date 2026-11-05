@@ -150,6 +150,10 @@ impl BirdAdapter {
             return Ok(());
         }
         let prefix = source.prefix.clone().unwrap_or_default();
+        let archive = match &source.inner {
+            Some(inner) => unpack_inner(&archive, inner, &self.dirs.archives())?,
+            None => archive,
+        };
         let file = std::fs::File::open(&archive)
             .with_context(|| format!("opening {}", archive.display()))?;
         let mut zip =
@@ -184,6 +188,28 @@ impl BirdAdapter {
         std::fs::write(&marker, want)?;
         Ok(())
     }
+}
+
+/// RFC 0244: copies the zip named `inner` out of `outer` into `dir` (once; reused while its size
+/// matches) and returns its path.
+fn unpack_inner(outer: &Path, inner: &str, dir: &Path) -> Result<PathBuf> {
+    let file =
+        std::fs::File::open(outer).with_context(|| format!("opening {}", outer.display()))?;
+    let mut zip =
+        zip::ZipArchive::new(file).with_context(|| format!("reading {}", outer.display()))?;
+    let mut entry = zip
+        .by_name(inner)
+        .with_context(|| format!("{} has no {inner}", outer.display()))?;
+    let name = inner.rsplit('/').next().unwrap_or(inner);
+    let out = dir.join(format!(".inner-{name}"));
+    if std::fs::metadata(&out).is_ok_and(|m| m.len() == entry.size()) {
+        return Ok(out);
+    }
+    let tmp = dir.join(format!(".inner-{name}.part"));
+    let mut f = std::fs::File::create(&tmp)?;
+    std::io::copy(&mut entry, &mut f)?;
+    std::fs::rename(&tmp, &out)?;
+    Ok(out)
 }
 
 /// `<db>/<db>.sqlite` or `<db>/database_description/<x>.csv`, for a database in `db_ids`; any
@@ -1236,6 +1262,29 @@ mod tests {
         ] {
             assert!(allowlisted(refused, &dbs).is_none(), "{refused}");
         }
+    }
+
+    #[test]
+    fn a_zip_inside_the_archive_is_unpacked_once() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let zip_bytes = |name: &str, body: &[u8]| {
+            let mut buf = std::io::Cursor::new(Vec::new());
+            let mut w = zip::ZipWriter::new(&mut buf);
+            w.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(body).unwrap();
+            w.finish().unwrap();
+            buf.into_inner()
+        };
+        let inner = zip_bytes("dbs/x/x.sqlite", b"not really sqlite");
+        let outer = dir.path().join("dev.zip");
+        std::fs::write(&outer, zip_bytes("dev_2024/dev_databases.zip", &inner)).unwrap();
+        let out = unpack_inner(&outer, "dev_2024/dev_databases.zip", dir.path()).unwrap();
+        assert_eq!(std::fs::read(&out).unwrap(), inner);
+        let again = unpack_inner(&outer, "dev_2024/dev_databases.zip", dir.path()).unwrap();
+        assert_eq!(again, out);
+        assert!(unpack_inner(&outer, "missing.zip", dir.path()).is_err());
     }
 
     #[test]

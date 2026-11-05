@@ -1,0 +1,30 @@
+# RFC 0244 — the BIRD-Test submission cell: RFC 0242's K2 (EKOS pack with profiles and value
+# lookup, the ekos-v1 prompt, a tool-using agent with checks and one verify step) on Claude Haiku
+# 5.5, WITH BIRD's evidence hints (the leaderboard's Oracle Knowledge setting).
+name = "K2-dev"
+description = "K2 + evidence (BIRD Oracle Knowledge) — the submission cell"
+context = "ekos-pack"
+evidence = true
+value-lookup = true
+few-shot = 0
+n = 1
+r = 1
+max-tokens = 4096
+ves-iterations = 3
+timeout-seconds = 30
+profiles = true
+profile-version = 2
+value-lookup-version = 2
+prompt = "ekos-v1"
+result-checks = false
+vary-context = false
+strategy = "agent"
+verify = true
+checks = ["E000", "P001", "P002", "P003", "P004", "P005", "L001", "L003", "L004", "L005", "L006", "L007", "L008"]
+
+[llm]
+# OpenCode Zen, Claude Haiku 5.5 ($0.10 / $0.50 per million tokens). Metered: needs --allow-metered.
+provider = "zen"
+model = "claude-haiku-5-5"
+api-key-env = "OPENCODE_API_KEY"
+budget-usd = 6.0

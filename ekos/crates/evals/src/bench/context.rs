@@ -12,6 +12,7 @@ use sqlparser::dialect::SQLiteDialect;
 use sqlparser::parser::Parser;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::ControlFlow;
+use std::time::{Duration, Instant};
 
 /// `"name"` / `` `name` `` / `[name]` → `name`.
 pub fn unquote(name: &str) -> String {
@@ -298,20 +299,26 @@ impl ValueIndex {
                     continue;
                 }
                 let (qt, qc) = (quote(t), quote(c));
-                let distinct: i64 =
-                    conn.query_row(&format!("SELECT COUNT(DISTINCT {qc}) FROM {qt}"), [], |r| {
-                        r.get(0)
-                    })?;
-                if distinct == 0 || distinct > MAX_DISTINCT {
-                    continue;
-                }
-                let mut stmt = conn.prepare(&format!(
-                    "SELECT DISTINCT {qc} FROM {qt} WHERE typeof({qc}) = 'text' \
-                     AND length({qc}) BETWEEN 1 AND {MAX_VALUE_CHARS} ORDER BY {qc}"
-                ))?;
-                let values = stmt
-                    .query_map([], |r| r.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()?;
+                let limit = Duration::from_secs(PROFILE_QUERY_SECONDS);
+                let values = bounded(conn, limit, &format!("values of {t}.{c}"), || {
+                    let distinct: i64 = conn.query_row(
+                        &format!("SELECT COUNT(DISTINCT {qc}) FROM {qt}"),
+                        [],
+                        |r| r.get(0),
+                    )?;
+                    if distinct == 0 || distinct > MAX_DISTINCT {
+                        return Ok(Vec::new());
+                    }
+                    let mut stmt = conn.prepare(&format!(
+                        "SELECT DISTINCT {qc} FROM {qt} WHERE typeof({qc}) = 'text' \
+                         AND length({qc}) BETWEEN 1 AND {MAX_VALUE_CHARS} ORDER BY {qc}"
+                    ))?;
+                    let values = stmt
+                        .query_map([], |r| r.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?;
+                    Ok(values)
+                })
+                .unwrap_or_default();
                 if !values.is_empty() {
                     columns.push((t.clone(), c.clone(), values));
                 }
@@ -480,6 +487,71 @@ fn is_list_column(distinct_values: &[String]) -> bool {
     known * 2 >= elements.len()
 }
 
+/// Longest one profile or value-index query may run (RFC 0244: BIRD's test set holds giant
+/// databases, and `prepare` must finish).
+pub const PROFILE_QUERY_SECONDS: u64 = 60;
+
+/// Runs `f` with a deadline on `conn`; `None` (logged) when it fails or runs out of time.
+fn bounded<T>(
+    conn: &rusqlite::Connection,
+    limit: Duration,
+    what: &str,
+    f: impl FnOnce() -> rusqlite::Result<T>,
+) -> Option<T> {
+    let deadline = Instant::now() + limit;
+    conn.progress_handler(10_000, Some(move || Instant::now() > deadline));
+    let result = f();
+    conn.progress_handler(0, None::<fn() -> bool>);
+    match result {
+        Ok(v) => Some(v),
+        Err(e) => {
+            tracing::warn!("{what}: left out ({e})");
+            None
+        }
+    }
+}
+
+/// One column's statistics.
+fn column_profile(
+    conn: &rusqlite::Connection,
+    qt: &str,
+    qc: &str,
+    rows: i64,
+) -> rusqlite::Result<ColumnProfile> {
+    let (nulls, distinct, empty): (i64, i64, i64) = conn.query_row(
+        &format!(
+            "SELECT COUNT(*) - COUNT({qc}), COUNT(DISTINCT {qc}), \
+             COALESCE(SUM(typeof({qc}) = 'text' AND trim({qc}) = ''), 0) FROM {qt}"
+        ),
+        [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT DISTINCT CAST({qc} AS TEXT) FROM {qt} WHERE {qc} IS NOT NULL LIMIT 2000"
+    ))?;
+    let sample: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, Option<String>>(0))?
+        .filter_map(|v| v.ok().flatten())
+        .collect();
+    let list_valued = is_list_column(&sample);
+    let sentinels = sentinels(conn, qt, qc, rows)?;
+    let examples = sample
+        .iter()
+        .filter(|v| !v.trim().is_empty())
+        .take(3)
+        .map(|v| v.chars().take(EXAMPLE_CHARS).collect())
+        .collect();
+    Ok(ColumnProfile {
+        nulls: nulls as u64,
+        empty: empty as u64,
+        distinct: distinct as u64,
+        unique: distinct > 0 && distinct == rows - nulls && nulls == 0,
+        examples,
+        list_valued,
+        sentinels,
+    })
+}
+
 /// Share of a table's rows a sentinel must hold.
 const SENTINEL_SHARE: f64 = 0.01;
 /// A `0` is a sentinel only when the column's real values start well above it (heights,
@@ -494,7 +566,7 @@ fn sentinels(
     qt: &str,
     qc: &str,
     rows: i64,
-) -> Result<Vec<(String, u64)>> {
+) -> rusqlite::Result<Vec<(String, u64)>> {
     let num = format!("typeof({qc}) IN ('integer', 'real')");
     let (zeros, minus_one, other_negative, min_positive): (i64, i64, i64, Option<f64>) = conn
         .query_row(
@@ -546,50 +618,32 @@ fn profile_v1() -> u32 {
 
 impl Profile {
     pub fn build(db: &Db, schema: &SchemaInfo) -> Result<Profile> {
+        Self::build_within(db, schema, Duration::from_secs(PROFILE_QUERY_SECONDS))
+    }
+
+    /// [`Profile::build`] with each table's row count and each column's statistics bounded by
+    /// `limit` (RFC 0244): what does not finish in time is left out of the profile (and logged)
+    /// rather than holding up `prepare` on a giant table.
+    pub fn build_within(db: &Db, schema: &SchemaInfo, limit: Duration) -> Result<Profile> {
         let conn = db.connection();
         let mut tables = BTreeMap::new();
         for t in &schema.table_names {
             let qt = quote(t);
-            let rows: i64 =
-                conn.query_row(&format!("SELECT COUNT(*) FROM {qt}"), [], |r| r.get(0))?;
+            let Some(rows) = bounded(conn, limit, &format!("row count of {t}"), || {
+                conn.query_row(&format!("SELECT COUNT(*) FROM {qt}"), [], |r| {
+                    r.get::<_, i64>(0)
+                })
+            }) else {
+                continue;
+            };
             let mut columns = BTreeMap::new();
             for (c, _, _) in &schema.tables[&t.to_lowercase()] {
                 let qc = quote(c);
-                let (nulls, distinct, empty): (i64, i64, i64) = conn.query_row(
-                    &format!(
-                        "SELECT COUNT(*) - COUNT({qc}), COUNT(DISTINCT {qc}), \
-                         COALESCE(SUM(typeof({qc}) = 'text' AND trim({qc}) = ''), 0) FROM {qt}"
-                    ),
-                    [],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-                )?;
-                let mut stmt = conn.prepare(&format!(
-                    "SELECT DISTINCT CAST({qc} AS TEXT) FROM {qt} WHERE {qc} IS NOT NULL LIMIT 2000"
-                ))?;
-                let sample: Vec<String> = stmt
-                    .query_map([], |r| r.get::<_, Option<String>>(0))?
-                    .filter_map(|v| v.ok().flatten())
-                    .collect();
-                let list_valued = is_list_column(&sample);
-                let sentinels = sentinels(conn, &qt, &qc, rows)?;
-                let examples = sample
-                    .iter()
-                    .filter(|v| !v.trim().is_empty())
-                    .take(3)
-                    .map(|v| v.chars().take(EXAMPLE_CHARS).collect())
-                    .collect();
-                columns.insert(
-                    c.to_lowercase(),
-                    ColumnProfile {
-                        nulls: nulls as u64,
-                        empty: empty as u64,
-                        distinct: distinct as u64,
-                        unique: distinct > 0 && distinct == rows - nulls && nulls == 0,
-                        examples,
-                        list_valued,
-                        sentinels,
-                    },
-                );
+                if let Some(cp) = bounded(conn, limit, &format!("profile of {t}.{c}"), || {
+                    column_profile(conn, &qt, &qc, rows)
+                }) {
+                    columns.insert(c.to_lowercase(), cp);
+                }
             }
             tables.insert(
                 t.to_lowercase(),
@@ -1003,6 +1057,30 @@ pub fn join_pairs(joins: &[String]) -> BTreeSet<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 0244: a statistic past its deadline is left out; `prepare` does not wait for it.
+    #[test]
+    fn a_profile_query_past_its_deadline_is_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.sqlite");
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE big (id INTEGER PRIMARY KEY, v TEXT);
+             WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200000)
+             INSERT INTO big SELECT i, 'v' || (i % 977) FROM n;",
+        )
+        .unwrap();
+        drop(c);
+        let db = Db::open(&path).unwrap();
+        let schema = SchemaInfo::read(&db).unwrap();
+        let quick = Profile::build_within(&db, &schema, Duration::ZERO).unwrap();
+        assert!(
+            quick.table("big").is_none_or(|t| t.columns.is_empty()),
+            "nothing finishes with no time"
+        );
+        let full = Profile::build_within(&db, &schema, Duration::from_secs(60)).unwrap();
+        assert_eq!(full.column("big", "v").unwrap().distinct, 977);
+    }
 
     #[test]
     fn extracts_the_last_sql_block() {

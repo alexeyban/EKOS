@@ -427,6 +427,65 @@ async fn rfc_0242_checks_rescue_value_spellings_in_the_loop_and_the_agent() {
     );
 }
 
+/// RFC 0244: a test-set question (no gold SQL) is predicted and left unscored, and a run resumed
+/// from a checkpoint asks only the questions it does not hold.
+#[tokio::test]
+async fn rfc_0244_predict_only_questions_and_resume() {
+    let f = fixture();
+    let adapter = adapter(&f.suite_dir);
+    adapter
+        .prepare(&PrepareCtx {
+            dirs: &SuiteDirs::new(&f.suite_dir),
+            force: false,
+        })
+        .unwrap();
+    let dirs = SuiteDirs::new(&f.suite_dir);
+    let dbs = open_dbs(adapter.as_ref(), &dirs);
+    let cfg = ExperimentConfig::load(&f.suite_dir.join("configs/a.toml")).unwrap();
+    let mut planned = adapter.scenarios(Split::All).unwrap();
+    planned[0].gold_sql = String::new();
+    let llm = ScriptedLlm::new();
+    let rt = RunCtx {
+        llm: &llm,
+        dbs: &dbs,
+        price: None,
+    };
+    let first = bench::run(adapter.as_ref(), &planned, &cfg, &rt, &mut |_, _, _| {}).await;
+    let q0 = &first.results[0];
+    assert!(
+        q0.prediction.sql.is_some(),
+        "a test question is still answered"
+    );
+    assert_eq!(q0.score.category, bench::Category::Unscored);
+    assert!(q0.score.gold_error.is_none());
+    let asked = llm.calls.load(std::sync::atomic::Ordering::SeqCst);
+
+    // Resume with the first three answered: only the rest are asked, and the outcome is whole.
+    let done = first.results[..3].to_vec();
+    let llm2 = ScriptedLlm::new();
+    let rt2 = RunCtx {
+        llm: &llm2,
+        dbs: &dbs,
+        price: None,
+    };
+    let mut fresh = 0;
+    let resumed = bench::run_from(
+        adapter.as_ref(),
+        &planned,
+        &cfg,
+        &rt2,
+        done,
+        &mut |_, _, _| fresh += 1,
+    )
+    .await;
+    assert_eq!(resumed.results.len(), planned.len());
+    assert_eq!(fresh, planned.len() - 3);
+    assert!(llm2.calls.load(std::sync::atomic::Ordering::SeqCst) < asked);
+    let ids: Vec<&str> = resumed.results.iter().map(|r| r.id.as_str()).collect();
+    let want: Vec<&str> = planned.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, want, "results keep the questions' order");
+}
+
 #[tokio::test]
 async fn cache_served_calls_are_counted_and_not_billed() {
     let f = fixture();

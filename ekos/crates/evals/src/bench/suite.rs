@@ -55,6 +55,10 @@ pub struct Source {
     /// Inside a database archive: the directory holding one folder per database.
     #[serde(default)]
     pub prefix: Option<String>,
+    /// RFC 0244: a zip inside the downloaded zip that holds the databases (`dev.zip` carries
+    /// `dev_20240627/dev_databases.zip`); `prefix` then applies inside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inner: Option<String>,
 }
 
 /// The tuning / hold-out split (RFC 0240 §6, first open question).
@@ -224,6 +228,7 @@ file = "dbs"
             url: Some("https://example.invalid/a.bin".into()),
             sha256: Some(sha256_hex(b"hello")),
             prefix: None,
+            inner: None,
         };
         verify(&source, &path).unwrap();
         source.sha256 = Some(sha256_hex(b"other"));

@@ -488,9 +488,29 @@ pub async fn run(
     rt: &RunCtx<'_>,
     progress: &mut dyn FnMut(usize, usize, &QuestionResult),
 ) -> RunOutcome {
+    run_from(adapter, scenarios, cfg, rt, Vec::new(), progress).await
+}
+
+/// [`run`], starting from results a checkpoint already holds (RFC 0244): their questions are not
+/// asked again, and the outcome lists every question in `scenarios` order. `progress` is called
+/// for newly answered questions only — the caller appends them to its checkpoint.
+pub async fn run_from(
+    adapter: &dyn BenchAdapter,
+    scenarios: &[BenchScenario],
+    cfg: &ExperimentConfig,
+    rt: &RunCtx<'_>,
+    done: Vec<QuestionResult>,
+    progress: &mut dyn FnMut(usize, usize, &QuestionResult),
+) -> RunOutcome {
+    let mut done: BTreeMap<String, QuestionResult> =
+        done.into_iter().map(|r| (r.id.clone(), r)).collect();
     let mut results = Vec::with_capacity(scenarios.len());
     let mut budget_stopped = None;
     for (i, s) in scenarios.iter().enumerate() {
+        if let Some(r) = done.remove(&s.id) {
+            results.push(r);
+            continue;
+        }
         let prediction = match adapter.run_one(s, cfg, rt).await {
             Ok(p) => p,
             Err(e) => {
@@ -504,12 +524,17 @@ pub async fn run(
                 }
             }
         };
-        let score = adapter
-            .score(s, &prediction, cfg, rt)
-            .unwrap_or_else(|e| Score {
-                gold_error: Some(format!("{e:#}")),
-                ..Default::default()
-            });
+        // RFC 0244: a question with no gold SQL (a test set) is predicted, not scored.
+        let score = if s.gold_sql.trim().is_empty() {
+            Score::default()
+        } else {
+            adapter
+                .score(s, &prediction, cfg, rt)
+                .unwrap_or_else(|e| Score {
+                    gold_error: Some(format!("{e:#}")),
+                    ..Default::default()
+                })
+        };
         let result = QuestionResult {
             id: s.id.clone(),
             db_id: s.db_id.clone(),
