@@ -5,6 +5,8 @@
 [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=alexeyban_EKOS&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=alexeyban_EKOS)
 [![Quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=alexeyban_EKOS)](https://sonarcloud.io/summary/new_code?id=alexeyban_EKOS)
 
+<a href="https://www.producthunt.com/products/ekos-2/reviews/new?utm_source=badge-product_review&utm_medium=badge&utm_source=badge-ekos&#0045;2" target="_blank"><img src="https://api.producthunt.com/widgets/embed-image/v1/product_review.svg?product_id=1288395&theme=dark" alt="EKOS - Turn&#0032;GitHub&#0032;repos&#0032;into&#0032;MCP&#0032;servers | Product Hunt" style="width: 250px; height: 54px;" width="250" height="54" /></a>
+
 EKOS is the open-source knowledge layer for AI agents: a compiler that turns source code, SQL,
 documentation and Git history into evidence-backed knowledge that agents query over MCP. Project
 site and documentation: **[ekos.dev](https://ekos.dev)**. Install: **[ekos.dev/docs/getting-started/installation](https://ekos.dev/docs/getting-started/installation.html)**
