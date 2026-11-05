@@ -97,11 +97,13 @@ fn newest_report(dir: &Path, cell: &str) -> PathBuf {
         .unwrap()
         .flatten()
         .map(|e| e.path())
+        // Reports only: a run also leaves its checkpoint (`*.partial.jsonl`) beside them.
         .filter(|p| {
-            p.file_name()
-                .unwrap()
-                .to_string_lossy()
-                .contains(&format!("-{cell}-"))
+            p.extension().is_some_and(|x| x == "json")
+                && p.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains(&format!("-{cell}-"))
         })
         .collect();
     found.sort();

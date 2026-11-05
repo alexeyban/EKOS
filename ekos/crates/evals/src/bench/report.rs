@@ -330,6 +330,14 @@ impl BenchReport {
     }
 
     /// Plain-text summary, as `ekos eval bench run` prints it.
+    /// Every question was answered without a gold SQL to score against (a test set).
+    pub fn predictions_only(&self) -> bool {
+        !self.questions.is_empty()
+            && self.questions.iter().all(|q| {
+                q.score.category == super::Category::Unscored && q.score.gold_error.is_none()
+            })
+    }
+
     pub fn render(&self) -> String {
         let m = &self.metrics;
         let mut out = String::new();
@@ -348,19 +356,33 @@ impl BenchReport {
                 None => String::new(),
             }
         ));
-        out.push_str(&format!(
-            "EX        {:6.2}%   95% CI [{:.2}, {:.2}]\n",
-            m.ex.mean, m.ex.low, m.ex.high
-        ));
-        out.push_str(&format!(
-            "Soft-F1   {:6.2}%   95% CI [{:.2}, {:.2}]\n",
-            m.soft_f1.mean, m.soft_f1.low, m.soft_f1.high
-        ));
-        out.push_str(&format!("R-VES     {:6.2}\n", m.rves));
-        out.push_str(&format!(
-            "Grounded  {:6.2}%   executed {:.2}%\n",
-            m.grounding_rate, m.executed_rate
-        ));
+        if self.predictions_only() {
+            // RFC 0244: a test set has no gold SQL; there is nothing to score, not a score of 0.
+            let with_sql = self
+                .questions
+                .iter()
+                .filter(|q| q.prediction.sql.is_some())
+                .count();
+            out.push_str(&format!(
+                "Predictions only — no gold SQL to score against: {with_sql} of {} questions \
+                 answered with SQL\n",
+                self.n
+            ));
+        } else {
+            out.push_str(&format!(
+                "EX        {:6.2}%   95% CI [{:.2}, {:.2}]\n",
+                m.ex.mean, m.ex.low, m.ex.high
+            ));
+            out.push_str(&format!(
+                "Soft-F1   {:6.2}%   95% CI [{:.2}, {:.2}]\n",
+                m.soft_f1.mean, m.soft_f1.low, m.soft_f1.high
+            ));
+            out.push_str(&format!("R-VES     {:6.2}\n", m.rves));
+            out.push_str(&format!(
+                "Grounded  {:6.2}%   executed {:.2}%\n",
+                m.grounding_rate, m.executed_rate
+            ));
+        }
         let opt = |v: Option<f64>| v.map_or("n/a".to_string(), |v| format!("{v:.2}%"));
         out.push_str(&format!(
             "Schema-linking recall {} · join-path recall {} · value-hit rate {}\n",
@@ -662,5 +684,37 @@ impl Comparison {
             out.push_str(&format!("  warning: {w}\n"));
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// RFC 0244: a run over a test set (no gold SQL) reads as predictions, not as 0% EX.
+    #[test]
+    fn a_test_set_run_renders_as_predictions_only() {
+        let mut r = crate::bench::fixture::empty_report();
+        r.n = 1;
+        r.questions.push(crate::bench::QuestionResult {
+            id: "7".into(),
+            db_id: "db".into(),
+            difficulty: String::new(),
+            prediction: crate::bench::Prediction {
+                sql: Some("SELECT 1".into()),
+                ..Default::default()
+            },
+            score: Default::default(),
+        });
+        assert!(r.predictions_only());
+        let text = r.render();
+        assert!(
+            text.contains("Predictions only") && text.contains("1 of 1"),
+            "{text}"
+        );
+        assert!(!text.contains("EX  "));
+        r.questions[0].score.gold_error = Some("gold SQL failed: timeout".into());
+        assert!(
+            !r.predictions_only(),
+            "a gold that failed is a scoring gap, not a test set"
+        );
     }
 }
