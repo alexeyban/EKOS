@@ -94,3 +94,61 @@ user to send; the key goes only in that email.
   - a profile query past its deadline leaves the column without statistics.
 - The repository's `run.sh` runs end to end on a 10-question local suite built from dev files laid
   out like BIRD's test input, from a clean Docker build.
+
+## 7. Results (2026-11-05)
+
+### 7.1 Dev: BIRD New Dev 2025-11-06, all 1,534 questions, cell K2-dev, Claude Haiku 5.5 via Zen
+
+| | |
+|---|---|
+| **EX** | **65.84%**, 95% CI [63.56, 68.25] |
+| Soft-F1 | 72.09 |
+| R-VES | 60.67 |
+| By difficulty | simple 75.8 (860), moderate 61.4 (443), challenging 37.2 (231) |
+| Outcomes | correct 1,010, wrong_values 220, wrong_columns 174, wrong_rows 123, exec_error 2, no_sql 1, unscored 4 |
+| Calls | 3,409 (2.22 per question) |
+| Tokens | 23.8M input and 1.75M output (15.5k and 1.1k per question) |
+| Cost | $3.24 at list price ($2.82 billed, after the provider's prompt-cache discount) |
+| Wall time | 3.0 h |
+
+- **Weak databases:** financial 28.3 and california_schools 39.3. The best are superhero 81.4 and
+  debit_card_specializing 81.2.
+- **The `unscored` 4:** gold SQL past the 30-second limit when scored.
+
+**Where it sits.** The leaderboard's New Dev entries include:
+
+| Entry | New Dev EX |
+|---|---|
+| Claude Opus 4.6 (baseline) | 68.77 |
+| Claude 4.5 Sonnet (baseline) | 67.34 |
+| GLM-4.7 | 63.82 |
+| DeepSeek-R1 | 61.67 |
+| Kimi-K2-Thinking | 60.63 |
+
+EKOS K2 on Haiku 5.5 (65.84) is between GLM-4.7 and Claude 4.5 Sonnet, at about $0.002 a question.
+The ranked systems at the top reach 72–78 on dev.
+
+**The largest single failure class is `wrong_columns` (11%).** BIRD dev's gold SQL usually returns
+exactly the asked column. The agent's verify step asks for "exactly the columns asked", yet it
+still adds identifying columns. That is the next lever. It is not tuned here, because dev is the
+reported number.
+
+### 7.2 The submission path
+
+- **v1.3.0** was released on 2026-11-05. Before it could publish, the release workflow's
+  aarch64-apple-darwin build had to move from `macos-14`, which was no longer served, to
+  `macos-15`.
+- **Repository:** https://github.com/alexeyban/ekos-text2sql-bird. Its Docker image pins the
+  v1.3.0 static binary by SHA-256.
+- **Tested end to end** with that image, on 10 dev questions laid out like BIRD's test input:
+  prepare, run, export, `predict.json` in BIRD's format.
+- **Resume** was tested with `run.sh`: a second invocation made no model calls.
+
+### 7.3 Spend
+
+$2.85 of the approved $10:
+
+- the dev run;
+- a 10-question smoke run;
+- two 10-question `run.sh` tests;
+- the Docker test.
