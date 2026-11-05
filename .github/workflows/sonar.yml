@@ -1,0 +1,119 @@
+name: SonarCloud
+
+# Regular SonarCloud analysis: after every push to main, every Monday (so issues from new rules
+# and new vulnerabilities in unchanged code still surface), and on demand. The scanner only
+# *imports* coverage, so this job first runs the three test suites with coverage on, the way the
+# scans run by hand did (sonar-project.properties holds the paths and exclusions):
+#   ekos/lcov.info            cargo llvm-cov over the Rust workspace
+#   web/ui/coverage/lcov.info vitest --coverage
+#   web/api/coverage.xml      pytest (pyproject addopts write it)
+# The quality gate is waited for: a failing gate fails this workflow.
+#
+# Needs the repository secret SONAR_TOKEN (a SonarCloud token with "Execute Analysis" on
+# alexeyban_EKOS), and SonarCloud's Automatic Analysis switched off for the project — CI-based and
+# automatic analysis cannot both run.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch: {}
+
+# One analysis at a time per branch; a newer push supersedes a running one.
+concurrency:
+  group: sonar-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  sonar:
+    name: SonarCloud analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      # Before an hour of coverage runs: without the secret the scan cannot upload.
+      - name: SONAR_TOKEN is set
+        env:
+          HAS_TOKEN: ${{ secrets.SONAR_TOKEN != '' }}
+        run: |
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::Repository secret SONAR_TOKEN is not set (gh secret set SONAR_TOKEN)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          # Full history: Sonar's new-code period and blame need it.
+          fetch-depth: 0
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ekos/target
+          key: ${{ runner.os }}-cargo-llvm-cov-${{ hashFiles('ekos/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-llvm-cov-
+
+      - name: Rust coverage (ekos workspace)
+        working-directory: ekos
+        run: cargo llvm-cov --workspace --locked --lcov --output-path lcov.info
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+
+      - name: UI coverage
+        working-directory: web/ui
+        run: |
+          npm ci --ignore-scripts
+          npm run coverage
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: true
+
+      # Last: every pytest run rewrites coverage.xml, so nothing may run pytest after it.
+      - name: API coverage
+        working-directory: web/api
+        run: |
+          uv sync --frozen --no-build --no-install-project
+          uv run --no-sync --no-build pytest -q -o faulthandler_timeout=300
+
+      - name: Coverage reports exist
+        run: |
+          for f in ekos/lcov.info web/ui/coverage/lcov.info web/api/coverage.xml; do
+            test -s "$f" || { echo "missing coverage report: $f"; exit 1; }
+          done
+
+      - name: SonarCloud scan + quality gate
+        uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=alexeyban
+            -Dsonar.projectKey=alexeyban_EKOS
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=600
