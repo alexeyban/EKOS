@@ -54,8 +54,10 @@ jobs:
             packages: musl-tools
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-22.04-arm
+          # macos-15 (Apple silicon). macos-14 jobs were cancelled within seconds, with no
+          # runner assigned, from 2026-11-05: the image is no longer served.
           - target: aarch64-apple-darwin
-            runner: macos-14
+            runner: macos-15
           - target: x86_64-apple-darwin
             runner: macos-15
           - target: x86_64-pc-windows-msvc

@@ -171,7 +171,7 @@ jobs:
     # A hung test once held this job for an hour with no output (pytest's progress is buffered on
     # a pipe). Stop well before GitHub's six hours.
     timeout-minutes: 45
-    # The console's supported Python. A runner's default can be newer (macos-14 moved to Homebrew
+    # The console's supported Python. A runner's default can be newer (macOS runners moved to Homebrew
     # 3.14), and fa2-modified ships wheels for 3.12/3.13 only, so `--no-build` would refuse it.
     env:
       UV_PYTHON: "3.12"
@@ -253,14 +253,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     continue-on-error: true
     timeout-minutes: 60
-    # The console's supported Python. A runner's default can be newer (macos-14 moved to Homebrew
+    # The console's supported Python. A runner's default can be newer (macOS runners moved to Homebrew
     # 3.14), and fa2-modified ships wheels for 3.12/3.13 only, so `--no-build` would refuse it.
     env:
       UV_PYTHON: "3.12"
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-14]
+        os: [windows-latest, macos-15]
 
     steps:
       - uses: actions/checkout@v7
