@@ -483,7 +483,7 @@ pub async fn run(base: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<()>
     let (checkpoint_path, done) = match &opts.resume {
         Some(path) => (path.clone(), read_checkpoint(path, &cfg.hash())?),
         None => {
-            std::fs::create_dir_all(&reports_dir)?;
+            tokio::fs::create_dir_all(&reports_dir).await?;
             let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S");
             let name = format!(
                 "{stamp}-{}-{}.partial.jsonl",
