@@ -875,6 +875,8 @@ dependencies = [
  "ekos-semantic",
  "ekos-session",
  "ekos-simulation",
+ "ekos-sql-dialect-sdk",
+ "ekos-sqlgen",
  "fs4 0.8.4",
  "hex",
  "rand 0.8.7",
@@ -885,6 +887,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sha2 0.10.9",
+ "sqlparser",
  "tar",
  "tokio",
  "toml",
@@ -1043,8 +1046,11 @@ dependencies = [
  "chrono",
  "ekos-kir",
  "ekos-ledger",
+ "ekos-plugin-sql-dialect-sqlite",
  "ekos-recovery",
  "ekos-runtime",
+ "ekos-sql-dialect-sdk",
+ "ekos-sqlgen",
  "hex",
  "rusqlite",
  "serde",
@@ -1289,9 +1295,11 @@ dependencies = [
  "ekos-artifact",
  "ekos-common",
  "ekos-observation-sdk",
+ "ekos-sql-dialect-sdk",
  "reqwest",
  "serde",
  "serde_json",
+ "sqlparser",
  "thiserror",
  "tokio",
  "tracing",
@@ -1480,8 +1488,10 @@ dependencies = [
  "ekos-common",
  "ekos-observation-sdk",
  "ekos-ora-live",
+ "ekos-sql-dialect-sdk",
  "serde",
  "serde_json",
+ "sqlparser",
  "tokio",
  "tracing",
 ]
@@ -1529,7 +1539,9 @@ dependencies = [
  "ekos-migrate",
  "ekos-observation-sdk",
  "ekos-pg-live",
+ "ekos-sql-dialect-sdk",
  "serde_json",
+ "sqlparser",
  "tokio",
  "tracing",
 ]
@@ -1626,6 +1638,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-sql-dialect-sqlite"
+version = "1.2.0"
+dependencies = [
+ "ekos-sql-dialect-sdk",
+ "sqlparser",
+]
+
+[[package]]
 name = "ekos-plugin-sql-dialect-trino"
 version = "1.2.0"
 dependencies = [
@@ -1670,6 +1690,7 @@ dependencies = [
  "ekos-plugin-sql-dialect-oracle",
  "ekos-plugin-sql-dialect-postgres",
  "ekos-plugin-sql-dialect-snowflake",
+ "ekos-plugin-sql-dialect-sqlite",
  "ekos-plugin-sql-dialect-trino",
  "ekos-semantic",
  "ekos-sql-dialect-sdk",
@@ -1786,6 +1807,18 @@ dependencies = [
 name = "ekos-sql-dialect-sdk"
 version = "1.2.0"
 dependencies = [
+ "sqlparser",
+]
+
+[[package]]
+name = "ekos-sqlgen"
+version = "1.2.0"
+dependencies = [
+ "ekos-kir",
+ "ekos-recovery",
+ "ekos-sql-dialect-sdk",
+ "serde",
+ "serde_json",
  "sqlparser",
 ]
 

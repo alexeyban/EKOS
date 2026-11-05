@@ -15,6 +15,7 @@ use ekos_plugin_sql_dialect_mysql::MySqlDialectParser;
 use ekos_plugin_sql_dialect_oracle::OracleDialectParser;
 use ekos_plugin_sql_dialect_postgres::PostgresDialectParser;
 use ekos_plugin_sql_dialect_snowflake::SnowflakeDialectParser;
+use ekos_plugin_sql_dialect_sqlite::SqliteDialectParser;
 use ekos_plugin_sql_dialect_trino::TrinoDialectParser;
 use ekos_sql_dialect_sdk::SqlDialectParser;
 use sqlparser::dialect::{Dialect, GenericDialect};
@@ -31,6 +32,13 @@ impl SqlDialectParser for GenericDialectParser {
 
     fn sqlparser_dialect(&self) -> Box<dyn Dialect + Send + Sync> {
         Box::new(GenericDialect {})
+    }
+
+    /// RFC 0243: the engine is not known, so only standard SQL is safe.
+    fn generation_notes(&self) -> &'static [&'static str] {
+        &[
+            "The engine is not known: write standard SQL — FETCH FIRST n ROWS ONLY, CAST(x AS DECIMAL(18, 4)) / y for a ratio, || to concatenate, double quotes for names — and name the dialect for engine-specific checks.",
+        ]
     }
 }
 
@@ -68,6 +76,8 @@ pub fn build_dialect_registry() -> HashMap<String, Box<dyn SqlDialectParser>> {
     // since RFC 0152; this is the parser that name now resolves to.
     registry.insert("oracle".to_string(), Box::new(OracleDialectParser));
     registry.insert("plsql".to_string(), Box::new(OracleDialectParser));
+    // RFC 0242: SQLite, for the text-to-SQL checks (BIRD's databases are SQLite files).
+    registry.insert("sqlite".to_string(), Box::new(SqliteDialectParser));
     // Same alias set `sql_transform_analyzer.rs`'s old private `dialect_for` recognized —
     // preserved exactly so unifying both passes on this registry doesn't regress existing
     // `dialect = "mssql"`/`"tsql"`/`"synapse"` workspace configs.
@@ -214,5 +224,22 @@ mod tests {
             ),
             "generic"
         );
+    }
+    /// RFC 0243: every registered dialect says how to write SQL for it.
+    #[test]
+    fn every_registered_dialect_has_generation_notes() {
+        for (name, parser) in build_dialect_registry() {
+            assert!(
+                !parser.generation_notes().is_empty(),
+                "dialect {name} has no generation notes"
+            );
+            if name != "generic" {
+                assert_ne!(
+                    parser.facts().row_limit,
+                    ekos_sql_dialect_sdk::RowLimit::Unknown,
+                    "dialect {name} states no row-limit form"
+                );
+            }
+        }
     }
 }

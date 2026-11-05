@@ -754,6 +754,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-sql-dialect-sqlite"
+version = "1.2.0"
+dependencies = [
+ "ekos-sql-dialect-sdk",
+ "sqlparser",
+]
+
+[[package]]
 name = "ekos-plugin-sql-dialect-trino"
 version = "1.2.0"
 dependencies = [
@@ -782,6 +790,7 @@ dependencies = [
  "ekos-plugin-sql-dialect-oracle",
  "ekos-plugin-sql-dialect-postgres",
  "ekos-plugin-sql-dialect-snowflake",
+ "ekos-plugin-sql-dialect-sqlite",
  "ekos-plugin-sql-dialect-trino",
  "ekos-semantic",
  "ekos-sql-dialect-sdk",

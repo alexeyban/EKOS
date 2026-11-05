@@ -145,9 +145,53 @@ pub struct ExperimentConfig {
     /// RFC 0241: with `n > 1`, candidate i gets a different schema rendering (temperature is 0).
     #[serde(default, skip_serializing_if = "is_false")]
     pub vary_context: bool,
+    /// RFC 0242: how an answer is reached — one prompt with RFC 0241's repair rounds, the
+    /// detector loop, or the tool-using agent.
+    #[serde(default, skip_serializing_if = "Strategy::is_single")]
+    pub strategy: Strategy,
+    /// RFC 0242: model replies in total for `loop` / `agent` (the first answer included).
+    #[serde(
+        default = "default_max_turns",
+        skip_serializing_if = "is_default_max_turns"
+    )]
+    pub max_turns: usize,
+    /// RFC 0242: show the first clean answer's result once and ask whether it answers exactly
+    /// what was asked (cell K2).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub verify: bool,
+    /// RFC 0242: the finding codes in use (`L001`…, `P001`…, `E000`); empty means all.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checks: Vec<String>,
     /// The model route: the same keys as `ekos.toml`'s `[llm]`, read by the CLI.
     #[serde(default)]
     pub llm: serde_json::Value,
+}
+
+/// How a cell reaches its answer (RFC 0242 §2.3).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Strategy {
+    /// One prompt, `n` candidates, `r` repair rounds (RFC 0240/0241).
+    #[default]
+    Single,
+    /// Each answer is checked (lint + probes) and sent back with the findings and the context
+    /// they name, up to `max-turns` replies; no tools.
+    Loop,
+    /// The model may call schema, value and SQL tools; every submission is checked.
+    Agent,
+}
+
+impl Strategy {
+    fn is_single(&self) -> bool {
+        *self == Strategy::Single
+    }
+}
+
+fn default_max_turns() -> usize {
+    6
+}
+fn is_default_max_turns(v: &usize) -> bool {
+    *v == 6
 }
 
 /// The prompt template a cell uses (RFC 0241 §2.3).
@@ -253,6 +297,8 @@ pub struct DbHandle {
     /// RFC 0241: column profiles from `data/values/<db>.profile.json`.
     pub profile: Option<context::Profile>,
     pub fingerprint: Option<String>,
+    /// RFC 0242: what the checks and agent tools know; built for `loop` / `agent` cells.
+    pub sql_schema: Option<ekos_sqlgen::Schema>,
 }
 
 /// What a run is given.
@@ -288,6 +334,22 @@ pub struct Prediction {
     pub billed_output_tokens: u64,
     /// RFC 0241: no SQL, and the last answer used the whole output allowance.
     pub truncated: bool,
+    /// RFC 0242: model replies (`loop` / `agent`).
+    #[serde(skip_serializing_if = "is_zero")]
+    pub turns: usize,
+    /// RFC 0242: tools called, in order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
+    /// RFC 0242: finding codes raised on every submission, in order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<String>,
+    /// RFC 0242: finding codes still open on the final SQL.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub open_findings: Vec<String>,
+}
+
+fn is_zero(v: &usize) -> bool {
+    *v == 0
 }
 
 /// Why a question was scored as it was (RFC 0241 §2.1).

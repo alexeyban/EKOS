@@ -210,6 +210,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: CheckCommands,
     },
+    /// Checks for SQL written against the compiled schema (RFC 0242)
+    Sql {
+        #[command(subcommand)]
+        subcommand: SqlCommands,
+    },
     /// Which source files changed since the ledger was committed, and which compiled objects
     /// cite them (RFC 0171)
     Freshness {
@@ -872,6 +877,15 @@ enum BenchCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Replay the text-to-SQL checks over a report's SQL (no model calls): how often each
+    /// finding code fires on answers scored right and wrong (RFC 0242)
+    Checks {
+        report: PathBuf,
+        #[arg(long, value_name = "DIR")]
+        bench_dir: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Write a report's predictions in a benchmark's submission format
     Export {
         report: PathBuf,
@@ -1431,6 +1445,58 @@ enum SignoffCommands {
 }
 
 #[derive(Subcommand)]
+enum SqlCommands {
+    /// Check a query against the ledger's tables, columns, keys and foreign keys and the
+    /// dialect's rules (unknown names, row-limit form, integer division, quoting, NULL ordering,
+    /// …). With --database or --sqlite it also runs read-only probes on that database: the
+    /// result, value spellings, rows repeated by joins, ties (RFC 0242/0243)
+    Check {
+        /// A file holding the query; `-` or nothing reads stdin
+        file: Option<PathBuf>,
+        /// sqlite, postgres, mysql, mssql, snowflake, databricks, clickhouse, trino, oracle or
+        /// generic; default: the database's kind, else the project's first
+        /// `[[recover.sql.dialect-rules]]` dialect, else generic
+        #[arg(long)]
+        dialect: Option<String>,
+        /// A `[[databases]]` entry to run the probes on (read-only)
+        #[arg(long, conflicts_with = "sqlite")]
+        database: Option<String>,
+        /// A SQLite file to run the probes on (opened read-only)
+        #[arg(long, value_name = "FILE")]
+        sqlite: Option<PathBuf>,
+        /// Probe a PostgreSQL database even when its role can write (the session stays read-only)
+        #[arg(long)]
+        allow_writable_role: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Write SQL for a question: an agent over the ledger's schema and the dialect's rules, whose
+    /// every draft is checked — and, with --database or --sqlite, run read-only — before it is
+    /// final. Calls the `nl-sql` model route (RFC 0243)
+    Generate {
+        question: String,
+        #[arg(long)]
+        dialect: Option<String>,
+        #[arg(long, conflicts_with = "sqlite")]
+        database: Option<String>,
+        #[arg(long, value_name = "FILE")]
+        sqlite: Option<PathBuf>,
+        /// Model replies in total, the first draft included
+        #[arg(long, default_value_t = 6)]
+        max_turns: usize,
+        #[arg(long, default_value_t = 4096)]
+        max_tokens: u32,
+        /// Allow a model route that is not a local Ollama model (it may be billed)
+        #[arg(long)]
+        allow_metered: bool,
+        #[arg(long)]
+        allow_writable_role: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum CheckCommands {
     /// References that resolve to nothing or to several objects — code, ETL and dbt into a
     /// schema, SQL routines and views to tables — with evidence, confidence and a fingerprint
@@ -1976,6 +2042,9 @@ fn emits_machine_output(command: &Commands) -> bool {
         Commands::Check {
             subcommand: CheckCommands::Explain { json, .. },
         } => *json,
+        Commands::Sql {
+            subcommand: SqlCommands::Check { json, .. } | SqlCommands::Generate { json, .. },
+        } => *json,
         Commands::Llm { subcommand } => match subcommand {
             LlmCommands::Routes { json }
             | LlmCommands::Usage { json, .. }
@@ -2003,7 +2072,8 @@ fn emits_machine_output(command: &Commands) -> bool {
                 BenchCommands::List { json, .. }
                 | BenchCommands::Prepare { json, .. }
                 | BenchCommands::Run { json, .. }
-                | BenchCommands::Compare { json, .. } => *json,
+                | BenchCommands::Compare { json, .. }
+                | BenchCommands::Checks { json, .. } => *json,
                 BenchCommands::Export { .. } | BenchCommands::Context { .. } => false,
             },
         },
@@ -2251,6 +2321,55 @@ where
                     from_index,
                 },
             ),
+        },
+        Commands::Sql { subcommand } => match subcommand {
+            SqlCommands::Check {
+                file,
+                dialect,
+                database,
+                sqlite,
+                allow_writable_role,
+                json,
+            } => crate::commands::sql_check::run(
+                &config,
+                &cwd,
+                crate::commands::sql_check::CheckOpts {
+                    file: file.as_ref(),
+                    dialect: dialect.as_deref(),
+                    database: database.as_deref(),
+                    sqlite: sqlite.as_deref(),
+                    allow_writable_role,
+                    json,
+                },
+            ),
+            SqlCommands::Generate {
+                question,
+                dialect,
+                database,
+                sqlite,
+                max_turns,
+                max_tokens,
+                allow_metered,
+                allow_writable_role,
+                json,
+            } => {
+                crate::commands::sql_check::generate(
+                    &config,
+                    &cwd,
+                    crate::commands::sql_check::GenerateOpts {
+                        question: &question,
+                        dialect: dialect.as_deref(),
+                        database: database.as_deref(),
+                        sqlite: sqlite.as_deref(),
+                        max_turns,
+                        max_tokens,
+                        allow_metered,
+                        allow_writable_role,
+                        json,
+                    },
+                )
+                .await
+            }
         },
         Commands::Freshness { json, limit } => {
             crate::commands::freshness::run(&config, &cwd, json, limit)
@@ -3521,6 +3640,11 @@ async fn dispatch_bench(
             report_b,
             json,
         } => bench::compare(&report_a, &report_b, json),
+        BenchCommands::Checks {
+            report,
+            bench_dir,
+            json,
+        } => bench::checks(cwd, bench_dir.as_deref(), &report, json),
         BenchCommands::Export {
             report,
             target,

@@ -67,6 +67,8 @@ members = [
     "plugins/sql-dialect-oracle",
     "plugins/sql-dialect-mssql",
     "plugins/sql-dialect-clickhouse",
+    "plugins/sql-dialect-sqlite",
+    "crates/sqlgen",
     "crates/clickhouse-query",
 ]
 
@@ -137,6 +139,8 @@ ekos-plugin-sql-dialect-mssql      = { path = "plugins/sql-dialect-mssql", versi
 ekos-plugin-sql-dialect-mysql      = { path = "plugins/sql-dialect-mysql", version = "1.2.0" }
 ekos-plugin-sql-dialect-postgres   = { path = "plugins/sql-dialect-postgres", version = "1.2.0" }
 ekos-plugin-sql-dialect-snowflake  = { path = "plugins/sql-dialect-snowflake", version = "1.2.0" }
+ekos-plugin-sql-dialect-sqlite     = { path = "plugins/sql-dialect-sqlite", version = "1.2.0" }
+ekos-sqlgen                        = { path = "crates/sqlgen", version = "1.2.0" }
 ekos-plugin-treasury               = { path = "plugins/treasury", version = "1.2.0" }
 ekos-recovery                      = { path = "crates/recovery", version = "1.2.0" }
 ekos-runtime                       = { path = "crates/runtime", version = "1.2.0" }

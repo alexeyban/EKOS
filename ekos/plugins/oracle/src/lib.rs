@@ -14,6 +14,8 @@
 //! runs on a blocking thread: the driver is
 //! synchronous, and `ekos build` drives observers from an async runtime.
 
+pub mod probe;
+
 use async_trait::async_trait;
 use ekos_artifact::ObservationArtifact;
 use ekos_common::redaction::RedactionConfig;

@@ -15,7 +15,7 @@
 //! `DatabricksDialect` coverage (e.g. backtick-delimited identifiers, per its
 //! `is_delimited_identifier_start` — verified below). Flagged, not blocking.
 
-use ekos_sql_dialect_sdk::SqlDialectParser;
+use ekos_sql_dialect_sdk::{DialectFacts, RowLimit, SqlDialectParser};
 use sqlparser::dialect::{DatabricksDialect, Dialect};
 
 pub struct DatabricksDialectParser;
@@ -27,6 +27,32 @@ impl SqlDialectParser for DatabricksDialectParser {
 
     fn sqlparser_dialect(&self) -> Box<dyn Dialect + Send + Sync> {
         Box::new(DatabricksDialect {})
+    }
+
+    /// RFC 0242/0243: the engine behaviour the text-to-SQL checks consult.
+    fn facts(&self) -> DialectFacts {
+        DialectFacts {
+            nulls_first_ascending: true,
+            has_ilike: true,
+            row_limit: RowLimit::Limit,
+            identifier_quote: Some('`'),
+            backtick_identifiers: true,
+            ..DialectFacts::GENERIC
+        }
+    }
+
+    /// RFC 0243: how to write correct SQL for this engine.
+    fn generation_notes(&self) -> &'static [&'static str] {
+        &[
+            "Limit rows with LIMIT n.",
+            "/ gives a double; a div b is integer division.",
+            "Concatenate with || or concat().",
+            "= and LIKE are case-sensitive; ILIKE ignores case.",
+            "Quote names with backticks.",
+            "Dates: DATE'2024-01-31', date_trunc('MONTH', ts), year(ts), datediff(end, start) in days.",
+            "NULL sorts first in ascending order.",
+            "QUALIFY filters on window functions.",
+        ]
     }
 }
 

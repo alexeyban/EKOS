@@ -95,6 +95,14 @@ pub fn guard_identifier(name: &str) -> Result<&str, OraError> {
     }
 }
 
+/// What [`OraSource::preview`] read (RFC 0243).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PreviewRows {
+    pub columns: Vec<String>,
+    pub rows: Rows,
+    pub truncated: bool,
+}
+
 /// A live, read-only Oracle session.
 pub struct OraSource {
     label: String,
@@ -131,6 +139,10 @@ impl OraSource {
     }
 
     pub fn rows_of(&self, _sql: &str, _binds: &[&str]) -> Result<Rows, OraError> {
+        Err(OraError::DriverNotBuilt)
+    }
+
+    pub fn preview(&self, _sql: &str, _max_rows: usize) -> Result<PreviewRows, OraError> {
         Err(OraError::DriverNotBuilt)
     }
 
@@ -265,6 +277,46 @@ impl OraSource {
             out.push(cells);
         }
         Ok(out)
+    }
+
+    /// RFC 0243: the column names and at most `max_rows` rows of one query, inside a
+    /// `SET TRANSACTION READ ONLY` transaction that is rolled back after. The caller must have
+    /// checked the text is a single SELECT (`ekos_sql_dialect_sdk::guard::single_select`).
+    pub fn preview(&self, sql: &str, max_rows: usize) -> Result<PreviewRows, OraError> {
+        self.begin_read_only()?;
+        let result = (|| {
+            let rs = self
+                .conn
+                .query(sql, &[])
+                .map_err(|e| query_error(sql, &e))?;
+            let mut out = PreviewRows {
+                columns: rs
+                    .column_info()
+                    .iter()
+                    .map(|c| c.name().to_string())
+                    .collect(),
+                ..Default::default()
+            };
+            for row in rs {
+                if out.rows.len() == max_rows {
+                    out.truncated = true;
+                    break;
+                }
+                let row = row.map_err(|e| query_error(sql, &e))?;
+                let n = row.sql_values().len();
+                let mut cells = Vec::with_capacity(n);
+                for i in 0..n {
+                    cells.push(
+                        row.get::<usize, Option<String>>(i)
+                            .map_err(|e| query_error(sql, &e))?,
+                    );
+                }
+                out.rows.push(cells);
+            }
+            Ok(out)
+        })();
+        self.end_transaction()?;
+        result
     }
 }
 

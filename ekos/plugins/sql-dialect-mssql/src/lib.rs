@@ -17,7 +17,7 @@
 //! grammar `sqlparser` already parses into a structured statement list, no client-tool text
 //! convention to strip first.
 
-use ekos_sql_dialect_sdk::SqlDialectParser;
+use ekos_sql_dialect_sdk::{DialectFacts, RowLimit, SqlDialectParser};
 use sqlparser::dialect::{Dialect, MsSqlDialect};
 
 pub struct MsSqlDialectParser {
@@ -37,6 +37,32 @@ impl SqlDialectParser for MsSqlDialectParser {
 
     fn sqlparser_dialect(&self) -> Box<dyn Dialect + Send + Sync> {
         Box::new(MsSqlDialect {})
+    }
+
+    /// RFC 0242/0243: the engine behaviour the text-to-SQL checks consult.
+    fn facts(&self) -> DialectFacts {
+        DialectFacts {
+            integer_division: true,
+            nulls_first_ascending: true,
+            like_case_insensitive: true,
+            row_limit: RowLimit::TopOrFetch,
+            identifier_quote: Some('['),
+            ..DialectFacts::GENERIC
+        }
+    }
+
+    /// RFC 0243: how to write correct SQL for this engine.
+    fn generation_notes(&self) -> &'static [&'static str] {
+        &[
+            "Limit rows with SELECT TOP (n) …, or ORDER BY … OFFSET 0 ROWS FETCH NEXT n ROWS ONLY; there is no LIMIT.",
+            "/ between two integers truncates: multiply by 1.0 or CAST(x AS DECIMAL(18, 4)) first.",
+            "Concatenate with + or CONCAT(), which treats NULL as empty.",
+            "Comparison follows the collation, usually case-insensitive; there is no ILIKE.",
+            "Quote names with [brackets] or double quotes.",
+            "Dates: CAST('2024-01-31' AS date), YEAR(col), DATEADD(day, n, d), DATEDIFF(day, a, b), FORMAT(col, 'yyyy-MM').",
+            "NULL sorts first in ascending order.",
+            "A condition is not a value: write CASE WHEN … THEN 1 ELSE 0 END to count or select it.",
+        ]
     }
 }
 

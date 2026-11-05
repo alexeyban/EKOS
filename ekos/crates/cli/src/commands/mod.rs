@@ -54,6 +54,7 @@ pub mod setup_server;
 mod setup_tests;
 pub mod simulate;
 pub mod source;
+pub mod sql_check;
 pub mod store;
 pub mod treasury;
 pub mod uninstall_server;

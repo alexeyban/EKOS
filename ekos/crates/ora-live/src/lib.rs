@@ -16,7 +16,7 @@ pub use catalog::{
 };
 pub use dictionary::{DictionaryKind, TableFlags};
 pub use profile::{ProfileStats, ProfileTier, ScanSource};
-pub use session::{OraConnection, OraSource, SessionPolicy, WriteCheck};
+pub use session::{OraConnection, OraSource, PreviewRows, SessionPolicy, WriteCheck};
 
 #[derive(Debug, thiserror::Error)]
 pub enum OraError {

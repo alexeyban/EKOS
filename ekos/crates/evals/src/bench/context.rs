@@ -396,7 +396,7 @@ impl Default for Shown {
 }
 
 /// The profile file's format; `prepare` rebuilds a file older than this.
-pub const PROFILE_VERSION: u32 = 2;
+pub const PROFILE_VERSION: u32 = 3;
 
 /// What the data says about one column.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -411,6 +411,10 @@ pub struct ColumnProfile {
     pub examples: Vec<String>,
     /// Values are comma-separated lists: match an element with `LIKE`, never `=`.
     pub list_valued: bool,
+    /// RFC 0242, profile v3: numeric values that stand for "unknown" (`0` or `-1`) with their row
+    /// counts. Not shown in the pack text (cells keep their prompts); the checks read it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sentinels: Vec<(String, u64)>,
 }
 
 impl ColumnProfile {
@@ -476,6 +480,48 @@ fn is_list_column(distinct_values: &[String]) -> bool {
     known * 2 >= elements.len()
 }
 
+/// Share of a table's rows a sentinel must hold.
+const SENTINEL_SHARE: f64 = 0.01;
+/// A `0` is a sentinel only when the column's real values start well above it (heights,
+/// weights, years), so a count column whose zeros are real counts is never flagged.
+const SENTINEL_GAP: f64 = 10.0;
+
+/// `0` or `-1` used for "unknown" in a numeric column (RFC 0242): `0` when it holds at least
+/// [`SENTINEL_SHARE`] of the rows, nothing is negative and the smallest positive value is at least
+/// [`SENTINEL_GAP`]; `-1` when it holds that share and no other value is negative.
+fn sentinels(
+    conn: &rusqlite::Connection,
+    qt: &str,
+    qc: &str,
+    rows: i64,
+) -> Result<Vec<(String, u64)>> {
+    let num = format!("typeof({qc}) IN ('integer', 'real')");
+    let (zeros, minus_one, other_negative, min_positive): (i64, i64, i64, Option<f64>) = conn
+        .query_row(
+            &format!(
+                "SELECT COALESCE(SUM({num} AND {qc} = 0), 0), \
+                 COALESCE(SUM({num} AND {qc} = -1), 0), \
+                 COALESCE(SUM({num} AND {qc} < 0 AND {qc} <> -1), 0), \
+                 MIN(CASE WHEN {num} AND {qc} > 0 THEN {qc} END) FROM {qt}"
+            ),
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )?;
+    let enough = |n: i64| n >= 2 && n as f64 >= SENTINEL_SHARE * rows as f64;
+    let mut out = Vec::new();
+    if enough(zeros)
+        && minus_one == 0
+        && other_negative == 0
+        && min_positive.is_some_and(|m| m >= SENTINEL_GAP)
+    {
+        out.push(("0".to_string(), zeros as u64));
+    }
+    if enough(minus_one) && other_negative == 0 && min_positive.is_some() {
+        out.push(("-1".to_string(), minus_one as u64));
+    }
+    Ok(out)
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TableProfile {
     pub rows: u64,
@@ -525,6 +571,7 @@ impl Profile {
                     .filter_map(|v| v.ok().flatten())
                     .collect();
                 let list_valued = is_list_column(&sample);
+                let sentinels = sentinels(conn, &qt, &qc, rows)?;
                 let examples = sample
                     .iter()
                     .filter(|v| !v.trim().is_empty())
@@ -540,6 +587,7 @@ impl Profile {
                         unique: distinct > 0 && distinct == rows - nulls && nulls == 0,
                         examples,
                         list_valued,
+                        sentinels,
                     },
                 );
             }
@@ -711,47 +759,126 @@ pub fn render_value_groups(groups: &[ValueGroup]) -> String {
     out
 }
 
-// ── Reading SQL ──────────────────────────────────────────────────────────────────────────────
+// ── The checks' view of a database (RFC 0242) ──────────────────────────────────────────────
 
-/// The SQL a model answered with: the last ```sql block, else the last code block, else the
-/// text from the first `SELECT`/`WITH`. Trailing semicolons are dropped.
-pub fn extract_sql(answer: &str) -> Option<String> {
-    let blocks: Vec<&str> = answer.split("```").collect();
-    let mut best: Option<String> = None;
-    for (i, b) in blocks.iter().enumerate() {
-        if i % 2 == 1 {
-            let body = b
-                .strip_prefix("sqlite")
-                .or_else(|| b.strip_prefix("sql"))
-                .or_else(|| b.strip_prefix("SQL"))
-                .unwrap_or(b);
-            if !body.trim().is_empty() {
-                best = Some(body.to_string());
-            }
-        }
-    }
-    let sql = match best {
-        Some(b) => b,
-        None => {
-            let upper = answer.to_uppercase();
-            let start = ["SELECT", "WITH"]
+/// What `ekos-sqlgen`'s checks and agent tools know about one database: the pack's tables,
+/// columns, descriptions and join paths when there is a pack (else the file's own schema and
+/// foreign keys), each column's profile, and the value index.
+pub fn sqlgen_schema(
+    db: &Db,
+    schema: &SchemaInfo,
+    pack: Option<&DbPack>,
+    profile: Option<&Profile>,
+    values: Option<&ValueIndex>,
+) -> Result<ekos_sqlgen::Schema> {
+    use ekos_sqlgen::schema::parse_fk_desc;
+    let stats = |t: &str, c: &str| {
+        profile
+            .and_then(|p| p.column(t, c))
+            .map(|cp| ekos_sqlgen::ColumnStats {
+                nulls: cp.nulls,
+                empty: cp.empty,
+                distinct: cp.distinct,
+                unique: cp.unique,
+                examples: cp.examples.clone(),
+                list_valued: cp.list_valued,
+                sentinels: cp.sentinels.clone(),
+            })
+    };
+    let rows = |t: &str| profile.and_then(|p| p.table(t)).map(|tp| tp.rows);
+    let (tables, foreign_keys) = match pack {
+        Some(pack) => (
+            pack.tables
                 .iter()
-                .filter_map(|k| upper.find(k))
-                .min()?;
-            answer[start..].to_string()
+                .map(|t| ekos_sqlgen::Table {
+                    name: t.name.clone(),
+                    schema: None,
+                    database: None,
+                    description: t.description.clone(),
+                    rows: rows(&t.name),
+                    columns: t
+                        .columns
+                        .iter()
+                        .map(|c| ekos_sqlgen::Column {
+                            name: c.name.clone(),
+                            data_type: c.data_type.clone(),
+                            primary_key: c.primary_key,
+                            description: c.description.clone(),
+                            stats: stats(&t.name, &c.name),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            pack.joins.iter().filter_map(|j| parse_fk_desc(j)).collect(),
+        ),
+        None => {
+            let mut fks = Vec::new();
+            let mut tables = Vec::new();
+            for t in &schema.table_names {
+                let cols = &schema.tables[&t.to_lowercase()];
+                tables.push(ekos_sqlgen::Table {
+                    name: t.clone(),
+                    schema: None,
+                    database: None,
+                    description: None,
+                    rows: rows(t),
+                    columns: cols
+                        .iter()
+                        .map(|(c, ty, pk)| ekos_sqlgen::Column {
+                            name: c.clone(),
+                            data_type: ty.clone(),
+                            primary_key: *pk > 0,
+                            description: None,
+                            stats: stats(t, c),
+                        })
+                        .collect(),
+                });
+                let mut stmt = db
+                    .connection()
+                    .prepare(&format!("PRAGMA foreign_key_list({})", quote(t)))?;
+                let found = stmt
+                    .query_map([], |r| {
+                        Ok((
+                            r.get::<_, String>(2)?,
+                            r.get::<_, String>(3)?,
+                            r.get::<_, Option<String>>(4)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                for (to, from, to_col) in found {
+                    let to_col = to_col.unwrap_or_else(|| {
+                        schema
+                            .tables
+                            .get(&to.to_lowercase())
+                            .and_then(|cs| cs.iter().find(|c| c.2 > 0).map(|c| c.0.clone()))
+                            .unwrap_or_default()
+                    });
+                    fks.push(ekos_sqlgen::ForeignKey {
+                        from_table: t.clone(),
+                        from_column: from,
+                        to_table: to,
+                        to_column: to_col,
+                    });
+                }
+            }
+            (tables, fks)
         }
     };
-    let sql = strip_comment_lines(&sql);
-    let sql = sql.trim().trim_end_matches(';').trim().to_string();
-    (!sql.is_empty()).then_some(sql)
+    let mut indexed = BTreeMap::new();
+    for (t, c, vs) in values.map(|v| v.columns.as_slice()).unwrap_or_default() {
+        indexed.insert((t.to_lowercase(), c.to_lowercase()), vs.clone());
+    }
+    Ok(ekos_sqlgen::Schema {
+        tables,
+        foreign_keys,
+        values: indexed,
+    })
 }
 
-fn strip_comment_lines(sql: &str) -> String {
-    sql.lines()
-        .filter(|l| !l.trim_start().starts_with("--"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
+// ── Reading SQL ──────────────────────────────────────────────────────────────────────────────
+
+/// The SQL a model answered with (RFC 0242 moved it into `ekos-sqlgen`, which the agent uses).
+pub use ekos_sqlgen::extract_sql;
 
 /// Tables, columns, join pairs and string literals one SQL statement names (lower-cased).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

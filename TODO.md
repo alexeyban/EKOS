@@ -7007,3 +7007,15 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [ ] Few-shot examples from `bird23-train-filtered` (new suite, train split only)
 - [ ] `bird-dev` and the cleaned `bird-sql-dev-1106` suites; the PostgreSQL variant of Mini-Dev (exercises RFC 0235)
 - [ ] Ollama provider: honour `[llm] base-url` (it reads only `OLLAMA_BASE_URL`)
+
+## RFC 0242 / 0243 — Text-to-SQL agent; per-dialect SQL checking and generation (2026-11-05, devlog_319)
+
+- [x] `ekos-sqlgen`: schema model, scope-resolving analysis, lint L001–L011 + E001, probes E000/P001–P005, tool-using agent with verify
+- [x] SQLite dialect plugin; facts + generation notes for every dialect (registry test)
+- [x] BIRD cells G3/G3-full, J (loop), K (agent), K2 (agent + verify); `ekos eval bench checks` replay; profile v3 sentinels
+- [x] Results: K2 tune 75.8 vs G3 68.7 (+7.1, p=0.007); hold 76.2 vs 71.5 (+4.6, CI [0, +9.3], p=0.06); vs raw DDL +22.9; spend $2.13 of $3
+- [x] Live read-only probes in the postgres (role write check), clickhouse (readonly=1) and oracle (read-only txn) plugins; single-SELECT guard
+- [x] `ekos sql check --database/--sqlite`, `ekos sql generate`, MCP `ekos_sql_check` (static; dialect notes), `text-to-sql` skill
+- [ ] dbt-regeneration benchmark (RFC 0242 §2.4): needs a dbt project with seeds or a fixture database
+- [ ] Live probes for MySQL / SQL Server / Snowflake / Databricks (no live plugin yet)
+- [ ] A fresh text-to-SQL test set: Mini-Dev's hold-out was inspected on 2026-11-05

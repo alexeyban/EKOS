@@ -50,6 +50,14 @@ impl WriteCheck {
     }
 }
 
+/// What [`PgSource::preview`] read.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PreviewRows {
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<Option<String>>>,
+    pub truncated: bool,
+}
+
 /// A live, read-only PostgreSQL session.
 ///
 /// `RefCell<Client>`: [`ekos_migrate_validate::EngineReader`] takes `&self`, because a reader is a
@@ -236,6 +244,38 @@ impl PgSource {
     ///
     /// The simple protocol also permits multiple statements in one message. Nothing here builds SQL
     /// from user text, and RFC 0160's statement classifier is the control for anything that does.
+    /// RFC 0243: the column names and at most `max_rows` rows of one query, with NULL kept as
+    /// `None` (unlike [`Self::raw_query`]); the flag says more rows came back. The caller must
+    /// have checked the text is a single SELECT (`ekos_sql_dialect_sdk::guard::single_select`);
+    /// the session is read-only besides.
+    pub fn preview(&self, sql: &str, max_rows: usize) -> Result<PreviewRows, PgError> {
+        use postgres::SimpleQueryMessage;
+        let mut c = self.client.borrow_mut();
+        let messages = c.simple_query(sql).map_err(|e| PgError::Query {
+            sql: sql.to_string(),
+            message: describe(&e),
+        })?;
+        let mut out = PreviewRows::default();
+        for m in messages {
+            let SimpleQueryMessage::Row(row) = m else {
+                continue;
+            };
+            if out.columns.is_empty() {
+                out.columns = row.columns().iter().map(|c| c.name().to_string()).collect();
+            }
+            if out.rows.len() == max_rows {
+                out.truncated = true;
+                continue;
+            }
+            out.rows.push(
+                (0..row.len())
+                    .map(|i| row.get(i).map(str::to_string))
+                    .collect(),
+            );
+        }
+        Ok(out)
+    }
+
     pub fn raw_query(&self, sql: &str) -> Result<Vec<Vec<String>>, PgError> {
         use postgres::SimpleQueryMessage;
         let mut c = self.client.borrow_mut();

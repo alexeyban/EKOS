@@ -17,7 +17,7 @@
 //! procedure/function with a `$$`-quoted body compiles to `Unmapped` today (same honest-gap
 //! posture as `pentaho_analyzer.rs`'s documented approximations), not a parser crash.
 
-use ekos_sql_dialect_sdk::SqlDialectParser;
+use ekos_sql_dialect_sdk::{DialectFacts, RowLimit, SqlDialectParser};
 use sqlparser::dialect::{Dialect, SnowflakeDialect};
 
 pub struct SnowflakeDialectParser;
@@ -29,6 +29,30 @@ impl SqlDialectParser for SnowflakeDialectParser {
 
     fn sqlparser_dialect(&self) -> Box<dyn Dialect + Send + Sync> {
         Box::new(SnowflakeDialect {})
+    }
+
+    /// RFC 0242/0243: the engine behaviour the text-to-SQL checks consult.
+    fn facts(&self) -> DialectFacts {
+        DialectFacts {
+            has_ilike: true,
+            row_limit: RowLimit::LimitOrFetch,
+            identifier_quote: Some('"'),
+            ..DialectFacts::GENERIC
+        }
+    }
+
+    /// RFC 0243: how to write correct SQL for this engine.
+    fn generation_notes(&self) -> &'static [&'static str] {
+        &[
+            "Limit rows with LIMIT n or FETCH FIRST n ROWS ONLY.",
+            "/ gives a decimal even between integers; TRUNC(a / b) truncates.",
+            "Concatenate with || or CONCAT().",
+            "= and LIKE are case-sensitive; ILIKE ignores case.",
+            "Unquoted names fold to UPPER case; quote with double quotes to keep a name's case.",
+            "Dates: '2024-01-31'::date, DATE_TRUNC('month', ts), YEAR(ts), DATEDIFF('day', a, b).",
+            "NULL sorts last in ascending order.",
+            "QUALIFY filters on window functions, e.g. QUALIFY ROW_NUMBER() OVER (PARTITION BY k ORDER BY t DESC) = 1.",
+        ]
     }
 }
 

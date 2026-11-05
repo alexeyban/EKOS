@@ -3,7 +3,9 @@
 //! here from the database's own catalogue; `crates/cli/tests/bench.rs` builds it from a real
 //! compiled ledger.
 
-use ekos_evals::bench::context::{DbPack, PackColumn, PackTable, SchemaInfo, ValueIndex};
+use ekos_evals::bench::context::{
+    DbPack, PackColumn, PackTable, Profile, SchemaInfo, ValueIndex, sqlgen_schema,
+};
 use ekos_evals::bench::fixture::{self, ScriptedLlm};
 use ekos_evals::bench::report::{self, BenchReport, RunMeta};
 use ekos_evals::bench::sqlexec::Db;
@@ -77,6 +79,12 @@ fn open_dbs(adapter: &dyn BenchAdapter, dirs: &SuiteDirs) -> BTreeMap<String, Db
             &std::fs::read_to_string(dirs.values().join(format!("{db_id}.json"))).unwrap(),
         )
         .unwrap();
+        let profile: Profile = serde_json::from_str(
+            &std::fs::read_to_string(dirs.values().join(format!("{db_id}.profile.json"))).unwrap(),
+        )
+        .unwrap();
+        let sql_schema =
+            sqlgen_schema(&db, &schema, Some(&pack), Some(&profile), Some(&values)).unwrap();
         dbs.insert(
             db_id.to_string(),
             DbHandle {
@@ -84,16 +92,9 @@ fn open_dbs(adapter: &dyn BenchAdapter, dirs: &SuiteDirs) -> BTreeMap<String, Db
                 schema,
                 pack: Some(pack),
                 values: Some(values),
-                profile: Some(
-                    serde_json::from_str(
-                        &std::fs::read_to_string(
-                            dirs.values().join(format!("{db_id}.profile.json")),
-                        )
-                        .unwrap(),
-                    )
-                    .unwrap(),
-                ),
+                profile: Some(profile),
                 fingerprint: Some(format!("fp-{db_id}")),
+                sql_schema: Some(sql_schema),
             },
         );
     }
@@ -385,6 +386,45 @@ async fn result_checks_send_an_empty_or_null_result_back() {
     cfg.result_checks = false;
     let r = run_config(&f.suite_dir, &cfg, Split::All, &ScriptedLlm::new(), &[]).await;
     assert_eq!(r.metrics.ex.mean.round(), 60.0);
+}
+
+#[tokio::test]
+async fn rfc_0242_checks_rescue_value_spellings_in_the_loop_and_the_agent() {
+    let f = fixture();
+    let a = adapter(&f.suite_dir);
+    a.prepare(&PrepareCtx {
+        dirs: &SuiteDirs::new(&f.suite_dir),
+        force: false,
+    })
+    .unwrap();
+    for cell in ["j", "k"] {
+        // Without profiles or value lookup the prompt never shows 'retail', 'Maths', 'Gryff';
+        // only a finding (L004 offers the stored spelling) can rescue questions 1, 6, 7.
+        let mut cfg =
+            ExperimentConfig::load(&f.suite_dir.join(format!("configs/{cell}.toml"))).unwrap();
+        cfg.profiles = false;
+        cfg.value_lookup = false;
+        let r = run_config(&f.suite_dir, &cfg, Split::All, &ScriptedLlm::new(), &[]).await;
+        assert_eq!(r.metrics.ex.mean.round(), 90.0, "cell {cell}");
+        for id in ["1", "6", "7"] {
+            let q = r.questions.iter().find(|q| q.id == id).unwrap();
+            assert_eq!(q.prediction.turns, 2, "cell {cell} question {id}");
+            assert!(q.prediction.findings.contains(&"L004".to_string()));
+            assert!(q.prediction.open_findings.is_empty());
+            assert!(q.score.ex, "cell {cell} question {id}");
+        }
+        let q0 = r.questions.iter().find(|q| q.id == "0").unwrap();
+        assert_eq!(q0.prediction.turns, 1, "a clean answer is accepted at once");
+        assert!(r.metrics.turns >= 13);
+        // Question 9 (score > 80 vs >= 80) is wrong and nothing can see it.
+        assert_eq!(r.metrics.categories["wrong_values"], 1);
+    }
+    // Existing cells keep their configuration hash: new fields at their defaults are not written.
+    let g = ExperimentConfig::load(&f.suite_dir.join("configs/g.toml")).unwrap();
+    let text = toml::to_string(&g).unwrap();
+    assert!(
+        !text.contains("strategy") && !text.contains("max-turns") && !text.contains("\nchecks")
+    );
 }
 
 #[tokio::test]

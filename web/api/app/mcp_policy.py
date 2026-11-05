@@ -22,6 +22,7 @@ SCOPED_TOOLS = frozenset(
         "ekos_impact",
         "ekos_diff",
         "ekos_graph_export",
+        "ekos_sql_check",
     }
 )
 

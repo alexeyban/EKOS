@@ -22,7 +22,7 @@ use super::{
     BenchAdapter, BenchScenario, ContextKind, ExperimentConfig, ExportTarget, Prediction,
     PrepareCtx, ProjectSpec, RunCtx, Score, Split,
 };
-use super::{Category, PromptKind};
+use super::{Category, PromptKind, Strategy};
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use ekos_recovery::llm::{LlmRequest, LlmResponse, Message};
@@ -710,6 +710,91 @@ async fn answer_candidate(
     }
 }
 
+/// RFC 0242: every finding (all codes) for one SQL on one database — what a `loop` / `agent`
+/// cell would raise on it. Used by `ekos eval bench checks` to replay detectors over a report.
+pub fn check_sql(
+    h: &super::DbHandle,
+    cfg: &ExperimentConfig,
+    db_id: &str,
+    sql: &str,
+) -> Result<Vec<ekos_sqlgen::Finding>> {
+    use ekos_sql_dialect_sdk::SqlDialectParser;
+    let schema = required(h.sql_schema.as_ref(), "checks schema", db_id)?;
+    let parser = ekos_plugin_sql_dialect_sqlite::SqliteDialectParser;
+    let dialect = parser.sqlparser_dialect();
+    let probe = sqlexec::SqliteProbe {
+        db: &h.db,
+        timeout: cfg.limits().timeout,
+    };
+    let tb = ekos_sqlgen::agent::Toolbox {
+        schema,
+        dialect: dialect.as_ref(),
+        facts: parser.facts(),
+        probe: Some(&probe),
+        checks: None,
+    };
+    Ok(tb.check(sql).1)
+}
+
+/// RFC 0242: `loop` and `agent` cells — the answer is checked (lint + probes on the database)
+/// after every submission; the agent may also call schema, value and SQL tools.
+async fn answer_with_checks(
+    rt: &RunCtx<'_>,
+    cfg: &ExperimentConfig,
+    h: &super::DbHandle,
+    db_id: &str,
+    prompt: &str,
+    p: &mut Prediction,
+) -> Result<()> {
+    use ekos_sql_dialect_sdk::SqlDialectParser;
+    let schema = required(h.sql_schema.as_ref(), "checks schema", db_id)?;
+    let parser = ekos_plugin_sql_dialect_sqlite::SqliteDialectParser;
+    let dialect = parser.sqlparser_dialect();
+    let probe = sqlexec::SqliteProbe {
+        db: &h.db,
+        timeout: cfg.limits().timeout,
+    };
+    let checks: BTreeSet<String> = cfg.checks.iter().cloned().collect();
+    let tb = ekos_sqlgen::agent::Toolbox {
+        schema,
+        dialect: dialect.as_ref(),
+        facts: parser.facts(),
+        probe: Some(&probe),
+        checks: (!checks.is_empty()).then_some(&checks),
+    };
+    let agent_cfg = ekos_sqlgen::agent::AgentConfig {
+        max_turns: cfg.max_turns,
+        max_tokens: cfg.max_tokens,
+        prompt_version: PROMPT_VERSION,
+        tools: cfg.strategy == Strategy::Agent,
+        verify: cfg.verify,
+    };
+    let o = ekos_sqlgen::agent::run(rt.llm, prompt, &tb, &agent_cfg).await?;
+    for c in &o.calls {
+        p.calls += 1;
+        p.model = c.model.clone();
+        p.input_tokens += c.input_tokens;
+        p.output_tokens += c.output_tokens;
+        if c.cached {
+            p.cached_calls += 1;
+        } else {
+            p.billed_input_tokens += c.input_tokens;
+            p.billed_output_tokens += c.output_tokens;
+        }
+    }
+    p.turns = o.turns;
+    p.repairs = o.turns.saturating_sub(1);
+    p.tools = o.tools;
+    p.findings = o.findings;
+    p.open_findings = o.open_findings;
+    p.truncated = o.truncated;
+    if o.sql.is_none() {
+        p.error = Some("the answer held no SQL code block".into());
+    }
+    p.sql = o.sql;
+    Ok(())
+}
+
 /// Self-consistency: the candidate whose result most executed candidates share; ties go to the
 /// earliest; with none executed, the first candidate.
 fn vote(candidates: &[Candidate]) -> Option<usize> {
@@ -889,6 +974,26 @@ impl BenchAdapter for BirdAdapter {
         };
         p.prompt_hash = suite::sha256_hex(template.as_bytes());
         let block = question_block(s, cfg.evidence);
+        if cfg.strategy != Strategy::Single {
+            let mut schema_text = render_schema(
+                cfg.context,
+                0,
+                h,
+                h.pack.as_ref(),
+                profile,
+                cfg.profile_version >= 2,
+            )?;
+            schema_text.push_str(&values_text);
+            let prompt = fill_prompt_with(template, "SQLite", &schema_text, &block);
+            if cfg.strategy == Strategy::Agent {
+                let protocol = ekos_sqlgen::agent::protocol(cfg.max_turns, cfg.verify);
+                p.prompt_hash = suite::sha256_hex(format!("{template}{protocol}").as_bytes());
+            }
+            let started = Instant::now();
+            answer_with_checks(rt, cfg, h, &s.db_id, &prompt, &mut p).await?;
+            p.latency_ms = started.elapsed().as_millis() as u64;
+            return Ok(p);
+        }
         let mut candidates: Vec<Candidate> = Vec::new();
         let started = Instant::now();
         for i in 0..cfg.n {

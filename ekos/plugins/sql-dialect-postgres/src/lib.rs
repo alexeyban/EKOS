@@ -50,8 +50,8 @@
 //!   statement is from its first characters misses every statement carrying a `--` banner, which in
 //!   a hand-written schema is most of them. See [`leading_keyword`].
 
-use ekos_sql_dialect_sdk::SqlDialectParser;
 use ekos_sql_dialect_sdk::lex::{self, skip_non_code};
+use ekos_sql_dialect_sdk::{DialectFacts, RowLimit, SqlDialectParser};
 use sqlparser::dialect::{Dialect, PostgreSqlDialect};
 
 pub struct PostgresDialectParser;
@@ -67,6 +67,32 @@ impl SqlDialectParser for PostgresDialectParser {
 
     fn preprocess(&self, sql: &str) -> String {
         preprocess_postgres_ddl(sql)
+    }
+
+    /// RFC 0242: integer `/` truncates; NULL sorts last ascending; `LIKE` is case-sensitive and
+    /// `ILIKE` exists; dates are typed.
+    fn facts(&self) -> DialectFacts {
+        DialectFacts {
+            integer_division: true,
+            has_ilike: true,
+            row_limit: RowLimit::LimitOrFetch,
+            identifier_quote: Some('"'),
+            ..DialectFacts::GENERIC
+        }
+    }
+
+    /// RFC 0243: how to write correct SQL for this engine.
+    fn generation_notes(&self) -> &'static [&'static str] {
+        &[
+            "Limit rows with LIMIT n or FETCH FIRST n ROWS ONLY.",
+            "/ between two integers truncates: cast one side for a ratio, e.g. x::numeric / y or 100.0 * x / y.",
+            "Concatenate with || (a NULL operand makes the result NULL) or concat(), which skips NULLs.",
+            "= and LIKE are case-sensitive; use ILIKE, or lower(col) = lower('…').",
+            "Dates: DATE '2024-01-31', date_trunc('month', ts), extract(year FROM ts), ts::date, interval '7 days'.",
+            "Quote names with double quotes; unquoted names fold to lower case, so a mixed-case name must be quoted exactly. Backticks are not SQL here.",
+            "NULL sorts last in ascending order and first in descending order: add NULLS LAST to ORDER BY … DESC.",
+            "COUNT(*) FILTER (WHERE …) counts conditionally; DISTINCT ON (col) keeps the first row of each group.",
+        ]
     }
 }
 

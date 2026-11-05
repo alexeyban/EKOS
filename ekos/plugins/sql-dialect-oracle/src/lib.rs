@@ -20,7 +20,7 @@
 use ekos_plsql::script::{
     Tok, TokKind, Unit, UnitKind, matching_paren, neutralize_quotes, tokens, units,
 };
-use ekos_sql_dialect_sdk::SqlDialectParser;
+use ekos_sql_dialect_sdk::{DialectFacts, RowLimit, SqlDialectParser};
 use sqlparser::dialect::{Dialect, GenericDialect};
 
 pub struct OracleDialectParser;
@@ -36,6 +36,31 @@ impl SqlDialectParser for OracleDialectParser {
 
     fn preprocess(&self, sql: &str) -> String {
         preprocess(sql)
+    }
+
+    /// RFC 0242/0243: the engine behaviour the text-to-SQL checks consult.
+    fn facts(&self) -> DialectFacts {
+        DialectFacts {
+            has_ilike: false,
+            row_limit: RowLimit::FetchFirst,
+            identifier_quote: Some('"'),
+            ..DialectFacts::GENERIC
+        }
+    }
+
+    /// RFC 0243: how to write correct SQL for this engine.
+    fn generation_notes(&self) -> &'static [&'static str] {
+        &[
+            "Limit rows with FETCH FIRST n ROWS ONLY (12c and later), or ROWNUM <= n around an ordered subquery; there is no LIMIT and no TOP.",
+            "/ gives a NUMBER with decimals; TRUNC(a / b) truncates.",
+            "Concatenate with || (a NULL operand counts as empty) or CONCAT(a, b).",
+            "= and LIKE are case-sensitive and there is no ILIKE: use UPPER(col) = UPPER('…').",
+            "The empty string '' is NULL: test missing text with IS NULL, never = ''.",
+            "Unquoted names fold to UPPER case; quote with double quotes to keep a name's case. Backticks are not SQL here.",
+            "Dates: DATE '2024-01-31', TO_DATE('31.01.2024', 'DD.MM.YYYY'), EXTRACT(YEAR FROM d), TRUNC(d, 'MM'); a DATE also holds a time of day.",
+            "A SELECT without a table reads FROM DUAL.",
+            "NULL sorts last in ascending order.",
+        ]
     }
 }
 

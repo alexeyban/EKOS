@@ -11,7 +11,7 @@ use super::store::open_store_read_only;
 use anyhow::{Context, Result, bail};
 use ekos_compiler_core::EkosConfig;
 use ekos_compiler_core::config::LlmConfig;
-use ekos_evals::bench::context::{DbPack, Profile, SchemaInfo, ValueIndex};
+use ekos_evals::bench::context::{self, DbPack, Profile, SchemaInfo, ValueIndex};
 use ekos_evals::bench::report::{self, BenchReport, RunMeta};
 use ekos_evals::bench::sqlexec::Db;
 use ekos_evals::bench::suite::{Suite, SuiteDirs};
@@ -560,6 +560,18 @@ fn open_db(
         ),
         Err(_) => None,
     };
+    // RFC 0242: the checks' view is built only for cells that use it (it copies the value index).
+    let sql_schema = if cfg.strategy == bench::Strategy::Single {
+        None
+    } else {
+        Some(context::sqlgen_schema(
+            &db,
+            &schema,
+            pack.as_ref(),
+            profile.as_ref(),
+            values.as_ref(),
+        )?)
+    };
     Ok(DbHandle {
         db,
         schema,
@@ -567,6 +579,7 @@ fn open_db(
         values,
         profile,
         fingerprint,
+        sql_schema,
     })
 }
 
@@ -592,6 +605,81 @@ pub fn context(
         db_id,
     )?;
     print!("{}", adapter.schema_text(&cfg, &handle)?);
+    Ok(())
+}
+
+/// `ekos eval bench checks` (RFC 0242 §2.3): replays every finding over a report's final SQL,
+/// with no model calls, and prints how often each code fired on answers scored right and wrong —
+/// the evidence for which detectors a `loop` / `agent` cell keeps.
+pub fn checks(cwd: &Path, bench_dir: Option<&Path>, report_path: &Path, json: bool) -> Result<()> {
+    let run = BenchReport::load(report_path)?;
+    let root = bench_root(cwd, bench_dir);
+    let (suite, dirs, adapter) = open_suite(&root, &run.suite)?;
+    let mut cfg = run.config.clone();
+    cfg.strategy = bench::Strategy::Loop;
+    let prepared = read_prepared(&dirs);
+    let mut dbs: BTreeMap<String, DbHandle> = BTreeMap::new();
+    let mut raised: Vec<(Vec<String>, bool)> = Vec::new();
+    let mut examples: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for q in &run.questions {
+        let Some(sql) = &q.prediction.sql else {
+            continue;
+        };
+        if !dbs.contains_key(&q.db_id) {
+            let h = open_db(
+                &dirs,
+                adapter.as_ref(),
+                &suite,
+                &cfg,
+                prepared.as_ref(),
+                &q.db_id,
+            )?;
+            dbs.insert(q.db_id.clone(), h);
+        }
+        let findings = ekos_evals::bench::bird::check_sql(&dbs[&q.db_id], &cfg, &q.db_id, sql)?;
+        for f in &findings {
+            examples.entry(f.code.clone()).or_default().push(format!(
+                "{} {}: {}",
+                q.id,
+                if q.score.ex { "right" } else { "wrong" },
+                f.message
+            ));
+        }
+        raised.push((findings.into_iter().map(|f| f.code).collect(), q.score.ex));
+    }
+    let counts = report::finding_counts(raised.iter().map(|(c, ex)| (c, *ex)));
+    let wrong_total = raised.iter().filter(|(_, ex)| !ex).count();
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "report": report_path,
+                "answers": raised.len(),
+                "wrong": wrong_total,
+                "codes": counts,
+                "examples": examples,
+            }))?
+        );
+        return Ok(());
+    }
+    println!(
+        "{} answers with SQL, {} scored wrong ({:.0}%). Per code: answers it fires on.",
+        raised.len(),
+        wrong_total,
+        100.0 * wrong_total as f64 / raised.len().max(1) as f64
+    );
+    println!(
+        "{:<6} {:>6} {:>6} {:>8}  keep (wrong ≥ 2×right and ≥ 3)",
+        "code", "right", "wrong", "% wrong"
+    );
+    for (code, (right, wrong)) in &counts {
+        let share = 100.0 * *wrong as f64 / (*right + *wrong).max(1) as f64;
+        let keep = *wrong >= 2 * *right && *wrong >= 3;
+        println!(
+            "{code:<6} {right:>6} {wrong:>6} {share:>7.0}%  {}",
+            if keep { "yes" } else { "no" }
+        );
+    }
     Ok(())
 }
 

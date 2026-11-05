@@ -14,7 +14,7 @@ site and documentation: **[ekos.dev](https://ekos.dev)**. Install: **[ekos.dev/d
 
 Unlike traditional enterprise systems that manage data, documents or metadata independently, EKOS treats the entire enterprise as a living knowledge system — a permanently evolving semantic model that can be trusted by both humans and AI.
 
-**Text-to-SQL benchmark:** on [BIRD Mini-Dev](https://bird-bench.github.io/) (release 1024, 302 hold-out questions over 11 databases), the same model, Claude Haiku 5.5, scores **53.3%** execution accuracy on raw DDL and **63.9–66.9%** on the knowledge EKOS compiles from each database (+10.6 to +13.6 points, significant on paired questions), for about a tenth of a cent per question. Every question, the SQL it produced, tokens, cost and the scorer's parity with BIRD's official evaluator: [BIRD Mini-Dev on EKOS](https://alexeyban.github.io/EKOS/presentations/bird-mini-dev-benchmark.html).
+**Text-to-SQL benchmark:** on [BIRD Mini-Dev](https://bird-bench.github.io/) (release 1024, 302 hold-out questions over 11 databases), the same model, Claude Haiku 5.5, scores **53.3%** execution accuracy on raw DDL, **71.5%** on the knowledge EKOS compiles from each database, and **76.2%** when it also checks its SQL against the data with EKOS's tools (+22.9 points, significant on paired questions), for about a quarter of a cent per question. Every question, the SQL it produced, tokens, cost and the scorer's parity with BIRD's official evaluator: [BIRD Mini-Dev on EKOS](https://alexeyban.github.io/EKOS/presentations/bird-mini-dev-benchmark.html).
 
 **First benchmark:** on a real 2,022-file open-source repo ([plausible/analytics](https://github.com/plausible/analytics)), cold ingestion takes 34 seconds, and answering real questions from the compiled ledger costs **67-93% fewer tokens** than raw grep-based search over the source — measured with a standard tokenizer (`tiktoken`), not a hand-rolled estimate, with the one case grep wins included rather than hidden. Full methodology, every command, and every raw output: [The First Benchmark Number](https://alexeyban.github.io/EKOS/presentations/token-benchmark.html).
 
@@ -1044,6 +1044,50 @@ questions, Claude Haiku 5.5), the EKOS cell (pack + column profiles + value look
 scored 63.9% execution accuracy against 53.3% for the same model with raw DDL: +10.6 points, 95%
 CI +4.3 to +16.9, for $0.30 a run. See `evals/README.md`.
 
+RFC 0242 added cells that *check* each answer:
+
+- `strategy = "loop"` sends gold-free findings back;
+- `strategy = "agent"` lets the model call schema, value and read-only SQL tools, and `verify`
+  shows it its own result once.
+
+`ekos eval bench checks <report>` replays the checks over an old report for free. The agent cell
+K2 scored **76.2%** on the same hold-out split. That is +4.6 over the same pack without the agent
+(71.5%; CI 0.0 to +9.3, so not shown at 5%; +7.1 with p = 0.007 on the tune split), and **+22.9
+points over raw DDL** with the same model, for $0.78 a run.
+
+### Checking and writing SQL for a database (RFC 0242 / 0243)
+
+`ekos sql check q.sql` lints a query against the ledger's tables, columns, keys and foreign keys,
+and against the dialect's rules:
+
+| Check | Example |
+|---|---|
+| Unknown names | with the nearest real ones |
+| Row-limit form | `LIMIT` on Oracle |
+| `ILIKE` | where the engine has none |
+| Identifier quoting | wrong quote character for the dialect |
+| Integer division | truncates a ratio |
+| `=` on a list column | needs `LIKE` |
+| NULLs first under `ORDER BY … LIMIT` | — |
+| Date literals | in another format |
+
+Every SQL dialect plugin (sqlite, postgres, mysql, mssql, snowflake, databricks, clickhouse,
+trino, oracle) states these rules and its own notes for writing SQL.
+
+With `--database <name>` (a `[[databases]]` entry) or `--sqlite <file>`, it also runs read-only
+probes on the database: the result, value spellings (`'Germany'` vs `'Berlin, Germany'`), rows
+repeated by joins, ties at the top. Each live probe is protected:
+
+- **PostgreSQL:** a read-only session, and a role that cannot write (`--allow-writable-role`
+  overrides).
+- **ClickHouse:** `readonly=1`.
+- **Oracle:** a read-only transaction.
+- **All of them:** a guard refuses anything but one SELECT before it is sent.
+
+`ekos sql generate "<question>" --database <name>` runs RFC 0242's agent over the same schema and
+probes, through the `nl-sql` model route; `--allow-metered` is needed unless it is Ollama. The
+`text-to-sql` skill (`.claude/skills/`) gives Claude Code the same procedure over MCP.
+
 ### iDempiere eval (RFC 0222)
 
 `evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six
@@ -1897,7 +1941,9 @@ content hash for compiler-synthesized objects like rollups and risks), `ekos_sta
 `freshness` block: does the ledger still match the source? RFC 0171), `ekos_conflicts` (where
 sources disagree about one fact, every claim with its file and line — read-only, RFC 0172; an
 `ekos_query`/`ekos_retrieve` claim about such an attribute is marked `disputed: true`, RFC 0173),
-`ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
+`ekos_sql_check` (check a drafted query against the compiled schema and the SQL dialect's rules;
+with only `dialect`, it returns that engine's rules for writing SQL — RFC 0242/0243, static, it
+never opens a database), `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
 explanation and migration diffing — RFC 0028), `ekos_architecture_evaluate`/
 `ekos_architecture_drift`/`ekos_architecture_diff` (real completeness/evidence-coverage scoring,
 documentation drift, and a real architecture-level diff between two points in time — technologies,

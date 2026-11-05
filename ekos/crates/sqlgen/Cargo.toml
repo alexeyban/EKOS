@@ -1,0 +1,22 @@
+[package]
+name = "ekos-sqlgen"
+description = "RFC 0242 — text-to-SQL checks (lint + probes) and a tool-using agent over EKOS knowledge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ekos-kir.workspace = true
+ekos-recovery.workspace = true
+ekos-sql-dialect-sdk.workspace = true
+sqlparser.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+async-trait.workspace = true
+rusqlite = { workspace = true }
+tokio = { workspace = true }

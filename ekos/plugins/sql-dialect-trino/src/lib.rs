@@ -16,8 +16,8 @@
 //! Blanking replaces every character except line breaks with a space, so line numbers in
 //! diagnostics and evidence stay the file's own (the same rule RFC 0176 uses).
 
-use ekos_sql_dialect_sdk::SqlDialectParser;
 use ekos_sql_dialect_sdk::lex::{is_ident_char, skip_non_code, statement_spans};
+use ekos_sql_dialect_sdk::{DialectFacts, RowLimit, SqlDialectParser};
 use sqlparser::dialect::{Dialect, GenericDialect};
 
 pub struct TrinoDialectParser;
@@ -31,6 +31,16 @@ impl SqlDialectParser for TrinoDialectParser {
         Box::new(GenericDialect {})
     }
 
+    /// RFC 0242: integer `/` truncates; NULL sorts last ascending; `LIKE` is case-sensitive.
+    fn facts(&self) -> DialectFacts {
+        DialectFacts {
+            integer_division: true,
+            row_limit: RowLimit::LimitOrFetch,
+            identifier_quote: Some('"'),
+            ..DialectFacts::GENERIC
+        }
+    }
+
     fn preprocess(&self, sql: &str) -> String {
         let mut chars: Vec<char> = sql.chars().collect();
         for (start, end) in statement_spans(&chars) {
@@ -42,6 +52,20 @@ impl SqlDialectParser for TrinoDialectParser {
             blank_clauses(&mut chars, &toks, end);
         }
         chars.into_iter().collect()
+    }
+
+    /// RFC 0243: how to write correct SQL for this engine.
+    fn generation_notes(&self) -> &'static [&'static str] {
+        &[
+            "Limit rows with LIMIT n or FETCH FIRST n ROWS ONLY.",
+            "/ between two integers truncates: CAST(x AS DOUBLE) / y for a ratio.",
+            "Concatenate with || or concat().",
+            "= and LIKE are case-sensitive and there is no ILIKE: use lower(col) LIKE lower('…').",
+            "Quote names with double quotes; backticks are not accepted.",
+            "Dates: DATE '2024-01-31', date_trunc('month', ts), year(ts), date_diff('day', a, b).",
+            "NULL sorts last in ascending order.",
+            "count_if(cond) counts conditionally; approx_distinct is approximate, count(DISTINCT x) is exact.",
+        ]
     }
 }
 

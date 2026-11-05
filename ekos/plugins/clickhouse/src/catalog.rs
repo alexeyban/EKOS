@@ -66,14 +66,14 @@ fn ident(value: &str) -> String {
     format!("`{}`", value.replace('\\', "\\\\").replace('`', "\\`"))
 }
 
-struct Http {
+pub(crate) struct Http {
     conn: ChConnection,
     password: String,
     client: reqwest::Client,
 }
 
 impl Http {
-    fn new(conn: &ChConnection) -> Result<Self, String> {
+    pub(crate) fn new(conn: &ChConnection) -> Result<Self, String> {
         let password = std::env::var(&conn.password_env).map_err(|_| {
             format!(
                 "the environment variable {} names this database's password but is not set",
@@ -91,7 +91,7 @@ impl Http {
         })
     }
 
-    async fn send(&self, sql: &str, readonly: bool) -> Result<String, String> {
+    pub(crate) async fn send(&self, sql: &str, readonly: bool) -> Result<String, String> {
         let mut req = self
             .client
             .post(&self.conn.url)

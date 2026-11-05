@@ -17,6 +17,7 @@ use thiserror::Error;
 
 /// RFC 0235: a ClickHouse server as a `[[databases]]` entry.
 pub mod catalog;
+pub mod probe;
 
 /// One row of `system.tables` for a configured database.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

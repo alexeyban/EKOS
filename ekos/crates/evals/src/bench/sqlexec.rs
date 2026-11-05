@@ -151,6 +151,58 @@ impl Db {
     }
 }
 
+/// The checks' read-only window on a benchmark database (RFC 0242): every probe query runs
+/// under the cell's deadline and reads at most the rows asked for.
+pub struct SqliteProbe<'a> {
+    pub db: &'a Db,
+    pub timeout: Duration,
+}
+
+impl ekos_sqlgen::probe::Probe for SqliteProbe<'_> {
+    fn preview(&self, sql: &str, max_rows: usize) -> Result<ekos_sqlgen::probe::Preview, String> {
+        let deadline = Instant::now() + self.timeout;
+        let conn = &self.db.conn;
+        conn.progress_handler(10_000, Some(move || Instant::now() > deadline));
+        let result = (|| {
+            let map = |e: rusqlite::Error| {
+                if Instant::now() > deadline {
+                    "timeout".to_string()
+                } else {
+                    e.to_string()
+                }
+            };
+            let mut stmt = conn.prepare(sql).map_err(map)?;
+            let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+            let width = columns.len();
+            let mut rows = stmt.query([]).map_err(map)?;
+            let mut out = ekos_sqlgen::probe::Preview {
+                columns,
+                ..Default::default()
+            };
+            while let Some(row) = rows.next().map_err(map)? {
+                if out.rows.len() >= max_rows {
+                    out.truncated = true;
+                    break;
+                }
+                let mut cells = Vec::with_capacity(width);
+                for i in 0..width {
+                    cells.push(match Cell::from_ref(row.get_ref(i).map_err(map)?) {
+                        Cell::Null => None,
+                        Cell::Int(x) => Some(x.to_string()),
+                        Cell::Real(bits) => Some(f64::from_bits(bits).to_string()),
+                        Cell::Text(s) => Some(s),
+                        Cell::Blob(_) => Some("<blob>".into()),
+                    });
+                }
+                out.rows.push(cells);
+            }
+            Ok(out)
+        })();
+        conn.progress_handler(0, None::<fn() -> bool>);
+        result
+    }
+}
+
 /// SQLite's built-in math functions (`SQLITE_ENABLE_MATH_FUNCTIONS`, SQLite 3.35+). The official
 /// evaluator runs Python's `sqlite3`, whose system library has them; the bundled library here is
 /// built without, so a query using `FLOOR` or `POWER` failed here and ran there (BIRD Mini-Dev

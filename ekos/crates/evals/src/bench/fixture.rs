@@ -213,6 +213,8 @@ pub fn write_suite(suite_dir: &Path) -> Result<()> {
         ("f.toml", rfc_0241_cell("F", true, false, 1)),
         ("g.toml", rfc_0241_cell("G", true, true, 1)),
         ("h.toml", rfc_0241_cell("H", true, true, 3)),
+        ("j.toml", rfc_0242_cell("J", super::Strategy::Loop)),
+        ("k.toml", rfc_0242_cell("K", super::Strategy::Agent)),
     ] {
         std::fs::write(suite_dir.join("configs").join(file), toml::to_string(&cfg)?)?;
     }
@@ -238,8 +240,20 @@ fn cell(name: &str, context: ContextKind, evidence: bool, value_lookup: bool) ->
         prompt: super::PromptKind::Baseline,
         result_checks: false,
         vary_context: false,
+        strategy: super::Strategy::Single,
+        max_turns: 6,
+        verify: false,
+        checks: Vec::new(),
         llm: serde_json::json!({"provider": "ollama", "model": "fixture"}),
     }
+}
+
+/// RFC 0242's cells: G's context with the detector loop (`J`) or the tool-using agent (`K`).
+fn rfc_0242_cell(name: &str, strategy: super::Strategy) -> ExperimentConfig {
+    let mut c = rfc_0241_cell(name, true, true, 1);
+    c.result_checks = false;
+    c.strategy = strategy;
+    c
 }
 
 /// RFC 0241's cells: the pack with profiles; value lookup v2; the ekos-v1 prompt with result
@@ -383,6 +397,8 @@ pub fn empty_report() -> BenchReport {
             cached_calls: 0,
             billed_input_tokens: 0,
             billed_output_tokens: 0,
+            turns: 0,
+            open_findings: Default::default(),
         },
         questions: Vec::new(),
     }

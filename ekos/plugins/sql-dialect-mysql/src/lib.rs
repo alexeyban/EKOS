@@ -13,7 +13,7 @@
 //! `sqlparser` dialect (or any real SQL parser) understands it, so it must be stripped, and the
 //! custom delimiter it declares must be normalized back to `;`, before parsing.
 
-use ekos_sql_dialect_sdk::SqlDialectParser;
+use ekos_sql_dialect_sdk::{DialectFacts, RowLimit, SqlDialectParser};
 use sqlparser::dialect::{Dialect, MySqlDialect};
 
 pub struct MySqlDialectParser;
@@ -29,6 +29,33 @@ impl SqlDialectParser for MySqlDialectParser {
 
     fn preprocess(&self, sql: &str) -> String {
         strip_delimiter_directives(sql)
+    }
+
+    /// RFC 0242/0243: the engine behaviour the text-to-SQL checks consult.
+    fn facts(&self) -> DialectFacts {
+        DialectFacts {
+            nulls_first_ascending: true,
+            like_case_insensitive: true,
+            row_limit: RowLimit::Limit,
+            identifier_quote: Some('`'),
+            double_quote_is_string: true,
+            backtick_identifiers: true,
+            ..DialectFacts::GENERIC
+        }
+    }
+
+    /// RFC 0243: how to write correct SQL for this engine.
+    fn generation_notes(&self) -> &'static [&'static str] {
+        &[
+            "Limit rows with LIMIT n.",
+            "/ always gives a decimal; DIV is integer division.",
+            "Concatenate with CONCAT(a, b): || means OR in the default mode.",
+            "Comparison follows the column's collation, usually case-insensitive; there is no ILIKE.",
+            "Quote names with backticks; \"text\" is a string literal in the default mode, not a name.",
+            "Dates: DATE('2024-01-31'), YEAR(col), DATE_FORMAT(col, '%Y-%m'), DATEDIFF(a, b) in days.",
+            "NULL sorts first in ascending order.",
+            "There is no FULL OUTER JOIN: UNION a LEFT JOIN and a RIGHT JOIN.",
+        ]
     }
 }
 

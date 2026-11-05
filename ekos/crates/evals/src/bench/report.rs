@@ -56,6 +56,17 @@ pub struct Metrics {
     pub billed_input_tokens: u64,
     #[serde(default)]
     pub billed_output_tokens: u64,
+    /// RFC 0242: model replies per question (`loop` / `agent` cells), in total.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub turns: usize,
+    /// RFC 0242: per finding code left open on the final SQL, how many of those answers were
+    /// scored (correct, wrong) — a detector's precision on that run.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub open_findings: BTreeMap<String, (usize, usize)>,
+}
+
+fn is_zero(v: &usize) -> bool {
+    *v == 0
 }
 
 /// One `ekos eval bench run`.
@@ -195,7 +206,45 @@ pub fn metrics(results: &[QuestionResult], price: Option<(f64, f64)>) -> Metrics
         cached_calls: results.iter().map(|r| r.prediction.cached_calls).sum(),
         billed_input_tokens,
         billed_output_tokens,
+        turns: results.iter().map(|r| r.prediction.turns).sum(),
+        open_findings: finding_counts(
+            results
+                .iter()
+                .map(|r| (&r.prediction.open_findings, r.score.ex)),
+        ),
     }
+}
+
+/// Per finding code: answers it was raised on that were (correct, wrong); a code counts once per
+/// answer.
+pub fn finding_counts<'a>(
+    answers: impl Iterator<Item = (&'a Vec<String>, bool)>,
+) -> BTreeMap<String, (usize, usize)> {
+    let mut out: BTreeMap<String, (usize, usize)> = BTreeMap::new();
+    for (codes, ex) in answers {
+        let unique: std::collections::BTreeSet<&String> = codes.iter().collect();
+        for c in unique {
+            let e = out.entry(c.clone()).or_default();
+            if ex {
+                e.0 += 1;
+            } else {
+                e.1 += 1;
+            }
+        }
+    }
+    out
+}
+
+/// The per-code table: `L004 right 3 · wrong 9 (75% of its answers wrong)`.
+pub fn render_finding_counts(counts: &BTreeMap<String, (usize, usize)>) -> String {
+    counts
+        .iter()
+        .map(|(code, (right, wrong))| {
+            let share = 100.0 * *wrong as f64 / (*right + *wrong).max(1) as f64;
+            format!("{code} right {right} · wrong {wrong} ({share:.0}% wrong)")
+        })
+        .collect::<Vec<_>>()
+        .join("\n               ")
 }
 
 /// Everything about a run that is not its per-question results.
@@ -353,6 +402,15 @@ impl BenchReport {
                 ));
             }
             out.push('\n');
+        }
+        if m.turns > 0 {
+            out.push_str(&format!("Replies:       {} in total\n", m.turns));
+        }
+        if !m.open_findings.is_empty() {
+            out.push_str(&format!(
+                "Open findings: {}\n",
+                render_finding_counts(&m.open_findings)
+            ));
         }
         out.push_str(&format!(
             "Calls {} ({} from the LLM cache) · billed tokens {} in / {} out\n",

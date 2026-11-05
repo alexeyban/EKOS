@@ -1,0 +1,29 @@
+# RFC 0242 — G2's context and prompt; every answer is checked (lint + probes on the database)
+# and sent back with the findings and the context they name, up to 6 replies. No tools.
+# Checks: all but L002, whose replay over G2's tune answers fired on 2 right answers for 1 wrong.
+name = "J"
+description = "G2 + detector loop (RFC 0242), max 6 replies"
+context = "ekos-pack"
+evidence = false
+value-lookup = true
+few-shot = 0
+n = 1
+r = 1
+max-tokens = 4096
+ves-iterations = 3
+timeout-seconds = 30
+profiles = true
+profile-version = 2
+value-lookup-version = 2
+prompt = "ekos-v1"
+result-checks = false
+vary-context = false
+strategy = "loop"
+checks = ["E000", "P001", "P002", "P003", "P004", "P005", "L001", "L003", "L004", "L005", "L006", "L007", "L008"]
+
+[llm]
+# OpenCode Zen, Claude Haiku 5.5 ($0.10 / $0.50 per million tokens). Metered: needs --allow-metered.
+provider = "zen"
+model = "claude-haiku-5-5"
+api-key-env = "OPENCODE_API_KEY"
+budget-usd = 0.3

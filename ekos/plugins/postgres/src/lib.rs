@@ -17,6 +17,8 @@ use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+pub mod probe;
+
 /// The observer's name, and the `source_kind` its artifacts carry.
 pub const OBSERVER: &str = "postgres";
 /// The target scheme: `postgres://<database>/<schema>/…`.
@@ -63,7 +65,7 @@ impl PgConnection {
         )
     }
 
-    fn connect(&self, run_id: &str) -> Result<PgSource, PgError> {
+    pub(crate) fn connect(&self, run_id: &str) -> Result<PgSource, PgError> {
         let conn = ekos_migrate::ConnectionRef {
             engine: ekos_migrate::EngineKind::Postgres,
             alias: self.host.clone(),

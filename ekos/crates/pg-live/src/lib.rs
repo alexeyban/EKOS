@@ -32,7 +32,7 @@ pub use catalog::{CatalogObject, CatalogSnapshot, ObjectKind, introspect, reconc
 pub use pii::{Classification, PiiClass};
 pub use profile::{ColumnProfile, ProfileTier, TableProfile};
 pub use sandbox::PgSandbox;
-pub use session::{PgSource, SessionPolicy, WriteCheck};
+pub use session::{PgSource, PreviewRows, SessionPolicy, WriteCheck};
 pub use workload::{QueryShape, WorkloadJoin};
 
 #[derive(Debug, thiserror::Error)]

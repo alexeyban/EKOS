@@ -42,7 +42,7 @@
 //! `Statement::Query`. Live queries are always plain `SELECT`s, never `CREATE TABLE`/`CREATE
 //! DICTIONARY`, so none of this preprocessing changes that gate's behavior.
 
-use ekos_sql_dialect_sdk::SqlDialectParser;
+use ekos_sql_dialect_sdk::{DialectFacts, RowLimit, SqlDialectParser};
 use sqlparser::dialect::{ClickHouseDialect, Dialect};
 
 pub struct ClickHouseDialectParser;
@@ -58,6 +58,32 @@ impl SqlDialectParser for ClickHouseDialectParser {
 
     fn preprocess(&self, sql: &str) -> String {
         preprocess_clickhouse_ddl(sql)
+    }
+
+    /// RFC 0242/0243: the engine behaviour the text-to-SQL checks consult.
+    fn facts(&self) -> DialectFacts {
+        DialectFacts {
+            has_ilike: true,
+            row_limit: RowLimit::Limit,
+            identifier_quote: Some('`'),
+            backtick_identifiers: true,
+            ..DialectFacts::GENERIC
+        }
+    }
+
+    /// RFC 0243: how to write correct SQL for this engine.
+    fn generation_notes(&self) -> &'static [&'static str] {
+        &[
+            "Limit rows with LIMIT n; LIMIT n BY col keeps n rows per group.",
+            "/ always gives a Float64; intDiv(a, b) truncates.",
+            "Concatenate with concat(a, b) or ||.",
+            "= and LIKE are case-sensitive; ILIKE ignores case.",
+            "Quote names with backticks or double quotes; names are case-sensitive.",
+            "Dates: toDate('2024-01-31'), toYear(ts), toStartOfMonth(ts), dateDiff('day', a, b).",
+            "count() counts rows; uniqExact(col) counts distinct values exactly (uniq is approximate); countIf(cond), sumIf(x, cond), argMax(x, y).",
+            "Columns are often not Nullable and hold a default (0, '') instead of NULL, and a LEFT JOIN row with no match gets those defaults unless join_use_nulls = 1: test for 0 or '' as well as NULL.",
+            "NULL sorts last in ascending order.",
+        ]
     }
 }
 

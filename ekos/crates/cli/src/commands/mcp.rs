@@ -112,6 +112,7 @@ pub const SCOPED_TOOLS: &[&str] = &[
     "ekos_impact",
     "ekos_diff",
     "ekos_graph_export",
+    "ekos_sql_check",
 ];
 
 /// Tools a restricted reader does not get, each with the reason.
@@ -1087,10 +1088,26 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
         tools.push(xref_tool_definition());
     }
     tools.push(signoff_status_tool_definition());
+    tools.push(sql_check_tool_definition());
     for e in ext.iter() {
         tools.extend(e.mcp_tools(config));
     }
     tools
+}
+
+/// RFC 0242 — read-only: lints SQL against the compiled schema. Runs nothing on a database.
+fn sql_check_tool_definition() -> Value {
+    json!({
+        "name": "ekos_sql_check",
+        "description": "Before writing SQL for a database EKOS compiled, call this with only `dialect` to get that engine's rules (row limits, integer division, quoting, dates, case sensitivity). Then call it with the `sql` you drafted to check it against the compiled schema (tables, columns, primary and foreign keys) and the dialect: unknown tables or columns with the nearest real names, the wrong row-limit form (LIMIT on Oracle), ILIKE where it does not exist, wrong identifier quoting, joins off the foreign keys, `=` on list-valued columns, integer division that truncates a ratio, ascending ORDER BY … LIMIT on nullable columns, date literals in another format. Static only: it does not run the query, so value spellings and row counts are not checked (the `ekos sql check --database` command does that). An empty findings list is not proof the query is right.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sql": { "type": "string", "description": "One SELECT statement; leave out to get only the dialect's rules" },
+                "dialect": { "type": "string", "description": "sqlite, postgres, mysql, mssql, snowflake, databricks, clickhouse, trino, oracle or generic (default: the project's SQL dialect)" }
+            }
+        }
+    })
 }
 
 /// RFC 0170 Phase 4 — business-semantics lookups for agents, listed only with
@@ -1773,6 +1790,11 @@ fn call_tool(
         let ledger = cache.get(config, workspace)?;
         let limit = bounded_arg(args, "limit", 20, 1, 200)? as usize;
         return super::check::agent_check(config, workspace, ledger, args, limit);
+    }
+
+    if name == "ekos_sql_check" {
+        let ledger = cache.get(config, workspace)?;
+        return super::sql_check::agent_check(config, ledger, args);
     }
 
     if name == "ekos_signoff_status" {
@@ -3410,7 +3432,9 @@ mod tests {
                 // RFC 0233 — on by default, read-only.
                 "ekos_xref_check",
                 // RFC 0213 — read-only.
-                "ekos_signoff_status"
+                "ekos_signoff_status",
+                // RFC 0242 — read-only.
+                "ekos_sql_check"
             ]
         );
         for tool in tools {
