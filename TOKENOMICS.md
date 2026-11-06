@@ -76,17 +76,17 @@ Every row is part of the 966,875,284 total supply — this table shows *where it
 carve-out from a separate pool. About 97% is held by the market; founder and community allocations
 together hold about 3%.
 
-Snapshot as of **2026-10-24**; balances change on-chain.
+Snapshot as of **2026-11-06**; balances change on-chain.
 
 | Holder | EKOS | % of Supply | Status |
 |---|---|---|---|
-| Public / market holders | ~937,388,000 | ~96.95% | Circulating — Pump.fun bonding curve / open market |
+| Public / market holders | ~936,888,000 | ~96.90% | Circulating — Pump.fun bonding curve / open market |
 | Founder Vesting | 14,000,000 | 1.45% | **Vesting** — Streamflow, linear monthly; 2.3333M unlocked, not yet claimed |
 | Founder Lock | 4,000,000 | 0.41% | **Locked until Jul 27, 2027** — Streamflow lock |
-| Staking Pool | 4,500,000 | 0.47% | 3.5M reward budget + 1M founder stake ([StakePoint](https://stakepoint.app/embed/pool/cmvj8dje60000l308pgn2q79q?color=fb57ff&theme=dark)) |
-| Founder Personal Wallet | ~2,985,279 | 0.31% | Unlocked — mostly open-market buys |
-| Bounty Fund | 2,500,000 | 0.26% | Bounty #2 expired, refund pending (see below) |
-| Community Rewards | 1,500,000 | 0.16% | Held for distribution — separate Metamask wallet |
+| Staking Pool | 5,500,000 | 0.57% | 4.5M reward budget + 1M founder stake ([StakePoint](https://stakepoint.app/embed/pool/cmvj8dje60000l308pgn2q79q?color=fb57ff&theme=dark)) |
+| Founder Personal Wallet | ~5,485,279 | 0.57% | Unlocked — mostly open-market buys |
+| Bounty Fund | 0 | 0% | Bounty #2 refunded to the founder's personal wallet (see below) |
+| Community Rewards | 1,000,000 | 0.10% | Held for distribution — separate Metamask wallet |
 | Burn wallet | 2,000 | <0.01% | Left from a test transfer; for burning |
 | Treasury | 0 | 0% | Fully allocated to the Bounty Fund on 2026-08-27 |
 | **Total supply** | **966,875,284** | **100%** | |
@@ -94,23 +94,24 @@ Snapshot as of **2026-10-24**; balances change on-chain.
 **In Streamflow contracts: 18,000,000 EKOS (~1.9%)** — ~15,666,700 EKOS (~1.6%) still time-locked,
 plus 2.3333M EKOS unlocked but unclaimed. Everything else is in circulation.
 
-Founder custody total: ~25,985,279 EKOS (~2.7% of supply) — Founder Vesting + Founder Lock +
+Founder custody total: ~25,485,279 EKOS (~2.6% of supply) — Founder Vesting + Founder Lock +
 personal wallet + the founder's 1,000,000 EKOS stake in the staking pool + Bounty Fund + Community
 Rewards. This is a *transparency* figure, **not** locked or reserved supply: only the ~15,666,700
 EKOS above is still time-locked, the Bounty Fund and Community Rewards are earmarked for community
-distribution, and the personal wallet is mostly open-market buys. The staking pool's 3,500,000 EKOS
+distribution, and the personal wallet is mostly open-market buys. The staking pool's 4,500,000 EKOS
 reward budget is not counted: it is paid out to stakers. Neither is the burn wallet's 2,000 EKOS.
 
 ### How the pools changed since the first draft
 
-- **Community Rewards, 5M → 2M → 1.5M:** 3M moved to fund the staking pool's reward budget, and a
-  further 500,000 on 2026-10-23 ([deposit](https://solscan.io/tx/5Q7CiYwMwZ99Mn2WNAFK78Ltz1TaUYCBSpNk6NhpdbexNdYg4k6bJbRgtNeU7qq5Zs2CMWe8ZYzrAcxZouqjnUGq)).
-- **Founder Personal Wallet, 3.55M → 2.55M → ~2.99M:** 1M staked by the founder in the staking
-  pool; on 2026-10-23/24, +935,279 EKOS bought on the open market (212,521 + 349,576 + 373,182) and 500,000 sent to the
-  burn wallet and burned.
-- **Bounty Fund:** bounty #1 (3.6M EKOS) was paid in full to 9 winners. The current 2.5M is
-  bounty #2, funded from the founder's personal wallet; it expired and its refund returns to the
-  Bounty Fund.
+- **Community Rewards, 5M → 2M → 1.5M → 1M:** 3M moved to fund the staking pool's reward budget, a
+  further 500,000 on 2026-10-23 ([deposit](https://solscan.io/tx/5Q7CiYwMwZ99Mn2WNAFK78Ltz1TaUYCBSpNk6NhpdbexNdYg4k6bJbRgtNeU7qq5Zs2CMWe8ZYzrAcxZouqjnUGq)),
+  and 500,000 on 2026-11-06. The reward vault held 4,500,000 EKOS and the staking vault 43,840,000
+  EKOS (all stakers, including the founder's 1M) on 2026-11-06.
+- **Founder Personal Wallet, 3.55M → 2.55M → ~2.99M → ~5.49M:** 1M staked by the founder in the staking
+  pool; on 2026-10-23/24, +935,279 EKOS bought on the open market (212,521 + 349,576 + 373,182), 500,000 sent to the
+  burn wallet and burned, and +2.5M returned from the Bounty Fund when bounty #2 was refunded.
+- **Bounty Fund, 2.5M → 0:** bounty #1 (3.6M EKOS) was paid in full to 9 winners. The 2.5M of
+  bounty #2, funded from the founder's personal wallet, expired and was refunded to that wallet.
 
 The "Public / market holders" figure is total supply minus the named wallets above; the
 circulating-supply figure is total supply minus only the locked tokens. Neither is a separate
@@ -135,7 +136,7 @@ contracts themselves are the source of truth.
 
 ## Community Rewards
 
-The 1,500,000 EKOS Community Rewards pool pays for work that makes EKOS better, judged by evidence
+The 1,000,000 EKOS Community Rewards pool pays for work that makes EKOS better, judged by evidence
 of impact rather than activity counts.
 
 | Track | Rewarded work | Evidence required |
@@ -167,11 +168,11 @@ balance.
 ## Bounties
 
 Bounties pay for specific deliverables with published acceptance criteria. One bounty has been
-paid in full; the second expired and its refund is pending.
+paid in full; the second expired and was refunded.
 
 | Bounty | Amount | Status | Result |
 |---|---|---|---|
-| #2 | 2,500,000 EKOS | Expired, refund pending | Refund returns to the Bounty Fund. [View](https://pump.fun/go/bb35a0d7-ac6d-43ab-b4d0-68a5518d57ec) |
+| #2 | 2,500,000 EKOS | Expired, refunded | Refunded to the founder's personal wallet. [View](https://pump.fun/go/bb35a0d7-ac6d-43ab-b4d0-68a5518d57ec) |
 | #1 "Make EKOS More Visible" | 3,600,000 EKOS + 0.25 SOL | Settled 2026-09-01 | ≈$1,256 paid to 9 winners. [View](https://pump.fun/go/d3beb920-3526-4394-9a19-13eee1500fd0) |
 
 Bounty #1 was funded by the former Treasury (2,000,000 EKOS) and the founder's personal wallet
@@ -321,7 +322,7 @@ Five items are live or completed; the rest are proposals.
 | Item | Status |
 |---|---|
 | Founder vesting and lock (Streamflow, non-cancelable) | Live |
-| Staking pool (3.5M EKOS rewards, 90 days) | Live |
+| Staking pool (4.5M EKOS rewards, 90 days) | Live |
 | Bounty #1 payout to 9 winners | Completed |
 | Community Rewards and Bounty Fund pools | Live |
 | Monthly transparency reports | Proposed |
