@@ -366,52 +366,11 @@ fn split_sql_statements(sql: &str) -> Vec<&str> {
     let b = sql.as_bytes();
     let (mut out, mut start, mut i) = (Vec::new(), 0usize, 0usize);
     while i < b.len() {
-        match b[i] {
-            b'\'' | b'"' => {
-                let q = b[i];
-                i += 1;
-                while i < b.len() {
-                    if b[i] == q {
-                        if b.get(i + 1) == Some(&q) {
-                            i += 1; // doubled quote is an escape
-                        } else {
-                            break;
-                        }
-                    }
-                    i += 1;
-                }
-            }
-            b'-' if b.get(i + 1) == Some(&b'-') => {
-                while i < b.len() && b[i] != b'\n' {
-                    i += 1;
-                }
-            }
-            b'/' if b.get(i + 1) == Some(&b'*') => {
-                i += 2;
-                while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
-                    i += 1;
-                }
-                i += 1;
-            }
-            b'$' => {
-                // `$tag$` where tag is empty or an identifier.
-                let mut j = i + 1;
-                while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
-                    j += 1;
-                }
-                if j < b.len() && b[j] == b'$' && !b.get(i + 1).is_some_and(u8::is_ascii_digit) {
-                    let tag = &sql[i..=j];
-                    match sql[j + 1..].find(tag) {
-                        Some(off) => i = j + 1 + off + tag.len() - 1,
-                        None => i = b.len(),
-                    }
-                }
-            }
-            b';' => {
-                out.push(&sql[start..i]);
-                start = i + 1;
-            }
-            _ => {}
+        if b[i] == b';' {
+            out.push(&sql[start..i]);
+            start = i + 1;
+        } else {
+            i = skip_protected(sql, i);
         }
         i += 1;
     }
@@ -419,6 +378,56 @@ fn split_sql_statements(sql: &str) -> Vec<&str> {
         out.push(&sql[start..]);
     }
     out
+}
+
+/// If a quoted literal, comment or dollar-quoted body starts at `i`, the index of its last byte;
+/// otherwise `i` itself.
+fn skip_protected(sql: &str, i: usize) -> usize {
+    let b = sql.as_bytes();
+    match b[i] {
+        q @ (b'\'' | b'"') => skip_quoted(b, i, q),
+        b'-' if b.get(i + 1) == Some(&b'-') => b[i..]
+            .iter()
+            .position(|c| *c == b'\n')
+            .map_or(b.len(), |p| i + p),
+        b'/' if b.get(i + 1) == Some(&b'*') => {
+            sql[i + 2..].find("*/").map_or(b.len(), |p| i + 2 + p + 1)
+        }
+        b'$' => skip_dollar_quoted(sql, i),
+        _ => i,
+    }
+}
+
+/// End of a `'…'` / `"…"` literal opened at `i`; a doubled quote is an escape.
+fn skip_quoted(b: &[u8], i: usize, q: u8) -> usize {
+    let mut j = i + 1;
+    while j < b.len() {
+        if b[j] == q {
+            if b.get(j + 1) != Some(&q) {
+                return j;
+            }
+            j += 1;
+        }
+        j += 1;
+    }
+    b.len()
+}
+
+/// End of a `$tag$ … $tag$` body opened at `i` (tag empty or an identifier not starting with a digit).
+fn skip_dollar_quoted(sql: &str, i: usize) -> usize {
+    let b = sql.as_bytes();
+    let tag_len = b[i + 1..]
+        .iter()
+        .take_while(|c| c.is_ascii_alphanumeric() || **c == b'_')
+        .count();
+    let j = i + 1 + tag_len;
+    if b.get(j) != Some(&b'$') || b.get(i + 1).is_some_and(u8::is_ascii_digit) {
+        return i;
+    }
+    let tag = &sql[i..=j];
+    sql[j + 1..]
+        .find(tag)
+        .map_or(b.len(), |off| j + 1 + off + tag.len() - 1)
 }
 
 /// Whole-file parse fallback (RFC 0039), engaged only when full-file structured parsing (plus
