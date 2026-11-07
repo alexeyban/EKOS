@@ -200,6 +200,8 @@ pub async fn generate(
     })?;
 
     let objects = ledger.all_objects()?;
+    // RFC 0247: what people wrote, newest version of each — once for the whole run.
+    let annotations_now = ekos_kir::annotations::current(&objects);
     let documented: Vec<_> = objects
         .iter()
         .filter(|o| ekos_docs_gen::is_significant(&o.kind))
@@ -238,6 +240,7 @@ pub async fn generate(
         model.defined_in_file =
             ekos_docs_gen::resolve_defining_file(object.id, &parent_of, &objects_by_id)
                 .and_then(|file_id| object_names.get(&file_id).cloned());
+        model.annotations = ekos_docs_gen::annotation_rows(object, &annotations_now);
         models.push(model);
 
         // RFC 0068 §61 follow-on: a standalone SVG counterpart to the Mermaid diagram already
@@ -533,6 +536,7 @@ fn generate_curated(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()
     // `render_api`'s own link-generation, so a link is never emitted to a page that isn't written
     // here (or vice versa).
     let object_names: HashMap<_, _> = objects.iter().map(|o| (o.id, o.name.clone())).collect();
+    let annotations_now = ekos_kir::annotations::current(&objects);
     let unique_file_names = ekos_docs_gen::unique_page_file_names(&objects, "md");
     // RFC 0089: same real multi-hop file resolution as the `--layout objects` entity pages, built
     // once over the whole graph already loaded into `objects`/`relationships` above.
@@ -567,6 +571,7 @@ fn generate_curated(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()
         model.defined_in_file =
             ekos_docs_gen::resolve_defining_file(object.id, &parent_of, &objects_by_id)
                 .and_then(|file_id| object_names.get(&file_id).cloned());
+        model.annotations = ekos_docs_gen::annotation_rows(object, &annotations_now);
         let mut page = ekos_docs_gen::render_markdown_object_page(&model);
         if let Some(name) = unique_file_names.get(&object.id) {
             page.file_name = name.clone();

@@ -18,8 +18,8 @@
 //! is type-checked against its target ([`check_new`]). Free text is never applied as logic: it
 //! reaches a model only inside a delimited data block ([`data_block`]).
 
+use crate::{KirId, KirObject, ObjectKind};
 use ekos_common::ContentHash;
-use ekos_kir::{KirId, KirObject, ObjectKind};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -268,6 +268,25 @@ pub fn target_digest(properties: &BTreeMap<String, Value>) -> String {
     ContentHash::of(canonical.as_bytes()).to_string()
 }
 
+/// The object name. A synonym is named after its word, so a keyword search finds it; everything
+/// else is `annotation:<kind>:<target>`.
+fn object_name(kind: AnnotationKind, target: &str, term: Option<&str>) -> String {
+    match (kind, term) {
+        (AnnotationKind::Synonym, Some(t)) => format!("synonym:{t}"),
+        _ => format!("annotation:{}:{target}", kind.as_str()),
+    }
+}
+
+/// [`target_digest`] of an object's own compiled properties.
+pub fn digest_of_object(o: &KirObject) -> String {
+    let props: BTreeMap<String, Value> = o
+        .properties
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    target_digest(&props)
+}
+
 /// The object id: (target, kind, author, text, rule) — the same annotation written twice is one
 /// object, a different text is another.
 fn annotation_id(
@@ -296,7 +315,7 @@ fn annotation_id(
 /// A new (or re-confirmed) annotation object. Call [`check_new`] first.
 pub fn annotation_object(n: &NewAnnotation) -> KirObject {
     let mut o = KirObject::new(
-        format!("annotation:{}:{}", n.kind.as_str(), n.target),
+        object_name(n.kind, &n.target, n.term.as_deref()),
         ObjectKind::Custom(ANNOTATION_KIND.into()),
     );
     o.id = annotation_id(
@@ -330,7 +349,7 @@ pub fn annotation_object(n: &NewAnnotation) -> KirObject {
 /// A new version of `a` with a changed status; same id, so [`current`] takes it as the newest.
 fn next_version(a: &Annotation, at: &str) -> KirObject {
     let mut o = KirObject::new(
-        format!("annotation:{}:{}", a.kind.as_str(), a.target),
+        object_name(a.kind, &a.target, a.term.as_deref()),
         ObjectKind::Custom(ANNOTATION_KIND.into()),
     );
     o.id = a.id;

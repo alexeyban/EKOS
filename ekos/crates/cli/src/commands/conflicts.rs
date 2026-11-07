@@ -711,6 +711,17 @@ pub fn resolve(
     Ok(())
 }
 
+/// After conflicts were decided elsewhere (`ekos annotate resolve`): refresh the counts file the
+/// status commands read, exactly as [`resolve`] does for one.
+pub(super) fn refresh_manifest(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+) -> Result<()> {
+    let ids = commit_ids(config, cwd).unwrap_or_default();
+    write_manifest(config, cwd, &ids, count(&items_in(config, cwd, ledger)?))
+}
+
 /// A measurement in words: how many rows contradict what, and how it was counted.
 fn measured_line(m: &serde_json::Value) -> String {
     let against = m["against"].as_str().unwrap_or("the documentation");

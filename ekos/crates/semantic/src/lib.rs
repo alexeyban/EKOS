@@ -4,7 +4,8 @@
 //! of the compiler pipeline. Downstream consumers (Ledger, Runtime, AI) always
 //! read from the CKM, never from raw KIR.
 
-pub mod annotations;
+pub use ekos_kir::annotations;
+pub mod bulk_resolve;
 pub mod business_semantics;
 pub mod conflicts;
 pub mod data_lineage;

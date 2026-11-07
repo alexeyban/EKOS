@@ -42,6 +42,12 @@ const HUMAN_ONLY: &[HumanOnly] = &[
         why: "RFC 0247: withdrawing an annotation is a person's act",
     },
     HumanOnly {
+        path: &["annotate", "resolve"],
+        defined_in: include_str!("annotate.rs"),
+        definition: "pub fn resolve(",
+        why: "RFC 0247: deciding conflicts by rule is a human decision",
+    },
+    HumanOnly {
         path: &["annotate", "approve"],
         defined_in: include_str!("annotate.rs"),
         definition: "pub fn approve(",
@@ -55,25 +61,25 @@ const HUMAN_ONLY: &[HumanOnly] = &[
     },
     HumanOnly {
         path: &["annotations", "annotation_object"],
-        defined_in: include_str!("../../../semantic/src/annotations.rs"),
+        defined_in: include_str!("../../../kir/src/annotations.rs"),
         definition: "pub fn annotation_object(",
         why: "RFC 0247: a model never writes an annotation",
     },
     HumanOnly {
         path: &["annotations", "approve_object"],
-        defined_in: include_str!("../../../semantic/src/annotations.rs"),
+        defined_in: include_str!("../../../kir/src/annotations.rs"),
         definition: "pub fn approve_object(",
         why: "RFC 0247: approving an annotation is a human decision",
     },
     HumanOnly {
         path: &["annotations", "confirm_object"],
-        defined_in: include_str!("../../../semantic/src/annotations.rs"),
+        defined_in: include_str!("../../../kir/src/annotations.rs"),
         definition: "pub fn confirm_object(",
         why: "RFC 0247: re-confirming an annotation is a person's act",
     },
     HumanOnly {
         path: &["annotations", "withdraw_object"],
-        defined_in: include_str!("../../../semantic/src/annotations.rs"),
+        defined_in: include_str!("../../../kir/src/annotations.rs"),
         definition: "pub fn withdraw_object(",
         why: "RFC 0247: withdrawing an annotation is a person's act",
     },

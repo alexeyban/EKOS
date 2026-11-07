@@ -109,7 +109,10 @@ pub fn understand(raw: &str, runtime: &Runtime) -> Result<QueryUnderstanding, Ru
     }
     candidates.truncate(8);
     let mut resolved = resolve_entities(&candidates, runtime)?;
-    for e in synonym_entities(raw, &keywords, runtime)? {
+    for e in synonym_entities(raw, &keywords, runtime)?
+        .into_iter()
+        .chain(annotation_synonym_entities(raw, &keywords, runtime)?)
+    {
         if !resolved.iter().any(|r| r.id == e.id) {
             resolved.push(e);
         }
@@ -572,6 +575,78 @@ fn synonym_entities(
     Ok(out)
 }
 
+/// RFC 0247: the entities a question names by a business word that **people** gave them — a synonym
+/// annotation, shared and approved for everyone, whose entity has not changed since it was written.
+/// A personal, unapproved, stale or withdrawn synonym names nothing here: the runtime has no
+/// requester, so only what everyone may rely on counts. Found through the search index (a synonym
+/// is named after its word) and checked as whole words against the question.
+fn annotation_synonym_entities(
+    raw: &str,
+    keywords: &[String],
+    runtime: &Runtime,
+) -> Result<Vec<ResolvedEntity>, RuntimeError> {
+    use ekos_kir::annotations::{
+        Annotation, AnnotationKind, Effective, Scope, digest_of_object, effective,
+    };
+    let mut ids: Vec<KirId> = Vec::new();
+    for kw in keywords
+        .iter()
+        .filter(|k| k.len() >= 3)
+        .take(SYNONYM_KEYWORDS)
+    {
+        for h in runtime
+            .retrieve(&RetrievalRequest::lexical(kw.clone()))?
+            .hits
+            .into_iter()
+            .take(SYNONYM_CANDIDATES)
+        {
+            if !ids.contains(&h.id) {
+                ids.push(h.id);
+            }
+        }
+    }
+    let mut out: Vec<ResolvedEntity> = Vec::new();
+    for id in ids {
+        let Some(obj) = runtime.load_object(&id)? else {
+            continue;
+        };
+        let Some(a) = Annotation::from_object(&obj) else {
+            continue;
+        };
+        let (Some(term), AnnotationKind::Synonym, Scope::Shared, Some(approved_by)) =
+            (a.term.as_deref(), a.kind, a.scope, a.approved_by.as_deref())
+        else {
+            continue;
+        };
+        if !has_phrase(raw, term) {
+            continue;
+        }
+        let Ok(target_id) = a.target.parse::<KirId>() else {
+            continue;
+        };
+        let Some(target) = runtime.load_object(&target_id)? else {
+            continue;
+        };
+        if effective(&a, Some(&digest_of_object(&target))) != Effective::Active
+            || out.iter().any(|e| e.id == target.id)
+        {
+            continue;
+        }
+        out.push(ResolvedEntity {
+            mention: term.to_string(),
+            id: target.id,
+            name: target.name,
+            kind: Some(target.kind),
+            confidence: SYNONYM_CONFIDENCE,
+            via: Some(format!(
+                "annotation synonym \"{term}\" (by {}, approved by {approved_by})",
+                a.author
+            )),
+        });
+    }
+    Ok(out)
+}
+
 // ── intent classification ──────────────────────────────────────────────────
 
 fn looks_like_uuid(s: &str) -> bool {
@@ -687,6 +762,97 @@ mod tests {
             ekos_ledger::Ledger::open(&dir.path().join("l.db")).unwrap(),
             dir,
         )
+    }
+
+    /// RFC 0247: a synonym people gave a table resolves to it only while it is shared, approved,
+    /// not withdrawn and the table has not changed since — and the answer says who gave it.
+    #[test]
+    fn rfc0247_annotation_synonyms_resolve_only_while_they_hold() {
+        use ekos_kir::annotations::{
+            Annotation, AnnotationKind, NewAnnotation, Scope, annotation_object, approve_object,
+            digest_of_object, withdraw_object,
+        };
+        let new = |table: &KirObject, term: &str, scope: Scope| NewAnnotation {
+            target: table.id.to_string(),
+            kind: AnnotationKind::Synonym,
+            text: format!("{term} means this table"),
+            rule: None,
+            author: "ann".into(),
+            scope,
+            term: Some(term.into()),
+            target_digest: digest_of_object(table),
+            at: "2026-11-07T10:00:00Z".into(),
+        };
+        let resolves = |l: &ekos_ledger::Ledger, q: &str, id: KirId| {
+            understand(q, &Runtime::new(l))
+                .unwrap()
+                .resolved_entities
+                .into_iter()
+                .find(|e| e.id == id)
+        };
+
+        let (l, _d) = temp_ledger();
+        let sales = KirObject::new("c_invoice", ObjectKind::Table);
+        l.append_object(&sales).unwrap();
+
+        // Written, shared, not yet approved: names nothing.
+        let shared = annotation_object(&new(&sales, "turnover", Scope::Shared));
+        l.append_object(&shared).unwrap();
+        assert!(resolves(&l, "what was the turnover last year", sales.id).is_none());
+
+        // A personal synonym is its author's alone; the runtime has no requester.
+        let personal = annotation_object(&new(&sales, "takings", Scope::Personal));
+        l.append_object(&personal).unwrap();
+        assert!(resolves(&l, "show the takings", sales.id).is_none());
+
+        // Approved by someone else: resolves, and says who gave it.
+        let a = Annotation::from_object(&shared).unwrap();
+        let approved =
+            approve_object(&a, "bob", &digest_of_object(&sales), "2026-11-07T11:00:00Z").unwrap();
+        l.append_object(&approved).unwrap();
+        let e = resolves(&l, "what was the turnover last year", sales.id).expect("approved");
+        assert_eq!(e.mention, "turnover");
+        assert_eq!(
+            e.via.as_deref(),
+            Some("annotation synonym \"turnover\" (by ann, approved by bob)")
+        );
+        assert!(
+            resolves(&l, "what was the turn over", sales.id).is_none(),
+            "whole words only"
+        );
+
+        // The table changes: the synonym is stale and stops resolving.
+        let mut changed = sales.clone();
+        changed
+            .properties
+            .insert("columns".into(), serde_json::json!([{"name": "region"}]));
+        l.append_object(&changed).unwrap();
+        assert!(
+            resolves(&l, "what was the turnover last year", sales.id).is_none(),
+            "stale"
+        );
+
+        // A fresh table state with a fresh approved synonym, then withdrawn: gone again.
+        let again = annotation_object(&new(&changed, "revenue", Scope::Shared));
+        l.append_object(&again).unwrap();
+        let a2 = Annotation::from_object(&again).unwrap();
+        l.append_object(
+            &approve_object(
+                &a2,
+                "bob",
+                &digest_of_object(&changed),
+                "2026-11-07T12:00:00Z",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(resolves(&l, "total revenue", sales.id).is_some());
+        l.append_object(&withdraw_object(&a2, "2026-11-07T13:00:00Z"))
+            .unwrap();
+        assert!(
+            resolves(&l, "total revenue", sales.id).is_none(),
+            "withdrawn"
+        );
     }
 
     /// RFC 0246: a business word an Ossie model gives a table resolves to that table — multi-word

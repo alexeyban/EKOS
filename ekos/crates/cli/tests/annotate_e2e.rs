@@ -334,3 +334,198 @@ fn the_mcp_tool_reads_annotations_and_there_is_no_write_tool() {
     );
     assert_eq!(bad["result"]["isError"], true);
 }
+
+/// A workspace where two files define `sales` differently: a real `duplicate_definition` conflict.
+fn conflicting_workspace(dir: &Path) -> PathBuf {
+    let ws = dir.join("ws");
+    std::fs::create_dir_all(ws.join("db")).unwrap();
+    std::fs::write(
+        ws.join("db/a.sql"),
+        "CREATE TABLE sales (id INT PRIMARY KEY, amount INT);\n",
+    )
+    .unwrap();
+    std::fs::write(
+        ws.join("db/b.sql"),
+        "CREATE TABLE sales (id INT PRIMARY KEY, amount BIGINT);\n",
+    )
+    .unwrap();
+    ok(&ws, &["init"]);
+    let mut toml = std::fs::read_to_string(ws.join("ekos.toml")).unwrap();
+    toml.push_str("\n[recover.sql]\ndefault-dialect = \"postgres\"\n");
+    std::fs::write(ws.join("ekos.toml"), toml).unwrap();
+    pipeline(&ws);
+    ws
+}
+
+fn open_conflicts(ws: &Path) -> usize {
+    let rows: Vec<Value> = serde_json::from_str(&ok(
+        ws,
+        &["conflicts", "list", "--status", "open", "--json"],
+    ))
+    .unwrap();
+    rows.len()
+}
+
+#[test]
+fn conflicts_are_decided_by_a_rule_with_a_dry_run_first() {
+    let dir = tempfile::tempdir().unwrap();
+    let ws = conflicting_workspace(dir.path());
+    let before = open_conflicts(&ws);
+    assert!(before >= 1, "the planted disagreement must be a conflict");
+
+    let rule = |body: &str| {
+        let path = dir.path().join("rule.json");
+        std::fs::write(&path, body).unwrap();
+        path.to_string_lossy().into_owned()
+    };
+
+    // A rule with no matcher, or no rationale, is refused outright.
+    let no_matcher = rule(
+        r#"{"name":"all","rationale":"decide everything at once","match":{},"decision":"both_valid"}"#,
+    );
+    assert!(
+        refused(
+            &ws,
+            &["annotate", "resolve", "--rule", &no_matcher, "--as", "ann"]
+        )
+        .contains("narrow")
+    );
+    let no_why = rule(
+        r#"{"name":"x","rationale":"no","match":{"conflict_type":"duplicate_definition"},"decision":"both_valid"}"#,
+    );
+    assert!(
+        refused(
+            &ws,
+            &["annotate", "resolve", "--rule", &no_why, "--as", "ann"]
+        )
+        .contains("rationale")
+    );
+    let typo = rule(
+        r#"{"name":"x","rationale":"a long enough reason","match":{"conflict_typ":"a"},"decision":"both_valid"}"#,
+    );
+    assert!(
+        !run(
+            &ws,
+            &["annotate", "resolve", "--rule", &typo, "--as", "ann"]
+        )
+        .status
+        .success()
+    );
+
+    // Both claims come from the same kind of source, so `pick_source` cannot tell them apart: the
+    // conflict is left to a person, with the reason, and nothing is written even with --apply.
+    let pick = rule(
+        r#"{"name":"pick","rationale":"the first source is the authority","match":{"conflict_type":"duplicate_definition"},"decision":{"pick_source":"zzz-no-such-source"}}"#,
+    );
+    let out = ok(
+        &ws,
+        &["annotate", "resolve", "--rule", &pick, "--as", "ann"],
+    );
+    assert!(out.contains("left:") && out.contains("dry run"), "{out}");
+    assert!(
+        refused(
+            &ws,
+            &[
+                "annotate", "resolve", "--rule", &pick, "--apply", "--as", "ann"
+            ]
+        )
+        .contains("decides nothing")
+    );
+    assert_eq!(open_conflicts(&ws), before, "nothing was decided");
+
+    // A rule that decides: the dry run writes nothing, --apply decides and records the rule.
+    let both = rule(
+        r#"{"name":"widen-on-purpose","rationale":"Both definitions are deliberate: a and b are engine twins","match":{"conflict_type":"duplicate_definition"},"decision":"both_valid"}"#,
+    );
+    let plan: Value = serde_json::from_str(&ok(
+        &ws,
+        &[
+            "annotate", "resolve", "--rule", &both, "--json", "--as", "ann",
+        ],
+    ))
+    .unwrap();
+    assert_eq!(plan["applied"], false);
+    assert!(!plan["decide"].as_array().unwrap().is_empty(), "{plan}");
+    assert_eq!(open_conflicts(&ws), before, "a dry run writes nothing");
+
+    ok(
+        &ws,
+        &[
+            "annotate", "resolve", "--rule", &both, "--apply", "--as", "ann",
+        ],
+    );
+    assert!(open_conflicts(&ws) < before, "the conflict is decided");
+    let recorded = list(&ws);
+    let note = recorded
+        .iter()
+        .find(|r| r["target"] == "project")
+        .expect("the rule is recorded on the project");
+    assert!(
+        note["text"].as_str().unwrap().contains("widen-on-purpose"),
+        "{note}"
+    );
+    assert!(note["text"].as_str().unwrap().contains("engine twins"));
+    // The decisions are ordinary conflict decisions carrying the rationale.
+    let shown = ok(
+        &ws,
+        &["conflicts", "list", "--status", "dismissed", "--json"],
+    );
+    assert!(shown.contains("engine twins"), "{shown}");
+}
+
+/// Documentation generation shows what people wrote on the entity's page, and an annotation never
+/// gets a page of its own.
+#[test]
+fn generated_docs_show_notes_from_people() {
+    let dir = tempfile::tempdir().unwrap();
+    let ws = workspace(dir.path());
+    ok(
+        &ws,
+        &[
+            "annotate",
+            "add",
+            "sales",
+            "comment",
+            "amount is in cents",
+            "--as",
+            "ann",
+        ],
+    );
+    ok(
+        &ws,
+        &["docs", "generate", "--layout", "objects", "--output", "doc"],
+    );
+
+    let pages: Vec<(String, String)> = std::fs::read_dir(ws.join("doc"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "md"))
+        .map(|e| {
+            (
+                e.file_name().to_string_lossy().into_owned(),
+                std::fs::read_to_string(e.path()).unwrap(),
+            )
+        })
+        .collect();
+    let sales: Vec<_> = pages
+        .iter()
+        .filter(|(n, _)| n.starts_with("table-sales"))
+        .collect();
+    assert_eq!(
+        sales.len(),
+        1,
+        "{:?}",
+        pages.iter().map(|p| &p.0).collect::<Vec<_>>()
+    );
+    assert!(
+        sales[0].1.contains("## Notes from people"),
+        "{}",
+        sales[0].1
+    );
+    assert!(sales[0].1.contains("amount is in cents"));
+    assert!(
+        !pages.iter().any(|(n, _)| n.contains("annotation")),
+        "an annotation is a note on a page, not a page: {:?}",
+        pages.iter().map(|p| &p.0).collect::<Vec<_>>()
+    );
+}

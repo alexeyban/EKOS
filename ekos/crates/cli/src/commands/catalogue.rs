@@ -99,6 +99,7 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("annotate show", Class::Read, false),
     ("annotate add", Class::Write, false),
     ("annotate withdraw", Class::Write, false),
+    ("annotate resolve", Class::Review, false),
     ("annotate approve", Class::Review, false),
     ("annotate confirm", Class::Review, false),
     ("conflicts list", Class::Read, false),

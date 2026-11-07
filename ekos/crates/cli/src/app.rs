@@ -1375,6 +1375,19 @@ enum AnnotateCommands {
         #[arg(long = "as")]
         by: Option<String>,
     },
+    /// Decide open conflicts by a rule file (JSON). Prints the plan; writes only with --apply
+    Resolve {
+        /// {"name","rationale","match":{conflict_type|subject_contains|attribute},"decision":{"pick_source":"db"}|"both_valid"}
+        #[arg(long)]
+        rule: std::path::PathBuf,
+        /// Record the decisions (default: dry run)
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
     /// Approve someone else's shared instruction or synonym for everyone
     Approve {
         id: String,
@@ -3000,6 +3013,12 @@ fn dispatch_annotate(
         }
         AnnotateCommands::Show { id } => annotate::show(config, cwd, &id),
         AnnotateCommands::Withdraw { id, by } => annotate::withdraw(config, cwd, &id, by),
+        AnnotateCommands::Resolve {
+            rule,
+            apply,
+            json,
+            by,
+        } => annotate::resolve(config, cwd, &rule, apply, json, by),
         AnnotateCommands::Approve { id, by } => annotate::approve(config, cwd, &id, by),
         AnnotateCommands::Confirm { id, by } => annotate::confirm(config, cwd, &id, by),
     }

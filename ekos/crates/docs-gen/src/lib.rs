@@ -34,7 +34,10 @@ pub struct RenderedPage {
 /// gets a page: hiding a kind by default would silently drop real compiled facts, the same
 /// mistake RFC 0035's relationship-grouping already avoids by not filtering to `ForeignKey` only.
 pub fn is_significant(kind: &ObjectKind) -> bool {
+    // RFC 0247: an annotation is shown on the page of the object it is about ("Notes from
+    // people"), never as a page of its own.
     !matches!(kind, ObjectKind::Column)
+        && !matches!(kind, ObjectKind::Custom(k) if k == ekos_kir::annotations::ANNOTATION_KIND)
 }
 
 // ── Phase 4 — format-agnostic page model ────────────────────────────────────
@@ -149,6 +152,107 @@ pub struct ObjectPageModel {
     /// LLM call. `build_object_page_model` always initializes this to `None` — prose is layered
     /// on top of the model, never produced by it.
     pub prose: Option<ProseSection>,
+    /// RFC 0247: what people wrote about this object (comments, instructions, synonyms), with each
+    /// one's state. Empty by default; set by the caller from [`annotation_rows`] — layered on top
+    /// of the model like `prose`, never produced by [`build_object_page_model`].
+    pub annotations: Vec<AnnotationRow>,
+}
+
+/// One annotation as a page shows it. Text is a person's, not the compiler's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnnotationRow {
+    /// `comment`, `instruction` or `synonym`.
+    pub kind: String,
+    /// `active` or `stale` (a withdrawn annotation is not shown).
+    pub state: String,
+    pub author: String,
+    /// Set when a shared instruction or synonym was approved for everyone.
+    pub approved_by: Option<String>,
+    pub text: String,
+    /// A synonym's business word.
+    pub term: Option<String>,
+}
+
+/// The annotations on `object`, newest versions only, withdrawn ones dropped, stale ones marked.
+/// `current` is [`ekos_kir::annotations::current`] over the ledger's objects, computed once for
+/// the whole run (not per page).
+pub fn annotation_rows(
+    object: &KirObject,
+    current: &[ekos_kir::annotations::Annotation],
+) -> Vec<AnnotationRow> {
+    use ekos_kir::annotations::{self, Effective};
+    let digest = annotations::digest_of_object(object);
+    let id = object.id.to_string();
+    current
+        .iter()
+        .filter(|a| a.target == id)
+        .filter_map(|a| {
+            let state = match annotations::effective(a, Some(&digest)) {
+                Effective::Active => "active",
+                Effective::Stale => "stale",
+                Effective::Withdrawn => return None,
+            };
+            Some(AnnotationRow {
+                kind: a.kind.as_str().to_string(),
+                state: state.to_string(),
+                author: a.author.clone(),
+                approved_by: a.approved_by.clone(),
+                text: a.text.clone(),
+                term: a.term.clone(),
+            })
+        })
+        .collect()
+}
+
+fn annotation_label(r: &AnnotationRow) -> String {
+    let mut label = r.kind.clone();
+    if let Some(t) = &r.term {
+        label = format!("{label} \"{t}\"");
+    }
+    label = format!("{label} by {}", r.author);
+    if let Some(b) = &r.approved_by {
+        label = format!("{label}, approved by {b}");
+    }
+    if r.state == "stale" {
+        label.push_str(" — STALE: the object changed after this was written");
+    }
+    label
+}
+
+fn md_annotations(model: &ObjectPageModel, out: &mut String) {
+    if model.annotations.is_empty() {
+        return;
+    }
+    out.push_str("## Notes from people\n\n");
+    out.push_str("_Written by people, not derived from the sources._\n\n");
+    for r in &model.annotations {
+        // A person's text can hold Markdown or HTML: show it as plain text on one line.
+        let text: String = r
+            .text
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect::<String>()
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('`', "'");
+        out.push_str(&format!("- **{}** — {text}\n", annotation_label(r)));
+    }
+    out.push('\n');
+}
+
+fn html_annotations(model: &ObjectPageModel, body: &mut String) {
+    if model.annotations.is_empty() {
+        return;
+    }
+    body.push_str("<h2>Notes from people</h2>\n<p class=\"empty\">Written by people, not derived from the sources.</p>\n<ul>\n");
+    for r in &model.annotations {
+        body.push_str(&format!(
+            "<li><strong>{}</strong> &mdash; {}</li>\n",
+            html_escape(&annotation_label(r)),
+            html_escape(&r.text)
+        ));
+    }
+    body.push_str("</ul>\n");
 }
 
 /// Assemble the format-agnostic model for `object`. See `render_object_page`'s original
@@ -289,6 +393,7 @@ pub fn build_object_page_model(
         diagram_markdown,
         evidence: evidence_rows,
         prose: None,
+        annotations: Vec::new(),
     }
 }
 
@@ -493,6 +598,8 @@ pub fn render_markdown_object_page(model: &ObjectPageModel) -> RenderedPage {
 
     md_ai_overview(model, &mut out);
 
+    md_annotations(model, &mut out);
+
     md_relationships(model, &mut out);
 
     out.push_str("## Diagram\n\n");
@@ -672,6 +779,7 @@ pub fn render_html_object_page(model: &ObjectPageModel) -> RenderedPage {
 
     html_ai_overview(model, &mut body);
 
+    html_annotations(model, &mut body);
     html_relationships(model, &mut body);
 
     body.push_str("<h2>Diagram</h2>\n");
@@ -6236,5 +6344,113 @@ mod tests {
     fn findings_memo_on_no_candidates_is_honest_not_fabricated() {
         let page = render_findings_memo(&[], None);
         assert!(page.content.contains("No findings compiled"));
+    }
+    // ── RFC 0247: notes from people ───────────────────────────────────────────
+
+    fn note(
+        target: &KirObject,
+        kind: ekos_kir::annotations::AnnotationKind,
+        text: &str,
+        term: Option<&str>,
+    ) -> KirObject {
+        ekos_kir::annotations::annotation_object(&ekos_kir::annotations::NewAnnotation {
+            target: target.id.to_string(),
+            kind,
+            text: text.into(),
+            rule: None,
+            author: "ann".into(),
+            scope: ekos_kir::annotations::Scope::Shared,
+            term: term.map(str::to_string),
+            target_digest: ekos_kir::annotations::digest_of_object(target),
+            at: "2026-11-07T10:00:00Z".into(),
+        })
+    }
+
+    #[test]
+    fn rfc0247_notes_from_people_are_shown_marked_and_escaped() {
+        use ekos_kir::annotations::{Annotation, AnnotationKind, current, withdraw_object};
+        let table = KirObject::new("sales", ObjectKind::Table);
+        let comment = note(
+            &table,
+            AnnotationKind::Comment,
+            "amount is in <b>cents</b>\n`x`",
+            None,
+        );
+        let synonym = note(
+            &table,
+            AnnotationKind::Synonym,
+            "turnover",
+            Some("turnover"),
+        );
+        let gone = note(&table, AnnotationKind::Comment, "withdrawn note", None);
+        let gone_withdrawn = withdraw_object(
+            &Annotation::from_object(&gone).unwrap(),
+            "2026-11-07T11:00:00Z",
+        );
+        let objects = vec![table.clone(), comment, synonym, gone, gone_withdrawn];
+
+        let rows = annotation_rows(&table, &current(&objects));
+        assert_eq!(rows.len(), 2, "the withdrawn one is not shown: {rows:?}");
+        let mut model = build_object_page_model(&table, &[], &[], &HashMap::new());
+        assert!(
+            model.annotations.is_empty(),
+            "the model builder adds none itself"
+        );
+        model.annotations = rows;
+
+        let md = render_markdown_object_page(&model).content;
+        assert!(md.contains("## Notes from people"), "{md}");
+        assert!(md.contains("synonym \"turnover\" by ann"));
+        assert!(
+            md.contains("amount is in &lt;b&gt;cents&lt;/b&gt;"),
+            "markup is neutralised: {md}"
+        );
+        assert!(!md.contains("<b>cents"), "{md}");
+        assert!(!md.contains("withdrawn note"));
+        let html = render_html_object_page(&model).content;
+        assert!(
+            html.contains("Notes from people") && !html.contains("<b>cents"),
+            "{html}"
+        );
+    }
+
+    #[test]
+    fn rfc0247_a_changed_object_marks_its_notes_stale_and_no_notes_means_no_section() {
+        use ekos_kir::annotations::{AnnotationKind, current};
+        let table = KirObject::new("sales", ObjectKind::Table);
+        let objects = vec![note(&table, AnnotationKind::Comment, "in cents", None)];
+        let mut changed = table.clone();
+        changed
+            .properties
+            .insert("columns".into(), serde_json::json!([{"name": "region"}]));
+        let rows = annotation_rows(&changed, &current(&objects));
+        assert_eq!(rows[0].state, "stale");
+        let mut model = build_object_page_model(&changed, &[], &[], &HashMap::new());
+        model.annotations = rows;
+        assert!(
+            render_markdown_object_page(&model)
+                .content
+                .contains("STALE")
+        );
+
+        let plain = build_object_page_model(&table, &[], &[], &HashMap::new());
+        assert!(
+            !render_markdown_object_page(&plain)
+                .content
+                .contains("Notes from people")
+        );
+    }
+
+    #[test]
+    fn rfc0247_an_annotation_has_no_page_of_its_own() {
+        let table = KirObject::new("sales", ObjectKind::Table);
+        let a = note(
+            &table,
+            ekos_kir::annotations::AnnotationKind::Comment,
+            "x",
+            None,
+        );
+        assert!(is_significant(&table.kind));
+        assert!(!is_significant(&a.kind));
     }
 }
