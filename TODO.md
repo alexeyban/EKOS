@@ -5045,7 +5045,7 @@ are excluded — see the full exclusion list in the planning history if needed.
       `AI001` — which returns empty refs, which makes groundedness `None`, silently removing the
       scenario from the metric. Now scans balanced spans last-first and strips the block from the
       visible answer. `AI001` **16 → 6**.
-    - [ ] **§3.6 — fabrication regression: OPEN, two failed fixes (`0c63dc9`, `3e74863`).** §3.1
+    - [x] **§3.6 — fabrication regression: CLOSED by `43f352c` (devlog_172, entry below); history of the first two failed fixes (`0c63dc9`, `3e74863`).** §3.1
       pushed fabrications **10 → 15** exactly as this RFC's warning box predicted: relaxation makes
       evidence sets non-empty for questions about things that don't exist. *Attempt 1* (mark relaxed
       search hits weak, refuse when all-weak) never fired — graph-neighbourhood claims kept the set
@@ -5091,7 +5091,7 @@ are excluded — see the full exclusion list in the planning history if needed.
       explicitly" while the grader looked for 22 specific phrases. Final, ruler v4, 101 scenarios:
       **passed 31 → 39, answer 36.2% → 42.5%, groundedness 39.6% → 44.0%, fabrication 10 → 3** —
       better than the original system on every axis.
-    - [ ] **Superseded note — §3.7 term-coverage scoring landed as infrastructure only
+    - [x] **Superseded note (closed by `43f352c`) — §3.7 term-coverage scoring landed as infrastructure only
       (`ebd26b2`).** Third failed attempt on the same mechanism: attempt 1 (relaxed
       search hits weak) never fired; attempts 2 and 3 (neighbourhood weak; coverage-graded
       neighbourhood weak) both reached adversarial 18/18 with 0 fabrications while collapsing
@@ -5276,8 +5276,8 @@ are excluded — see the full exclusion list in the planning history if needed.
       with 3 scenarios (`code-003`, `hist-003`, `hist-009`) where the model wrote
       `Cited evidence: [...]` in prose instead of the required JSON block — `history`'s only net
       regression. Neither pursued further this pass (user decision: ship as-is).
-    - [ ] **Phase 2 (the REASON-planner routing-gap fix itself, `code-002`'s underlying cause) —
-      not yet implemented.** Full near-diff-ready design exists (two-line phrase-table fix, then
+    - [x] **Phase 2 (the REASON-planner routing-gap fix itself, `code-002`'s underlying cause) —
+      shipped as devlog_186 (79 → 87/101); the note below is the original design.** Full near-diff-ready design exists (two-line phrase-table fix, then
       provenance-tagged entity resolution + a unified supporting-`Search` fallback with
       reserved-tail truncation); re-sequenced to run *after* Phase 1 so it inherits B1's fix (a
       re-routed plan only helps if the evidence it surfaces can render its content, not just a
