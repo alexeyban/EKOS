@@ -227,9 +227,12 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     # The only job in this workflow that writes anything: `gh release create` creates the release
-    # and uploads its assets.
+    # and uploads its assets. `id-token` + `attestations` are what the provenance step below needs
+    # (a short-lived OIDC token to sign with, and the right to store the attestation).
     permissions:
       contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - uses: actions/checkout@v7
@@ -274,6 +277,17 @@ jobs:
 
           echo "Release contains ${#archives[@]} archives:"
           cat SHA256SUMS
+
+      # Signed SLSA build provenance for every archive and for SHA256SUMS (Sigstore, keyless;
+      # GitHub's own action, so no third-party code runs in this job). Anyone can check a download:
+      #   gh attestation verify <archive> --repo alexeyban/EKOS
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
 
       - name: Create the release
         env:

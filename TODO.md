@@ -5915,8 +5915,11 @@ into a running instance, and a first run could silently produce nothing.
     as the public extension API and the pass-scheduling primitives. Confirm they are current
     before publishing them, or retire them.
 
-- [ ] **Release signing** — `SHA256SUMS` only today. Sigstore/cosign or minisign, plus SLSA
-  provenance, once there is a release cadence worth attesting.
+- [x] **Release signing** (2026-11-07) — `release.yml` attests every archive and `SHA256SUMS` with
+  `actions/attest-build-provenance` (Sigstore keyless, SLSA provenance; first-party, so no third-party
+  action in the job that holds `contents: write`). Verify: `gh attestation verify <file> --repo alexeyban/EKOS`.
+  Not yet exercised on a real tag; `install.sh` still checks `SHA256SUMS` only (no `gh` dependency).
+  - [ ] Container image attestation (`ghcr.io`), and an optional `install.sh --verify` using `gh attestation`.
 
 - [ ] **`aarch64-unknown-linux-musl` release row** — x86_64 Linux has a static fallback when the
   glibc build will not start (v1.0.1); aarch64 Linux does not, so a machine older than glibc 2.35

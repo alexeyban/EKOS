@@ -254,10 +254,16 @@ install -m 755 "ekos-${VERSION#v}-$TARGET/ekos" ~/.local/bin/ekos
 That prints `<asset>: OK` and exits 0. Anything else — `FAILED`, or nothing matched — means do
 not unpack it; open an issue instead.
 
-Worth being precise about what this proves: releases are checksummed but **not** signed — there
-is no Sigstore/cosign signature or SLSA provenance yet. `SHA256SUMS` tells you the archive
-arrived intact and matches what the release publishes; it does not, on its own, prove who built
-it.
+Worth being precise about what this proves: `SHA256SUMS` tells you the archive arrived intact
+and matches what the release publishes; it does not, on its own, prove who built it. From the
+first release cut after 2026-11-07, every archive and `SHA256SUMS` also carries signed SLSA build
+provenance (Sigstore, keyless), which does:
+
+```bash
+gh attestation verify "$ASSET" --repo alexeyban/EKOS      # needs the GitHub CLI
+```
+
+Earlier releases (v1.3.0 and before) are checksummed only.
 
 `~/.local/bin` needs to be on your `PATH`; add `export PATH="$HOME/.local/bin:$PATH"` to your
 shell profile if `ekos --version` comes back "command not found". Any directory on `PATH` works —
