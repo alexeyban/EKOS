@@ -112,6 +112,14 @@ locals {
     sources-ro = { share = "/${azurerm_storage_account.files[0].name}/sources", mode = "ReadOnly" }
   } : {}
   ca_secret_name = { for n in concat(module.common.console_secret_names, module.common.git_sync_secret_names) : n => lower(replace(n, "_", "-")) }
+  # Secrets a person put in the vault: the app's name for each, and the vault's (versionless, so a
+  # rotated value is picked up by the next revision).
+  ca_external = {
+    for env, kv in var.external_secrets : env => {
+      name = "ext-${lower(replace(env, "_", "-"))}"
+      id   = "${azurerm_key_vault.this.vault_uri}secrets/${kv}"
+    }
+  }
 }
 
 resource "azurerm_container_app_environment_storage" "this" {
@@ -138,6 +146,16 @@ resource "azurerm_container_app" "ekos" {
     identity_ids = [azurerm_user_assigned_identity.ekos.id]
   }
 
+  lifecycle {
+    precondition {
+      condition = length(setintersection(
+        keys(var.external_secrets),
+        concat(nonsensitive(module.common.console_secret_names), keys(module.common.console_env))
+      )) == 0
+      error_message = "external_secrets names a variable the module already sets; pick another name."
+    }
+  }
+
   dynamic "registry" {
     for_each = local.acr_server == "" ? [] : [local.acr_server]
     content {
@@ -152,6 +170,15 @@ resource "azurerm_container_app" "ekos" {
     content {
       name                = secret.value
       key_vault_secret_id = contains(keys(local.console_kv_names), secret.key) ? azurerm_key_vault_secret.console[secret.key].versionless_id : azurerm_key_vault_secret.git_sync[secret.key].versionless_id
+      identity            = azurerm_user_assigned_identity.ekos.id
+    }
+  }
+
+  dynamic "secret" {
+    for_each = local.ca_external
+    content {
+      name                = secret.value.name
+      key_vault_secret_id = secret.value.id
       identity            = azurerm_user_assigned_identity.ekos.id
     }
   }
@@ -216,6 +243,13 @@ resource "azurerm_container_app" "ekos" {
         content {
           name        = env.key
           secret_name = local.ca_secret_name[env.key]
+        }
+      }
+      dynamic "env" {
+        for_each = local.ca_external
+        content {
+          name        = env.key
+          secret_name = env.value.name
         }
       }
 

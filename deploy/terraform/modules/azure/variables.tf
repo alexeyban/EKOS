@@ -112,6 +112,27 @@ variable "secrets" {
   sensitive   = true
 }
 
+variable "external_secrets" {
+  description = <<-EOT
+    Secrets a person adds to this deployment's Key Vault themselves (the portal, or
+    `az keyvault secret set`), so the value never enters Terraform or its state: console variable
+    name → Key Vault secret name. The app reads them through its managed identity, which already
+    holds "Key Vault Secrets User". The secret must exist before the apply that names it: a
+    revision whose secret reference cannot be resolved does not start.
+  EOT
+  type        = map(string)
+  default     = {}
+
+  validation {
+    condition     = alltrue([for k in keys(var.external_secrets) : can(regex("^[A-Z][A-Z0-9_]{0,63}$", k))])
+    error_message = "external_secrets keys are environment variable names: capital letters, digits and _."
+  }
+  validation {
+    condition     = alltrue([for v in values(var.external_secrets) : can(regex("^[A-Za-z0-9-]{1,127}$", v))])
+    error_message = "external_secrets values are Key Vault secret names: letters, digits and - (1-127)."
+  }
+}
+
 # ── sources ──────────────────────────────────────────────────────────────────
 
 variable "git_repos" {

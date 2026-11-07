@@ -420,6 +420,19 @@ terraform init && terraform apply
 terraform output url
 ```
 
+**A key a person adds to Key Vault themselves (Azure, `compute = "container"`).** `TF_VAR_secrets`
+puts a value through Terraform, so it lands in the state. To keep a key out of it, add the secret
+to the deployment's vault by hand and name it in `external_secrets`: console variable → Key Vault
+secret name, e.g. `external_secrets = { ANTHROPIC_API_KEY = "anthropic-api-key" }`. The app reads
+it through its managed identity (versionless: a new value is picked up by the next revision).
+Add the secret **before** the apply that names it — a revision whose reference cannot be resolved
+does not start:
+
+```bash
+read -rs KEY && az keyvault secret set --vault-name "$(terraform output -json key_vault | jq -r .name)" \
+  --name anthropic-api-key --value "$KEY" -o none; unset KEY
+```
+
 **The image.** The modules, the examples and the chart default to the latest release,
 `ghcr.io/alexeyban/ekos:1.1.0`. That release predates this section: its image has no
 `ekos-entrypoint` and no `ekos-git-sync` (the git sync container does not start), no

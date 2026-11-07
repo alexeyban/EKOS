@@ -39,7 +39,10 @@ mock_provider "azurerm" {
     defaults = { id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/ekos-rg/providers/Microsoft.Network/virtualNetworks/ekos-vnet" }
   }
   mock_resource "azurerm_key_vault" {
-    defaults = { id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/ekos-rg/providers/Microsoft.KeyVault/vaults/ekos-kv" }
+    defaults = {
+      id        = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/ekos-rg/providers/Microsoft.KeyVault/vaults/ekos-kv"
+      vault_uri = "https://ekos-kv.vault.azure.net/"
+    }
   }
   mock_resource "azurerm_resource_group" {
     defaults = { id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/ekos-rg" }
@@ -307,4 +310,61 @@ run "container_ingress_is_unrestricted_by_default" {
     condition     = length(azurerm_container_app.ekos[0].ingress[0].ip_security_restriction) == 0
     error_message = "the default 0.0.0.0/0 adds no rule."
   }
+}
+
+run "an_external_secret_is_referenced_in_the_vault_and_never_held_by_terraform" {
+  command = plan
+  variables {
+    compute          = "container"
+    external_secrets = { ANTHROPIC_API_KEY = "anthropic-api-key" }
+  }
+
+  assert {
+    condition = length([
+      for s in azurerm_container_app.ekos[0].secret : s
+      if s.name == "ext-anthropic-api-key" && s.key_vault_secret_id == "https://ekos-kv.vault.azure.net/secrets/anthropic-api-key"
+    ]) == 1
+    error_message = "the app takes the secret from the vault, versionless, under its own name."
+  }
+  assert {
+    condition = length([
+      for e in azurerm_container_app.ekos[0].template[0].container[0].env : e
+      if e.name == "ANTHROPIC_API_KEY" && e.secret_name == "ext-anthropic-api-key"
+    ]) == 1
+    error_message = "and exposes it to the console as ANTHROPIC_API_KEY."
+  }
+  assert {
+    condition     = !contains(keys(azurerm_key_vault_secret.console), "ANTHROPIC_API_KEY")
+    error_message = "Terraform must not create (and so must not hold the value of) a secret a person adds."
+  }
+}
+
+run "without_external_secrets_nothing_extra_is_added" {
+  command = plan
+  variables {
+    compute = "container"
+  }
+
+  assert {
+    condition     = length([for s in azurerm_container_app.ekos[0].secret : s if startswith(s.name, "ext-")]) == 0
+    error_message = "no external secret unless one is named."
+  }
+}
+
+run "an_external_secret_cannot_shadow_a_variable_the_module_sets" {
+  command = plan
+  variables {
+    compute          = "container"
+    external_secrets = { EKOS_CONSOLE_SESSION_SECRET = "mine" }
+  }
+  expect_failures = [azurerm_container_app.ekos]
+}
+
+run "external_secret_names_are_checked" {
+  command = plan
+  variables {
+    compute          = "container"
+    external_secrets = { "lower-case" = "../escape" }
+  }
+  expect_failures = [var.external_secrets]
 }
