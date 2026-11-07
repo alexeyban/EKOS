@@ -456,7 +456,7 @@ jobs:
         env:
           REF: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
-        run: curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/install.sh" -o install.sh
+        run: curl --proto '=https' --tlsv1.2 -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/install.sh" -o install.sh
 
       - name: Install the published release (command only)
         env:
