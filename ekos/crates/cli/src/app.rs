@@ -1570,7 +1570,7 @@ enum ConflictsCommands {
         status: Option<String>,
         /// Only one type: duplicate_definition, merge_loss, label_mismatch, doc_vs_data, or (RFC 0211)
         /// model_table_missing, table_without_model, model_column_missing, mandatory_but_nullable,
-        /// routine_text_differs
+        /// routine_text_differs, or (RFC 0245) ossie_vs_schema
         #[arg(long = "type")]
         conflict_type: Option<String>,
         #[arg(long)]
