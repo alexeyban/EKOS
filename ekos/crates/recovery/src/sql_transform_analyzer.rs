@@ -359,6 +359,68 @@ fn dispatch_one_statement(
     }
 }
 
+/// Split SQL text at top-level `;` only: a semicolon inside a `'…'` or `"…"` literal, a `$tag$…$tag$`
+/// dollar-quoted body, a `--` line comment or a `/* … */` block comment does not end a statement.
+/// (`str::split(';')` cut PL/pgSQL bodies and string literals in half.)
+fn split_sql_statements(sql: &str) -> Vec<&str> {
+    let b = sql.as_bytes();
+    let (mut out, mut start, mut i) = (Vec::new(), 0usize, 0usize);
+    while i < b.len() {
+        match b[i] {
+            b'\'' | b'"' => {
+                let q = b[i];
+                i += 1;
+                while i < b.len() {
+                    if b[i] == q {
+                        if b.get(i + 1) == Some(&q) {
+                            i += 1; // doubled quote is an escape
+                        } else {
+                            break;
+                        }
+                    }
+                    i += 1;
+                }
+            }
+            b'-' if b.get(i + 1) == Some(&b'-') => {
+                while i < b.len() && b[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            b'/' if b.get(i + 1) == Some(&b'*') => {
+                i += 2;
+                while i + 1 < b.len() && !(b[i] == b'*' && b[i + 1] == b'/') {
+                    i += 1;
+                }
+                i += 1;
+            }
+            b'$' => {
+                // `$tag$` where tag is empty or an identifier.
+                let mut j = i + 1;
+                while j < b.len() && (b[j].is_ascii_alphanumeric() || b[j] == b'_') {
+                    j += 1;
+                }
+                if j < b.len() && b[j] == b'$' && !b.get(i + 1).is_some_and(u8::is_ascii_digit) {
+                    let tag = &sql[i..=j];
+                    match sql[j + 1..].find(tag) {
+                        Some(off) => i = j + 1 + off + tag.len() - 1,
+                        None => i = b.len(),
+                    }
+                }
+            }
+            b';' => {
+                out.push(&sql[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    if start < sql.len() {
+        out.push(&sql[start..]);
+    }
+    out
+}
+
 /// Whole-file parse fallback (RFC 0039), engaged only when full-file structured parsing (plus
 /// the missing-`;` repair retry) both fail. Splits `sql` on top-level `;` and retries each
 /// fragment independently, so a `CREATE PROCEDURE` using unmodelable control flow doesn't take
@@ -377,7 +439,7 @@ fn parse_sql_statement_by_statement(
     dialect: &dyn Dialect,
 ) -> Vec<TransformGraph> {
     let mut graphs = Vec::new();
-    for (index, fragment) in sql.split(';').enumerate() {
+    for (index, fragment) in split_sql_statements(sql).into_iter().enumerate() {
         let fragment = fragment.trim();
         if fragment.is_empty() {
             continue;
@@ -746,7 +808,7 @@ fn function_to_graph(
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
 
-    for fragment_sql in body_text.split(';') {
+    for fragment_sql in split_sql_statements(&body_text) {
         let fragment_sql = fragment_sql.trim();
         if fragment_sql.is_empty() {
             continue;
@@ -1223,5 +1285,19 @@ END;
         assert_eq!(stats.nodes_total, 2);
         assert_eq!(stats.nodes_mapped, 2);
         assert_eq!(stats.coverage_percent(), 100.0);
+    }
+}
+
+#[cfg(test)]
+mod split_tests {
+    use super::split_sql_statements;
+
+    #[test]
+    fn splits_only_at_top_level_semicolons() {
+        let sql = "SELECT 'a;b' FROM t; CREATE FUNCTION f() RETURNS int AS $$ BEGIN RETURN 1; END; $$ LANGUAGE plpgsql; -- x;y\nSELECT 2 /* ; */; SELECT $q$;$q$";
+        let parts: Vec<_> = split_sql_statements(sql).iter().map(|s| s.trim()).collect();
+        assert_eq!(parts.len(), 4, "{parts:?}");
+        assert!(parts[1].ends_with("LANGUAGE plpgsql"));
+        assert!(parts[0].contains("'a;b'"));
     }
 }

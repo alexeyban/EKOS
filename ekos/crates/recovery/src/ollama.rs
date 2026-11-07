@@ -40,10 +40,11 @@ pub fn resolve_num_ctx(configured: Option<u32>) -> u32 {
         .unwrap_or(DEFAULT_NUM_CTX)
 }
 
-/// RFC 0145: `true` when a response's prompt plus its generation budget filled the whole window —
-/// the signature of Ollama having silently dropped the front of the prompt.
-fn likely_truncated(prompt_tokens: u32, num_predict: u32, num_ctx: u32) -> bool {
-    prompt_tokens.saturating_add(num_predict) >= num_ctx
+/// RFC 0145: `true` when the prompt itself fills (at least 95% of) the window — the signature of
+/// Ollama having silently dropped the front of the prompt. The generation budget is not added:
+/// with `[ai] max-tokens` equal to the window that sum is true on every call.
+fn likely_truncated(prompt_tokens: u32, _num_predict: u32, num_ctx: u32) -> bool {
+    u64::from(prompt_tokens) * 100 >= u64::from(num_ctx) * 95
 }
 
 impl OllamaProvider {
@@ -440,7 +441,9 @@ mod tests {
     #[test]
     fn truncation_predicate() {
         assert!(!likely_truncated(3000, 1000, 8192));
-        assert!(likely_truncated(3200, 1000, 4096));
+        // A generation budget equal to the window is not truncation.
+        assert!(!likely_truncated(3000, 8192, 8192));
+        assert!(likely_truncated(4000, 1000, 4096));
         assert!(likely_truncated(u32::MAX, 1, 8192));
     }
 

@@ -672,14 +672,6 @@ impl SearchIndex {
                 MEMORY_PATH_BOOST,
             )),
         ));
-        let memory_boost: Box<dyn Query> = Box::new(BoostQuery::new(
-            Box::new(TermQuery::new(
-                Term::from_field_text(self.f_memory_path, MEMORY_PATH_TOKEN),
-                IndexRecordOption::Basic,
-            )),
-            MEMORY_PATH_BOOST,
-        ));
-        must.push((Occur::Should, memory_boost));
 
         let searcher = self.reader.searcher();
         let n_terms = terms.len();

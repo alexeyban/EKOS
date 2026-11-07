@@ -6414,8 +6414,8 @@ LinkML; generation stays in LinkML.
       from `ALTER TABLE`
 - [x] `ekos eval run --agent ollama` under a cloud `[llm]` config asked Ollama for the cloud
       model's name; a switched provider now drops the configured model and base URL
-- [ ] `sql_transform_analyzer`'s statement splitter is still `split(';')` (wrong inside
-      dollar-quoted bodies); give it RFC 0176's fallback
+- [x] `sql_transform_analyzer`'s statement splitter was `split(';')` (wrong inside
+      dollar-quoted bodies): now a quote-, dollar-quote- and comment-aware `split_sql_statements` (2026-11-07)
 - [ ] EKL property filters are applied after a full scan; push them down if a large ledger needs it
 - [x] `ekos eval run` prints `Status: PASS` when every scenario errored (seen with a missing local
       model): an errored scenario should fail the run *(RFC 0177, devlog_254)*
@@ -6475,9 +6475,8 @@ LinkML; generation stays in LinkML.
 - [ ] Remaining Sonar smells (devlog_257): two functions in `web/ui/src/pages/line-diff.ts` over
       the complexity limit; an undeclared 409 in `web/api/app/routes/semantics.py`; a missing
       `ASC` in `migrate-logic/tests/clickhouse_semantics.sql`
-- [ ] `ledger/src/search.rs::query_scored_marked` adds the memory-path boost clause twice. Left
-      as found; decide whether the doubled boost is intended
-- [ ] `ollama.rs::likely_truncated` is `prompt + num_predict >= num_ctx`, which is true on every
+- [x] `ledger/src/search.rs::query_scored_marked` added the memory-path boost clause twice; RFC 0101 describes one, duplicate removed (2026-11-07)
+- [x] (fixed 2026-11-07: warns only when the prompt is ≥95% of the window) `ollama.rs::likely_truncated` was `prompt + num_predict >= num_ctx`, which is true on every
       call when `[ai] max-tokens` equals the context window. Warn only when the prompt itself
       nears the window
 - [ ] A devlog that names an adversarial scenario's invented entity is not a verbatim question
@@ -7028,7 +7027,7 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] bird-dev suite (New Dev), predict-only questions, checkpoint/--resume, profile deadlines
 - [x] Dev: EKOS K2 + Haiku 5.5 + evidence = 65.84% EX (1,534 q), $2.82 billed
 - [x] v1.3.0 released; public repo alexeyban/ekos-text2sql-bird, Docker run tested end to end
-- [ ] The user sends the submission email to bird.bench23@gmail.com (no key in it); BIRD runs the test set
+- [x] The user sent the submission email to bird.bench23@gmail.com (2026-11-07) (no key in it); BIRD runs the test set
 - [ ] Next lever: `wrong_columns` (11% of dev answers): extra identifying columns
 
 ## RFC 0245 — Apache Ossie interchange (2026-11-07, devlog_322)
