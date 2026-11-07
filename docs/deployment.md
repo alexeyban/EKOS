@@ -297,6 +297,34 @@ with it only while that tenant's metered calls are on (**Admin → Tenants**), t
 for its projects' model calls. A model on the server itself (Ollama, a local OpenAI-compatible
 server) always may.
 
+### Public-demo safety (RFC 0249)
+
+A console that serves strangers (the public demo) screens every question before it is answered.
+It is **off** by default: `moderation_enabled = true` in **Settings → Public demo** turns on
+`POST /api/moderation/screen`, `GET /api/moderation/limits` and, for the platform owner,
+`GET /api/moderation/events`, `GET /api/moderation/restricted` and `POST /api/moderation/unban`.
+
+- Order of checks: the address rate, the person's standing (banned, blocked), the address block,
+  the daily question limit, deterministic signals, then — only for what they did not catch — a model.
+  A hard signal (overriding the rules, probing for a key, hidden text, a forbidden schema) bans at
+  once and blocks the address for 24 hours; a soft one (deleting or overloading) is refused, and the
+  third in a row bans. A request only the model judged unsafe blocks the person for 24 hours; a
+  second one bans. A model that cannot be reached refuses **without** penalty and never allows.
+- `moderation_model` names the intent-check model (empty: deterministic checks only);
+  `moderation_key_env` the variable holding its key (default `OPENCODE_API_KEY`);
+  `moderation_trusted_hops` how many proxies in front of the console are trusted for
+  `X-Forwarded-For` (0: the socket peer — behind Container Apps set it to the number of proxies);
+  `moderation_limits` the published numbers as JSON, e.g. `{"questions_per_day": 30, "block_hours": 24}`
+  (an unknown name is an error).
+- What is sent to the model: the one message, as an escaped JSON string in a delimited block. No row
+  values, no schema, no earlier answers. **That text goes to the model's provider**, and for Claude
+  models on OpenCode Zen the provider keeps requests for 30 days (OpenCode's data policy): the
+  rules page must say so.
+- The log keeps a 200-character escaped excerpt and a SHA-256 of each refused message. How long it
+  is kept is a data-protection decision that is not made yet.
+- `web/api/tools/redteam_live.py` measures a model on the red-team corpus (it spends tokens; it is
+  never run by the tests).
+
 ## 8. Backup and restore
 
 Everything is in the volume. A backup is one file.

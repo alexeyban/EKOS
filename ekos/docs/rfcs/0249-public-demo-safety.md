@@ -69,3 +69,47 @@ never receives a row value (asserted on the request body); a banned user cannot 
 ## 5. Open questions
 
 1. IP blocking behind a proxy: which address is authoritative? 2. Appeals: any process, or owner-only unban?
+
+## 6. Implementation and findings (2026-11-08)
+
+**Built** (EKOS `web/api`): `moderation_policy.py` (pure: normalisation, signals, the standing state
+machine, limits), `moderation.py` (the service over the console database: order of checks, usage,
+log, unban, address rate and block), `moderation_model.py` (the intent check over any chat provider),
+`routes/demo_safety.py`, tables `ModUser`/`ModEvent`/`ModUsage`/`ModIpBlock`, settings
+`moderation_*`, `tools/redteam_live.py`, `docs/deployment.md`. Off unless `moderation_enabled`.
+
+**Decisions taken while building it**
+
+- Standing is checked before the address block, so a banned person is told they are banned.
+- The model's text is delivered with `<` and `>` escaped inside the JSON string: a message holding a
+  literal `</message>` cannot close the block (a test pins it).
+- Matching runs on two views of the text (plain, and with digits/symbols read as letters), so `1=1`
+  and `$snapshots` are not damaged by the de-obfuscation that finds `1gn0re`.
+- The address is the socket peer unless `moderation_trusted_hops` says how many proxies to trust
+  (answers open question 1); non-user principals (tokens) are keyed by kind and id, so two of them
+  never share a ban.
+- Appeals (open question 2): owner-only unban. No other process is built.
+
+**Pre-launch checks (§3)**
+
+1. **OpenCode Zen terms: NOT satisfied.** OpenCode's Terms of Use (OC-LEG-TOS-2026.08, read
+   2026-11-08) say: *"You will only use the Services for your own internal use, and not on behalf of or
+   for the benefit of any third party"*. Reselling, key sharing and public apps are not addressed
+   anywhere, and an enterprise page exists that was not read. As written, serving strangers through the
+   owner's Zen key is not permitted. **The demo must not launch on that key** until OpenCode confirms
+   in writing (help@anoma.ly) or another route is used: the owner's own provider account, Azure
+   OpenAI, or a local model. The code is provider-neutral (`moderation_base_url`, `moderation_model`).
+   Data policy: OpenCode lists 30-day retention for Anthropic and OpenAI APIs, and free models may train
+   on prompts; free chat models cannot be used outside OpenCode.
+2. **Red-team pass: done for the first corpus** (`tests/redteam_corpus.py`: 59 attacks, 44 ordinary
+   questions). Deterministic layer, offline: every attack with a deterministic tell is caught (54 of
+   59), **0 of 44** ordinary questions flagged. Model layer, live (`claude-haiku-5-5` on OpenCode Zen,
+   103 messages, about 55k tokens): 0 false positives; of the attacks it answered it flagged all but
+   three that a pattern catches anyway; 5 messages, all attacks, got a non-JSON answer, which the service
+   treats as "unavailable" — a refusal, never an allow. The one attack that passed both layers (spaced
+   letters) was a corpus error: the full spaced-out sentence is caught by the model and missed by the
+   patterns, which is why both layers exist. **Not done:** a human red team, multilingual attacks,
+   multi-turn attacks, and attacks through annotations (RFC 0247), which are a separate surface.
+3. **Data protection: open.** The log stores an excerpt and a digest per refused message, and the
+   model's provider receives every screened message. Retention, deletion on request and the notice to
+   users depend on the erasure design for an append-only ledger (TODO, "Data retention/erasure RFC").

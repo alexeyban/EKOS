@@ -152,6 +152,20 @@ class Settings(BaseSettings):
     chat_max_tool_calls: int = 12
     chat_max_tokens: int = 2048
 
+    # ── Public-demo safety (EKOS RFC 0249) ──────────────────────────────────
+    # Off by default: a console that is not a public demo runs no safety checks.
+    moderation_enabled: bool = False
+    # A model for the intent check (e.g. claude-haiku-5-5 on OpenCode Zen). Empty: deterministic
+    # checks only, and the log says no model was asked.
+    moderation_model: str = ""
+    moderation_base_url: str = ""
+    # The NAME of the variable holding the key, as for chat.
+    moderation_key_env: str = "OPENCODE_API_KEY"
+    # Proxies in front of the console whose X-Forwarded-For entry is trusted (0: the socket peer).
+    moderation_trusted_hops: int = Field(default=0, ge=0, le=5)
+    # JSON overrides of the published numbers: {"questions_per_day": 30, "block_hours": 24, ...}.
+    moderation_limits: str = ""
+
     # RFC 0232: in a cloud. The lease keeps one console writing a home on a network share; a
     # backup URL turns on scheduled `ekos home backup --to` (cron in UTC) and, over an empty home,
     # a restore of the newest backup before the console opens its database.

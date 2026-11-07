@@ -38,6 +38,9 @@ DYNAMIC = {
     ("GET", "/api/config-schema"),  # a static description, like /api/commands
     ("GET", "/api/extensions"),  # RFC 0198: the pages the binary declares; no workspace data
     ("GET", "/api/chat/model"),  # which chat model is set; no workspace
+    # RFC 0249: any signed-in person is screened and sees their own allowance; no workspace data.
+    ("POST", "/api/moderation/screen"),
+    ("GET", "/api/moderation/limits"),
     ("POST", "/api/workspaces/{workspace_id}/cli"),
     ("GET", "/api/runs"),
     ("GET", "/api/runs/{run_id}"),
@@ -144,6 +147,12 @@ def test_review_and_tenant_routes_use_the_expected_actions(
         "review"
         in routes[("POST", "/api/workspaces/{workspace_id}/conflicts/{conflict_id}/resolve")]
     )
+    for method, path in (
+        ("GET", "/api/moderation/events"),
+        ("GET", "/api/moderation/restricted"),
+        ("POST", "/api/moderation/unban"),
+    ):
+        assert "platform" in routes[(method, path)], (method, path)
     notes = "/api/workspaces/{workspace_id}/annotations"
     assert "read" in routes[("GET", notes)]
     assert "operate" in routes[("POST", notes)]

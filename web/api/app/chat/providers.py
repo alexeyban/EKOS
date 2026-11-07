@@ -141,15 +141,16 @@ class Anthropic(_Base):
             "max_tokens": self.max_tokens,
             "system": system,
             "messages": out,
-            "tools": [
+        }
+        if tools:
+            body["tools"] = [
                 {
                     "name": t["name"],
                     "description": t["description"],
                     "input_schema": t["input_schema"],
                 }
                 for t in tools
-            ],
-        }
+            ]
         url = (self.base_url or "https://api.anthropic.com").rstrip("/") + "/v1/messages"
         headers = {"x-api-key": self.key, "anthropic-version": "2023-06-01"}
         return url, headers, body
@@ -232,8 +233,9 @@ class OpenAI(_Base):
             "model": self.model,
             "max_tokens": self.max_tokens,
             "messages": _openai_messages(system, messages, args_as_text=True),
-            "tools": _openai_tools(tools),
         }
+        if tools:
+            body["tools"] = _openai_tools(tools)
         return url, headers, body
 
     def parse(self, body):

@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import JSONResponse
 
-from . import cloud, home_projects, lifecycle, models
+from . import cloud, home_projects, lifecycle, models, moderation
 from .routes import annotations as annotation_routes
 from .routes import (
     auth,
@@ -28,6 +28,7 @@ from .routes import (
     commands,
     config,
     conflicts,
+    demo_safety,
     evals,
     extensions,
     graph,
@@ -65,6 +66,7 @@ ROUTERS = (
     semantics,
     conflicts,
     annotation_routes,
+    demo_safety,
     integrity,
     review,
     sources,
@@ -184,6 +186,9 @@ async def _lifespan(app: FastAPI):
     models.init_engine(settings.console_db)
     _seed_registry_if_empty()
     home_projects.register_new()
+
+    # RFC 0249: the public-demo checks, only when switched on.
+    app.state.moderator = moderation.build(settings)
 
     app.state.supervisor = McpSupervisor(settings)
     # RFC 0182: no server is started here. Each starts when a page or a gateway call first needs

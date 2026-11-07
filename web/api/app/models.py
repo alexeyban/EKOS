@@ -132,6 +132,57 @@ class AuditLog(SQLModel, table=True):
     detail: str = ""
 
 
+class ModUser(SQLModel, table=True):
+    """RFC 0249: a demo user's standing. `subject` is the signed-in identity, never an address."""
+
+    subject: str = Field(primary_key=True)
+    first_seen: datetime = Field(default_factory=_now)
+    last_seen: datetime = Field(default_factory=_now)
+    banned: bool = False
+    banned_at: datetime | None = None
+    ban_reason: str = ""
+    blocked_until: datetime | None = None
+    consecutive_unsafe: int = 0
+    model_strikes: int = 0
+
+
+class ModEvent(SQLModel, table=True):
+    """RFC 0249: the owner's log. One row per refusal, block, ban or lifted ban. The message is kept
+    as a short escaped excerpt and a digest, so the owner can review a case and a repeat can be
+    recognised; retention is the data-protection decision RFC 0249 §3 leaves open."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    at: datetime = Field(default_factory=_now, index=True)
+    subject: str = Field(index=True)
+    ip: str = ""
+    action: str  # refuse | block | ban | unban
+    signal: str = ""
+    reason: str = ""
+    digest: str = ""
+    excerpt: str = ""
+    by: str = ""  # who lifted a ban
+
+
+class ModUsage(SQLModel, table=True):
+    """RFC 0249: what a person has used today. `key` is `<subject>|<YYYY-MM-DD>` (UTC)."""
+
+    key: str = Field(primary_key=True)
+    subject: str = Field(index=True)
+    day: str
+    questions: int = 0
+    model_calls: int = 0
+    additive: int = 0
+    modifying: int = 0
+
+
+class ModIpBlock(SQLModel, table=True):
+    """RFC 0249: an address blocked for a while after an automatic ban."""
+
+    ip: str = Field(primary_key=True)
+    until: datetime
+    reason: str = ""
+
+
 class Conversation(SQLModel, table=True):
     """RFC 0187: a chat in one workspace, owned by the person who started it."""
 
