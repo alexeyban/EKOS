@@ -7058,3 +7058,21 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [ ] `dbt parse` with MetricFlow on the exported layer (opt-in, needs dbt-metricflow)
 - [ ] V2m for multi-table metrics (needs the join on both engines)
 - [ ] Time dimensions reached through a join (MetricFlow requires one on the measure's own model)
+
+## Public demo: questions → SQL → dashboards on Azure (2026-11-07, devlog_325)
+
+Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`).
+
+- [x] Private repo `ekos-demo-public`: Terraform (EKOS `modules/azure` console + ADLS Gen2 + PostgreSQL), demo question set, draft public rules
+- [x] Phase 1 applied on "Azure subscription 1", North Europe (West Europe refuses new resources there); console healthy; ingress limited to `allowed_cidrs`
+- [x] EKOS Azure module: Container Apps ingress honours `allowed_cidrs`; outputs `container_app_environment_id`, `subnet_id`, `identity.id`
+- [x] M0 RFCs written: 0247 annotations, 0248 questions → dashboards (triage, gold changes), 0249 safety, bans, limits (status Proposed)
+- [ ] M0 remainder: accept the three RFCs; the 15–20 question set against the real gold marts
+- [ ] M1 annotations in core + bulk conflict resolution by rule (RFC 0247)
+- [ ] M2 close step 3 on iDempiere (195 conflicts + 1 identity open; real per-kind decisions, a person's work)
+- [ ] M3 `lakehouse ask` without UI (ekos-lakehouse): five statuses, gold change proposals, gates
+- [ ] M4 remainder: sign-in (Entra ID/Google/GitHub), OpenCode Zen with limits, GitHub App, ACA Job for dbt; publish Iceberg files and enable phase 2 (`enable_lakehouse`, Polaris/Trino/Superset config unverified)
+- [ ] M5 moderation, M6 console step 8, M7 recorded demo + ekos.dev page
+- [ ] Before launch: OpenCode Zen terms (third-party use of the owner's key) and `[llm]` endpoint support; data-protection/erasure design (see Ongoing: retention RFC)
+- [ ] Static console tokens are the only sign-in on the deployed console today (IP allow-list is the protection)
+
