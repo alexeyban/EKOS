@@ -16,7 +16,7 @@ output "key_vault" {
 }
 
 output "identity" {
-  value = { client_id = azurerm_user_assigned_identity.ekos.client_id, principal_id = azurerm_user_assigned_identity.ekos.principal_id }
+  value = { id = azurerm_user_assigned_identity.ekos.id, client_id = azurerm_user_assigned_identity.ekos.client_id, principal_id = azurerm_user_assigned_identity.ekos.principal_id }
 }
 
 output "backup_url" {
