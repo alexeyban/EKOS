@@ -7030,3 +7030,16 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] v1.3.0 released; public repo alexeyban/ekos-text2sql-bird, Docker run tested end to end
 - [ ] The user sends the submission email to bird.bench23@gmail.com (no key in it); BIRD runs the test set
 - [ ] Next lever: `wrong_columns` (11% of dev answers): extra identifying columns
+
+## RFC 0245 — Apache Ossie interchange (2026-11-07, devlog_322)
+
+- [x] `ekos-ossie` crate: spec 0.2.0.dev0 types, 0.1.1 reader, SQL → DataType, builder from the ledger, structural checks; vendored official schema (apache/ossie@8437d59)
+- [x] `ekos export ossie` (status filter, `--database`/`--source`, YAML/JSON); composite `primary_key` / `unique_keys` recorded on tables (DDL + live)
+- [x] Ingest: `OssieAnalyzerPass` at recover, `ossie_links` at commit (dataset → table, Ossie-vs-schema conflicts), `ossie/current.json` so deleted files drop out, EKOS's own exports skipped, synonyms indexed (search content v3)
+- [x] `ekos import ossie` (human-only review round trip); MCP `ekos_ossie_export` (scoped); console Semantics → Apache Ossie view
+- [x] Official `validate.py` passes on exports (opt-in test `EKOS_OSSIE_REPO`)
+- [ ] Carry ingested *model-scoped* metrics (they reference Ossie dataset names, not EKOS's)
+- [ ] Ossie ontology + mapping documents (`ontology/`), BusinessConcept ↔ Ossie concept
+- [ ] Ingested metrics in the text-to-SQL agent's context (`sqlgen`)
+- [ ] Propose `EKOS` for Ossie's `extensions/vendors.md` upstream (the user's call)
+- [ ] Re-pin the vendored schema when Ossie releases 0.2.0

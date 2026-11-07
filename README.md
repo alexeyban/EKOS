@@ -1236,6 +1236,55 @@ see `ekos/docs/rfcs/0170-ledgersmb-starter-gold.yaml`): concept recall 0.68, enu
 0.95, evidence validity 1.0. Meaning defined only by comparisons between columns or against the
 current date (overdue, unpaid) leaves no literal trace and is not recovered: no trace, no recovery.
 
+### Apache Ossie interchange (RFC 0245)
+
+[Apache Ossie](https://ossie.apache.org) (incubating; formerly Open Semantic Interchange) is the
+vendor-neutral YAML/JSON format for semantic models that Snowflake, dbt, ThoughtSpot, Dremio,
+Power BI and others read and write. EKOS works with it in both directions.
+
+**Export.** `ekos export ossie` writes the compiled schema as one model (spec `0.2.0.dev0`):
+
+- every table and view becomes a dataset, with typed fields;
+- the stated primary and unique keys, including composite ones;
+- foreign keys become relationships;
+- RFC 0170 business meanings go into `ai_context`, filtered by `--status` (default `confirmed`).
+  An unreviewed meaning is marked "unreviewed" in words.
+
+EKOS never invents a metric. A dataset's metrics come only from Ossie files a team keeps in the
+sources, and only when their fields are the table's own columns. Every element carries an `EKOS`
+extension with its ledger id, status and evidence. The tests validate every export against the
+official JSON Schema, and an opt-in test also runs Ossie's own `validate.py`.
+
+**Ingest.** `ekos recover` reads Ossie models it finds in the project's sources. It reads
+`*.ossie.yaml|yml|json` and any YAML/JSON file that looks like an Ossie model, in either
+`0.2.0.dev0` or `0.1.1`.
+
+- Each file becomes `OssieModel`, `OssieDataset` and `OssieMetric` objects, redacted first like
+  every raw input.
+- `ekos commit` links each dataset to the one table its `source` names.
+- Where the file and the schema disagree, the disagreement becomes a conflict: a field naming a
+  column the table lacks, or a declared type from another family than the column's.
+- Synonyms are searchable.
+- EKOS's own exports are never read back as sources.
+
+**Review round trip.** `ekos import ossie <file>` turns a reviewer's edits to an exported file
+into human-only review decisions, like `ekos import linkml`:
+
+- a concept's `name`, `description` or `status`;
+- a code meaning's `label` or `status`.
+
+Entries are matched by `ekos_id`, and either every decision is recorded or none is. Edits to the
+observed schema are reported and not imported.
+
+```bash
+ekos export ossie --status all --out shop.ossie.yaml    # or --json; --database / --source narrow it
+ekos import ossie shop.ossie.yaml --dry-run             # the decisions a reviewer's edits stand for
+ekos import ossie shop.ossie.yaml --as ann              # …recorded, all or nothing
+```
+
+Agents can read the model with the read-only MCP tool `ekos_ossie_export`, and the console's
+Semantics tab has an *Apache Ossie* view (browse, download, validate and apply an edited file).
+
 ### dbt metadata extraction (RFC 0117)
 
 dbt can point at any warehouse, so `ekos recover` extracts real `Table` objects from a dbt
@@ -2480,7 +2529,10 @@ a Vite + React app (`web/ui/`).
   any recovered element) and a **YAML editor**: *Validate* is a dry-run `ekos import linkml`
   showing the decisions the edits stand for, *Apply* records them all-or-nothing; *Diff vs
   current export* shows the edits side by side (changed blocks with context); plus download and
-  load-from-file. Decisions need the write role and run the human-only CLI (never MCP),
+  load-from-file. *Apache Ossie* (RFC 0245) — the `ekos export ossie` model as a dataset browser
+  (fields, types, meanings, metrics, relationships), downloads as `.ossie.yaml` / `.json`, and an
+  import box: *Validate* is a dry-run `ekos import ossie`, *Apply* records the decisions.
+  Decisions need the write role and run the human-only CLI (never MCP),
   attributed to the OIDC user — or, in token mode, to a typed name recorded as `token:<name>`.
 
 ```bash
