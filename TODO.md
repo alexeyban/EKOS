@@ -5928,7 +5928,7 @@ into a running instance, and a first run could silently produce nothing.
   `build`. Add it on its own, with a `workflow_dispatch` run to prove it builds before a tag
   depends on it.
 
-- [ ] **Verify a release install on an image that did not build it** — the `verify install.sh`
+- [x] (2026-11-07: `verify-glibc` job in `release.yml` installs the published tag in `rockylinux:8` [must fall back to musl], `rockylinux:9` and `ubuntu:22.04` [must keep gnu]; the scenario was checked locally against v1.3.0; unrun on a real tag) **Verify a release install on an image that did not build it** — the `verify install.sh`
   job runs on the same `ubuntu-latest` that produces the binary, so it cannot catch a glibc-floor
   regression (exactly what shipped in v1.0.0). Add a matrix over a couple of older/other images,
   or a container step, so the check differs from the build environment in the dimension it claims

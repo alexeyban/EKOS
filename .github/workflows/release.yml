@@ -411,3 +411,74 @@ jobs:
           mkdir -p /tmp/ws/db && cd /tmp/ws
           printf 'CREATE TABLE t (id SERIAL PRIMARY KEY);\n' > db/schema.sql
           ekos init --detect --dry-run | grep -q 'default-dialect = "postgres"'
+
+  # The `verify` job above runs on the same `ubuntu-latest` family that built the binary, so it
+  # cannot catch a glibc-floor regression — exactly what shipped in v1.0.0 (built on 24.04, needs
+  # GLIBC_2.39). This one installs the published release in containers whose glibc DIFFERS from the
+  # build host's (2.35): below the floor the gnu build must not start and `install.sh` must fall back
+  # to the static musl build; at the floor it must keep the gnu build. A change to either decision
+  # (a raised floor, a broken fallback) fails here, before a user sees it.
+  verify-glibc:
+    name: Install on ${{ matrix.image }}
+    needs: release
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # glibc 2.28 (RHEL 8 family, supported to 2029) — below the floor: the gnu build must not
+          # start and `install.sh` must fall back to the static musl build. (Debian 11 would do,
+          # but it is end-of-life and its mirrors 404, which would break this job for no reason.)
+          - image: rockylinux:8
+            deps: dnf install -y -q curl ca-certificates tar gzip
+            expect_fallback: "yes"
+          # glibc 2.34 (RHEL 9 family) — the floor in practice: the v1.3.0 gnu binary needs at most
+          # GLIBC_2.34 even though it is built on 22.04 (2.35). Must keep the gnu build.
+          - image: rockylinux:9
+            deps: dnf install -y -q curl ca-certificates tar gzip
+            expect_fallback: "no"
+          # glibc 2.35 — the build host's own release: must keep the gnu build.
+          - image: ubuntu:22.04
+            deps: apt-get update -qq && apt-get install -y -qq curl ca-certificates tar gzip
+            expect_fallback: "no"
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - name: Install the tools install.sh needs
+        run: ${{ matrix.deps }}
+
+      # The checkout action needs git/node on some images; the script is all this job uses.
+      - name: Fetch install.sh from the tagged commit
+        env:
+          REF: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: curl -fsSL "https://raw.githubusercontent.com/${REPO}/${REF}/install.sh" -o install.sh
+
+      - name: Install the published release (command only)
+        env:
+          EKOS_VERSION: ${{ github.ref_name }}
+          # The console needs Python and a browser-free wizard; this job is about the binary.
+          EKOS_CLI_ONLY: "1"
+        run: sh ./install.sh 2>&1 | tee install.log
+
+      - name: The right build was chosen and it runs
+        env:
+          EXPECT_FALLBACK: ${{ matrix.expect_fallback }}
+        run: |
+          set -eu
+          ekos="$HOME/.ekos/bin/ekos"
+          [ -x "$ekos" ] || ekos="$(command -v ekos)"
+          "$ekos" --version
+          if [ "$EXPECT_FALLBACK" = yes ]; then
+            grep -q 'Falling back to the fully static' install.log \
+              || { echo "::error::expected the musl fallback on ${{ matrix.image }}"; exit 1; }
+          else
+            if grep -q 'Falling back' install.log; then
+              echo "::error::the gnu build no longer runs at the glibc floor on ${{ matrix.image }}"
+              exit 1
+            fi
+          fi
