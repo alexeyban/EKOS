@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -38,15 +39,33 @@ def rows(db: Path, sql: str) -> set[tuple] | str:
     return {tuple(norm(v) for v in r) for r in out}
 
 
-def ekos(ekos_bin: str, ws: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [ekos_bin, *args], cwd=ws, capture_output=True, text=True, timeout=900,
-        env={"PATH": "/usr/bin:/bin", "HOME": str(ws), "EKOS_HOME": str(ws / ".home"),
-             "NO_COLOR": "1"},
+def ekos(ekos_bin: Path, ws: Path, *args: str) -> subprocess.CompletedProcess:
+    # The binary is the one the operator named (resolved and checked in `binary`), each question
+    # is one argv element read from questions.yaml — no shell is involved.
+    return subprocess.run(  # NOSONAR
+        [str(ekos_bin), *args],
+        cwd=ws,
+        capture_output=True,
+        text=True,
+        timeout=900,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(ws),
+            "EKOS_HOME": str(ws / ".home"),
+            "NO_COLOR": "1",
+        },
     )
 
 
-def workspace(base: Path, with_ossie: bool, ekos_bin: str, model: str) -> Path:
+def binary(path: str) -> Path:
+    """The ekos binary to run: an existing executable file, by absolute path."""
+    p = Path(path).resolve()
+    if not p.is_file() or not os.access(p, os.X_OK):
+        sys.exit(f"not an executable file: {p}")
+    return p
+
+
+def workspace(base: Path, with_ossie: bool, ekos_bin: Path, model: str) -> Path:
     ws = base / ("with" if with_ossie else "without")
     shutil.copytree(FIXTURE / "db", ws / "db")
     if with_ossie:
@@ -63,46 +82,51 @@ def workspace(base: Path, with_ossie: bool, ekos_bin: str, model: str) -> Path:
     return ws
 
 
+def generate(ekos_bin: Path, ws: Path, db: Path, question: str) -> tuple[str | None, list[str]]:
+    """The SQL `ekos sql generate` answers with, and the tools the agent used."""
+    r = ekos(ekos_bin, ws, "sql", "generate", question, "--sqlite", str(db), "--json")
+    try:
+        out = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return None, []
+    tools = [t if isinstance(t, str) else t.get("tool") for t in out.get("tools", [])]
+    return out.get("sql"), tools
+
+
+def run_variant(variant: str, base: Path, db: Path, questions: list, a) -> list[dict]:
+    ws = workspace(base, variant == "with", a.ekos, a.model)
+    results = []
+    for q in questions:
+        gold = rows(db, q["gold"])
+        for rep in range(a.repeats):
+            sql, tools = generate(a.ekos, ws, db, q["question"])
+            ok = (rows(db, sql) if sql else "no SQL") == gold
+            results.append({"id": q["id"], "rep": rep, "ok": ok, "sql": sql, "tools": tools})
+            print(f"{variant:8} {q['id']} {'PASS' if ok else 'fail'}  {sql!r}"[:200], flush=True)
+    return results
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--ekos", required=True)
+    ap.add_argument("--ekos", required=True, type=binary)
     ap.add_argument("--model", default="qwen2.5-coder:3b")
     ap.add_argument("--repeats", type=int, default=1)
-    ap.add_argument("--out")
+    ap.add_argument("--out", help="where to write the JSON report (default: stdout only)")
     a = ap.parse_args()
     questions = yaml.safe_load((HERE / "questions.yaml").read_text())["questions"]
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         db = base / "tpcds.sqlite"
-        build(str(db))
-        results: dict[str, list[dict]] = {}
-        for variant in ("without", "with"):
-            ws = workspace(base, variant == "with", a.ekos, a.model)
-            results[variant] = []
-            for q in questions:
-                gold = rows(db, q["gold"])
-                for rep in range(a.repeats):
-                    r = ekos(a.ekos, ws, "sql", "generate", q["question"], "--sqlite", str(db),
-                             "--json")
-                    try:
-                        out = json.loads(r.stdout)
-                        sql = out.get("sql")
-                        tools = [t if isinstance(t, str) else t.get("tool") for t in out.get("tools", [])]
-                    except json.JSONDecodeError:
-                        sql, tools = None, []
-                    got = rows(db, sql) if sql else "no SQL"
-                    ok = got == gold
-                    results[variant].append({"id": q["id"], "rep": rep, "ok": ok, "sql": sql,
-                                             "tools": tools})
-                    print(f"{variant:8} {q['id']} {'PASS' if ok else 'fail'}  {sql!r}"[:200],
-                          flush=True)
+        build(db)
+        results = {v: run_variant(v, base, db, questions, a) for v in ("without", "with")}
     summary = {
         v: {"correct": sum(r["ok"] for r in rs), "total": len(rs)} for v, rs in results.items()
     }
     print(json.dumps(summary))
     if a.out:
-        Path(a.out).write_text(json.dumps({"model": a.model, "summary": summary,
-                                           "results": results}, indent=2))
+        report = json.dumps({"model": a.model, "summary": summary, "results": results}, indent=2)
+        # The operator's own output path, for their own report; nothing is read from it.
+        Path(a.out).write_text(report)  # NOSONAR
 
 
 if __name__ == "__main__":

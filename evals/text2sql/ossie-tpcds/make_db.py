@@ -1,17 +1,16 @@
 """A small, deterministic SQLite database for `tests/fixtures/ossie-tpcds` (RFC 0246 A/B).
 
 The same five TPC-DS tables as the fixture DDL, filled from a fixed seed: 2 years of dates,
-4 stores, 30 items, 60 customers, 800 sales lines. Synthetic data, no TPC tooling.
-
-    python3 make_db.py <out.sqlite>
+4 stores, 30 items, 60 customers, 800 sales lines. Synthetic data, no TPC tooling. `run.py`
+calls [`build`] with a path in its own temporary directory.
 """
 
 from __future__ import annotations
 
 import random
 import sqlite3
-import sys
 from datetime import date, timedelta
+from pathlib import Path
 
 DDL = """
 CREATE TABLE date_dim (d_date_sk INTEGER PRIMARY KEY, d_date_id TEXT NOT NULL, d_date DATE,
@@ -32,45 +31,96 @@ CREATE TABLE store_sales (ss_sold_date_sk INTEGER REFERENCES date_dim (d_date_sk
 
 FIRST = ["Ann", "Bob", "Carla", "Dev", "Eli", "Fay", "Gus", "Hana", "Ivo", "Jo"]
 LAST = ["Smith", "Lopez", "Novak", "Kim", "Okafor", "Rossi"]
-STORES = [("Northgate", 12, "Seattle", "WA"), ("Riverside", 8, "Portland", "OR"),
-          ("Lakeview", 20, "Chicago", "IL"), ("Harbor", 5, "Boston", "MA")]
+STORES = [
+    ("Northgate", 12, "Seattle", "WA"),
+    ("Riverside", 8, "Portland", "OR"),
+    ("Lakeview", 20, "Chicago", "IL"),
+    ("Harbor", 5, "Boston", "MA"),
+]
 CATEGORIES = ["Books", "Electronics", "Home"]
 BRANDS = ["Acme", "Globex", "Initech", "Umbrella", "Hooli"]
 
 
-def build(path: str) -> None:
-    rng = random.Random(245)
+class Seeded:
+    """The fixed-seed generator the fixture rows come from. Reproducible test data, never a secret:
+    every draw goes through these three methods."""
+
+    def __init__(self, seed: int) -> None:
+        # Deterministic synthetic test data; no security use.
+        self._rng = random.Random(seed)  # NOSONAR
+
+    def pick(self, items: list):
+        # Deterministic synthetic test data; no security use.
+        return self._rng.choice(items)  # NOSONAR
+
+    def between(self, low: int, high: int) -> int:
+        # Deterministic synthetic test data; no security use.
+        return self._rng.randint(low, high)  # NOSONAR
+
+    def real(self, low: float = 0.0, high: float = 1.0) -> float:
+        # Deterministic synthetic test data; no security use.
+        return self._rng.uniform(low, high)  # NOSONAR
+
+
+def build(path: Path) -> None:
+    rng = Seeded(245)
     db = sqlite3.connect(path)
     db.executescript(DDL)
     start = date(2001, 1, 1)
     for i in range(730):
         d = start + timedelta(days=i)
         q = (d.month - 1) // 3 + 1
-        db.execute("INSERT INTO date_dim VALUES (?,?,?,?,?,?)",
-                   (i + 1, f"D{i + 1:06d}", d.isoformat(), d.year, d.month, f"{d.year}Q{q}"))
+        db.execute(
+            "INSERT INTO date_dim VALUES (?,?,?,?,?,?)",
+            (i + 1, f"D{i + 1:06d}", d.isoformat(), d.year, d.month, f"{d.year}Q{q}"),
+        )
     for c in range(1, 61):
-        f, l = rng.choice(FIRST), rng.choice(LAST)
-        db.execute("INSERT INTO customer VALUES (?,?,?,?,?,?)",
-                   (c, f"C{c:06d}", f, l, "Y" if rng.random() < 0.3 else "N",
-                    f"{f.lower()}.{l.lower()}{c}@example.com"))
+        first, last = rng.pick(FIRST), rng.pick(LAST)
+        db.execute(
+            "INSERT INTO customer VALUES (?,?,?,?,?,?)",
+            (
+                c,
+                f"C{c:06d}",
+                first,
+                last,
+                "Y" if rng.real() < 0.3 else "N",
+                f"{first.lower()}.{last.lower()}{c}@example.com",
+            ),
+        )
     for i in range(1, 31):
-        db.execute("INSERT INTO item VALUES (?,?,?,?,?,?)",
-                   (i, f"I{i:06d}", f"item {i}", round(rng.uniform(2, 200), 2),
-                    rng.choice(BRANDS), rng.choice(CATEGORIES)))
+        db.execute(
+            "INSERT INTO item VALUES (?,?,?,?,?,?)",
+            (
+                i,
+                f"I{i:06d}",
+                f"item {i}",
+                round(rng.real(2, 200), 2),
+                rng.pick(BRANDS),
+                rng.pick(CATEGORIES),
+            ),
+        )
     for s, (name, emp, city, state) in enumerate(STORES, start=1):
-        db.execute("INSERT INTO store VALUES (?,?,?,?,?,?)",
-                   (s, f"S{s:04d}", name, emp, city, state))
+        db.execute(
+            "INSERT INTO store VALUES (?,?,?,?,?,?)", (s, f"S{s:04d}", name, emp, city, state)
+        )
     for t in range(1, 801):
-        item = rng.randint(1, 30)
-        qty = rng.randint(1, 5)
-        price = round(rng.uniform(2, 200), 2)
+        item = rng.between(1, 30)
+        qty = rng.between(1, 5)
+        price = round(rng.real(2, 200), 2)
         ext = round(price * qty, 2)
-        db.execute("INSERT INTO store_sales VALUES (?,?,?,?,?,?,?,?,?)",
-                   (rng.randint(1, 730), item, rng.randint(1, 60), rng.randint(1, 4), t, qty,
-                    price, ext, round(ext * rng.uniform(-0.1, 0.35), 2)))
+        db.execute(
+            "INSERT INTO store_sales VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                rng.between(1, 730),
+                item,
+                rng.between(1, 60),
+                rng.between(1, 4),
+                t,
+                qty,
+                price,
+                ext,
+                round(ext * rng.real(-0.1, 0.35), 2),
+            ),
+        )
     db.commit()
     db.close()
-
-
-if __name__ == "__main__":
-    build(sys.argv[1])
