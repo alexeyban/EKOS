@@ -1,3 +1,4 @@
+pub mod annotate;
 pub mod architecture;
 pub mod artifact;
 pub mod ask;

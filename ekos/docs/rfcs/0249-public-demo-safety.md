@@ -1,6 +1,6 @@
 # RFC 0249 — Public demo: safety, bans and limits
 
-**Status:** Proposed
+**Status:** Accepted (2026-11-07, on the maintainer's instruction to implement all proposed RFCs)
 **Date:** 2026-11-07
 **Depends on:** RFC 0248, RFC 0180 (console access control), RFC 0182 (MCP gateway, audit), RFC 0187 (chat)
 **Plan:** `ekos-demo-public/docs/PLAN.md`, "Safety"; public text: `ekos-demo-public/docs/RULES.md`

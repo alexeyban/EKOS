@@ -24,6 +24,7 @@ SCOPED_TOOLS = frozenset(
         "ekos_graph_export",
         "ekos_sql_check",
         "ekos_ossie_export",
+        "ekos_annotations",
     }
 )
 

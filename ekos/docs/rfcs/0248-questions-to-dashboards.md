@@ -1,6 +1,6 @@
 # RFC 0248 — Questions to dashboards: triage, term resolution and gold changes
 
-**Status:** Proposed
+**Status:** Accepted (2026-11-07, on the maintainer's instruction to implement all proposed RFCs)
 **Date:** 2026-11-07
 **Depends on:** RFC 0247 (annotations), RFC 0215 (requirements), RFC 0228 (marts), RFC 0213 (sign-off), RFC 0242/0243
 (text-to-SQL checks), RFC 0187 (chat provider)

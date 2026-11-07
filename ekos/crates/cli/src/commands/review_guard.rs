@@ -30,6 +30,54 @@ struct HumanOnly {
 
 const HUMAN_ONLY: &[HumanOnly] = &[
     HumanOnly {
+        path: &["annotate", "add"],
+        defined_in: include_str!("annotate.rs"),
+        definition: "pub fn add(",
+        why: "RFC 0247: a model never writes an annotation",
+    },
+    HumanOnly {
+        path: &["annotate", "withdraw"],
+        defined_in: include_str!("annotate.rs"),
+        definition: "pub fn withdraw(",
+        why: "RFC 0247: withdrawing an annotation is a person's act",
+    },
+    HumanOnly {
+        path: &["annotate", "approve"],
+        defined_in: include_str!("annotate.rs"),
+        definition: "pub fn approve(",
+        why: "RFC 0247: approving a shared instruction for everyone is a human decision",
+    },
+    HumanOnly {
+        path: &["annotate", "confirm"],
+        defined_in: include_str!("annotate.rs"),
+        definition: "pub fn confirm(",
+        why: "RFC 0247: re-confirming a stale annotation is a person's act",
+    },
+    HumanOnly {
+        path: &["annotations", "annotation_object"],
+        defined_in: include_str!("../../../semantic/src/annotations.rs"),
+        definition: "pub fn annotation_object(",
+        why: "RFC 0247: a model never writes an annotation",
+    },
+    HumanOnly {
+        path: &["annotations", "approve_object"],
+        defined_in: include_str!("../../../semantic/src/annotations.rs"),
+        definition: "pub fn approve_object(",
+        why: "RFC 0247: approving an annotation is a human decision",
+    },
+    HumanOnly {
+        path: &["annotations", "confirm_object"],
+        defined_in: include_str!("../../../semantic/src/annotations.rs"),
+        definition: "pub fn confirm_object(",
+        why: "RFC 0247: re-confirming an annotation is a person's act",
+    },
+    HumanOnly {
+        path: &["annotations", "withdraw_object"],
+        defined_in: include_str!("../../../semantic/src/annotations.rs"),
+        definition: "pub fn withdraw_object(",
+        why: "RFC 0247: withdrawing an annotation is a person's act",
+    },
+    HumanOnly {
         path: &["review", "decide"],
         defined_in: include_str!("review.rs"),
         definition: "pub fn decide(",

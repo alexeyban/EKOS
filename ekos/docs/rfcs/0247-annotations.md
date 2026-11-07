@@ -1,6 +1,6 @@
 # RFC 0247 — Annotations: comments, instructions and synonyms on any ledger entity
 
-**Status:** Proposed
+**Status:** Accepted (2026-11-07)
 **Date:** 2026-11-07
 **Depends on:** RFC 0213 (digest-bound sign-off), RFC 0172 (conflicts), RFC 0170 (business semantics), RFC 0186
 (catalogue classes), RFC 0181 (read scope)

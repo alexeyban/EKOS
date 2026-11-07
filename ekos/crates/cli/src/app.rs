@@ -305,6 +305,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ConflictsCommands,
     },
+    /// Comments, instructions and synonyms on any entity; stale when the entity changes (RFC 0247)
+    Annotate {
+        #[command(subcommand)]
+        subcommand: AnnotateCommands,
+    },
     /// The source-model review: scope, PII, conflicts, identity, write behaviour, glossary (RFC 0213)
     Review {
         #[command(subcommand)]
@@ -1329,6 +1334,58 @@ enum ClickHouseCommands {
         question: String,
         #[arg(long)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum AnnotateCommands {
+    /// Write an annotation (human-only; a model never writes one)
+    Add {
+        /// An entity id, an exact entity name, or `project`
+        target: String,
+        /// comment | instruction | synonym
+        kind: String,
+        /// The text a person reads (a free-text instruction reaches a model only as data)
+        text: String,
+        /// A machine-applicable rule, as JSON: {"rule":"fiscal_year_start","month":4}
+        #[arg(long)]
+        rule: Option<String>,
+        /// For a synonym: the business word
+        #[arg(long)]
+        term: Option<String>,
+        /// Apply to everyone once approved (default: your own requests only)
+        #[arg(long)]
+        shared: bool,
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
+    /// Annotations with their state: active, stale or withdrawn
+    List {
+        /// Only this entity (id, name or `project`)
+        #[arg(long)]
+        target: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// One annotation (an id, or at least 8 characters of one)
+    Show { id: String },
+    /// Withdraw your own annotation
+    Withdraw {
+        id: String,
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
+    /// Approve someone else's shared instruction or synonym for everyone
+    Approve {
+        id: String,
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
+    /// Re-bind a stale annotation to the entity as it is now (clears an earlier approval)
+    Confirm {
+        id: String,
+        #[arg(long = "as")]
+        by: Option<String>,
     },
 }
 
@@ -2484,6 +2541,7 @@ where
         }
         Commands::Resolve { force } => crate::commands::resolve::run(&config, &cwd, force),
         Commands::Conflicts { subcommand } => dispatch_conflicts(subcommand, &config, &cwd),
+        Commands::Annotate { subcommand } => dispatch_annotate(subcommand, &config, &cwd),
         Commands::Review { subcommand } => dispatch_review(subcommand, &config, &cwd),
         Commands::Signoff { subcommand } => dispatch_signoff(subcommand, &config, &cwd),
         Commands::Workflow {
@@ -2908,6 +2966,42 @@ fn dispatch_signoff(
             reason,
             by,
         } => review::revoke(config, cwd, &subject, &reason, by),
+    }
+}
+
+fn dispatch_annotate(
+    subcommand: AnnotateCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    use crate::commands::annotate;
+    match subcommand {
+        AnnotateCommands::Add {
+            target,
+            kind,
+            text,
+            rule,
+            term,
+            shared,
+            by,
+        } => annotate::add(
+            config,
+            cwd,
+            &target,
+            &kind,
+            &text,
+            rule.as_deref(),
+            term,
+            shared,
+            by,
+        ),
+        AnnotateCommands::List { target, json } => {
+            annotate::list(config, cwd, target.as_deref(), json)
+        }
+        AnnotateCommands::Show { id } => annotate::show(config, cwd, &id),
+        AnnotateCommands::Withdraw { id, by } => annotate::withdraw(config, cwd, &id, by),
+        AnnotateCommands::Approve { id, by } => annotate::approve(config, cwd, &id, by),
+        AnnotateCommands::Confirm { id, by } => annotate::confirm(config, cwd, &id, by),
     }
 }
 

@@ -233,6 +233,11 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(subject, item) — RFC 0213; a person's decision on one review item, last wins",
     },
     CustomKind {
+        name: "Annotation",
+        structurally_keyed: true,
+        note: "(target, kind, author, text, rule) — RFC 0247; a person's comment, instruction or synonym on an entity, newest version wins",
+    },
+    CustomKind {
         name: "SignOff",
         structurally_keyed: true,
         note: "the review subject — RFC 0213; approved on a digest, valid while it still matches",

@@ -7068,7 +7068,8 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
 - [x] EKOS Azure module: Container Apps ingress honours `allowed_cidrs`; outputs `container_app_environment_id`, `subnet_id`, `identity.id`
 - [x] M0 RFCs written: 0247 annotations, 0248 questions → dashboards (triage, gold changes), 0249 safety, bans, limits (status Proposed)
 - [ ] M0 remainder: accept the three RFCs; the 15–20 question set against the real gold marts
-- [ ] M1 annotations in core + bulk conflict resolution by rule (RFC 0247)
+- [x] M1 slices 1-3 (RFC 0247, 2026-11-07): `semantic/src/annotations.rs` (record, closed rule vocabulary, staleness, applicability), `ekos annotate add|list|show|withdraw|approve|confirm`, read-only MCP `ekos_annotations`; e2e `crates/cli/tests/annotate_e2e.rs`
+- [ ] M1 remainder (RFC 0247): `annotate resolve --rule` (bulk review decisions by rule), term resolution and docs generation reading `annotations::applicable`, console annotations panel + Review page use
 - [ ] M2 close step 3 on iDempiere (195 conflicts + 1 identity open; real per-kind decisions, a person's work)
 - [ ] M3 `lakehouse ask` without UI (ekos-lakehouse): five statuses, gold change proposals, gates
 - [ ] M4 remainder: sign-in (Entra ID/Google/GitHub), OpenCode Zen with limits, GitHub App, ACA Job for dbt; publish Iceberg files and enable phase 2 (`enable_lakehouse`, Polaris/Trino/Superset config unverified)
