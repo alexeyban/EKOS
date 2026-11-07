@@ -57,12 +57,25 @@ fn kind_dialect(kind: &DatabaseKind) -> &'static str {
     }
 }
 
-/// The schema the ledger holds (through the store, so a read scope applies).
-pub fn schema_of(store: &dyn KnowledgeReader) -> Result<Schema> {
-    Ok(Schema::from_ledger(
-        &store.all_objects()?,
-        &store.all_relationships()?,
-    ))
+/// The schema the ledger holds (through the store, so a read scope applies), with what the
+/// project's current Apache Ossie models state about it (RFC 0246): synonyms, keys, declared
+/// joins, metrics. `ossie_files` is the `ossie/current.json` list.
+pub fn schema_of(
+    store: &dyn KnowledgeReader,
+    ossie_files: Option<&std::collections::BTreeSet<String>>,
+) -> Result<Schema> {
+    let objects = store.all_objects()?;
+    let relationships = store.all_relationships()?;
+    let knowledge = ekos_ossie::knowledge::resolve(&objects, &relationships, ossie_files);
+    Ok(Schema::from_ledger(&objects, &relationships).with_ossie(&knowledge))
+}
+
+/// [`schema_of`] for a workspace: its own Ossie file list.
+fn schema_for(config: &EkosConfig, cwd: &Path, store: &dyn KnowledgeReader) -> Result<Schema> {
+    schema_of(
+        store,
+        super::export::current_ossie_files(config, cwd).as_ref(),
+    )
 }
 
 fn parser_for(dialect: &str) -> Result<Box<dyn SqlDialectParser>> {
@@ -142,12 +155,13 @@ fn report(
 /// the notes alone (for an agent about to write a query).
 pub fn agent_check(
     config: &EkosConfig,
+    workspace: &Path,
     store: &dyn KnowledgeReader,
     args: &Value,
 ) -> Result<Value> {
     let dialect = dialect_name(config, args.get("dialect").and_then(Value::as_str));
     match args.get("sql").and_then(Value::as_str) {
-        Some(sql) => check(&schema_of(store)?, sql, &dialect),
+        Some(sql) => check(&schema_for(config, workspace, store)?, sql, &dialect),
         None => Ok(json!({ "dialect": dialect, "dialect_notes": notes(&dialect)? })),
     }
 }
@@ -409,7 +423,7 @@ pub fn run(config: &EkosConfig, cwd: &Path, o: CheckOpts<'_>) -> Result<()> {
     let sql = read_sql(o.file)?;
     let target = Target::pick(config, o.database, o.sqlite)?;
     let store = open_store_read_only(config, cwd)?;
-    let schema = target.narrow(schema_of(store.as_ref())?);
+    let schema = target.narrow(schema_for(config, cwd, store.as_ref())?);
     let dialect = pick_dialect(config, o.dialect, &target);
     let v = check_on(&schema, &sql, &dialect, &target, o.allow_writable_role)?;
     if o.json {
@@ -502,11 +516,18 @@ pub fn generation_prompt(schema: &Schema, dialect: &str, question: &str) -> Resu
          - Before counting or averaging, check each table's grain: when an entity appears in \
          several rows, count DISTINCT entities if the question is about entities.\n\
          - Join on the foreign keys listed (`joins:`) unless the question needs another \
-         condition.\n\
+         condition.\n{metrics}\
          - Give the SQL first, in one ```sql block, then explain it in at most three \
          sentences, naming any assumption about a value or a definition the schema does not \
          state.\n",
-        schema.render(&tables)
+        schema.render(&tables),
+        metrics = if schema.metrics.is_empty() {
+            String::new()
+        } else {
+            "- When the question asks for a metric listed (`metric name = …`), compute it with \
+             that definition, and say that you did.\n"
+                .to_string()
+        }
     ))
 }
 
@@ -516,7 +537,7 @@ pub async fn generate(config: &EkosConfig, cwd: &Path, o: GenerateOpts<'_>) -> R
     let target = Target::pick(config, o.database, o.sqlite)?;
     let schema = {
         let store = open_store_read_only(config, cwd)?;
-        target.narrow(schema_of(store.as_ref())?)
+        target.narrow(schema_for(config, cwd, store.as_ref())?)
     };
     if schema.tables.is_empty() {
         bail!("the ledger holds no tables to write SQL against — run the pipeline first");

@@ -31,6 +31,12 @@ pub struct Column {
     pub primary_key: bool,
     pub description: Option<String>,
     pub stats: Option<ColumnStats>,
+    /// RFC 0246: other names a semantic model gives the column.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub synonyms: Vec<String>,
+    /// RFC 0246: a semantic model marks it a time axis.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_time: bool,
 }
 
 impl Column {
@@ -75,6 +81,12 @@ pub struct Table {
     pub description: Option<String>,
     pub rows: Option<u64>,
     pub columns: Vec<Column>,
+    /// RFC 0246: other names a semantic model gives the table.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub synonyms: Vec<String>,
+    /// RFC 0246: unique keys a semantic model states (a primary key counts as one).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unique_keys: Vec<Vec<String>>,
 }
 
 impl Table {
@@ -128,6 +140,43 @@ pub struct Schema {
     /// Distinct text values per `(table, column)`, lower-cased keys; only columns small enough to
     /// index. Empty when nothing was indexed.
     pub values: BTreeMap<(String, String), Vec<String>>,
+    /// RFC 0246: joins a semantic model declares that no foreign key states, one column pair each.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declared_joins: Vec<ForeignKey>,
+    /// RFC 0246: metrics a semantic model defines, over these tables.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metrics: Vec<Metric>,
+}
+
+/// RFC 0246: a metric a semantic model (Apache Ossie) defines, rewritten over the tables.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Metric {
+    pub name: String,
+    pub sql: String,
+    pub tables: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub synonyms: Vec<String>,
+    /// Where it is defined: `ossie:<path>`.
+    pub origin: String,
+}
+
+impl Metric {
+    /// `name = sql -- description (origin)`.
+    pub fn render(&self) -> String {
+        let mut out = format!("{} = {}", self.name, self.sql);
+        let mut notes = Vec::new();
+        if let Some(d) = &self.description {
+            notes.push(one_line(d));
+        }
+        if !self.synonyms.is_empty() {
+            notes.push(format!("also: {}", self.synonyms.join(", ")));
+        }
+        notes.push(format!("defined in {}", self.origin));
+        out.push_str(&format!(" -- {}", notes.join(" | ")));
+        out
+    }
 }
 
 impl Schema {
@@ -160,6 +209,7 @@ impl Schema {
                     .and_then(|v| v.as_array())
                     .map(|cols| cols.iter().filter_map(ledger_column).collect())
                     .unwrap_or_default(),
+                ..Default::default()
             })
             .collect();
         tables.sort_by(|a, b| {
@@ -178,7 +228,22 @@ impl Schema {
         Schema {
             tables,
             foreign_keys,
-            values: BTreeMap::new(),
+            ..Default::default()
+        }
+    }
+
+    /// Every join the checks know: the declared foreign keys, then the joins a semantic model
+    /// declares (RFC 0246).
+    pub fn all_joins(&self) -> impl Iterator<Item = &ForeignKey> {
+        self.foreign_keys.iter().chain(self.declared_joins.iter())
+    }
+
+    /// A join as text, marked when only a semantic model declares it.
+    pub fn render_join(&self, fk: &ForeignKey) -> String {
+        if self.declared_joins.contains(fk) && !self.foreign_keys.contains(fk) {
+            format!("{} (declared in the semantic model)", fk.render())
+        } else {
+            fk.render()
         }
     }
 
@@ -223,7 +288,7 @@ impl Schema {
     /// `a.x = b.y` is a declared foreign key, in either direction.
     pub fn is_foreign_key(&self, a: (&str, &str), b: (&str, &str)) -> bool {
         let eq = |x: &str, y: &str| x.eq_ignore_ascii_case(y);
-        self.foreign_keys.iter().any(|fk| {
+        self.all_joins().any(|fk| {
             (eq(&fk.from_table, a.0)
                 && eq(&fk.from_column, a.1)
                 && eq(&fk.to_table, b.0)
@@ -245,7 +310,7 @@ impl Schema {
         let mut seen: BTreeSet<String> = BTreeSet::from([from.to_lowercase()]);
         let mut queue = VecDeque::from([from.clone()]);
         while let Some(t) = queue.pop_front() {
-            for fk in &self.foreign_keys {
+            for fk in self.all_joins() {
                 let next = if fk.from_table.eq_ignore_ascii_case(&t) {
                     &fk.to_table
                 } else if fk.to_table.eq_ignore_ascii_case(&t) {
@@ -263,7 +328,7 @@ impl Schema {
         let mut at = to.to_lowercase();
         while at != from.to_lowercase() {
             let (back, fk) = prev.get(&at)?;
-            path.push(fk.render());
+            path.push(self.render_join(fk));
             at = back.to_lowercase();
         }
         path.reverse();
@@ -285,8 +350,18 @@ impl Schema {
             words.iter().filter(|w| s.contains(w.as_str())).count()
         };
         let mut scored: Vec<(usize, String)> = Vec::new();
+        for m in &self.metrics {
+            let n = hits(&m.name) * 2
+                + m.description.as_deref().map_or(0, hits)
+                + hits(&m.synonyms.join(" ")) * 2;
+            if n > 0 {
+                scored.push((n, format!("metric {}", m.render())));
+            }
+        }
         for t in &self.tables {
-            let n = hits(&t.name) * 2 + t.description.as_deref().map_or(0, hits);
+            let n = hits(&t.name) * 2
+                + t.description.as_deref().map_or(0, hits)
+                + hits(&t.synonyms.join(" ")) * 2;
             if n > 0 {
                 scored.push((
                     n,
@@ -299,8 +374,10 @@ impl Schema {
                     .as_ref()
                     .map(|s| s.examples.join(" "))
                     .unwrap_or_default();
-                let n =
-                    hits(&c.name) * 2 + c.description.as_deref().map_or(0, hits) + hits(&examples);
+                let n = hits(&c.name) * 2
+                    + c.description.as_deref().map_or(0, hits)
+                    + hits(&examples)
+                    + hits(&c.synonyms.join(" ")) * 2;
                 if n > 0 {
                     scored.push((
                         n,
@@ -328,6 +405,9 @@ impl Schema {
         }
         out.push_str(&note(t.description.as_deref()));
         out.push('\n');
+        if !t.synonyms.is_empty() {
+            out.push_str(&format!("  also called: {}\n", t.synonyms.join(", ")));
+        }
         for c in &t.columns {
             out.push_str(&format!("  {} {}", c.name, c.data_type));
             if c.primary_key {
@@ -336,6 +416,12 @@ impl Schema {
             let mut notes: Vec<String> = Vec::new();
             if let Some(d) = &c.description {
                 notes.push(one_line(d));
+            }
+            if c.is_time {
+                notes.push("time axis".into());
+            }
+            if !c.synonyms.is_empty() {
+                notes.push(format!("also: {}", c.synonyms.join(", ")));
             }
             if let Some(s) = &c.stats {
                 notes.push(describe_stats(s));
@@ -346,16 +432,30 @@ impl Schema {
             out.push('\n');
         }
         let fks: Vec<String> = self
-            .foreign_keys
-            .iter()
+            .all_joins()
             .filter(|fk| {
                 fk.from_table.eq_ignore_ascii_case(&t.name)
                     || fk.to_table.eq_ignore_ascii_case(&t.name)
             })
-            .map(ForeignKey::render)
+            .map(|fk| self.render_join(fk))
             .collect();
         if !fks.is_empty() {
             out.push_str(&format!("  joins: {}\n", fks.join("; ")));
+        }
+        if !t.unique_keys.is_empty() {
+            let keys: Vec<String> = t
+                .unique_keys
+                .iter()
+                .map(|k| format!("({})", k.join(", ")))
+                .collect();
+            out.push_str(&format!("  unique: {}\n", keys.join(", ")));
+        }
+        for m in self
+            .metrics
+            .iter()
+            .filter(|m| m.tables.len() == 1 && m.tables[0].eq_ignore_ascii_case(&t.name))
+        {
+            out.push_str(&format!("  metric {}\n", m.render()));
         }
         Some(out)
     }
@@ -445,6 +545,27 @@ impl Schema {
                 text.push(' ');
                 text.push_str(&d.to_lowercase());
             }
+            for syn in t
+                .synonyms
+                .iter()
+                .chain(t.columns.iter().flat_map(|c| &c.synonyms))
+            {
+                text.push(' ');
+                text.push_str(&syn.to_lowercase());
+            }
+            // A defined metric names its tables: a question about "total sales" needs them.
+            for m in self
+                .metrics
+                .iter()
+                .filter(|m| m.tables.iter().any(|x| x.eq_ignore_ascii_case(&t.name)))
+            {
+                text.push(' ');
+                text.push_str(&m.name.replace('_', " ").to_lowercase());
+                for syn in &m.synonyms {
+                    text.push(' ');
+                    text.push_str(&syn.to_lowercase());
+                }
+            }
             words.iter().filter(|w| text.contains(w.as_str())).count()
                 + words
                     .iter()
@@ -461,7 +582,7 @@ impl Schema {
         ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.name.cmp(&b.1.name)));
         let mut picked: Vec<&Table> = ranked.iter().take(max.div_ceil(2)).map(|r| r.1).collect();
         let seeds: Vec<String> = picked.iter().map(|t| t.name.to_lowercase()).collect();
-        for fk in &self.foreign_keys {
+        for fk in self.all_joins() {
             for (from, to) in [
                 (&fk.from_table, &fk.to_table),
                 (&fk.to_table, &fk.from_table),
@@ -494,6 +615,21 @@ impl Schema {
                 out.push_str(&d);
                 out.push('\n');
             }
+        }
+        // RFC 0246: a metric over several tables belongs to none of them; list it once when all
+        // its tables are shown (a one-table metric is already under its table).
+        let shown = |name: &str| tables.iter().any(|t| t.name.eq_ignore_ascii_case(name));
+        let spanning: Vec<String> = self
+            .metrics
+            .iter()
+            .filter(|m| m.tables.len() > 1 && m.tables.iter().all(|t| shown(t)))
+            .map(|m| format!("  metric {}", m.render()))
+            .collect();
+        if !spanning.is_empty() {
+            out.push_str(&format!(
+                "metrics across tables:\n{}\n\n",
+                spanning.join("\n")
+            ));
         }
         out
     }
@@ -553,6 +689,7 @@ fn ledger_column(v: &serde_json::Value) -> Option<Column> {
             .and_then(|d| d.as_str())
             .map(str::to_string),
         stats: None,
+        ..Default::default()
     })
 }
 
@@ -670,6 +807,7 @@ pub(crate) mod tests {
                 to_column: "id".into(),
             }],
             values,
+            ..Default::default()
         }
     }
 

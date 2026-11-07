@@ -10,6 +10,7 @@ rust-version.workspace = true
 
 [dependencies]
 ekos-kir.workspace = true
+ekos-ossie.workspace = true
 ekos-recovery.workspace = true
 ekos-sql-dialect-sdk.workspace = true
 sqlparser.workspace = true

@@ -37,6 +37,7 @@ pub mod dialect;
 pub mod divergence;
 pub mod fixtures;
 pub mod hash;
+pub mod metrics;
 pub mod reader;
 pub mod tiers;
 pub mod value;

@@ -98,6 +98,8 @@ impl Toolbox<'_> {
                     Err(e) => format!("error: {e}"),
                 },
             },
+            // RFC 0246: a metric a semantic model defines.
+            "metric" => self.schema.describe_metric(&arg("name")),
             "check_sql" => {
                 let (_, f) = self.check(&arg("sql"));
                 if f.is_empty() {
@@ -150,6 +152,7 @@ pub const TOOLS: &[&str] = &[
     "find_values",
     "run_sql",
     "check_sql",
+    "metric",
 ];
 
 /// One tool call as the model wrote it.
@@ -221,6 +224,19 @@ pub struct AgentOutcome {
 
 /// The tool protocol, appended to the task prompt when tools are on.
 pub fn protocol(max_turns: usize, verify: bool) -> String {
+    protocol_with(max_turns, verify, false)
+}
+
+/// [`protocol`], also offering the `metric` tool when the schema has metrics a semantic model
+/// defines (RFC 0246). Without metrics the text is exactly [`protocol`]'s, so benchmark prompts
+/// do not change.
+pub fn protocol_with(max_turns: usize, verify: bool, metrics: bool) -> String {
+    let metric_line = if metrics {
+        "- metric {\"name\"}: how a metric the semantic model defines is computed (by name or \
+         synonym); use that definition when the question asks for it\n"
+    } else {
+        ""
+    };
     let text = format!(
         "\nTools:\nBefore answering you may look things up. To use tools, reply with one or more \
          ```tool blocks, each holding one JSON object, and nothing else. For example:\n\
@@ -235,6 +251,7 @@ pub fn protocol(max_turns: usize, verify: bool) -> String {
          - run_sql {{\"sql\"}}: the first {PREVIEW_ROWS} rows of a read-only query\n\
          - check_sql {{\"sql\"}}: likely problems in a query (unknown names, value spellings, \
          joins that repeat rows, integer division, NULL ordering, ties)\n\
+         {metric_line}\
          When you are sure, give the final SQL in one ```sql block; it is checked before it is \
          accepted. You have at most {max_turns} replies in total.\n"
     );
@@ -265,7 +282,11 @@ pub async fn run(
         verified: false,
     };
     let mut user = if cfg.tools {
-        format!("{prompt}{}", protocol(cfg.max_turns, cfg.verify))
+        let metrics = !tb.schema.metrics.is_empty();
+        format!(
+            "{prompt}{}",
+            protocol_with(cfg.max_turns, cfg.verify, metrics)
+        )
     } else {
         prompt.to_string()
     };
@@ -663,6 +684,13 @@ mod tests {
         assert!(seen[0].contains("with find_values first"));
         assert!(seen[1].contains("That SQL runs") && seen[1].contains("Goyf"));
         assert!(!protocol(6, false).contains("find_values first"));
+    }
+
+    #[test]
+    fn rfc0246_the_metric_tool_is_offered_only_with_metrics() {
+        assert_eq!(protocol(5, true), protocol_with(5, true, false));
+        assert!(!protocol(5, false).contains("- metric"));
+        assert!(protocol_with(5, false, true).contains("- metric {\"name\"}"));
     }
 
     #[test]

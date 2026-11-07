@@ -54,6 +54,10 @@ pub struct ResolvedEntity {
     /// `1.0` for an exact case-insensitive name match, else
     /// `jaro_winkler(normalize(mention), normalize(name))`.
     pub confidence: f32,
+    /// Why the mention names this object when it is not its name: `synonym "POS data"
+    /// (ossie:semantic/sales.ossie.yaml)` — a business word an Apache Ossie model gives the table
+    /// (RFC 0246).
+    pub via: Option<String>,
 }
 
 /// The result of [`understand`].
@@ -104,7 +108,17 @@ pub fn understand(raw: &str, runtime: &Runtime) -> Result<QueryUnderstanding, Ru
         }
     }
     candidates.truncate(8);
-    let resolved = resolve_entities(&candidates, runtime)?;
+    let mut resolved = resolve_entities(&candidates, runtime)?;
+    for e in synonym_entities(raw, &keywords, runtime)? {
+        if !resolved.iter().any(|r| r.id == e.id) {
+            resolved.push(e);
+        }
+    }
+    resolved.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let (query_type, structural_op) = classify_intent(raw, &resolved);
     Ok(QueryUnderstanding {
         raw: raw.to_string(),
@@ -374,6 +388,7 @@ fn resolve_entities(
                         name: obj.name,
                         kind: Some(obj.kind),
                         confidence: RFC_MATCH_CONFIDENCE,
+                        via: None,
                     });
                     break;
                 }
@@ -421,6 +436,7 @@ fn resolve_entities(
                 name: h.name,
                 kind: h.kind,
                 confidence,
+                via: None,
             });
         }
     }
@@ -430,6 +446,130 @@ fn resolve_entities(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     Ok(resolved)
+}
+
+/// The confidence of a mention that is a synonym or metric name an Apache Ossie model states.
+pub const SYNONYM_CONFIDENCE: f32 = 0.95;
+/// How many search hits per keyword are checked for Ossie synonyms.
+const SYNONYM_CANDIDATES: usize = 12;
+/// How many of the question's keywords are searched for Ossie synonyms.
+const SYNONYM_KEYWORDS: usize = 6;
+
+/// Whether `phrase` occurs in `text` as whole words (case-insensitive).
+fn has_phrase(text: &str, phrase: &str) -> bool {
+    let words = |s: &str| -> Vec<String> {
+        s.split(|c: char| !c.is_alphanumeric() && c != '_')
+            .filter(|w| !w.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    };
+    let (t, p) = (words(text), words(phrase));
+    !p.is_empty() && t.windows(p.len()).any(|w| w == p.as_slice())
+}
+
+/// RFC 0246: the tables a question names by a business word — a synonym (or, for a metric, its
+/// name) that an ingested Apache Ossie dataset or metric states, found through the search index
+/// (which holds synonyms; each keyword searched alone) and followed to the table the dataset is
+/// linked to. Multi-word synonyms count ("POS data"), matched against the question as whole
+/// words. Reads only through the runtime, so a read scope applies.
+fn synonym_entities(
+    raw: &str,
+    keywords: &[String],
+    runtime: &Runtime,
+) -> Result<Vec<ResolvedEntity>, RuntimeError> {
+    const DATASET: &str = "OssieDataset";
+    const METRIC: &str = "OssieMetric";
+    // A hit's kind is not filled by every backend: load each one and look.
+    let mut ids: Vec<KirId> = Vec::new();
+    for kw in keywords
+        .iter()
+        .filter(|k| k.len() >= 3)
+        .take(SYNONYM_KEYWORDS)
+    {
+        for h in runtime
+            .retrieve(&RetrievalRequest::lexical(kw.clone()))?
+            .hits
+            .into_iter()
+            .take(SYNONYM_CANDIDATES)
+        {
+            if !ids.contains(&h.id) {
+                ids.push(h.id);
+            }
+        }
+    }
+    let mut out: Vec<ResolvedEntity> = Vec::new();
+    for id in ids {
+        let Some(obj) = runtime.load_object(&id)? else {
+            continue;
+        };
+        if !matches!(&obj.kind, ObjectKind::Custom(k) if k == DATASET || k == METRIC) {
+            continue;
+        }
+        let synonyms = obj
+            .properties
+            .get("synonyms")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str())
+            .map(str::to_string);
+        let is_metric = matches!(&obj.kind, ObjectKind::Custom(k) if k == METRIC);
+        let words: Vec<String> = if is_metric {
+            std::iter::once(obj.name.replace('_', " "))
+                .chain(synonyms)
+                .collect()
+        } else {
+            synonyms.collect()
+        };
+        let Some(word) = words.into_iter().find(|w| has_phrase(raw, w)) else {
+            continue;
+        };
+        let path = obj
+            .properties
+            .get("path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?")
+            .to_string();
+        // A metric's dataset (`Contains`), then the dataset's table (`DependsOn ossie_source`).
+        let dataset = if is_metric {
+            runtime
+                .relationships_for(&obj.id)?
+                .into_iter()
+                .find(|r| r.kind == ekos_kir::RelationshipKind::Contains && r.to == obj.id)
+                .map(|r| r.from)
+        } else {
+            Some(obj.id)
+        };
+        let Some(dataset) = dataset else { continue };
+        let tables = runtime
+            .relationships_for(&dataset)?
+            .into_iter()
+            .filter(|r| {
+                r.from == dataset
+                    && r.kind == ekos_kir::RelationshipKind::DependsOn
+                    && r.properties.get("link").and_then(|v| v.as_str()) == Some("ossie_source")
+            });
+        for r in tables {
+            let Some(table) = runtime.load_object(&r.to)? else {
+                continue;
+            };
+            if out.iter().any(|e| e.id == table.id) {
+                continue;
+            }
+            out.push(ResolvedEntity {
+                mention: word.clone(),
+                id: table.id,
+                name: table.name,
+                kind: Some(table.kind),
+                confidence: SYNONYM_CONFIDENCE,
+                via: Some(format!(
+                    "{} \"{word}\" (ossie:{path})",
+                    if is_metric { "metric" } else { "synonym" }
+                )),
+            });
+        }
+    }
+    Ok(out)
 }
 
 // ── intent classification ──────────────────────────────────────────────────
@@ -547,6 +687,71 @@ mod tests {
             ekos_ledger::Ledger::open(&dir.path().join("l.db")).unwrap(),
             dir,
         )
+    }
+
+    /// RFC 0246: a business word an Ossie model gives a table resolves to that table — multi-word
+    /// synonyms and metric names included — and says why.
+    #[test]
+    fn rfc0246_ossie_synonyms_and_metric_names_resolve_to_their_table() {
+        use ekos_kir::{KirRelationship, RelationshipKind};
+        let (l, _d) = temp_ledger();
+        let table = KirObject::new("store_sales", ObjectKind::Table);
+        let mut ds = KirObject::new("store_sales", ObjectKind::Custom("OssieDataset".into()));
+        ds.properties.insert(
+            "synonyms".into(),
+            serde_json::json!(["POS data", "retail sales"]),
+        );
+        ds.properties.insert(
+            "path".into(),
+            serde_json::json!("semantic/tpcds.ossie.yaml"),
+        );
+        let mut metric = KirObject::new("total_quantity", ObjectKind::Custom("OssieMetric".into()));
+        metric
+            .properties
+            .insert("description".into(), serde_json::json!("Units sold"));
+        metric.properties.insert(
+            "path".into(),
+            serde_json::json!("semantic/tpcds.ossie.yaml"),
+        );
+        let mut link = KirRelationship::new(RelationshipKind::DependsOn, ds.id, table.id);
+        link.properties
+            .insert("link".into(), serde_json::json!("ossie_source"));
+        let contains = KirRelationship::new(RelationshipKind::Contains, ds.id, metric.id);
+        for o in [&table, &ds, &metric] {
+            l.append_object(o).unwrap();
+        }
+        l.append_relationship(&link).unwrap();
+        l.append_relationship(&contains).unwrap();
+        let rt = Runtime::new(&l);
+
+        let u = understand("how many rows of POS data last year", &rt).unwrap();
+        let e = u
+            .resolved_entities
+            .iter()
+            .find(|e| e.id == table.id)
+            .unwrap_or_else(|| panic!("{:?}", u.resolved_entities));
+        assert_eq!(e.mention, "POS data");
+        assert_eq!(
+            e.via.as_deref(),
+            Some("synonym \"POS data\" (ossie:semantic/tpcds.ossie.yaml)")
+        );
+
+        let u = understand("what is the total quantity per store", &rt).unwrap();
+        let e = u
+            .resolved_entities
+            .iter()
+            .find(|e| e.id == table.id)
+            .unwrap();
+        assert!(
+            e.via
+                .as_deref()
+                .unwrap()
+                .starts_with("metric \"total quantity\"")
+        );
+
+        // A word that is only part of a synonym does not count.
+        let u = understand("what is retail", &rt).unwrap();
+        assert!(u.resolved_entities.iter().all(|e| e.via.is_none()));
     }
 
     #[test]

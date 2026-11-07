@@ -355,6 +355,7 @@ impl CompilerPass for OssieAnalyzerPass {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     const FLIGHTS: &str = include_str!("../../ossie/tests/fixtures/flights.semantic_model.yaml");
     const TPCDS: &str = include_str!("../../ossie/tests/fixtures/tpcds_semantic_model.yaml");
@@ -436,6 +437,131 @@ mod tests {
                 .unwrap()
                 .objects
                 .is_empty()
+        );
+    }
+
+    /// The official TPC-DS model over tables named as in the fixture DDL, linked as `ekos commit`
+    /// links them.
+    fn tpcds_knowledge() -> ekos_ossie::knowledge::OssieKnowledge {
+        let mut g = recover_ossie("semantic/tpcds.ossie.yaml", TPCDS, false).unwrap();
+        for t in ["store_sales", "date_dim", "customer", "item", "store"] {
+            let mut o = KirObject::new(t, ObjectKind::Table);
+            o.id = kid(&format!("table:{t}"));
+            g.objects.push(o);
+        }
+        ekos_semantic::ossie_links::link(&mut g, None);
+        ekos_ossie::knowledge::resolve(&g.objects, &g.relationships, None)
+    }
+
+    #[test]
+    fn rfc0246_metrics_resolve_over_the_tables() {
+        let k = tpcds_knowledge();
+        let m = |n: &str| {
+            k.metrics
+                .iter()
+                .find(|m| m.name == n)
+                .unwrap_or_else(|| panic!("no metric {n}: skipped {:#?}", k.skipped))
+        };
+        assert_eq!(
+            k.metrics.len(),
+            9,
+            "every metric of the official model resolves"
+        );
+        assert!(k.skipped.is_empty(), "{:#?}", k.skipped);
+        let q = m("total_quantity");
+        assert_eq!(
+            (q.scope.as_str(), q.sql.as_str()),
+            ("dataset", "SUM(store_sales.ss_quantity)")
+        );
+        let clv = m("customer_lifetime_value");
+        assert_eq!(
+            clv.sql,
+            "SUM(store_sales.ss_ext_sales_price) / COUNT(DISTINCT customer.c_customer_sk)"
+        );
+        assert_eq!(clv.tables, ["customer", "store_sales"]);
+        assert!(
+            m("cumulative_sales")
+                .sql
+                .contains("OVER (ORDER BY date_dim.d_date")
+        );
+        assert_eq!(k.joins.len(), 4);
+        let customer = k.tables.iter().find(|t| t.table == "customer").unwrap();
+        assert_eq!(customer.primary_key, ["c_customer_sk"]);
+        assert!(customer.synonyms.contains(&"shoppers".to_string()));
+        // The computed field is not a column fact, the plain ones are.
+        assert!(
+            customer
+                .columns
+                .iter()
+                .all(|c| c.column != "customer_full_name")
+        );
+        let dates = k.tables.iter().find(|t| t.table == "date_dim").unwrap();
+        assert!(
+            dates
+                .columns
+                .iter()
+                .any(|c| c.column == "d_date" && c.is_time)
+        );
+    }
+
+    #[test]
+    fn rfc0246_computed_fields_expand_and_unresolvable_metrics_are_skipped() {
+        let model = r#"
+version: 0.2.0.dev0
+name: m
+datasets:
+  - name: customer
+    source: shop.customer
+    fields:
+      - {name: id, expression: {sql: c_id}}
+      - {name: full_name, expression: {sql: "first || ' ' || last"}}
+    metrics:
+      - {name: names, expression: {sql: COUNT(DISTINCT full_name)}}
+      - {name: raw, expression: {sql: SUM(source.c_points)}}
+      - {name: bad_field, expression: {sql: SUM(nope)}}
+      - {name: on_metric, expression: {sql: names * 2}}
+  - name: orphan
+    source: nowhere.t
+    fields: [{name: x, expression: {sql: x}}]
+    metrics: [{name: lost, expression: {sql: COUNT(x)}}]
+metrics:
+  - {name: by_model, expression: {sql: COUNT(customer.full_name)}}
+  - {name: unqualified, expression: {sql: COUNT(full_name)}}
+"#;
+        let mut g = recover_ossie("m.ossie.yaml", model, false).unwrap();
+        let mut t = KirObject::new("customer", ObjectKind::Table);
+        t.id = kid("table:customer");
+        g.objects.push(t);
+        ekos_semantic::ossie_links::link(&mut g, None);
+        let k = ekos_ossie::knowledge::resolve(&g.objects, &g.relationships, None);
+        let sql = |n: &str| {
+            k.metrics
+                .iter()
+                .find(|m| m.name == n)
+                .map(|m| m.sql.clone())
+        };
+        assert_eq!(
+            sql("names").as_deref(),
+            Some("COUNT(DISTINCT (customer.first || ' ' || customer.last))")
+        );
+        assert_eq!(sql("raw").as_deref(), Some("SUM(customer.c_points)"));
+        assert_eq!(
+            sql("by_model").as_deref(),
+            Some("COUNT((customer.first || ' ' || customer.last))")
+        );
+        let reasons: BTreeMap<String, String> = k
+            .skipped
+            .iter()
+            .map(|s| (s.what.clone(), s.reason.clone()))
+            .collect();
+        assert!(reasons["metric `bad_field`"].contains("not a field"));
+        assert!(reasons["metric `on_metric`"].contains("refers to the metric"));
+        assert!(reasons["metric `lost`"].contains("not linked"));
+        assert!(reasons["metric `unqualified`"].contains("dataset.field"));
+        // A file the latest recover did not find contributes nothing.
+        let other: std::collections::BTreeSet<String> = ["x.yaml".to_string()].into();
+        assert!(
+            ekos_ossie::knowledge::resolve(&g.objects, &g.relationships, Some(&other)).is_empty()
         );
     }
 

@@ -1875,7 +1875,7 @@ fn call_tool(
 
     if name == "ekos_sql_check" {
         let ledger = cache.get(config, workspace)?;
-        return super::sql_check::agent_check(config, ledger, args);
+        return super::sql_check::agent_check(config, workspace, ledger, args);
     }
 
     if name == "ekos_signoff_status" {
@@ -2033,6 +2033,7 @@ fn tool_retrieve(
                 "id": e.id.to_string(),
                 "name": e.name,
                 "confidence": e.confidence,
+                "via": e.via,
             })).collect::<Vec<_>>(),
         },
     }))

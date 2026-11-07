@@ -1091,6 +1091,83 @@ pub fn ossie(config: &EkosConfig, cwd: &Path, opts: &OssieOptions) -> Result<()>
     Ok(())
 }
 
+/// `ekos export dbt-semantic --out <dir>` (RFC 0246): the current Apache Ossie models as a dbt
+/// semantic layer — `semantic_models.yml` (MetricFlow `semantic_models:` + `metrics:`),
+/// `models.yml` (key tests) and `skipped.md` (what MetricFlow cannot express, and why).
+pub fn dbt_semantic(config: &EkosConfig, cwd: &Path, out: &Path, time_spine: bool) -> Result<()> {
+    let ledger = crate::commands::store::open_store_read_only(config, cwd)?;
+    let objects = ledger.all_objects()?;
+    let relationships = ledger.all_relationships()?;
+    let files = current_ossie_files(config, cwd);
+    let knowledge = ekos_ossie::knowledge::resolve(&objects, &relationships, files.as_ref());
+    if knowledge.tables.is_empty() {
+        anyhow::bail!(
+            "no Apache Ossie model is linked to a compiled table — add an `*.ossie.yaml` to the \
+             project's sources and run the pipeline (RFC 0245)"
+        );
+    }
+    let names: HashMap<ekos_kir::KirId, String> = objects
+        .iter()
+        .filter(|o| o.kind == ObjectKind::Table)
+        .map(|o| (o.id, ekos_ossie::build::name_parts(&o.name).join(".")))
+        .collect();
+    let mut fks = Vec::new();
+    for r in relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::ForeignKey)
+    {
+        let (Some(from), Some(to)) = (names.get(&r.from), names.get(&r.to)) else {
+            continue;
+        };
+        let Some((fc, tc)) = r
+            .properties
+            .get("fk_desc")
+            .and_then(Json::as_str)
+            .and_then(ekos_ossie::fk::fk_columns)
+        else {
+            continue;
+        };
+        for (f, t) in fc.into_iter().zip(tc) {
+            fks.push(ekos_dbt_gen::semantic::KeyJoin {
+                from_table: from.clone(),
+                from_column: f,
+                to_table: to.clone(),
+                to_column: t,
+            });
+        }
+    }
+    let layer = ekos_dbt_gen::semantic::render_semantic_layer(&knowledge, &fks);
+    std::fs::create_dir_all(out).with_context(|| format!("creating {}", out.display()))?;
+    for (name, text) in [
+        ("semantic_models.yml", &layer.semantic_yml),
+        ("models.yml", &layer.models_yml),
+        ("skipped.md", &layer.skipped_md),
+    ] {
+        let path = out.join(name);
+        std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+    }
+    if time_spine {
+        for (name, text) in [
+            (
+                "metricflow_time_spine.sql",
+                ekos_dbt_gen::semantic::TIME_SPINE_SQL,
+            ),
+            ("time_spine.yml", ekos_dbt_gen::semantic::TIME_SPINE_YML),
+        ] {
+            let path = out.join(name);
+            std::fs::write(&path, text).with_context(|| format!("writing {}", path.display()))?;
+        }
+    }
+    println!(
+        "Wrote {} — {} semantic model(s), {} metric(s), {} skipped (see skipped.md).",
+        out.display(),
+        layer.semantic_models,
+        layer.metrics,
+        layer.skipped
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

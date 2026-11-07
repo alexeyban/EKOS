@@ -606,6 +606,8 @@ struct GlossEntry {
     path: String,
     line: u32,
     owner: KirId,
+    /// `glossary` (a document) or `ossie` (an Apache Ossie model, RFC 0246).
+    source: &'static str,
 }
 
 fn glossary_entries(graph: &KirGraph) -> Vec<GlossEntry> {
@@ -636,9 +638,11 @@ fn glossary_entries(graph: &KirGraph) -> Vec<GlossEntry> {
                 path: path.clone(),
                 line: e["line"].as_u64().unwrap_or(0) as u32,
                 owner: o.id,
+                source: "glossary",
             });
         }
     }
+    out.extend(ossie_gloss(graph));
     // Ledger order is arbitrary; evidence numbering and match order must not be.
     out.sort_by(|a, b| {
         (&a.path, a.line, &a.term, &a.definition, a.owner.0).cmp(&(
@@ -923,6 +927,8 @@ struct Facts<'a> {
     key_like: BTreeSet<ColKey>,
     /// Application constants grouped by prefix: `BC_AP => 1, BC_AR => 2` is the group `BC`.
     groups: BTreeMap<String, Vec<Constant>>,
+    /// RFC 0246: Apache Ossie field descriptions per column, with the model file's path.
+    ossie_descriptions: BTreeMap<ColKey, Vec<(String, String)>>,
 }
 
 impl<'a> Facts<'a> {
@@ -947,6 +953,7 @@ impl<'a> Facts<'a> {
             fks,
             key_like,
             groups: constant_groups(graph),
+            ossie_descriptions: ossie_descriptions(graph, by_id),
         }
     }
 
@@ -966,6 +973,84 @@ impl<'a> Facts<'a> {
         columns.retain(|k| !self.key_like.contains(k));
         columns
     }
+}
+
+/// RFC 0246: the field descriptions the Ossie models in the graph state, per linked table column.
+/// The caller passes only current models (the commit step drops a deleted file's objects).
+fn ossie_descriptions(
+    graph: &KirGraph,
+    by_id: &HashMap<Uuid, usize>,
+) -> BTreeMap<ColKey, Vec<(String, String)>> {
+    let k = ekos_ossie::knowledge::resolve(&graph.objects, &graph.relationships, None);
+    let mut out: BTreeMap<ColKey, Vec<(String, String)>> = BTreeMap::new();
+    for t in &k.tables {
+        let Some(&ti) = by_id.get(&t.table_id.0) else {
+            continue;
+        };
+        let path = t
+            .origins
+            .first()
+            .map(|o| o.trim_start_matches("ossie:").to_string())
+            .unwrap_or_default();
+        for c in &t.columns {
+            if let Some(d) = &c.description {
+                out.entry((ti, c.column.to_lowercase()))
+                    .or_default()
+                    .push((d.clone(), path.clone()));
+            }
+        }
+    }
+    out
+}
+
+/// RFC 0246: Apache Ossie metric and table descriptions as glossary entries — the term a metric's
+/// or a dataset's synonym, the definition its description. They document a concept of the same
+/// words; one that matches nothing is not a gap.
+fn ossie_gloss(graph: &KirGraph) -> Vec<GlossEntry> {
+    use ekos_ossie::kinds::{OSSIE_DATASET, OSSIE_METRIC};
+    let mut out = Vec::new();
+    for o in &graph.objects {
+        if !(is_custom(o, OSSIE_METRIC) || is_custom(o, OSSIE_DATASET)) {
+            continue;
+        }
+        let Some(definition) = o
+            .properties
+            .get("description")
+            .and_then(Value::as_str)
+            .filter(|d| !d.trim().is_empty())
+        else {
+            continue;
+        };
+        let path = o
+            .properties
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let line = o
+            .properties
+            .get("line")
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as u32;
+        let synonyms = o
+            .properties
+            .get("synonyms")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str);
+        for term in std::iter::once(o.name.as_str()).chain(synonyms) {
+            out.push(GlossEntry {
+                term: term.to_string(),
+                definition: definition.to_string(),
+                path: path.clone(),
+                line,
+                owner: o.id,
+                source: "ossie",
+            });
+        }
+    }
+    out
 }
 
 /// A primary-key or unique column.
@@ -1350,12 +1435,32 @@ fn column_meanings(f: &Facts, ti: usize, col: &str) -> (Meanings, BTreeMap<Strin
     let mut meanings = Meanings::new();
     let mut declared = BTreeMap::new();
     comment_meanings(f, ti, col, &mut meanings);
+    ossie_meanings(f, ti, col, &mut meanings);
     fk_seed_meanings(f, ti, col, &mut meanings, &mut declared);
     own_seed_meanings(f, ti, col, &mut meanings);
     constant_meanings(f, ti, col, &mut meanings);
     dbt_var_meanings(f, ti, col, &mut meanings);
     case_label_meanings(f, ti, col, &mut meanings);
     (meanings, declared)
+}
+
+/// RFC 0246: the legend in an Apache Ossie field description (`Y = preferred, N = not`) — the
+/// team's semantic model stating what the codes mean.
+fn ossie_meanings(f: &Facts, ti: usize, col: &str, meanings: &mut Meanings) {
+    let key = (ti, col.to_string());
+    for (text, path) in f.ossie_descriptions.get(&key).into_iter().flatten() {
+        for (code, label) in comment_legend(text) {
+            let value = match_value(&code, f.coded.get(&key), f.check_domain.get(&key));
+            meanings.entry(value).or_default().push(Meaning {
+                label,
+                source: "ossie",
+                confidence: 0.85,
+                path: path.clone(),
+                line: None,
+                detail: format!("Apache Ossie field description: {text}"),
+            });
+        }
+    }
 }
 
 /// The column comment's legend: `A=asset,L=liability`.
@@ -2116,7 +2221,9 @@ fn attach_glossary<'g>(
             continue;
         }
         let documented = gloss_items(b, gi, g, &key, &mut glossed);
-        if !documented && !table_words.contains(&key) {
+        // An Ossie model names metrics and tables, not a written promise of a concept: matching
+        // nothing is no gap.
+        if !documented && !table_words.contains(&key) && g.source == "glossary" {
             unmatched.push(g);
         }
     }
@@ -2182,7 +2289,7 @@ fn add_gloss(o: &mut KirObject, g: &GlossEntry) {
         o.properties
             .insert("description".into(), json!(g.definition));
         o.properties
-            .insert("description_source".into(), json!("glossary"));
+            .insert("description_source".into(), json!(g.source));
     }
 }
 
@@ -3074,6 +3181,76 @@ mod tests {
             .find(|o| o.name == "entity_credit_account.entity_class = 2")
             .unwrap();
         assert_eq!(prop(e2, "glossary").as_array().unwrap().len(), 1);
+    }
+
+    /// RFC 0246: an Apache Ossie model is a meaning source — a field description's legend gives
+    /// code meanings, a metric's description documents the concept of the same words, and a
+    /// metric that matches nothing is no gap.
+    #[test]
+    fn rfc0246_ossie_descriptions_are_a_meaning_source() {
+        let mut g = fixture();
+        // The account table loses its comment; the semantic model states the legend instead.
+        let account = g.objects.iter_mut().find(|o| o.name == "account").unwrap();
+        account.properties.insert(
+            "columns".into(),
+            json!([{"name": "category", "data_type": "CHAR(1)"}]),
+        );
+        let account_id = account.id;
+        let mut ds = KirObject::new("account", ObjectKind::Custom("OssieDataset".into()));
+        ds.properties
+            .insert("path".into(), json!("semantic/finance.ossie.yaml"));
+        ds.properties.insert("model".into(), json!("finance"));
+        ds.properties.insert(
+            "fields".into(),
+            json!([{"name": "category", "sql": "category",
+                    "description": "A = asset, L = liability, Q = equity"}]),
+        );
+        let mut link = KirRelationship::new(RelationshipKind::DependsOn, ds.id, account_id);
+        link.properties.insert("link".into(), json!("ossie_source"));
+        let mut metric = KirObject::new("active_parts", ObjectKind::Custom("OssieMetric".into()));
+        metric
+            .properties
+            .insert("path".into(), json!("semantic/finance.ossie.yaml"));
+        metric
+            .properties
+            .insert("description".into(), json!("Parts still on sale."));
+        let mut other = KirObject::new("revenue", ObjectKind::Custom("OssieMetric".into()));
+        other
+            .properties
+            .insert("path".into(), json!("semantic/finance.ossie.yaml"));
+        other
+            .properties
+            .insert("description".into(), json!("Money in."));
+        g.add_object(ds);
+        g.add_object(metric);
+        g.add_object(other);
+        g.add_relationship(link);
+        let out = synthesize(&g, &SemanticsConfig::default(), None);
+
+        let a = of(&out, ENUM_MEANING)
+            .into_iter()
+            .find(|o| o.name == "account.category = 'A'")
+            .unwrap_or_else(|| panic!("{:#?}", of(&out, ENUM_MEANING)));
+        assert_eq!(prop(a, "label"), &json!("asset"));
+        assert_eq!(prop(a, "meanings")[0]["source"], json!("ossie"));
+        assert_eq!(
+            prop(a, "meanings")[0]["path"],
+            json!("semantic/finance.ossie.yaml")
+        );
+        let c = of(&out, CONCEPT)
+            .into_iter()
+            .find(|c| c.name == "ActiveParts")
+            .unwrap();
+        assert_eq!(
+            prop(c, "glossary")[0]["definition"],
+            json!("Parts still on sale.")
+        );
+        assert!(
+            of(&out, GAP)
+                .iter()
+                .all(|g| prop(g, "term") != &json!("revenue")),
+            "an Ossie metric that matches nothing is no gap"
+        );
     }
 
     #[test]

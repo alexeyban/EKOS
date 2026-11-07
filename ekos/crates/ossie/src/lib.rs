@@ -7,13 +7,15 @@
 //! - [`read`] — parse and sniff documents;
 //! - [`build`] — the ledger as one model;
 //! - [`check`] — the structural checks of Ossie's own validator;
-//! - [`datatype`] — SQL types → Ossie data types.
+//! - [`datatype`] — SQL types → Ossie data types;
+//! - [`knowledge`] — the ingested models as facts about the compiled tables (RFC 0246).
 
 pub mod build;
 pub mod check;
 pub mod datatype;
 pub mod fk;
 pub mod kinds;
+pub mod knowledge;
 pub mod model;
 pub mod read;
 

@@ -55,7 +55,8 @@ impl Finding {
 
 /// Every lint code, in order.
 pub const LINT_CODES: &[&str] = &[
-    "L001", "L002", "L003", "L004", "L005", "L006", "L007", "L008", "L009", "L010", "L011", "E001",
+    "L001", "L002", "L003", "L004", "L005", "L006", "L007", "L008", "L009", "L010", "L011", "L012",
+    "E001",
 ];
 
 /// Parses and lints `sql`. A statement the dialect's parser cannot read gives `E001` (a warning:
@@ -125,7 +126,73 @@ pub fn lint_analysis(a: &Analysis, facts: &DialectFacts, schema: &Schema) -> Vec
     null_order(a, facts, schema, &mut out);
     dates(a, facts, schema, &mut out);
     dialect_forms(a, facts, schema, &mut out);
+    metric_shapes(a, schema, &mut out);
     out
+}
+
+/// A metric expression reduced to its shape: functions, operators and column names, with table
+/// qualifiers and aliases dropped and case and spacing ignored — `SUM(ss.ss_quantity)` and
+/// `sum(store_sales.SS_QUANTITY)` are one shape.
+fn metric_shape(sql: &str) -> Option<String> {
+    use sqlparser::ast::{Expr, visit_expressions_mut};
+    use std::ops::ControlFlow;
+    let mut e = sqlparser::parser::Parser::new(&sqlparser::dialect::GenericDialect {})
+        .try_with_sql(sql)
+        .ok()?
+        .parse_expr()
+        .ok()?;
+    let _ = visit_expressions_mut(&mut e, |x| {
+        if let Expr::CompoundIdentifier(ids) = x
+            && let Some(last) = ids.last()
+        {
+            *x = Expr::Identifier(last.clone());
+        }
+        ControlFlow::<()>::Continue(())
+    });
+    Some(
+        e.to_string()
+            .to_lowercase()
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect(),
+    )
+}
+
+/// L012 (RFC 0246): an output column named after a metric a semantic model defines, computed
+/// another way.
+fn metric_shapes(a: &Analysis, schema: &Schema, out: &mut Vec<Finding>) {
+    use sqlparser::ast::{SelectItem, SetExpr};
+    if schema.metrics.is_empty() {
+        return;
+    }
+    let Some(q) = &a.query else { return };
+    let SetExpr::Select(select) = q.body.as_ref() else {
+        return;
+    };
+    for item in &select.projection {
+        let SelectItem::ExprWithAlias { expr, alias } = item else {
+            continue;
+        };
+        let Some(m) = schema.metric(&alias.value) else {
+            continue;
+        };
+        let (Some(want), Some(got)) = (metric_shape(&m.sql), metric_shape(&expr.to_string()))
+        else {
+            continue;
+        };
+        if want != got {
+            out.push(Finding::new(
+                "L012",
+                Severity::Warn,
+                format!(
+                    "{} is a defined metric, {} ({}), but this query computes {}: use the \
+                     definition or name the column differently",
+                    alias.value, m.sql, m.origin, expr
+                ),
+                None,
+            ));
+        }
+    }
 }
 
 /// L009 (row-limit form), L010 (`ILIKE`), L011 (`"name"` read as a string).
@@ -260,7 +327,7 @@ fn unknown_names(a: &Analysis, schema: &Schema, out: &mut Vec<Finding>) {
 
 /// L002: a join on columns that are neither a declared foreign key nor a key on either side.
 fn joins(a: &Analysis, schema: &Schema, out: &mut Vec<Finding>) {
-    if schema.foreign_keys.is_empty() {
+    if schema.foreign_keys.is_empty() && schema.declared_joins.is_empty() {
         return;
     }
     for (x, y) in &a.joins {
@@ -268,9 +335,15 @@ fn joins(a: &Analysis, schema: &Schema, out: &mut Vec<Finding>) {
             continue;
         }
         let keyed = |c: &(String, String)| {
-            schema
-                .column(&c.0, &c.1)
-                .is_some_and(|col| col.primary_key || col.stats.as_ref().is_some_and(|s| s.unique))
+            let stated = schema.table(&c.0).is_some_and(|t| {
+                t.unique_keys
+                    .iter()
+                    .any(|k| k.len() == 1 && k[0].eq_ignore_ascii_case(&c.1))
+            });
+            stated
+                || schema.column(&c.0, &c.1).is_some_and(|col| {
+                    col.primary_key || col.stats.as_ref().is_some_and(|s| s.unique)
+                })
         };
         if keyed(x) || keyed(y) {
             continue;
@@ -585,6 +658,46 @@ mod tests {
         assert!(codes("SELECT name FROM cards").is_empty());
         let m = messages("SELECT id FROM cards WHERE name = \"Fireball\"");
         assert!(m[0].contains("'Fireball'"));
+    }
+
+    #[test]
+    fn rfc0246_stated_keys_declared_joins_and_metric_shapes() {
+        let mut s = fixture();
+        let lint_with = |s: &Schema, sql: &str| -> Vec<String> {
+            lint(sql, &SQLiteDialect {}, &SQLITE, s)
+                .map(|(_, f)| f)
+                .unwrap_or_else(|(_, f)| f)
+                .into_iter()
+                .map(|f| f.code)
+                .collect()
+        };
+        let off_keys = "SELECT 1 FROM cards c JOIN rulings r ON r.text = c.name";
+        assert_eq!(lint_with(&s, off_keys), ["L002"]);
+        // A model that states `cards.name` unique makes the join safe.
+        s.tables[0].unique_keys.push(vec!["name".into()]);
+        assert!(lint_with(&s, off_keys).is_empty());
+        // A declared join counts as a foreign key.
+        let mut s = fixture();
+        s.declared_joins.push(crate::ForeignKey {
+            from_table: "rulings".into(),
+            from_column: "text".into(),
+            to_table: "cards".into(),
+            to_column: "name".into(),
+        });
+        assert!(lint_with(&s, off_keys).is_empty());
+        // L012: the defined metric's name over another computation.
+        s.metrics.push(crate::Metric {
+            name: "total_power".into(),
+            sql: "SUM(cards.power)".into(),
+            tables: vec!["cards".into()],
+            origin: "ossie:m.yaml".into(),
+            ..Default::default()
+        });
+        assert!(lint_with(&s, "SELECT sum(c.POWER) AS total_power FROM cards c").is_empty());
+        assert_eq!(
+            lint_with(&s, "SELECT AVG(c.power) AS total_power FROM cards c"),
+            ["L012"]
+        );
     }
 
     #[test]

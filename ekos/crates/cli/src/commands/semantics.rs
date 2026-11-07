@@ -41,8 +41,15 @@ pub async fn commit_step(
     if !config.semantics.enabled {
         return Ok(None);
     }
+    // RFC 0246: an Apache Ossie model is a meaning source; a deleted file's objects stay in the
+    // ledger, so only the files the latest `recover` found are read.
+    let ossie_files = super::export::current_ossie_files(config, cwd);
     let graph = KirGraph {
-        objects: ledger.all_objects()?,
+        objects: ledger
+            .all_objects()?
+            .into_iter()
+            .filter(|o| ekos_semantic::ossie_links::is_current(o, ossie_files.as_ref()))
+            .collect(),
         relationships: ledger.all_relationships()?,
         events: Vec::new(),
         evidence: Vec::new(),

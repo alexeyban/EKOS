@@ -19,6 +19,8 @@ pub enum Tier {
     V1Counts,
     /// Per-column aggregates over the canonical form.
     V2Aggregates,
+    /// RFC 0246: the metrics a semantic model defines over the unit's table.
+    V2Metrics,
     /// Order-independent bucketed row checksums.
     V3Checksums,
     /// The exact divergent keys and columns, by bisect from failed V3 buckets.
@@ -35,6 +37,7 @@ impl Tier {
             Self::V0Structural => "v0",
             Self::V1Counts => "v1",
             Self::V2Aggregates => "v2",
+            Self::V2Metrics => "v2m",
             Self::V3Checksums => "v3",
             Self::V4RowDiff => "v4",
             Self::V5Logic => "v5",

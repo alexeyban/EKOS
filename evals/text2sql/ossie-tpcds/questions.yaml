@@ -1,0 +1,79 @@
+# RFC 0246 A/B: twelve questions whose answer depends on what the official Apache Ossie TPC-DS
+# model states — a metric definition, a business synonym, or both. Gold SQL is SQLite, written
+# from the model's own definitions (tests/fixtures/ossie-tpcds/semantic/tpcds.ossie.yaml).
+# Scored like BIRD EX: the gold and predicted result sets compared as sets of rows (floats to 2dp).
+questions:
+  - id: q01
+    needs: metric total_quantity
+    question: What is the total quantity across all store sales?
+    gold: SELECT SUM(ss_quantity) FROM store_sales
+  - id: q02
+    needs: metric total_sales
+    question: What are total sales for each store state?
+    gold: |
+      SELECT s.s_state, SUM(ss.ss_ext_sales_price)
+      FROM store_sales ss JOIN store s ON ss.ss_store_sk = s.s_store_sk GROUP BY s.s_state
+  - id: q03
+    needs: metric customer_lifetime_value
+    question: What is the customer lifetime value?
+    gold: |
+      SELECT SUM(ss.ss_ext_sales_price) / COUNT(DISTINCT c.c_customer_sk)
+      FROM store_sales ss JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk
+  - id: q04
+    needs: metric total_profit, join date_dim
+    question: What was the total profit in 2001?
+    gold: |
+      SELECT SUM(ss.ss_net_profit) FROM store_sales ss
+      JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk WHERE d.d_year = 2001
+  - id: q05
+    needs: metric total_sales by brand
+    question: Show sales by brand.
+    gold: |
+      SELECT i.i_brand, SUM(ss.ss_ext_sales_price)
+      FROM store_sales ss JOIN item i ON ss.ss_item_sk = i.i_item_sk GROUP BY i.i_brand
+  - id: q06
+    needs: synonym shoppers, merchandise
+    question: How many distinct shoppers bought merchandise in the Books category in 2002?
+    gold: |
+      SELECT COUNT(DISTINCT ss.ss_customer_sk) FROM store_sales ss
+      JOIN item i ON ss.ss_item_sk = i.i_item_sk
+      JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk
+      WHERE i.i_category = 'Books' AND d.d_year = 2002
+  - id: q07
+    needs: synonym branches, metric total_sales
+    question: Which of our branches had the highest total sales? Give its name.
+    gold: |
+      SELECT s.s_store_name FROM store_sales ss JOIN store s ON ss.ss_store_sk = s.s_store_sk
+      GROUP BY s.s_store_name ORDER BY SUM(ss.ss_ext_sales_price) DESC LIMIT 1
+  - id: q08
+    needs: metric total_quantity by month
+    question: What was the total quantity sold in each month of 2002?
+    gold: |
+      SELECT d.d_moy, SUM(ss.ss_quantity) FROM store_sales ss
+      JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk WHERE d.d_year = 2002 GROUP BY d.d_moy
+  - id: q09
+    needs: metric store_productivity
+    question: What is the store productivity of each store, by store name?
+    gold: |
+      SELECT s.s_store_name,
+             SUM(ss.ss_ext_sales_price) / NULLIF(SUM(s.s_number_employees), 0)
+      FROM store_sales ss JOIN store s ON ss.ss_store_sk = s.s_store_sk GROUP BY s.s_store_name
+  - id: q10
+    needs: synonym products, POS data
+    question: How many different products appear in the POS data for December 2001?
+    gold: |
+      SELECT COUNT(DISTINCT ss.ss_item_sk) FROM store_sales ss
+      JOIN date_dim d ON ss.ss_sold_date_sk = d.d_date_sk WHERE d.d_year = 2001 AND d.d_moy = 12
+  - id: q11
+    needs: metric total_profit, synonym retail locations
+    question: What is the total profit of each retail location in Washington (WA)?
+    gold: |
+      SELECT s.s_store_name, SUM(ss.ss_net_profit)
+      FROM store_sales ss JOIN store s ON ss.ss_store_sk = s.s_store_sk
+      WHERE s.s_state = 'WA' GROUP BY s.s_store_name
+  - id: q12
+    needs: metric total_sales, preferred flag
+    question: What are total sales to preferred customers?
+    gold: |
+      SELECT SUM(ss.ss_ext_sales_price) FROM store_sales ss
+      JOIN customer c ON ss.ss_customer_sk = c.c_customer_sk WHERE c.c_preferred_cust_flag = 'Y'

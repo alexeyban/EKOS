@@ -859,8 +859,10 @@ pub fn sqlgen_schema(
                             primary_key: c.primary_key,
                             description: c.description.clone(),
                             stats: stats(&t.name, &c.name),
+                            ..Default::default()
                         })
                         .collect(),
+                    ..Default::default()
                 })
                 .collect(),
             pack.joins.iter().filter_map(|j| parse_fk_desc(j)).collect(),
@@ -884,8 +886,10 @@ pub fn sqlgen_schema(
                             primary_key: *pk > 0,
                             description: None,
                             stats: stats(t, c),
+                            ..Default::default()
                         })
                         .collect(),
+                    ..Default::default()
                 });
                 let mut stmt = db
                     .connection()
@@ -926,6 +930,7 @@ pub fn sqlgen_schema(
         tables,
         foreign_keys,
         values: indexed,
+        ..Default::default()
     })
 }
 

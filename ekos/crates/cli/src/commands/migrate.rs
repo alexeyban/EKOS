@@ -659,13 +659,52 @@ pub fn assess(
     Ok(())
 }
 
+/// RFC 0246: the one-column keys an Apache Ossie model states for a table, and the model file.
+type OssieKeys = (Vec<String>, String);
+
+/// The one-column primary and unique keys the current Ossie models state, by table name
+/// (lowercase, as compiled and bare). A composite key is not a column claim and is left out.
+fn ossie_keys(
+    objects: &[ekos_kir::KirObject],
+    relationships: &[ekos_kir::KirRelationship],
+    files: Option<&std::collections::BTreeSet<String>>,
+) -> std::collections::HashMap<String, OssieKeys> {
+    let k = ekos_ossie::knowledge::resolve(objects, relationships, files);
+    let mut out = std::collections::HashMap::new();
+    for t in &k.tables {
+        let keys: Vec<String> = std::iter::once(&t.primary_key)
+            .chain(&t.unique_keys)
+            .filter(|k| k.len() == 1)
+            .map(|k| k[0].clone())
+            .collect();
+        if keys.is_empty() {
+            continue;
+        }
+        let path = t
+            .origins
+            .first()
+            .map(|o| o.trim_start_matches("ossie:").to_string())
+            .unwrap_or_default();
+        let bare = t
+            .table
+            .rsplit('.')
+            .next()
+            .unwrap_or(&t.table)
+            .to_lowercase();
+        out.insert(t.table.to_lowercase(), (keys.clone(), path.clone()));
+        out.entry(bare).or_insert((keys, path));
+    }
+    out
+}
+
 /// One documented, checkable claim about a live column, and where it was read.
 struct DocCheck {
     table: String,
     column: String,
     claim: ekos_migrate_dq::doc_claims::DocClaim,
-    /// `column_comment` (the repository's `COMMENT ON COLUMN`), `live_comment` (the catalog's) or
-    /// `doc_page` (a sentence in a Markdown or Confluence page that names the column).
+    /// `column_comment` (the repository's `COMMENT ON COLUMN`), `live_comment` (the catalog's),
+    /// `doc_page` (a sentence in a Markdown or Confluence page that names the column) or `ossie`
+    /// (a key an Apache Ossie model states, RFC 0246).
     source: &'static str,
     path: String,
     line: Option<u32>,
@@ -796,6 +835,7 @@ fn column_doc_checks(
     col: &ekos_pg_live::CatalogObject,
     repo_table: Option<&ColumnDocs>,
     pages: &PageDocs,
+    ossie: Option<&OssieKeys>,
 ) -> Vec<DocCheck> {
     use ekos_migrate_dq::doc_claims::{self, Claim};
     let mut checks = Vec::new();
@@ -828,6 +868,27 @@ fn column_doc_checks(
         ));
     }
     let mut seen = std::collections::BTreeSet::new();
+    // RFC 0246: a one-column key an Apache Ossie model states is a uniqueness claim the data can
+    // contradict — checked like a comment's, recorded with its own source.
+    if let Some((keys, path)) = ossie
+        && keys.iter().any(|k| k.eq_ignore_ascii_case(column))
+        && let Some(sql) = Claim::Unique.violation_sql(table, column, &data_type)
+    {
+        seen.insert(Claim::Unique.key());
+        checks.push(DocCheck {
+            table: table.to_string(),
+            column: column.to_string(),
+            claim: doc_claims::DocClaim {
+                claim: Claim::Unique,
+                phrase: "a key of the semantic model".into(),
+            },
+            source: "ossie",
+            path: path.clone(),
+            line: None,
+            sql,
+            affected: None,
+        });
+    }
     for (source, path, line, text) in sources {
         for claim in doc_claims::extract(&text) {
             // Enforced by the declaration, so the data cannot disagree.
@@ -968,6 +1029,11 @@ fn assess_doc_claims(
     let objects = store.all_objects()?;
     let repo = repo_column_docs(&objects)?;
     let pages = page_column_docs(&objects);
+    let ossie = ossie_keys(
+        &objects,
+        &store.all_relationships()?,
+        super::export::current_ossie_files(config, cwd).as_ref(),
+    );
     drop(objects);
     let mut checks: Vec<DocCheck> = Vec::new();
     for table in targets {
@@ -982,7 +1048,12 @@ fn assess_doc_claims(
             .filter(|c| c.qualified_name.starts_with(&prefix))
         {
             let column = col.qualified_name[prefix.len()..].to_string();
-            checks.extend(column_doc_checks(table, &column, col, repo_table, &pages));
+            let keys = ossie
+                .get(&table.to_lowercase())
+                .or_else(|| ossie.get(&bare));
+            checks.extend(column_doc_checks(
+                table, &column, col, repo_table, &pages, keys,
+            ));
         }
     }
 
@@ -1840,6 +1911,16 @@ pub fn validate(
     let bare = unit.rsplit('.').next().unwrap_or(&unit).to_string();
 
     let target = ChClient::from_alias(config, &target_ref.alias)?;
+    // RFC 0246: the metrics the project's Apache Ossie models define, for tier V2m.
+    let ossie_metrics: Vec<(String, String, Vec<String>)> = ekos_ossie::knowledge::resolve(
+        &store.all_objects()?,
+        &store.all_relationships()?,
+        super::export::current_ossie_files(config, cwd).as_ref(),
+    )
+    .metrics
+    .into_iter()
+    .map(|m| (m.name, m.sql, m.tables))
+    .collect();
     // The types actually deployed — what the canonical form must render against. Re-mapping the
     // column here with no evidence gives a *default* type, not the one `load` created.
     let deployed: std::collections::HashMap<String, String> = target
@@ -1909,19 +1990,34 @@ pub fn validate(
         };
 
         let mut outcomes = Vec::new();
+        let mut metrics_not_run = Vec::new();
         outcomes.push(v::tiers::run_v1(&plan, &src, &target)?);
         if tier != "v1" {
             outcomes.push(v::tiers::run_v2(&plan, &src, &target, &names)?);
+            // RFC 0246: the business numbers a semantic model defines must agree too.
+            let (checks, not_run) = v::metrics::plan_metrics(
+                &unit,
+                &plan.source_table,
+                &plan.target_table,
+                &ossie_metrics,
+            );
+            metrics_not_run = not_run;
+            if let Some(o) = v::metrics::run_v2m(&unit, &checks, &src, &target)? {
+                outcomes.push(o);
+            }
         }
         if tier == "v3" || tier == "v4" {
             outcomes.push(v::tiers::run_v3(&plan, &src, &target)?);
         }
-        Ok((outcomes, lsn, plan))
+        Ok((outcomes, lsn, plan, metrics_not_run))
     })?;
-    let (outcomes, lsn, plan) = outcome;
+    let (outcomes, lsn, plan, metrics_not_run) = outcome;
 
     println!("{unit} -> {target_db}.{bare}");
     println!("  source LSN: {lsn}");
+    for n in &metrics_not_run {
+        println!("  v2m not_run: metric {} — {}", n.name, n.reason);
+    }
     let mut all_passed = true;
     for o in &outcomes {
         println!("  {}", o.verdict());
@@ -3145,6 +3241,56 @@ fn whoami() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 0246 — a one-column key an Apache Ossie model states is checked as a uniqueness
+    /// claim, with the model as its source; a comment's own `unique` is not checked twice.
+    #[test]
+    fn rfc0246_an_ossie_key_is_a_uniqueness_claim() {
+        let col = ekos_pg_live::CatalogObject {
+            kind: ObjectKind::Column,
+            qualified_name: "public.customer.c_email".into(),
+            schema: Some("public".into()),
+            detail: serde_json::json!({"type": "text"}),
+        };
+        let keys: OssieKeys = (vec!["c_email".into()], "semantic/m.ossie.yaml".into());
+        let pages = PageDocs::new();
+        let checks = column_doc_checks(
+            "public.customer",
+            "c_email",
+            &col,
+            None,
+            &pages,
+            Some(&keys),
+        );
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].source, "ossie");
+        assert_eq!(checks[0].path, "semantic/m.ossie.yaml");
+        assert_eq!(checks[0].claim.claim.key(), "unique");
+        // A comment that also says unique adds nothing; another column is untouched.
+        let mut repo = ColumnDocs::new();
+        repo.insert(
+            "c_email".into(),
+            ("Unique per customer.".into(), "db/s.sql".into(), Some(3)),
+        );
+        let both = column_doc_checks(
+            "public.customer",
+            "c_email",
+            &col,
+            Some(&repo),
+            &pages,
+            Some(&keys),
+        );
+        assert_eq!(
+            both.iter()
+                .filter(|c| c.claim.claim.key() == "unique")
+                .count(),
+            1
+        );
+        assert!(
+            column_doc_checks("public.customer", "c_name", &col, None, &pages, Some(&keys))
+                .is_empty()
+        );
+    }
 
     /// RFC 0172 — page sentences reach the column they name, written qualified or bare, in a
     /// stable order, and nothing reaches a column no page names.

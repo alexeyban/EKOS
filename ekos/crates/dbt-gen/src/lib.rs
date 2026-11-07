@@ -15,6 +15,8 @@
 //! content isn't fully translated — the same "Unmapped is a citizen, not a failure" contract
 //! `ekos-docs-gen` already established (RFC 0035), applied to a second output format.
 
+pub mod semantic;
+
 use ekos_kir::{KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind};
 use std::collections::HashMap;
 

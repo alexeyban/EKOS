@@ -10,10 +10,12 @@
 //! - [`lint`]: static findings (`L001`–`L008`), gold-free.
 //! - [`probe`]: findings that run cheap queries through a [`probe::Probe`] (`P001`–`P005`).
 //! - [`agent`]: a tool loop over `LlmProvider::complete`, with checks on every submission.
+//! - [`ossie`]: what an Apache Ossie semantic model adds — synonyms, keys, joins, metrics (RFC 0246).
 
 pub mod agent;
 pub mod analyze;
 pub mod lint;
+pub mod ossie;
 pub mod probe;
 pub mod schema;
 
@@ -21,7 +23,7 @@ pub mod schema;
 pub use ekos_sql_dialect_sdk::guard;
 
 pub use lint::{Fetch, Finding, Severity};
-pub use schema::{Column, ColumnStats, ForeignKey, Schema, Table};
+pub use schema::{Column, ColumnStats, ForeignKey, Metric, Schema, Table};
 
 /// The SQL a model answered with: the last ```sql block, else the last code block, else the
 /// text from the first `SELECT`/`WITH`. Trailing semicolons are dropped.

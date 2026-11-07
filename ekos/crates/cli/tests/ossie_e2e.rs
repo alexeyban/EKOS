@@ -372,3 +372,131 @@ fn an_ekos_export_left_in_the_sources_is_not_read_back() {
     let found = ok(&ws, &["ekl", "FIND Object WHERE kind = 'OssieDataset'"]);
     assert!(found.contains("0 rows"), "{found}");
 }
+
+/// RFC 0246: `ekos export dbt-semantic` on the fixture, then dbt's own `dbt parse` with
+/// MetricFlow over the result. Opt-in (`EKOS_DBT_VALIDATE=1`; installs dbt-core, dbt-duckdb and
+/// dbt-metricflow through `uv`). The official TPC-DS model has no time axis on `store_sales`, so a
+/// second, small model over `date_dim` gives MetricFlow a measure to validate.
+#[test]
+fn the_dbt_semantic_layer_parses_with_metricflow() {
+    let dir = tempfile::tempdir().unwrap();
+    let ws = workspace(dir.path());
+    std::fs::create_dir_all(ws.join("semantic")).unwrap();
+    std::fs::copy(
+        fixture().join("semantic/tpcds.ossie.yaml"),
+        ws.join("semantic/tpcds.ossie.yaml"),
+    )
+    .unwrap();
+    std::fs::write(
+        ws.join("semantic/calendar.ossie.yaml"),
+        r#"version: 0.2.0.dev0
+name: calendar
+datasets:
+  - name: date_dim
+    source: date_dim
+    primary_key: [d_date_sk]
+    fields:
+      - {name: d_date_sk, expression: {sql: d_date_sk}, datatype: Integer}
+      - {name: d_date, expression: {sql: d_date}, datatype: Date}
+      - {name: d_year, expression: {sql: d_year}, datatype: Integer, dimension: {is_time: false}}
+    metrics:
+      - {name: days, expression: {sql: COUNT(d_date_sk)}, description: Calendar days}
+      - {name: years_per_day, expression: {sql: COUNT(DISTINCT d_year) / COUNT(d_date_sk)}}
+"#,
+    )
+    .unwrap();
+    pipeline(&ws);
+    let out = dir.path().join("dbt");
+    let said = ok(
+        &ws,
+        &[
+            "export",
+            "dbt-semantic",
+            "--out",
+            out.to_str().unwrap(),
+            "--with-time-spine",
+        ],
+    );
+    assert!(said.contains("semantic model(s)"), "{said}");
+    let layer = std::fs::read_to_string(out.join("semantic_models.yml")).unwrap();
+    let y: serde_yaml::Value = serde_yaml::from_str(&layer).unwrap();
+    let names: Vec<&str> = y["metrics"]
+        .as_sequence()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    assert!(
+        names.contains(&"days") && names.contains(&"years_per_day"),
+        "{names:?}"
+    );
+    let skipped = std::fs::read_to_string(out.join("skipped.md")).unwrap();
+    assert!(
+        skipped.contains("metric `cumulative_sales`"),
+        "windows are skipped: {skipped}"
+    );
+    assert!(
+        skipped.contains("time dimension on store_sales"),
+        "{skipped}"
+    );
+
+    if std::env::var("EKOS_DBT_VALIDATE").is_err() {
+        eprintln!("dbt parse skipped: set EKOS_DBT_VALIDATE=1 (needs uv and network)");
+        return;
+    }
+    // A minimal dbt project: one model per semantic model, the layer, a DuckDB profile.
+    let project = dir.path().join("dbtproj");
+    std::fs::create_dir_all(project.join("models")).unwrap();
+    std::fs::write(
+        project.join("dbt_project.yml"),
+        "name: ekos_ossie\nversion: '1.0'\nconfig-version: 2\nprofile: ekos_ossie\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.join("profiles.yml"),
+        "ekos_ossie:\n  target: dev\n  outputs:\n    dev:\n      type: duckdb\n      path: ':memory:'\n",
+    )
+    .unwrap();
+    for m in y["semantic_models"].as_sequence().unwrap() {
+        let name = m["name"].as_str().unwrap();
+        std::fs::write(
+            project.join(format!("models/{name}.sql")),
+            "select 1 as x\n",
+        )
+        .unwrap();
+    }
+    std::fs::copy(
+        out.join("semantic_models.yml"),
+        project.join("models/semantic_models.yml"),
+    )
+    .unwrap();
+    for f in ["models.yml", "metricflow_time_spine.sql", "time_spine.yml"] {
+        std::fs::copy(out.join(f), project.join("models").join(f)).unwrap();
+    }
+    let parse = Command::new("uv")
+        .args([
+            "run",
+            "--no-project",
+            "--with",
+            "dbt-core",
+            "--with",
+            "dbt-duckdb",
+        ])
+        .args([
+            "--with",
+            "dbt-metricflow",
+            "dbt",
+            "parse",
+            "--profiles-dir",
+            ".",
+        ])
+        .current_dir(&project)
+        .output()
+        .expect("uv runs");
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&parse.stdout),
+        String::from_utf8_lossy(&parse.stderr)
+    );
+    assert!(parse.status.success(), "dbt parse failed:\n{text}");
+}

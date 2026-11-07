@@ -428,3 +428,47 @@ fn a_row_only_in_the_target_is_identified_by_direction() {
         v4.divergences
     );
 }
+
+// ── RFC 0246: V2m, the metrics a semantic model defines ──────────────────────
+
+fn ossie_metrics(t: &str) -> Vec<(String, String, Vec<String>)> {
+    let m = |n: &str, sql: String| (n.to_string(), sql, vec![t.to_string()]);
+    vec![
+        m("revenue", format!("SUM({t}.amount)")),
+        m("avg_amount", format!("AVG({t}.amount)")),
+        m("tags", format!("COUNT(DISTINCT {t}.tag_a)")),
+        m("noted", format!("COUNT({t}.note)")),
+    ]
+}
+
+/// A clean copy agrees on every defined metric, and the planted offset is caught; one cent moved
+/// on one row is caught by V2m and reported by the metric's name, never its value.
+#[test]
+fn v2m_reconciles_the_defined_metrics() {
+    use ekos_migrate_validate::metrics::{plan_metrics, run_v2m};
+    if !live() {
+        return;
+    }
+    load("v2m");
+    let t = "orders_v2m";
+    let (checks, not_run) = plan_metrics(t, t, t, &ossie_metrics(t));
+    assert_eq!(checks.len(), 4, "{not_run:?}");
+    let clean = run_v2m(t, &checks, &Psql, &Ch).unwrap().unwrap();
+    assert!(clean.passed(), "a correct copy must pass V2m: {clean:?}");
+
+    ch(
+        "ALTER TABLE orders_v2m UPDATE amount = amount + 0.01 WHERE id = 1234 \
+        SETTINGS mutations_sync = 2",
+    );
+    let moved = run_v2m(t, &checks, &Psql, &Ch).unwrap().unwrap();
+    let loci: Vec<&str> = moved.divergences.iter().map(|d| d.locus.as_str()).collect();
+    assert!(loci.contains(&"orders_v2m:metric:revenue"), "{loci:?}");
+    assert!(!loci.contains(&"orders_v2m:metric:tags"), "{loci:?}");
+    assert!(
+        run_v1(&plan("v2m"), &Psql, &Ch)
+            .unwrap()
+            .divergences
+            .is_empty(),
+        "the row count is unchanged: only a value moved"
+    );
+}

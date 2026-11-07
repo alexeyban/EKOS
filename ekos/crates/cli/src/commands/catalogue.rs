@@ -111,6 +111,7 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("export linkml", Class::Read, false),
     ("import linkml", Class::Review, false),
     ("export ossie", Class::Read, false),
+    ("export dbt-semantic", Class::Read, false),
     ("import ossie", Class::Review, false),
     ("identity scan", Class::Write, false),
     ("treasury scan", Class::External, false),

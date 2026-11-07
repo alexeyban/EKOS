@@ -1727,6 +1727,17 @@ enum ExportCommands {
         #[arg(long)]
         source: Option<String>,
     },
+    /// The project's Apache Ossie models as a dbt semantic layer (RFC 0246): MetricFlow
+    /// `semantic_models:` and `metrics:`, key tests, and what could not be expressed
+    DbtSemantic {
+        /// The directory to write `semantic_models.yml`, `models.yml` and `skipped.md` to
+        #[arg(long)]
+        out: std::path::PathBuf,
+        /// Also write a daily `metricflow_time_spine` model (MetricFlow needs one; a project
+        /// already on the semantic layer has it)
+        #[arg(long)]
+        with_time_spine: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3037,6 +3048,10 @@ fn dispatch_export(
                 source,
             },
         ),
+        ExportCommands::DbtSemantic {
+            out,
+            with_time_spine,
+        } => crate::commands::export::dbt_semantic(config, cwd, &out, with_time_spine),
     }
 }
 
