@@ -48,3 +48,13 @@ output "kubernetes" {
   } : null
   sensitive = true
 }
+
+output "container_app_environment_id" {
+  description = "The Container Apps environment (compute = container), so other apps can join it; null otherwise."
+  value       = try(azurerm_container_app_environment.this[0].id, null)
+}
+
+output "subnet_id" {
+  description = "The deployment's subnet."
+  value       = azurerm_subnet.main.id
+}
