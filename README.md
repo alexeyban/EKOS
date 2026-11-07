@@ -1285,6 +1285,31 @@ ekos import ossie shop.ossie.yaml --as ann              # …recorded, all or no
 Agents can read the model with the read-only MCP tool `ekos_ossie_export`, and the console's
 Semantics tab has an *Apache Ossie* view (browse, download, validate and apply an edited file).
 
+**Validation.** `scripts/ossie-validate.sh` checks EKOS against Ossie's own validator
+(`validation/validate.py`: JSON Schema, names, references, arity, and a sqlglot parse of every
+expression). It runs on `tests/fixtures/ossie-tpcds`: five TPC-DS tables, plus Ossie's official
+TPC-DS model of them.
+
+0. **Self-check.** The official examples pass, and a planted broken model is rejected, so the
+   validator is proven to be checking.
+1. **Export.** The compiled schema is exported and validated.
+2. **Import, export again.** The official model is imported by ingest and the schema exported
+   again. All 5 datasets link, and there are 0 conflicts. The re-export carries the model's
+   metric and synonyms and validates.
+3. **Review round trip.** A review is made in the file, `ekos import ossie` applies it, and the
+   confirmed model validates. Re-importing the same file plans nothing.
+4. **Planted disagreements.** Exactly the two planted ones are reported.
+
+The run leaves every export, validator log and a `summary.md`. CI runs it in
+`.github/workflows/ossie.yml` against the pinned Ossie commit, which is required, and against
+Ossie's `main`, which is informational and weekly. `cargo test -p ekos --test ossie_e2e` runs the
+same flow offline against the vendored schema.
+
+```bash
+scripts/ossie-validate.sh --out ossie-report     # clones apache/ossie at the pinned commit; needs uv
+OSSIE_REF=main scripts/ossie-validate.sh         # against Ossie's latest spec
+```
+
 ### dbt metadata extraction (RFC 0117)
 
 dbt can point at any warehouse, so `ekos recover` extracts real `Table` objects from a dbt

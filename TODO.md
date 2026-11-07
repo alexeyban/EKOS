@@ -7038,6 +7038,7 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] Ingest: `OssieAnalyzerPass` at recover, `ossie_links` at commit (dataset → table, Ossie-vs-schema conflicts), `ossie/current.json` so deleted files drop out, EKOS's own exports skipped, synonyms indexed (search content v3)
 - [x] `ekos import ossie` (human-only review round trip); MCP `ekos_ossie_export` (scoped); console Semantics → Apache Ossie view
 - [x] Official `validate.py` passes on exports (opt-in test `EKOS_OSSIE_REPO`)
+- [x] Public validation: `scripts/ossie-validate.sh` + `ossie.yml` (pinned + upstream main) and `tests/ossie_e2e.rs` on the TPC-DS fixture — export, ingest + re-export, review round trip, planted conflicts (devlog_323)
 - [ ] Carry ingested *model-scoped* metrics (they reference Ossie dataset names, not EKOS's)
 - [ ] Ossie ontology + mapping documents (`ontology/`), BusinessConcept ↔ Ossie concept
 - [ ] Ingested metrics in the text-to-SQL agent's context (`sqlgen`)
