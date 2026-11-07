@@ -7041,6 +7041,18 @@ Part II console workflow steps 1–3 (demo-grade) → seam + steps 4–7 → Par
 - [x] Public validation: `scripts/ossie-validate.sh` + `ossie.yml` (pinned + upstream main) and `tests/ossie_e2e.rs` on the TPC-DS fixture — export, ingest + re-export, review round trip, planted conflicts (devlog_323)
 - [ ] Carry ingested *model-scoped* metrics (they reference Ossie dataset names, not EKOS's)
 - [ ] Ossie ontology + mapping documents (`ontology/`), BusinessConcept ↔ Ossie concept
-- [ ] Ingested metrics in the text-to-SQL agent's context (`sqlgen`)
+- [x] Ingested metrics in the text-to-SQL agent's context (`sqlgen`) — RFC 0246 (devlog_324)
 - [ ] Propose `EKOS` for Ossie's `extensions/vendors.md` upstream (the user's call)
 - [ ] Re-pin the vendored schema when Ossie releases 0.2.0
+
+## RFC 0246 — Putting ingested Apache Ossie models to work (2026-11-07, devlog_324)
+
+- [x] `ekos_ossie::knowledge`: one resolver — metrics over tables (AST walk), joins, keys, synonyms, time axes; skipped with reasons
+- [x] Text-to-SQL: synonyms, unique keys, declared joins, time axes, `metric` tool + prompt block, L002 keys, L012 metric shape
+- [x] `ekos export dbt-semantic`: MetricFlow semantic models + simple/ratio metrics, key tests, skipped.md
+- [x] Business semantics: Ossie legends as code meanings (source `ossie`), metric descriptions as glossary
+- [x] Ask/query: synonym and metric-name resolution with `via`
+- [x] EKOS Migrate: Ossie keys as uniqueness claims; tier V2m metric reconciliation (live PG→ClickHouse, planted control)
+- [ ] `dbt parse` with MetricFlow on the exported layer (opt-in, needs dbt-metricflow)
+- [ ] V2m for multi-table metrics (needs the join on both engines)
+- [ ] Time dimensions reached through a join (MetricFlow requires one on the measure's own model)

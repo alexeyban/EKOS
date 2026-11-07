@@ -1280,10 +1280,43 @@ observed schema are reported and not imported.
 ekos export ossie --status all --out shop.ossie.yaml    # or --json; --database / --source narrow it
 ekos import ossie shop.ossie.yaml --dry-run             # the decisions a reviewer's edits stand for
 ekos import ossie shop.ossie.yaml --as ann              # …recorded, all or nothing
+ekos export dbt-semantic --out models/semantic          # RFC 0246: MetricFlow YAML + key tests
 ```
 
 Agents can read the model with the read-only MCP tool `ekos_ossie_export`, and the console's
 Semantics tab has an *Apache Ossie* view (browse, download, validate and apply an edited file).
+
+**What EKOS does with an imported model (RFC 0246).** One resolver
+(`ekos_ossie::knowledge`) rewrites the model over the compiled tables: metrics in terms of table
+columns, joins as column pairs, keys, synonyms and time axes. Anything it cannot resolve is listed
+with the reason. The model never overrides the schema.
+
+- **Text-to-SQL** (`ekos sql generate|check`, MCP `ekos_sql_check`):
+  - the schema the agent sees gains synonyms, stated unique keys, declared joins (marked "declared
+    in the semantic model") and time axes;
+  - a `metric` tool and a "Defined metrics" prompt instruction let the agent use the team's
+    definition of "total sales" instead of guessing a column;
+  - lint **L002** stops warning on joins over stated keys;
+  - new lint **L012** warns when a query names a defined metric but computes something else.
+- **dbt semantic layer** (`ekos export dbt-semantic --out <dir>`):
+  - `semantic_models.yml` holds MetricFlow semantic models (entities from keys and joins,
+    categorical and time dimensions) and `simple` / `ratio` metrics;
+  - `models.yml` holds `unique` / `not_null` key tests;
+  - `skipped.md` lists what MetricFlow cannot express, with the reason: window functions, nested
+    aggregates, or a measure whose model has no time dimension.
+- **Business meanings:** a field description with a code legend (`Y = preferred, N = not
+  preferred`) gives code meanings with source `ossie`, and a metric's description documents the
+  concept of the same name. All of these stay hypotheses for review.
+- **Questions** (`ekos ask`, `ekos_query`, `ekos_retrieve`): a business word in a question ("POS
+  data", "total quantity") resolves to its table, and `ekos_retrieve` says why (`via: synonym "POS
+  data" (ossie:…)`).
+- **EKOS Migrate:**
+  - a one-column key the model states is checked at `migrate assess` as a uniqueness claim (source
+    `ossie`);
+  - `migrate validate` runs tier **V2m**, which computes each defined single-table metric on
+    PostgreSQL and ClickHouse and compares the two values. A one-cent change on one row is caught,
+    and the planted control must fire. A metric the engines cannot both run is `not_run`, never a
+    pass.
 
 **Validation.** `scripts/ossie-validate.sh` checks EKOS against Ossie's own validator
 (`validation/validate.py`: JSON Schema, names, references, arity, and a sqlglot parse of every
