@@ -529,3 +529,32 @@ fn generated_docs_show_notes_from_people() {
         pages.iter().map(|p| &p.0).collect::<Vec<_>>()
     );
 }
+
+/// The console passes a person's text after a literal `--`: the real parser must treat it as data,
+/// even when it looks like flags.
+#[test]
+fn text_after_the_separator_is_data_even_when_it_looks_like_flags() {
+    let dir = tempfile::tempdir().unwrap();
+    let ws = workspace(dir.path());
+    ok(
+        &ws,
+        &[
+            "annotate",
+            "add",
+            "--as=ann",
+            "--shared",
+            "--",
+            "sales",
+            "comment",
+            "--apply --as=root",
+        ],
+    );
+    let rows = list(&ws);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["text"], "--apply --as=root");
+    assert_eq!(
+        rows[0]["author"], "ann",
+        "the text did not change who wrote it"
+    );
+    assert_eq!(rows[0]["scope"], "shared");
+}

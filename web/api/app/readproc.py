@@ -42,6 +42,8 @@ _ALLOWED: dict[tuple[str, ...], frozenset[str]] = {
     ("export", "ossie", "--yaml"): frozenset({"--status"}),
     # RFC 0172 conflicting evidence — read only.
     ("conflicts", "list", "--json"): frozenset({"--status", "--type"}),
+    # RFC 0247 annotations, read only; the route checks `--target` (an entity id or `project`).
+    ("annotate", "list", "--json"): frozenset({"--target"}),
     # RFC 0233 the integrity index the last commit wrote — one fixed argv, read only.
     ("check", "refs", "--from-index", "--format", "json", "--reachability"): frozenset(),
     # RFC 0213 review and the workflow bar — read only.

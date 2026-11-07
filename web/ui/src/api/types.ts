@@ -407,6 +407,28 @@ export interface Conflict {
   measured: { violating_rows?: number; query?: string; measured_at?: string } | null;
 }
 
+// ── RFC 0247 annotations ────────────────────────────────────────────────────────────────────
+
+export type AnnotationKind = "comment" | "instruction" | "synonym";
+/** `stale`: the entity changed after the annotation was written; it applies nothing until confirmed. */
+export type AnnotationState = "active" | "stale" | "withdrawn";
+
+/** One annotation as `ekos annotate list --json` prints it. */
+export interface Annotation {
+  id: string;
+  /** An entity id, or `project`. */
+  target: string;
+  kind: AnnotationKind;
+  text: string;
+  rule: Record<string, unknown> | null;
+  term: string | null;
+  author: string;
+  scope: "personal" | "shared";
+  approved_by: string | null;
+  state: AnnotationState;
+  updated_at: string;
+}
+
 // ── RFC 0213 workflow bar, review and sign-off ──────────────────────────────────────────────
 
 export type StepState = "todo" | "partial" | "done" | "stale" | "blocked";

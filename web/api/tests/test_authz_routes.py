@@ -144,6 +144,12 @@ def test_review_and_tenant_routes_use_the_expected_actions(
         "review"
         in routes[("POST", "/api/workspaces/{workspace_id}/conflicts/{conflict_id}/resolve")]
     )
+    notes = "/api/workspaces/{workspace_id}/annotations"
+    assert "read" in routes[("GET", notes)]
+    assert "operate" in routes[("POST", notes)]
+    assert "operate" in routes[("POST", notes + "/{annotation_id}/withdraw")]
+    assert "review" in routes[("POST", notes + "/{annotation_id}/approve")]
+    assert "review" in routes[("POST", notes + "/{annotation_id}/confirm")]
     assert "operate" in routes[("PUT", "/api/workspaces/{workspace_id}/config")]
     assert "admin" in routes[("DELETE", "/api/workspaces/{workspace_id}")]
     assert "platform" in routes[("POST", "/api/tenants")]

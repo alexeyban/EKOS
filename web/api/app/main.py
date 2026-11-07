@@ -20,6 +20,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import JSONResponse
 
 from . import cloud, home_projects, lifecycle, models
+from .routes import annotations as annotation_routes
 from .routes import (
     auth,
     chat,
@@ -63,6 +64,7 @@ ROUTERS = (
     evals,
     semantics,
     conflicts,
+    annotation_routes,
     integrity,
     review,
     sources,

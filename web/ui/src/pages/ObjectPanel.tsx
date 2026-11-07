@@ -1,5 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
+import { useOutletContext } from "react-router-dom";
 import { api } from "../api/client";
+import { type Me, seesAll } from "../WorkspaceShell";
+import { ObjectNotes } from "./ObjectNotes";
 
 interface Evidence {
   location?: { path?: string; line?: number };
@@ -45,6 +48,8 @@ export function ObjectPanel({
   onIsolate?: (id: string) => void;
   onImpact?: (id: string, direction: "dependents" | "dependencies") => void;
 }) {
+  // RFC 0247: notes are for someone who sees the whole project, and describe the entity now.
+  const wholeProject = seesAll(useOutletContext<Me | undefined>());
   const state = useQuery({
     queryKey: ["object", workspace, objectId, asOf ?? "live"],
     queryFn: () =>
@@ -98,6 +103,8 @@ export function ObjectPanel({
               <pre className="props">{JSON.stringify(o.properties, null, 2)}</pre>
             </details>
           )}
+
+          <ObjectNotes workspace={workspace} objectId={o.id} enabled={wholeProject && !asOf} />
 
           <details open>
             <summary>Relationships ({rels.length})</summary>
