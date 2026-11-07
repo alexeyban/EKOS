@@ -510,7 +510,7 @@ fn report(opts: &ImportOptions, plan_out: &ImportPlan) -> Result<()> {
 /// One reviewable entry of an exported Ossie model: a business concept on a dataset or a code
 /// meaning on a field, from the `EKOS` extensions — the only parts of the file that are decisions.
 #[derive(Debug, Clone, PartialEq, Default)]
-struct OssieEntry {
+pub struct OssieEntry {
     kind: &'static str,
     path: String,
     name: Option<String>,
@@ -646,17 +646,60 @@ fn observed_edits(
     }
 }
 
-/// Compare an edited Ossie export with the current one and plan the decisions. Pure.
+/// Every current RFC 0170 concept and code meaning as the entry an export would write for it —
+/// rejected ones included, which an export leaves out: re-importing a file whose rejection is
+/// already recorded must not call that entry stale.
+fn known_entries(items: &[KirObject]) -> BTreeMap<String, OssieEntry> {
+    let text = |o: &KirObject, keys: &[&str]| {
+        keys.iter()
+            .filter_map(|k| o.properties.get(*k).and_then(serde_json::Value::as_str))
+            .find(|v| !v.is_empty())
+            .map(str::to_string)
+    };
+    items
+        .iter()
+        .filter_map(|o| {
+            let common = OssieEntry {
+                status: text(o, &["status"]),
+                note: text(o, &["review_note"]),
+                ..Default::default()
+            };
+            let entry = if ekos_ossie::kinds::is_concept(o) {
+                OssieEntry {
+                    kind: "BusinessConcept",
+                    name: text(o, &["expert_name"]).or_else(|| Some(o.name.clone())),
+                    description: text(o, &["expert_description", "description"]),
+                    ..common
+                }
+            } else if ekos_ossie::kinds::is_enum_meaning(o) {
+                OssieEntry {
+                    kind: "EnumMeaning",
+                    label: text(o, &["expert_label", "label"]),
+                    ..common
+                }
+            } else {
+                return None;
+            };
+            Some((o.id.to_string(), entry))
+        })
+        .collect()
+}
+
+/// Compare an edited Ossie export with the current one and plan the decisions. Pure. Entries
+/// are compared with `known` (every current item, see [`known_entries`]); the baseline export
+/// decides only what counts as an observed-schema edit and what is missing from the file.
 pub fn plan_ossie(
     baseline: &ekos_ossie::SemanticModel,
     edited: &ekos_ossie::SemanticModel,
+    known: &BTreeMap<String, OssieEntry>,
 ) -> ImportPlan {
     let mut p = ImportPlan::default();
     let mut ignored = Vec::new();
-    let base = ossie_entries(baseline, &mut ignored);
+    let exported = ossie_entries(baseline, &mut ignored);
+    let base = known;
     let new = ossie_entries(edited, &mut p.errors);
     observed_edits(baseline, edited, &mut p);
-    let missing = base.keys().filter(|id| !new.contains_key(*id)).count();
+    let missing = exported.keys().filter(|id| !new.contains_key(*id)).count();
     if missing > 0 {
         p.warnings.push(format!(
             "{missing} recovered meaning(s) are not in the file and are left unchanged — deleting \
@@ -701,6 +744,14 @@ pub fn plan_ossie(
             Some("edit")
         } else if status_changed && wanted == "confirmed" {
             Some("confirm")
+        } else if status_changed && matches!(wanted, "hypothesis" | "needs_review" | "") {
+            // What an untouched entry of an older export looks like: no decision.
+            p.warnings.push(format!(
+                "{}: the file says `{wanted}`, the ledger `{}` — an older export; left unchanged",
+                e.path,
+                b.status.as_deref().unwrap_or("?")
+            ));
+            None
         } else if status_changed {
             p.warnings.push(format!(
                 "{}: `status: {wanted}` cannot be set by hand — only confirmed or rejected",
@@ -708,7 +759,8 @@ pub fn plan_ossie(
             ));
             None
         } else {
-            (e.note != b.note && b.status.as_deref() == Some("confirmed")).then_some("confirm")
+            let note_changed = e.note.is_some() && e.note != b.note;
+            (note_changed && b.status.as_deref() == Some("confirmed")).then_some("confirm")
         };
         let Some(action) = action else { continue };
         if status_changed {
@@ -764,6 +816,7 @@ pub fn ossie(config: &EkosConfig, cwd: &Path, opts: &ImportOptions) -> Result<()
                 .unwrap_or(StatusFilter::All);
             let (database, source) = (ext_str(&x, "database"), ext_str(&x, "source"));
             let ledger = crate::commands::store::open_store_read_only(config, cwd)?;
+            let known = known_entries(&super::semantics::items_in(config, cwd, &*ledger)?);
             let baseline = super::export::ossie_model(
                 config,
                 cwd,
@@ -776,7 +829,7 @@ pub fn ossie(config: &EkosConfig, cwd: &Path, opts: &ImportOptions) -> Result<()
                 },
             )?;
             drop(ledger);
-            plan_ossie(&baseline, &edited)
+            plan_ossie(&baseline, &edited, &known)
         }
         Err(e) => ImportPlan {
             errors: vec![e],
@@ -942,6 +995,11 @@ enums:
         }
     }
 
+    /// What the ledger holds, as the baseline export states it (the tests have no ledger).
+    fn known_of(b: &ekos_ossie::SemanticModel) -> BTreeMap<String, OssieEntry> {
+        ossie_entries(b, &mut Vec::new())
+    }
+
     /// Rewrite one EKOS extension's JSON in place.
     fn edit_ext(exts: &mut [ekos_ossie::CustomExtension], f: impl FnOnce(&mut serde_json::Value)) {
         let mut v: serde_json::Value = serde_json::from_str(&exts[0].data).unwrap();
@@ -954,7 +1012,7 @@ enums:
         let b = ossie_base();
         // Through YAML and back, as a person's editor would.
         let edited = ekos_ossie::parse(&b.to_yaml()).unwrap().remove(0);
-        let p = plan_ossie(&b, &edited);
+        let p = plan_ossie(&b, &edited, &known_of(&b));
         assert!(p.decisions.is_empty() && p.warnings.is_empty() && p.errors.is_empty());
     }
 
@@ -971,7 +1029,7 @@ enums:
         });
         // Renaming the dataset changes nothing: entries match by id, not by name.
         e.datasets[0].name = "orders_renamed".into();
-        let p = plan_ossie(&b, &e);
+        let p = plan_ossie(&b, &e, &known_of(&b));
         assert!(p.errors.is_empty(), "{:?}", p.errors);
         let mut got: Vec<(String, String)> = p
             .decisions
@@ -1007,7 +1065,7 @@ enums:
         edit_ext(&mut e.datasets[0].fields[0].custom_extensions, |v| {
             v["enum_meanings"][0]["ekos_id"] = "nope".into();
         });
-        let p = plan_ossie(&b, &e);
+        let p = plan_ossie(&b, &e, &known_of(&b));
         assert!(p.decisions.is_empty());
         assert!(p.warnings.iter().any(|w| w.contains("observed schema")));
         assert!(

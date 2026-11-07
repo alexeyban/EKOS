@@ -1,0 +1,96 @@
+name: Ossie validation
+
+# RFC 0245 — EKOS's Apache Ossie exports, checked by Ossie's own validator
+# (`scripts/ossie-validate.sh`): export → validate, import an Ossie model → export again →
+# validate, review round trip → validate, planted disagreements reported. The pinned job is the
+# gate; the `main` job tells us early when the spec moves (0.2.0.dev0 is still changing).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ekos/crates/ossie/**"
+      - "ekos/crates/cli/src/commands/export.rs"
+      - "ekos/crates/cli/src/commands/import.rs"
+      - "ekos/crates/cli/src/commands/recover.rs"
+      - "ekos/crates/recovery/src/ossie_analyzer.rs"
+      - "ekos/crates/semantic/src/ossie_links.rs"
+      - "tests/fixtures/ossie-tpcds/**"
+      - "scripts/ossie-validate.sh"
+      - "scripts/ossie_e2e.py"
+      - ".github/workflows/ossie.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "ekos/crates/ossie/**"
+      - "ekos/crates/cli/src/commands/export.rs"
+      - "ekos/crates/cli/src/commands/import.rs"
+      - "ekos/crates/recovery/src/ossie_analyzer.rs"
+      - "ekos/crates/semantic/src/ossie_links.rs"
+      - "tests/fixtures/ossie-tpcds/**"
+      - "scripts/ossie-validate.sh"
+      - "scripts/ossie_e2e.py"
+  schedule:
+    - cron: "17 5 * * 1" # Mondays: catch upstream spec changes
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Ossie ${{ matrix.ossie.name }}
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.ossie.informational }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ossie:
+          - { name: "pinned (vendored schema)", ref: "8437d59e07c7fa56fcabc4a16d46864fd88d7313", informational: false }
+          - { name: "upstream main", ref: "main", informational: true }
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Cache cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ekos/target
+          key: ${{ runner.os }}-cargo-ossie-${{ hashFiles('ekos/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+
+      - name: Build ekos
+        working-directory: ekos
+        run: cargo build --locked -p ekos
+
+      - name: End-to-end test (vendored schema)
+        if: ${{ !matrix.ossie.informational }}
+        working-directory: ekos
+        run: cargo test --locked -p ekos --test ossie_e2e
+
+      - name: Validate with Ossie's validator
+        env:
+          OSSIE_REF: ${{ matrix.ossie.ref }}
+          EKOS_BIN: ${{ github.workspace }}/ekos/target/debug/ekos
+        run: scripts/ossie-validate.sh --out ossie-report
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f ossie-report/summary.md ]; then cat ossie-report/summary.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ossie-validation-${{ matrix.ossie.informational && 'upstream-main' || 'pinned' }}
+          path: ossie-report/
+          retention-days: 30
