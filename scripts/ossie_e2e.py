@@ -1,14 +1,15 @@
 """Steps of `scripts/ossie-validate.sh` that read or edit Ossie documents (RFC 0245).
 
 Run with the validator's environment (PyYAML available). Every check exits non-zero with a
-message when it fails; nothing here talks to EKOS or the network.
+message when it fails; nothing here talks to EKOS or the network, and nothing writes a file —
+an edited document goes to stdout and the calling script decides where it lands.
 
-    ossie_e2e.py break <in.yaml> <out.yaml>          a copy the official validator must reject
-    ossie_e2e.py check-first <export.json>           the schema-only export
-    ossie_e2e.py check-ingest <export.json>          the export after the Ossie model was ingested
-    ossie_e2e.py review <export.json> <edited.json>  a reviewer's edits to the EKOS extensions
-    ossie_e2e.py check-review <export.json>          the confirmed export after the import
-    ossie_e2e.py plant <model.yaml>                  two disagreements with the schema, in place
+    ossie_e2e.py break <in.yaml>             a copy the official validator must reject
+    ossie_e2e.py check-first <export.json>   the schema-only export
+    ossie_e2e.py check-ingest <export.json>  the export after the Ossie model was ingested
+    ossie_e2e.py review <export.json>        a reviewer's edits to the EKOS extensions
+    ossie_e2e.py check-review <export.json>  the confirmed export after the import
+    ossie_e2e.py plant <model.yaml>          the model with two disagreements with the schema
 """
 
 from __future__ import annotations
@@ -64,7 +65,7 @@ def synonyms(element: dict) -> list[str]:
     return ctx.get("synonyms", []) if isinstance(ctx, dict) else []
 
 
-def cmd_break(src: str, out: str) -> None:
+def cmd_break(src: str) -> None:
     m = load(src)
     m.setdefault("relationships", []).append(
         {
@@ -75,7 +76,7 @@ def cmd_break(src: str, out: str) -> None:
             "to_columns": ["y", "z"],
         }
     )
-    Path(out).write_text(yaml.safe_dump(m, sort_keys=False))
+    sys.stdout.write(yaml.safe_dump(m, sort_keys=False))
 
 
 def cmd_check_first(path: str) -> None:
@@ -111,7 +112,7 @@ def cmd_check_ingest(path: str) -> None:
         fail("model-scoped metrics name the file's datasets and must not be exported")
 
 
-def cmd_review(src: str, out: str) -> None:
+def cmd_review(src: str) -> None:
     m = load(src)
     customer = dataset(m, "customer")
     flag = field(customer, "c_preferred_cust_flag")
@@ -126,7 +127,7 @@ def cmd_review(src: str, out: str) -> None:
     data["concepts"][0]["status"] = "rejected"
     data["concepts"][0]["note"] = "a filter, not a business concept"
     set_ekos(customer, data)
-    Path(out).write_text(json.dumps(m, indent=2))
+    sys.stdout.write(json.dumps(m, indent=2))
 
 
 def cmd_check_review(path: str) -> None:
@@ -148,7 +149,7 @@ def cmd_plant(path: str) -> None:
         {"name": "s_manager", "expression": {"sql": "s_manager"}, "datatype": "String"}
     )
     field(store, "s_city")["datatype"] = "Integer"
-    Path(path).write_text(yaml.safe_dump(m, sort_keys=False))
+    sys.stdout.write(yaml.safe_dump(m, sort_keys=False))
 
 
 COMMANDS = {
