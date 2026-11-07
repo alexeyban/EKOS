@@ -1,9 +1,0 @@
-id: 1
-accno: "1060"
-description: Checking account
-category: A
-heading: 1
-is_temp: false
-contra: false
-tax: false
-obsolete: false

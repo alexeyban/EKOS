@@ -1,9 +1,0 @@
-id: 2
-accno: "9999"
-description: A category LedgerSMB does not have
-category: X
-heading: 1
-is_temp: false
-contra: false
-tax: false
-obsolete: false
