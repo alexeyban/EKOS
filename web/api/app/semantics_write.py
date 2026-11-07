@@ -185,16 +185,38 @@ def _write_fd(fd: int, text: str) -> None:
 async def import_linkml(
     ekos_bin: str, workspace_path: str, yaml_text: str, *, dry_run: bool, reviewer: str | None
 ) -> dict[str, Any]:
-    """`ekos import linkml <tmp> --json [--dry-run] [--as=…]` on the edited text. The text goes to
-    a private temp file outside the workspace (0600 via mkstemp) and is deleted afterwards."""
+    """`ekos import linkml <tmp> --json [--dry-run] [--as=…]` on the edited text."""
+    return await _import_file("linkml", ekos_bin, workspace_path, yaml_text, dry_run, reviewer)
+
+
+async def import_ossie(
+    ekos_bin: str, workspace_path: str, yaml_text: str, *, dry_run: bool, reviewer: str | None
+) -> dict[str, Any]:
+    """`ekos import ossie <tmp> --json [--dry-run] [--as=…]` on an edited Apache Ossie export
+    (RFC 0245): the review entries in its EKOS extensions become decisions."""
+    return await _import_file("ossie", ekos_bin, workspace_path, yaml_text, dry_run, reviewer)
+
+
+async def _import_file(
+    what: str,
+    ekos_bin: str,
+    workspace_path: str,
+    yaml_text: str,
+    dry_run: bool,
+    reviewer: str | None,
+) -> dict[str, Any]:
+    """`ekos import <what> <tmp> --json …`. The text goes to a private temp file outside the
+    workspace (0600 via mkstemp) and is deleted afterwards."""
+    if what not in ("linkml", "ossie"):
+        raise ReviewError(f"unknown import {what!r}")
     if len(yaml_text.encode()) > _MAX_YAML:
         raise ReviewError("schema is larger than 8 MiB")
     if not dry_run and not reviewer:
         raise ReviewError("applying an import needs a reviewer")
-    fd, tmp = tempfile.mkstemp(prefix="ekos-linkml-", suffix=".yaml")
+    fd, tmp = tempfile.mkstemp(prefix=f"ekos-{what}-", suffix=".yaml")
     try:
         await asyncio.to_thread(_write_fd, fd, yaml_text)
-        argv = ["import", "linkml", tmp, "--json"]
+        argv = ["import", what, tmp, "--json"]
         if dry_run:
             argv.append("--dry-run")
         if reviewer:

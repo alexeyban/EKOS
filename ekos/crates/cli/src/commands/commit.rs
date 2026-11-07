@@ -305,7 +305,10 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     ledger.set_write_context(Some(write_ctx("commit:procedure-lineage")));
     let step = phase_note("linking procedures");
     let (procedure_links_added, procedure_link_stats, schema_link_stats) =
-        commit_procedure_lineage(&*ledger)?;
+        commit_procedure_lineage(
+            &*ledger,
+            crate::commands::export::current_ossie_files(config, cwd).as_ref(),
+        )?;
     step.done();
 
     // RFC 0170: business-semantics hypotheses — after procedure lineage, for the same reason: a
@@ -705,6 +708,7 @@ fn live_summary(l: &ekos_semantic::live_conflicts::LiveConflictStats) -> String 
 /// relationships newly written and what the linker resolved.
 fn commit_procedure_lineage(
     ledger: &dyn KnowledgeStore,
+    ossie_files: Option<&std::collections::BTreeSet<String>>,
 ) -> Result<(
     usize,
     procedure_lineage::ProcedureLinkStats,
@@ -720,6 +724,14 @@ fn commit_procedure_lineage(
     let stats = procedure_lineage::link_procedures(&mut graph);
     // RFC 0210: migration-script changes → the tables they change, by the same unique-name rule.
     let schema_stats = ekos_semantic::schema_history::link_changes(&mut graph);
+    // RFC 0245: ingested Apache Ossie datasets → the table their `source` names, same rule.
+    let ossie = ekos_semantic::ossie_links::link(&mut graph, ossie_files);
+    if ossie.datasets > 0 {
+        println!(
+            "  Ossie datasets       : {} linked to a table, {} unresolved, {} ambiguous",
+            ossie.linked, ossie.unresolved, ossie.ambiguous
+        );
+    }
     let mut written = 0usize;
     for rel in &graph.relationships {
         if ledger.append_relationship(rel)? {

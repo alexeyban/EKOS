@@ -15,6 +15,7 @@ ekos-plpgsql.workspace = true
 ekos-artifact.workspace = true
 ekos-compiler-core.workspace = true
 ekos-semantic.workspace = true
+ekos-ossie.workspace = true
 # RFC 0088: `describe_objects` reads/re-appends objects directly through `&dyn KnowledgeStore`
 # (the same post-`commit` architectural slot `commit_rollups`/`commit_data_lineage` already
 # occupy in `cli/src/commands/commit.rs`) — confirmed before adding this: `ekos-ledger` depends

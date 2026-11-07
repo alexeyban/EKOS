@@ -113,6 +113,8 @@ pub const SCOPED_TOOLS: &[&str] = &[
     "ekos_diff",
     "ekos_graph_export",
     "ekos_sql_check",
+    // RFC 0245: builds the model from the scoped store's objects, relationships and evidence only.
+    "ekos_ossie_export",
 ];
 
 /// Tools a restricted reader does not get, each with the reason.
@@ -1089,10 +1091,84 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     }
     tools.push(signoff_status_tool_definition());
     tools.push(sql_check_tool_definition());
+    tools.push(ossie_export_tool_definition());
     for e in ext.iter() {
         tools.extend(e.mcp_tools(config));
     }
     tools
+}
+
+/// RFC 0245 — read-only: the compiled schema as an Apache Ossie semantic model.
+fn ossie_export_tool_definition() -> Value {
+    json!({
+        "name": "ekos_ossie_export",
+        "description": "The compiled schema as an Apache Ossie (Open Semantic Interchange) semantic model, spec 0.2.0.dev0: tables and views as datasets with typed fields, primary/unique keys, foreign keys as relationships, business meanings in `ai_context`, and metrics from Ossie files in the sources. For a BI tool, semantic layer or agent that reads Ossie. Meanings marked \"unreviewed\" are hypotheses EKOS inferred from code — say so when you use them. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status": { "type": "string", "enum": ["confirmed", "hypothesis", "all"], "description": "Which business meanings to include (default confirmed); tables are always included" },
+                "database": { "type": "string", "description": "Only tables of this [[databases]] name" },
+                "match": { "type": "string", "description": "Only datasets whose name contains this (case-insensitive)" },
+                "format": { "type": "string", "enum": ["json", "yaml"], "description": "Default json" },
+                "max_datasets": { "type": "integer", "description": "Max datasets (default 50, max 500)" }
+            }
+        }
+    })
+}
+
+/// `ekos_ossie_export`: the model, narrowed and capped for a tool result.
+fn ossie_export(
+    config: &EkosConfig,
+    workspace: &Path,
+    ledger: &dyn KnowledgeStore,
+    args: &Value,
+) -> Result<Value> {
+    let status = match args.get("status").and_then(Value::as_str) {
+        None => super::export::StatusFilter::Confirmed,
+        Some(s) => super::export::StatusFilter::from_name(s)
+            .ok_or_else(|| anyhow::anyhow!("status must be confirmed, hypothesis or all"))?,
+    };
+    let max = bounded_arg(args, "max_datasets", 50, 1, 500)? as usize;
+    let mut model = super::export::ossie_model(
+        config,
+        workspace,
+        ledger,
+        &super::export::OssieRequest {
+            status,
+            name: None,
+            database: args.get("database").and_then(Value::as_str),
+            source: None,
+        },
+    )?;
+    if let Some(m) = args.get("match").and_then(Value::as_str) {
+        let m = m.to_lowercase();
+        model
+            .datasets
+            .retain(|d| d.name.to_lowercase().contains(&m));
+    }
+    let total = model.datasets.len();
+    model.datasets.truncate(max);
+    let kept: std::collections::BTreeSet<&str> =
+        model.datasets.iter().map(|d| d.name.as_str()).collect();
+    let relationships: Vec<_> = model
+        .relationships
+        .iter()
+        .filter(|r| kept.contains(r.from.as_str()) && kept.contains(r.to.as_str()))
+        .cloned()
+        .collect();
+    model.relationships = relationships;
+    let body = match args.get("format").and_then(Value::as_str) {
+        Some("yaml") => json!(model.to_yaml()),
+        _ => model.to_json(),
+    };
+    Ok(json!({
+        "spec_version": ekos_ossie::SPEC_VERSION,
+        "status_filter": status.as_str(),
+        "datasets": model.datasets.len(),
+        "datasets_matched": total,
+        "truncated": total > model.datasets.len(),
+        "model": body,
+    }))
 }
 
 /// RFC 0242 — read-only: lints SQL against the compiled schema. Runs nothing on a database.
@@ -1790,6 +1866,11 @@ fn call_tool(
         let ledger = cache.get(config, workspace)?;
         let limit = bounded_arg(args, "limit", 20, 1, 200)? as usize;
         return super::check::agent_check(config, workspace, ledger, args, limit);
+    }
+
+    if name == "ekos_ossie_export" {
+        let ledger = cache.get(config, workspace)?;
+        return ossie_export(config, workspace, ledger, args);
     }
 
     if name == "ekos_sql_check" {
@@ -3434,7 +3515,9 @@ mod tests {
                 // RFC 0213 — read-only.
                 "ekos_signoff_status",
                 // RFC 0242 — read-only.
-                "ekos_sql_check"
+                "ekos_sql_check",
+                // RFC 0245 — read-only.
+                "ekos_ossie_export"
             ]
         );
         for tool in tools {

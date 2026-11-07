@@ -666,6 +666,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-ossie"
+version = "1.3.0"
+dependencies = [
+ "ekos-kir",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
 name = "ekos-plpgsql"
 version = "1.3.0"
 dependencies = [
@@ -781,6 +791,7 @@ dependencies = [
  "ekos-compiler-core",
  "ekos-kir",
  "ekos-ledger",
+ "ekos-ossie",
  "ekos-plpgsql",
  "ekos-plsql",
  "ekos-plugin-sql-dialect-clickhouse",
@@ -857,6 +868,7 @@ dependencies = [
  "ekos-compiler-core",
  "ekos-identity",
  "ekos-kir",
+ "ekos-ossie",
  "serde",
  "serde_json",
  "thiserror",

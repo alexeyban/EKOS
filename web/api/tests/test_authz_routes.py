@@ -138,6 +138,8 @@ def test_review_and_tenant_routes_use_the_expected_actions(
     assert "review" in routes[("POST", semantics + "/items/{item_id}/review")]
     assert "review" in routes[("POST", semantics + "/review-bulk")]
     assert "review" in routes[("POST", "/api/workspaces/{workspace_id}/semantics/linkml/import")]
+    assert "review" in routes[("POST", semantics + "/ossie/import")]
+    assert "read" in routes[("POST", semantics + "/ossie/validate")]
     assert (
         "review"
         in routes[("POST", "/api/workspaces/{workspace_id}/conflicts/{conflict_id}/resolve")]

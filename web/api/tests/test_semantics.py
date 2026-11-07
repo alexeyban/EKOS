@@ -55,7 +55,14 @@ elif args[:2] == ["export", "linkml"]:
         sys.stderr.write("Error: nothing to export with --status Confirmed: 3 hypothesis\n")
         sys.exit(1)
     print(json.dumps({"name": "t", "classes": {}}))
-elif args[:2] == ["import", "linkml"]:
+elif args[:2] == ["export", "ossie"] and "--json" not in args:
+    print("version: 0.2.0.dev0\nname: t\ndatasets: []\n")
+elif args[:2] == ["export", "ossie"]:
+    if "confirmed" in args:
+        sys.stderr.write("Error: no tables or views to export — run the pipeline first\n")
+        sys.exit(1)
+    print(json.dumps({"version": "0.2.0.dev0", "name": "t", "datasets": [{"name": "orders"}]}))
+elif args[:2] == ["import", "linkml"] or args[:2] == ["import", "ossie"]:
     text = open(args[2]).read()
     print(json.dumps({"decisions": [{"id": "c1", "action": "edit"}] if "edited" in text else [],
                       "warnings": [], "errors": [], "applied": 0 if "--dry-run" in args else 1}))
@@ -207,6 +214,45 @@ def test_linkml_validate_is_a_read_and_import_is_a_write(setup) -> None:
     call = _calls(log)[-1]
     assert call[:2] == ["import", "linkml"] and "--as=token:Ann" in call
     assert not Path(call[2]).exists(), "the temp file is removed"
+
+
+@_not_on_windows("the fake ekos is a script run by its #! line")
+def test_ossie_reads_need_only_the_read_role(setup) -> None:
+    c, log = setup
+    j = c.get("/api/workspaces/w/semantics/ossie", headers=R).json()
+    assert j["empty"] is False and j["model"]["datasets"][0]["name"] == "orders"
+    y = c.get("/api/workspaces/w/semantics/ossie/yaml", headers=R).json()
+    assert y["yaml"].startswith("version: 0.2.0.dev0")
+    assert ["export", "ossie", "--status", "all"] in _calls(log), "--yaml never reaches the CLI"
+    empty = c.get("/api/workspaces/w/semantics/ossie?status=confirmed", headers=R).json()
+    assert empty["empty"] is True and "no tables" in empty["reason"]
+
+
+@_not_on_windows("the fake ekos is a script run by its #! line")
+def test_ossie_validate_is_a_read_and_import_is_a_review(setup) -> None:
+    c, log = setup
+    v = c.post("/api/workspaces/w/semantics/ossie/validate", headers=R, json={"yaml": "edited"})
+    assert v.status_code == 200 and v.json()["decisions"][0]["action"] == "edit"
+    assert _calls(log)[-1][:2] == ["import", "ossie"] and "--dry-run" in _calls(log)[-1]
+    url = "/api/workspaces/w/semantics/ossie/import"
+    assert c.post(url, headers=R, json={"yaml": "edited"}).status_code == 403
+    a = c.post(url, headers=W, json={"yaml": "edited", "reviewer": "Ann"})
+    assert a.status_code == 200 and a.json()["applied"] == 1
+    call = _calls(log)[-1]
+    assert call[:2] == ["import", "ossie"] and "--as=token:Ann" in call
+    assert not Path(call[2]).exists(), "the temp file is removed"
+
+
+def test_ossie_reads_are_on_the_allowlist_and_nothing_else() -> None:
+    _check_allowed(["export", "ossie", "--json", "--status", "all"])
+    _check_allowed(["export", "ossie", "--yaml", "--status", "confirmed"])
+    for argv in (
+        ["export", "ossie", "--json", "--out", "/etc/passwd"],
+        ["export", "ossie", "--json", "--database", "x"],
+        ["import", "ossie", "/tmp/x"],
+    ):
+        with pytest.raises(ReadProcError):
+            _check_allowed(argv)
 
 
 def test_a_client_side_route_reloads_into_the_app(tmp_path: Path) -> None:

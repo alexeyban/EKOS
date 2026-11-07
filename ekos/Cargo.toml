@@ -69,6 +69,7 @@ members = [
     "plugins/sql-dialect-clickhouse",
     "plugins/sql-dialect-sqlite",
     "crates/sqlgen",
+    "crates/ossie",
     "crates/clickhouse-query",
 ]
 
@@ -141,6 +142,7 @@ ekos-plugin-sql-dialect-postgres   = { path = "plugins/sql-dialect-postgres", ve
 ekos-plugin-sql-dialect-snowflake  = { path = "plugins/sql-dialect-snowflake", version = "1.3.0" }
 ekos-plugin-sql-dialect-sqlite     = { path = "plugins/sql-dialect-sqlite", version = "1.3.0" }
 ekos-sqlgen                        = { path = "crates/sqlgen", version = "1.3.0" }
+ekos-ossie                         = { path = "crates/ossie", version = "1.3.0" }
 ekos-plugin-treasury               = { path = "plugins/treasury", version = "1.3.0" }
 ekos-recovery                      = { path = "crates/recovery", version = "1.3.0" }
 ekos-runtime                       = { path = "crates/runtime", version = "1.3.0" }
@@ -172,6 +174,8 @@ serde_json = "1"
 toml       = "0.8"
 toml_edit  = "0.22"
 serde_yaml = "0.9"
+# RFC 0245: tests validate Ossie exports against the vendored JSON Schema; no network resolution.
+jsonschema = { version = "0.60", default-features = false }
 
 # Error handling
 thiserror = "2"

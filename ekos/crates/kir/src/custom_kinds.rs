@@ -127,6 +127,25 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(source path, view name) — RFC 0169 view_analyzer; a view redefined in another \
                file is another definition, never merged by name",
     },
+    // RFC 0245: Apache Ossie semantic models ingested from a project's sources.
+    CustomKind {
+        name: "OssieModel",
+        structurally_keyed: true,
+        note: "(file, model name) — RFC 0245 ossie_analyzer; two files may hold same-named \
+               models that are two definitions",
+    },
+    CustomKind {
+        name: "OssieDataset",
+        structurally_keyed: true,
+        note: "(file, model, dataset) — RFC 0245 ossie_analyzer; a dataset is named after its \
+               table, so merging by name would fold it into other models' datasets",
+    },
+    CustomKind {
+        name: "OssieMetric",
+        structurally_keyed: true,
+        note: "(file, model, scope, metric) — RFC 0245 ossie_analyzer; metric names repeat \
+               across datasets and models (`total`, `count`)",
+    },
     CustomKind {
         name: "Trigger",
         structurally_keyed: true,

@@ -120,7 +120,8 @@ fn terr(e: impl std::fmt::Display) -> LedgerError {
 /// changes**, or existing workspaces keep searching the old text.
 ///
 /// - `2` — RFC 0177: a symbol's `description`, `signature` and `fields`.
-const CONTENT_VERSION: &str = "2";
+/// - `3` — RFC 0245: `synonyms` (Apache Ossie datasets, fields' owners and metrics).
+const CONTENT_VERSION: &str = "3";
 const CONTENT_VERSION_FILE: &str = "content_version";
 
 /// Wipes `dir`'s on-disk contents so a subsequent `Index::open_or_create` starts genuinely fresh

@@ -436,6 +436,9 @@ fn is_expected_cross_namespace_group<'a>(group: impl Iterator<Item = &'a KirObje
         ("python", &["PythonModule", "PythonSymbol"]),
         ("rust", &["RustModule", "RustSymbol"]),
         ("elixir", &["ElixirModule", "ElixirSymbol"]),
+        // RFC 0245: an Ossie dataset is named after its table, and a model or metric may share
+        // a name with either; the commit-time link compares them instead.
+        ("ossie", &["OssieModel", "OssieDataset", "OssieMetric"]),
     ];
     const ROUTINES: &[&str] = &["View", "Procedure", "Trigger"];
     // namespace → distinct kinds seen in it
@@ -464,7 +467,7 @@ fn is_expected_cross_namespace_group<'a>(group: impl Iterator<Item = &'a KirObje
                 let routines = kinds.iter().any(|k| k != "Table");
                 tables != routines
             }
-            "perl" | "java" => true,
+            "perl" | "java" | "ossie" => true,
             _ => kinds.len() == 1,
         })
 }

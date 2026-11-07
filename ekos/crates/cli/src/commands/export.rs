@@ -39,11 +39,31 @@ pub enum StatusFilter {
 }
 
 impl StatusFilter {
-    fn admits(self, status: &str) -> bool {
+    /// Whether an item with this review status is exported.
+    pub fn admits(self, status: &str) -> bool {
         match self {
             StatusFilter::Confirmed => status == "confirmed",
             StatusFilter::Hypothesis => status == "hypothesis",
             StatusFilter::All => status != "rejected",
+        }
+    }
+
+    /// The filter's name as written on the command line.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            StatusFilter::Confirmed => "confirmed",
+            StatusFilter::Hypothesis => "hypothesis",
+            StatusFilter::All => "all",
+        }
+    }
+
+    /// The filter a name (as [`as_str`](Self::as_str) writes it) stands for.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "confirmed" => Some(StatusFilter::Confirmed),
+            "hypothesis" => Some(StatusFilter::Hypothesis),
+            "all" => Some(StatusFilter::All),
+            _ => None,
         }
     }
 }
@@ -910,6 +930,165 @@ pub fn build_schema(
             },
         ),
     ])))
+}
+
+// ── RFC 0245: Apache Ossie ─────────────────────────────────────────────────────────────────
+
+/// Options for `ekos export ossie`.
+pub struct OssieOptions {
+    pub status: StatusFilter,
+    pub out: Option<PathBuf>,
+    pub name: Option<String>,
+    /// JSON instead of YAML.
+    pub json: bool,
+    pub database: Option<String>,
+    pub source: Option<String>,
+}
+
+/// `<state>/ossie/current.json`: the Ossie files the latest `recover` found (RFC 0245). The ledger
+/// keeps a deleted file's objects; every reader leaves out what this does not list.
+fn ossie_manifest_path(config: &EkosConfig, cwd: &Path) -> PathBuf {
+    config.ekos_dir(cwd).join("ossie").join("current.json")
+}
+
+/// The current Ossie files, or `None` before any `recover` recorded them.
+pub fn current_ossie_files(config: &EkosConfig, cwd: &Path) -> Option<BTreeSet<String>> {
+    let bytes = std::fs::read(ossie_manifest_path(config, cwd)).ok()?;
+    let v: Json = serde_json::from_slice(&bytes).ok()?;
+    Some(
+        v["files"]
+            .as_array()?
+            .iter()
+            .filter_map(|f| f.as_str().map(str::to_string))
+            .collect(),
+    )
+}
+
+/// Record the Ossie files this `recover` found — empty too, so a deleted file drops out.
+pub fn write_current_ossie_files(config: &EkosConfig, cwd: &Path, files: &[String]) -> Result<()> {
+    let path = ossie_manifest_path(config, cwd);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut files = files.to_vec();
+    files.sort();
+    files.dedup();
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&serde_json::json!({"files": files}))?,
+    )
+    .with_context(|| format!("writing {}", path.display()))
+}
+
+/// What [`ossie_model`] needs besides the store: shared by the CLI and the MCP tool.
+pub struct OssieRequest<'a> {
+    pub status: StatusFilter,
+    pub name: Option<&'a str>,
+    pub database: Option<&'a str>,
+    pub source: Option<&'a str>,
+}
+
+/// The ledger as one Apache Ossie semantic model (RFC 0245): every table and view, their keys
+/// and foreign keys, the business meanings the status filter admits, and the metrics of Ossie
+/// files ingested from the sources. Reads only; fails when the result would not pass the
+/// structural checks of Ossie's own validator.
+pub fn ossie_model(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+    req: &OssieRequest,
+) -> Result<ekos_ossie::SemanticModel> {
+    let files = current_ossie_files(config, cwd);
+    let objects: Vec<KirObject> = ledger
+        .all_objects()?
+        .into_iter()
+        .filter(|o| ekos_semantic::ossie_links::is_current(o, files.as_ref()))
+        .collect();
+    let relationships = ledger.all_relationships()?;
+    let items = super::semantics::items_in(config, cwd, ledger)?;
+    let admits = |s: &str| req.status.admits(s);
+    let project = default_schema_name(cwd);
+    let opts = ekos_ossie::BuildOptions {
+        name: req
+            .name
+            .map(str::to_string)
+            .unwrap_or_else(|| project.clone()),
+        export_status: req.status.as_str().into(),
+        admits: &admits,
+        database: req.database.map(str::to_string),
+        source: req.source.map(str::to_string),
+        ekos_version: env!("CARGO_PKG_VERSION").into(),
+        project: Some(project),
+    };
+    let view = ekos_ossie::LedgerView {
+        objects: &objects,
+        relationships: &relationships,
+        items: &items,
+    };
+    let model = ekos_ossie::from_ledger(&view, &opts, &|o| evidence_refs(ledger, o, 3))
+        .map_err(anyhow::Error::msg)?;
+    let problems = ekos_ossie::check(&model);
+    if !problems.is_empty() {
+        anyhow::bail!(
+            "the Ossie model failed its own structural checks (an EKOS bug — please report it):\n{}",
+            problems
+                .iter()
+                .map(|p| format!("  {}: {}", p.path, p.message))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+    Ok(model)
+}
+
+/// The header comment of an exported YAML document.
+pub const OSSIE_HEADER: &str = "# Apache Ossie semantic model compiled by EKOS (RFC 0245), spec 0.2.0.dev0.\n\
+     # Every element's `EKOS` extension carries its ledger id, status and evidence. Business\n\
+     # meanings marked \"unreviewed\" are hypotheses, not confirmed definitions.\n\
+     # Edit `status`/`label`/`name`/`description` inside the extensions' `concepts` and\n\
+     # `enum_meanings`, then `ekos import ossie <file>` turns the edits into review decisions.\n";
+
+/// `ekos export ossie`.
+pub fn ossie(config: &EkosConfig, cwd: &Path, opts: &OssieOptions) -> Result<()> {
+    let ledger = crate::commands::store::open_store_read_only(config, cwd)?;
+    let model = ossie_model(
+        config,
+        cwd,
+        &*ledger,
+        &OssieRequest {
+            status: opts.status,
+            name: opts.name.as_deref(),
+            database: opts.database.as_deref(),
+            source: opts.source.as_deref(),
+        },
+    )?;
+    let json = opts.json
+        || opts
+            .out
+            .as_ref()
+            .is_some_and(|p| p.extension().is_some_and(|e| e == "json"));
+    let text = if json {
+        format!("{}\n", serde_json::to_string_pretty(&model.to_json())?)
+    } else {
+        format!("{OSSIE_HEADER}{}", model.to_yaml())
+    };
+    match &opts.out {
+        Some(path) => {
+            std::fs::write(path, &text).with_context(|| format!("writing {}", path.display()))?;
+            let fields: usize = model.datasets.iter().map(|d| d.fields.len()).sum();
+            let metrics: usize = model.datasets.iter().map(|d| d.metrics.len()).sum();
+            println!(
+                "Wrote {} — {} dataset(s), {fields} field(s), {} relationship(s), {metrics} \
+                 metric(s), status filter {}.",
+                path.display(),
+                model.datasets.len(),
+                model.relationships.len(),
+                opts.status.as_str()
+            );
+        }
+        None => print!("{text}"),
+    }
+    Ok(())
 }
 
 #[cfg(test)]

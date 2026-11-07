@@ -1746,6 +1746,10 @@ mod tests {
             !mcp.contains("import::linkml"),
             "LinkML import records human decisions"
         );
+        assert!(
+            !mcp.contains("import::ossie") && !mcp.contains("plan_ossie"),
+            "an Apache Ossie import records human decisions (RFC 0245)"
+        );
     }
 
     /// The commit step end to end over a real fact ledger: a review survives an unchanged re-run

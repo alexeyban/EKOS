@@ -140,6 +140,8 @@ impl CompilerPass for SqlAnalyzerPass {
         &self.pass_id
     }
 
+    /// `v7` = RFC 0245: a `Table` records its whole `primary_key` (composite too) and its
+    /// `unique_keys`, which an Apache Ossie export needs and per-column flags cannot state.
     /// `v6` = RFC 0241 §6: `COMMENT ON` reaches tables and columns declared with quoted
     /// identifiers (their names keep the quotes; the comment's do not), which it silently missed.
     /// `v5` = RFC 0210: every `Table` records the `dialect` it was read under.
@@ -148,7 +150,7 @@ impl CompilerPass for SqlAnalyzerPass {
     /// `not_null`/`primary_key`/`unique`/`description_line`. `cache_inputs` hashes only the SQL, so
     /// without this a workspace recovered before 0170 keeps serving tables without them.
     fn version(&self) -> &str {
-        "v6"
+        "v7"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -529,6 +531,7 @@ pub fn parse_ddl_structural_report(
             let mut obj = KirObject::new(&table_name, ObjectKind::Table).with_evidence(ev_id);
             obj.id = table_kir_id(&table_name);
             obj.properties.insert("columns".into(), columns_json(ct));
+            insert_table_keys(&mut obj, ct);
             let checks = check_constraints_json(ct, &table_name, source_path);
             if checks.as_array().is_some_and(|a| !a.is_empty()) {
                 obj.properties.insert("check_constraints".into(), checks);
@@ -724,6 +727,49 @@ fn col_names(cols: &[sqlparser::ast::Ident]) -> String {
         .map(|c| c.value.as_str())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// RFC 0245: the table's keys as the schema states them, composite ones included —
+/// `primary_key: [col, …]` and `unique_keys: [[col, …], …]`. A column-level `PRIMARY KEY` /
+/// `UNIQUE` counts as a one-column key. Names keep the schema's spelling; nothing is inferred.
+fn insert_table_keys(obj: &mut KirObject, ct: &sqlparser::ast::CreateTable) {
+    use sqlparser::ast::ColumnOption;
+    let mut primary_key: Vec<String> = Vec::new();
+    let mut unique_keys: Vec<Vec<String>> = Vec::new();
+    for c in &ct.constraints {
+        match c {
+            TableConstraint::PrimaryKey { columns, .. } if primary_key.is_empty() => {
+                primary_key = columns.iter().map(|c| c.value.clone()).collect();
+            }
+            TableConstraint::Unique { columns, .. } => {
+                unique_keys.push(columns.iter().map(|c| c.value.clone()).collect());
+            }
+            _ => {}
+        }
+    }
+    for c in &ct.columns {
+        for o in &c.options {
+            if let ColumnOption::Unique { is_primary, .. } = &o.option {
+                if *is_primary {
+                    if primary_key.is_empty() {
+                        primary_key = vec![c.name.value.clone()];
+                    }
+                } else {
+                    unique_keys.push(vec![c.name.value.clone()]);
+                }
+            }
+        }
+    }
+    unique_keys.retain(|k| !k.is_empty());
+    unique_keys.dedup();
+    if !primary_key.is_empty() {
+        obj.properties
+            .insert("primary_key".into(), serde_json::json!(primary_key));
+    }
+    if !unique_keys.is_empty() {
+        obj.properties
+            .insert("unique_keys".into(), serde_json::json!(unique_keys));
+    }
 }
 
 fn columns_json(ct: &sqlparser::ast::CreateTable) -> serde_json::Value {
@@ -1216,6 +1262,37 @@ mod tests {
         );
         assert!(!first.evidence.is_empty());
         assert_eq!(stable(&first), stable(&second));
+    }
+
+    /// RFC 0245: composite primary and unique keys are kept whole on the table; column-level
+    /// constraints count as one-column keys.
+    #[test]
+    fn tables_record_whole_primary_and_unique_keys() {
+        let sql = "CREATE TABLE line (order_id int, line_no int, sku text UNIQUE, ext text,\n\
+                   PRIMARY KEY (order_id, line_no), UNIQUE (order_id, ext));\n\
+                   CREATE TABLE plain (id int PRIMARY KEY, note text);\n\
+                   CREATE TABLE nokey (note text);\n";
+        let g = parse_ddl_structural(sql, "s.sql", &sqlparser::dialect::PostgreSqlDialect {});
+        let props = |name: &str| {
+            g.objects
+                .iter()
+                .find(|o| o.name == name)
+                .unwrap()
+                .properties
+                .clone()
+        };
+        let line = props("line");
+        assert_eq!(
+            line["primary_key"],
+            serde_json::json!(["order_id", "line_no"])
+        );
+        assert_eq!(
+            line["unique_keys"],
+            serde_json::json!([["order_id", "ext"], ["sku"]])
+        );
+        assert_eq!(props("plain")["primary_key"], serde_json::json!(["id"]));
+        assert!(!props("plain").contains_key("unique_keys"));
+        assert!(!props("nokey").contains_key("primary_key"));
     }
 
     const ECOMMERCE_SQL: &str = include_str!("../../../../tests/fixtures/ecommerce.sql");

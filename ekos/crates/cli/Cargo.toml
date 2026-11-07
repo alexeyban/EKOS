@@ -50,6 +50,7 @@ ekos-simulation.workspace = true
 ekos-observation-sdk.workspace = true
 ekos-recovery.workspace = true
 ekos-sqlgen.workspace = true
+ekos-ossie.workspace = true
 ekos-sql-dialect-sdk.workspace = true
 sqlparser.workspace = true
 ekos-clickhouse-query.workspace = true

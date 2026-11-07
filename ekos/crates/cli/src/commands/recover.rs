@@ -14,12 +14,12 @@ use ekos_recovery::{
     DocumentSemanticsStats, ElixirAnalyzerPass, ElixirStats, GitAnalyzerPass, GitHubAnalyzerPass,
     GovernanceAnalyzerPass, JavaAnalyzerPass, JavaScriptAnalyzerPass, JavaScriptStats, JavaStats,
     LlmRouter, LocalDocAnalyzerPass, MockLlmProvider, OracleCatalogPass, OracleCatalogStats,
-    PackageJsonAnalyzerPass, PentahoAnalyzerPass, PentahoStats, PerlAnalyzerPass, PerlStats,
-    PlPgSqlAnalyzerPass, PlPgSqlStats, PlSqlAnalyzerPass, PlSqlStats, PythonAnalyzerPass,
-    PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats, SchemaHistoryPass,
-    SchemaHistoryStats, SqlAnalyzerPass, SqlTransformAnalyzerPass, SqlTransformStats, Task,
-    TreasuryAnalyzerPass, TriggerAnalyzerPass, TriggerStats, ViewAnalyzerPass, ViewStats,
-    build_dialect_registry, llm::LlmProvider, resolve_dialect_name,
+    OssieAnalyzerPass, PackageJsonAnalyzerPass, PentahoAnalyzerPass, PentahoStats,
+    PerlAnalyzerPass, PerlStats, PlPgSqlAnalyzerPass, PlPgSqlStats, PlSqlAnalyzerPass, PlSqlStats,
+    PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats,
+    SchemaHistoryPass, SchemaHistoryStats, SqlAnalyzerPass, SqlTransformAnalyzerPass,
+    SqlTransformStats, Task, TreasuryAnalyzerPass, TriggerAnalyzerPass, TriggerStats,
+    ViewAnalyzerPass, ViewStats, build_dialect_registry, llm::LlmProvider, resolve_dialect_name,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -1198,6 +1198,79 @@ async fn read_dbt_models(
     (dbt_yml_files, dbt_sql_files)
 }
 
+/// The largest file read as a possible Ossie model: semantic models are hand-written YAML, and a
+/// multi-megabyte YAML file is data, not a model.
+const MAX_OSSIE_FILE_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Whether a file name could hold an Ossie model: `*.ossie.{yaml,yml,json}` always is a candidate,
+/// any other YAML/JSON only when its content sniffs as one.
+fn ossie_candidate(name: &str) -> Option<bool> {
+    let lower = name.to_ascii_lowercase();
+    let explicit = [".ossie.yaml", ".ossie.yml", ".ossie.json"]
+        .iter()
+        .any(|e| lower.ends_with(e));
+    let structured = [".yaml", ".yml", ".json"]
+        .iter()
+        .any(|e| lower.ends_with(e));
+    structured.then_some(explicit)
+}
+
+/// Registers one Ossie analyzer pass per Apache Ossie model file under the observed paths
+/// (RFC 0245). A raw-content entry point: excluded paths are never read, and every file is
+/// redacted before anything else sees it (RFC 0043). Returns the files' keys.
+async fn register_ossie_passes(
+    observe_paths: &[ekos_compiler_core::ObserveBase],
+    ignore: &[String],
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+    pass_manager: &mut ekos_compiler_core::pass::PassManager,
+) -> Result<Vec<String>> {
+    let mut found = Vec::new();
+    for ob in observe_paths {
+        let base = &ob.path;
+        for entry in WalkDir::new(base)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(|e| !is_ignored_dir(e, ignore))
+        {
+            let Ok(entry) = entry else { continue };
+            let name = entry.file_name().to_string_lossy();
+            let Some(explicit) = ossie_candidate(&name) else {
+                continue;
+            };
+            if !entry.file_type().is_file()
+                || entry
+                    .metadata()
+                    .map_or(true, |m| m.len() > MAX_OSSIE_FILE_BYTES)
+            {
+                continue;
+            }
+            let rel = entry
+                .path()
+                .strip_prefix(base)
+                .unwrap_or(entry.path())
+                .to_string_lossy()
+                .replace('\\', "/");
+            if ekos_common::redaction::is_excluded_path(&rel, redaction_config) {
+                continue;
+            }
+            let Ok(content) = tokio::fs::read_to_string(entry.path()).await else {
+                continue;
+            };
+            let content = ekos_common::redaction::redact(&content, redaction_config);
+            if !ekos_ossie::sniff(&content) {
+                if explicit {
+                    tracing::warn!("{rel}: named *.ossie.* but not an Apache Ossie model; skipped");
+                }
+                continue;
+            }
+            let file_key = ekos_common::project::project_qualify(&rel, Some(&ob.key));
+            pass_manager.register(Box::new(OssieAnalyzerPass::new(file_key.clone(), content)));
+            found.push(file_key);
+        }
+    }
+    Ok(found)
+}
+
 /// Registers one dbt analyzer pass per dbt project found under the observed paths (RFC 0117).
 #[allow(clippy::too_many_arguments)]
 async fn register_dbt_passes(
@@ -1796,9 +1869,19 @@ pub async fn run_with(
     // never mixes their model namespaces.
     register_dbt_passes(&observe_paths, ignore, &redaction_config, &mut pass_manager).await?;
 
+    // ── Apache Ossie semantic models (RFC 0245) ────────────────────────────
+    // Hand-written model files kept beside the code: datasets, metrics, synonyms. Linked to the
+    // compiled tables at `ekos commit` (`ekos_semantic::ossie_links`).
+    let ossie_files =
+        register_ossie_passes(&observe_paths, ignore, &redaction_config, &mut pass_manager).await?;
+    crate::commands::export::write_current_ossie_files(config, cwd, &ossie_files)?;
+    if !ossie_files.is_empty() {
+        println!("  Ossie models: {} file(s)", ossie_files.len());
+    }
+
     if pass_manager.is_empty() {
         println!(
-            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, treasury payments, governance proposals, Confluence pages, ClickHouse tables, local documents, Pentaho jobs, Python files, Rust files, Cargo manifests, CI/CD workflows, or dbt projects found)."
+            "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, treasury payments, governance proposals, Confluence pages, ClickHouse tables, local documents, Pentaho jobs, Python files, Rust files, Cargo manifests, CI/CD workflows, dbt projects, or Apache Ossie models found)."
         );
         return Ok(());
     }

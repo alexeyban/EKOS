@@ -11,6 +11,7 @@ import { api, apiPost } from "../api/client";
 import type { ReviewStatus, SemanticsItem, SemanticsKind } from "../api/types";
 import { type Me, mayReview } from "../WorkspaceShell";
 import { Linkml } from "./Linkml";
+import { Ossie } from "./Ossie";
 import { SemanticsItemPanel } from "./SemanticsItemPanel";
 import {
   KIND_FILTER,
@@ -29,6 +30,7 @@ const VIEWS = [
   { key: "review", label: "Review" },
   { key: "gaps", label: "Gaps & conflicts" },
   { key: "linkml", label: "LinkML schema" },
+  { key: "ossie", label: "Apache Ossie" },
 ] as const;
 
 export function Semantics() {
@@ -55,6 +57,7 @@ export function Semantics() {
       {view === "review" && <Review me={me} />}
       {view === "gaps" && <Gaps me={me} />}
       {view === "linkml" && <Linkml me={me} />}
+      {view === "ossie" && <Ossie me={me} />}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-"""Business semantics review + LinkML schema viewer/editor (RFC 0170).
+"""Business semantics review + LinkML schema viewer/editor (RFC 0170) + Apache Ossie (RFC 0245).
 
 Reads (`items`, `item`, `gaps`, `linkml`, and an import *dry run*) go through the read-only
 subprocess seam and need the `read` role. Decisions — confirm/reject/edit and an applied LinkML
@@ -125,6 +125,49 @@ async def linkml_yaml(
     return {"empty": False, "yaml": text}
 
 
+@router.get("/ossie", dependencies=[Depends(allow("read"))], responses={502: BAD_GATEWAY})
+async def ossie(
+    ws: models.Workspace = Depends(require_workspace),
+    settings: Settings = Depends(get_settings),
+    status: Literal["confirmed", "hypothesis", "all"] = Query(default="all"),
+) -> dict:
+    """The Apache Ossie semantic model as JSON (`ekos export ossie --json`, RFC 0245). A workspace
+    with no compiled tables is not an error: the viewer says why it is empty."""
+    try:
+        model = await readproc.read_json(
+            settings.ekos_bin,
+            ws.path,
+            ["export", "ossie", "--json", "--status", status],
+            max_output=_BIG,
+        )
+    except readproc.ReadProcError as exc:
+        if "no tables or views" in str(exc):
+            return {"empty": True, "reason": str(exc).split(": ", 1)[-1][:400]}
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"empty": False, "model": model}
+
+
+@router.get("/ossie/yaml", dependencies=[Depends(allow("read"))], responses={502: BAD_GATEWAY})
+async def ossie_yaml(
+    ws: models.Workspace = Depends(require_workspace),
+    settings: Settings = Depends(get_settings),
+    status: Literal["confirmed", "hypothesis", "all"] = Query(default="all"),
+) -> dict:
+    """The model as YAML text — what is downloaded, edited and read back by `ekos import ossie`."""
+    try:
+        text = await readproc.read_text(
+            settings.ekos_bin,
+            ws.path,
+            ["export", "ossie", "--yaml", "--status", status],
+            max_output=_BIG,
+        )
+    except readproc.ReadProcError as exc:
+        if "no tables or views" in str(exc):
+            return {"empty": True, "reason": str(exc).split(": ", 1)[-1][:400], "yaml": ""}
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"empty": False, "yaml": text}
+
+
 # ── human decisions ──────────────────────────────────────────────────────────────────────────
 
 
@@ -217,12 +260,17 @@ class ImportIn(BaseModel):
 
 
 async def _import(
-    body: ImportIn, ws: models.Workspace, settings: Settings, *, dry_run: bool, who: str | None
+    body: ImportIn,
+    ws: models.Workspace,
+    settings: Settings,
+    *,
+    dry_run: bool,
+    who: str | None,
+    what: Literal["linkml", "ossie"] = "linkml",
 ) -> dict:
+    run = semantics_write.import_ossie if what == "ossie" else semantics_write.import_linkml
     try:
-        return await semantics_write.import_linkml(
-            settings.ekos_bin, ws.path, body.yaml, dry_run=dry_run, reviewer=who
-        )
+        return await run(settings.ekos_bin, ws.path, body.yaml, dry_run=dry_run, reviewer=who)
     except semantics_write.ReviewError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except semantics_write.LedgerBusy as exc:
@@ -258,3 +306,32 @@ async def apply_linkml(
     """Apply an edited schema's decisions — all or nothing — attributed to the signed-in user."""
     who = _reviewer(principal, settings, body.reviewer)
     return await _import(body, ws, settings, dry_run=False, who=who)
+
+
+@router.post(
+    "/ossie/validate",
+    dependencies=[Depends(allow("read"))],
+    responses={400: BAD_REQUEST, 409: CONFLICT, 502: BAD_GATEWAY},
+)
+async def validate_ossie(
+    body: ImportIn,
+    ws: models.Workspace = Depends(require_workspace),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    """Dry run: the review decisions an edited Ossie export stands for. Writes nothing."""
+    return await _import(body, ws, settings, dry_run=True, who=None, what="ossie")
+
+
+@router.post(
+    "/ossie/import",
+    responses={400: BAD_REQUEST, 409: CONFLICT, 502: BAD_GATEWAY},
+)
+async def apply_ossie(
+    body: ImportIn,
+    ws: models.Workspace = Depends(require_workspace),
+    settings: Settings = Depends(get_settings),
+    principal: Principal = Depends(_WRITER),
+) -> dict:
+    """Apply an edited Ossie export's decisions — all or nothing — as the signed-in user."""
+    who = _reviewer(principal, settings, body.reviewer)
+    return await _import(body, ws, settings, dry_run=False, who=who, what="ossie")

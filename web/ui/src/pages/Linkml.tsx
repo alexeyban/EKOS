@@ -568,7 +568,8 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
   );
 }
 
-function PlanView({ plan }: { plan: ImportPlan }) {
+/** The decisions, warnings and errors of an import plan — LinkML and Apache Ossie alike. */
+export function PlanView({ plan }: { plan: ImportPlan }) {
   return (
     <div className="findings">
       {plan.applied > 0 && (

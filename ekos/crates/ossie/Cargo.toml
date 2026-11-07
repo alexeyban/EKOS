@@ -1,0 +1,20 @@
+[package]
+name = "ekos-ossie"
+description = "RFC 0245 — Apache Ossie semantic models: read (0.1.1 and 0.2.0.dev0), build from the EKOS ledger, check"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ekos-kir.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+
+[dev-dependencies]
+jsonschema = { workspace = true }
+uuid.workspace = true
+tempfile = "3"

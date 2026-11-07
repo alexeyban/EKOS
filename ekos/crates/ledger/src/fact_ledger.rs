@@ -3269,7 +3269,7 @@ mod tests {
         assert_eq!(ledger.find_objects("wombat").unwrap().len(), 1);
         assert_eq!(
             std::fs::read_to_string(search.join("content_version")).unwrap(),
-            "2"
+            "3"
         );
     }
 

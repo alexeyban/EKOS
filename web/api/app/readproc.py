@@ -37,6 +37,9 @@ _ALLOWED: dict[tuple[str, ...], frozenset[str]] = {
     ("export", "linkml", "--json"): frozenset({"--status"}),
     # The same schema as YAML text, for the console's editor (`read_text`).
     ("export", "linkml", "--yaml"): frozenset({"--status"}),
+    # RFC 0245: the Apache Ossie model, as JSON for the viewer and as YAML for download.
+    ("export", "ossie", "--json"): frozenset({"--status"}),
+    ("export", "ossie", "--yaml"): frozenset({"--status"}),
     # RFC 0172 conflicting evidence — read only.
     ("conflicts", "list", "--json"): frozenset({"--status", "--type"}),
     # RFC 0233 the integrity index the last commit wrote — one fixed argv, read only.
@@ -115,7 +118,8 @@ async def read_text(
     ekos_bin: str, workspace_path: str, argv: list[str], *, max_output: int = _MAX_OUTPUT
 ) -> str:
     """[`read_json`] for a command whose output is text. `--yaml` is a console-side marker on the
-    allowlist only; it is stripped before the CLI runs (YAML is `export linkml`'s default)."""
+    allowlist only; it is stripped before the CLI runs (YAML is `export linkml`'s and
+    `export ossie`'s default)."""
     _check_allowed(argv)
     argv = [a for a in argv if a != "--yaml"]
     root = Path(workspace_path).resolve()

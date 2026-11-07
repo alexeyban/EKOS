@@ -143,7 +143,19 @@ pub fn commit_step(
         written += append_conflicts(ledger, &g, &mut ids)?;
     }
     // RFC 0211: the code's claims against the live catalog. Compares nothing unless both exist.
-    let (g, live) = ekos_semantic::live_conflicts::detect(&ledger.all_objects()?);
+    let objects = ledger.all_objects()?;
+    let (g, live) = ekos_semantic::live_conflicts::detect(&objects);
+    written += append_conflicts(ledger, &g, &mut ids)?;
+    // RFC 0245: an ingested Ossie model against the schema it describes.
+    let lookup = |id: &ekos_kir::KirId| {
+        ledger
+            .get_evidence(id)
+            .ok()
+            .flatten()
+            .map(|e| (e.location.path, e.location.line))
+    };
+    let files = crate::commands::export::current_ossie_files(config, cwd);
+    let g = ekos_semantic::ossie_links::conflicts(&objects, files.as_ref(), &lookup);
     written += append_conflicts(ledger, &g, &mut ids)?;
     write_manifest(config, cwd, &ids, ConflictStats::default())?;
     let mut stats = count(&items_in(config, cwd, ledger)?);

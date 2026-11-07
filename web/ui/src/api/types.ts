@@ -289,7 +289,82 @@ export interface LinkmlSchema {
   annotations?: Annotations;
 }
 
-/** `ekos import linkml --json`. */
+// ── RFC 0245 Apache Ossie ───────────────────────────────────────────────────────────────────
+
+export interface OssieAiContext {
+  instructions?: string;
+  synonyms?: string[];
+  examples?: string[];
+}
+
+export interface OssieExtension {
+  vendor_name: string;
+  /** A JSON string. */
+  data: string;
+}
+
+export interface OssieExpression {
+  sql?: string;
+  dialects?: { dialect: string; expression: string }[];
+}
+
+export interface OssieField {
+  name: string;
+  expression: OssieExpression;
+  datatype?: string;
+  description?: string;
+  dimension?: { is_time?: boolean };
+  ai_context?: string | OssieAiContext;
+  custom_extensions?: OssieExtension[];
+}
+
+export interface OssieMetric {
+  name: string;
+  expression: OssieExpression;
+  datatype?: string;
+  description?: string;
+  ai_context?: string | OssieAiContext;
+  custom_extensions?: OssieExtension[];
+}
+
+export interface OssieDataset {
+  name: string;
+  source: string;
+  primary_key?: string[];
+  unique_keys?: string[][];
+  description?: string;
+  ai_context?: string | OssieAiContext;
+  fields?: OssieField[];
+  metrics?: OssieMetric[];
+  custom_extensions?: OssieExtension[];
+}
+
+export interface OssieRelationship {
+  name: string;
+  from: string;
+  to: string;
+  from_columns: string[];
+  to_columns: string[];
+}
+
+export interface OssieModel {
+  version: string;
+  name: string;
+  description?: string;
+  ai_context?: string | OssieAiContext;
+  datasets: OssieDataset[];
+  relationships?: OssieRelationship[];
+  metrics?: OssieMetric[];
+  custom_extensions?: OssieExtension[];
+}
+
+export interface OssieJson {
+  empty: boolean;
+  reason?: string;
+  model?: OssieModel;
+}
+
+/** `ekos import linkml --json` and `ekos import ossie --json`. */
 export interface ImportPlan {
   decisions: {
     id: string;

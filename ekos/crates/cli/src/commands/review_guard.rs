@@ -78,6 +78,12 @@ const HUMAN_ONLY: &[HumanOnly] = &[
         why: "RFC 0170: a LinkML import records human review decisions",
     },
     HumanOnly {
+        path: &["import", "ossie"],
+        defined_in: include_str!("import.rs"),
+        definition: "pub fn ossie(",
+        why: "RFC 0245: an Apache Ossie import records human review decisions",
+    },
+    HumanOnly {
         path: &["conflicts", "resolve"],
         defined_in: include_str!("conflicts.rs"),
         definition: "pub fn resolve(",

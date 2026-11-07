@@ -32,7 +32,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bump when the mapping's output changes.
-pub const LOGIC_VERSION: &str = "oracle-catalog/4";
+pub const LOGIC_VERSION: &str = "oracle-catalog/5";
 
 /// The custom kind of the per-owner summary object.
 pub const CATALOG_KIND: &str = "OracleCatalog";
@@ -487,6 +487,10 @@ fn add_table(
     if let Some(c) = c.filter(|c| !c.primary_key.is_empty()) {
         o.properties
             .insert("primary_key".into(), json!(c.primary_key));
+    }
+    // RFC 0245: every unique constraint, composite ones included (Apache Ossie `unique_keys`).
+    if let Some(c) = c.filter(|c| !c.unique.is_empty()) {
+        o.properties.insert("unique_keys".into(), json!(c.unique));
     }
     for (from, to) in [
         ("comment", "description"),

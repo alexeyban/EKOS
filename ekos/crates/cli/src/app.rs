@@ -1704,6 +1704,29 @@ enum ExportCommands {
         #[arg(long)]
         json: bool,
     },
+    /// The compiled schema as an Apache Ossie semantic model (RFC 0245): tables and views as
+    /// datasets, keys, foreign keys as relationships, business meanings in `ai_context` (by
+    /// `--status`), and the metrics of Ossie files ingested from the sources
+    Ossie {
+        /// Which business meanings to include (tables are observed facts, always included)
+        #[arg(long, value_enum, default_value = "confirmed")]
+        status: crate::commands::export::StatusFilter,
+        /// Write here instead of stdout (`.json` writes JSON)
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// Model name (default: the workspace directory's name)
+        #[arg(long)]
+        name: Option<String>,
+        /// JSON instead of YAML
+        #[arg(long)]
+        json: bool,
+        /// Only tables of this `[[databases]]` name
+        #[arg(long)]
+        database: Option<String>,
+        /// Only tables of this `[[sources]]` name
+        #[arg(long)]
+        source: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1712,6 +1735,21 @@ enum ImportCommands {
     /// labels, `ekos_status: confirmed|rejected`. Human-only; all or nothing
     Linkml {
         /// The edited schema (from `ekos export linkml`)
+        file: std::path::PathBuf,
+        /// Show the decisions without writing them
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+        /// Who is reviewing (default: $USER)
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
+    /// Turn edits to an exported Apache Ossie model into review decisions (RFC 0245): the
+    /// `status`/`name`/`description`/`label`/`note` of the `concepts` and `enum_meanings` in its
+    /// EKOS extensions. Human-only; all or nothing
+    Ossie {
+        /// The edited model (from `ekos export ossie`)
         file: std::path::PathBuf,
         /// Show the decisions without writing them
         #[arg(long)]
@@ -2980,6 +3018,25 @@ fn dispatch_export(
                 json,
             },
         ),
+        ExportCommands::Ossie {
+            status,
+            out,
+            name,
+            json,
+            database,
+            source,
+        } => crate::commands::export::ossie(
+            config,
+            cwd,
+            &crate::commands::export::OssieOptions {
+                status,
+                out,
+                name,
+                json,
+                database,
+                source,
+            },
+        ),
     }
 }
 
@@ -2996,6 +3053,21 @@ fn dispatch_import(
             json,
             by,
         } => crate::commands::import::linkml(
+            config,
+            cwd,
+            &crate::commands::import::ImportOptions {
+                file: &file,
+                dry_run,
+                json,
+                by,
+            },
+        ),
+        ImportCommands::Ossie {
+            file,
+            dry_run,
+            json,
+            by,
+        } => crate::commands::import::ossie(
             config,
             cwd,
             &crate::commands::import::ImportOptions {

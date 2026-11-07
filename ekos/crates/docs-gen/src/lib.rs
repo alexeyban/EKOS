@@ -734,6 +734,9 @@ pub fn is_entity_page_kind(kind: &ObjectKind) -> bool {
                     | "Procedure"
                     | "View"
                     | "Trigger"
+                    // RFC 0245: Apache Ossie datasets and metrics ingested from the sources.
+                    | "OssieDataset"
+                    | "OssieMetric"
             )
         }
         ObjectKind::Pipeline => true,

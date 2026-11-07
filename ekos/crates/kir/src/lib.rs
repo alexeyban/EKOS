@@ -292,6 +292,19 @@ impl KirObject {
                     .join(" ")
             })
             .unwrap_or_default();
+        // RFC 0245: the other names a team gave a dataset, field or metric (Apache Ossie
+        // `ai_context.synonyms`) — what a question in the business's own words searches for.
+        let synonyms = self
+            .properties
+            .get("synonyms")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default();
         [
             excerpt,
             symbols.as_str(),
@@ -301,6 +314,7 @@ impl KirObject {
             description,
             signature,
             fields.as_str(),
+            synonyms.as_str(),
         ]
         .into_iter()
         .filter(|s| !s.is_empty())
