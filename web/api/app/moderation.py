@@ -188,60 +188,78 @@ class Moderator:
                 return Outcome(False, "limited", "too many requests from this address; slow down")
         with models.session() as s:
             u = self._user(s, subject, now)
-            standing = self._standing(u)
             usage = self._usage(s, subject, now)
-
-            # Standing first: someone banned is told so, not that their address is blocked.
-            stop = pre_check(standing, now)
-            if stop:
+            stop = self._gate(s, u, usage, ip, now)
+            if stop is None:
+                stop, verdict = await self._read(text, u, usage, now)
+            if stop is not None:
                 s.commit()
-                return self._out(stop)
-
-            blocked = s.get(models.ModIpBlock, ip) if ip else None
-            if blocked and _aware(blocked.until) > now:
-                s.commit()
-                return Outcome(
-                    False, "block", "this address is blocked for now", until=_aware(blocked.until)
-                )
-
-            over = check_limit(
-                "question",
-                Usage(usage.questions, usage.model_calls, usage.additive, usage.modifying),
-                self.limits,
-                _aware(u.first_seen) or now,
-                now,
-            )
-            if over:
-                s.commit()
-                return Outcome(False, "limited", over, remaining=self._remaining(usage))
-
-            found = signals(text)
-            verdict: Verdict | None = None
-            if not found and self.classifier is not None:
-                verdict, refusal = await self._ask_model(usage, text, u, now)
-                if refusal:
-                    s.commit()
-                    return refusal
+                return stop
             decision = decide(
-                standing, found, None if verdict is None else verdict.unsafe, now, self.rules
+                self._standing(u),
+                signals(text),
+                None if verdict is None else verdict.unsafe,
+                now,
+                self.rules,
             )
-            if decision.signal == "model" or decision.action in ("block", "ban"):
-                pass
-            self._apply(s, u, decision, now)
-            if decision.allowed:
-                usage.questions += 1
-            else:
-                self._log(s, subject, ip, decision, text, now)
-                if decision.ip_block and ip:
-                    s.merge(
-                        models.ModIpBlock(
-                            ip=ip, until=now + decision.ip_block, reason=decision.reason
-                        )
-                    )
+            self._record(s, u, usage, decision, (subject, ip, text), now)
             s.commit()
             return self._out(
                 decision, model_checked=verdict is not None, remaining=self._remaining(usage)
             )
+
+    def _gate(
+        self, s, u: models.ModUser, usage: models.ModUsage, ip: str, now: datetime
+    ) -> Outcome | None:
+        """What ends a request before its text is read: standing first (someone banned is told
+        so, not that their address is blocked), then the address, then the daily question limit."""
+        stop = pre_check(self._standing(u), now)
+        if stop:
+            return self._out(stop)
+        blocked = s.get(models.ModIpBlock, ip) if ip else None
+        if blocked and _aware(blocked.until) > now:
+            return Outcome(
+                False, "block", "this address is blocked for now", until=_aware(blocked.until)
+            )
+        over = check_limit(
+            "question",
+            Usage(usage.questions, usage.model_calls, usage.additive, usage.modifying),
+            self.limits,
+            _aware(u.first_seen) or now,
+            now,
+        )
+        if over:
+            return Outcome(False, "limited", over, remaining=self._remaining(usage))
+        return None
+
+    async def _read(
+        self, text: str, u: models.ModUser, usage: models.ModUsage, now: datetime
+    ) -> tuple[Outcome | None, Verdict | None]:
+        """The model's verdict for a message no signal caught — or the refusal to give instead.
+        Deterministic signals decide alone, so a message with one never reaches the model."""
+        if signals(text) or self.classifier is None:
+            return None, None
+        verdict, refusal = await self._ask_model(usage, text, u, now)
+        return refusal, verdict
+
+    def _record(
+        self,
+        s,
+        u: models.ModUser,
+        usage: models.ModUsage,
+        d: Decision,
+        who: tuple[str, str, str],
+        now: datetime,
+    ) -> None:
+        """Persist a decision: the standing, the day's spend or the log, and an address block."""
+        subject, ip, text = who
+        self._apply(s, u, d, now)
+        if d.allowed:
+            usage.questions += 1
+            return
+        self._log(s, subject, ip, d, text, now)
+        if d.ip_block and ip:
+            s.merge(models.ModIpBlock(ip=ip, until=now + d.ip_block, reason=d.reason))
 
     async def _ask_model(
         self, usage: models.ModUsage, text: str, u: models.ModUser, now: datetime

@@ -52,7 +52,7 @@ def test_attacks_the_patterns_cannot_see_are_listed_as_model_only() -> None:
 
 
 def test_normalize_folds_what_hides_an_attack() -> None:
-    assert normalize("IGNORE​  ALL") == "ignore all"
+    assert normalize("IGNORE\u200b  ALL") == "ignore all"
     assert normalize("іgnоre") == "ignore"  # Cyrillic i and o
     assert normalize("iǵnore") == "ignore"  # a combining mark
     assert normalize("ｉｇｎｏｒｅ") == "ignore"  # fullwidth

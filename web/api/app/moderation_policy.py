@@ -33,7 +33,7 @@ SOFT = frozenset({"destructive", "abuse"})
 # Characters that carry no visible text but can carry instructions: bidirectional controls, the
 # Unicode "tag" block (invisible ASCII), and zero-width separators that split a word for a filter.
 # ZWJ/ZWNJ (200C/200D) are legitimate in several scripts and are not counted on their own.
-_HIDDEN = re.compile("[‪-‮⁦-⁩\U000e0000-\U000e007f​⁠﻿]")
+_HIDDEN = re.compile("[\u202a-\u202e\u2066-\u2069\U000e0000-\U000e007f\u200b\u2060\ufeff]")
 
 # Look-alike letters that let "ignore" be written with a Cyrillic "о". Matching only.
 _CONFUSABLES = str.maketrans(

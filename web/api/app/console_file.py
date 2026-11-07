@@ -24,6 +24,7 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource
 from . import keychain
 
 FILE_NAME = "console.toml"
+_DEMO = "Public demo"
 
 
 @dataclass(frozen=True)
@@ -107,25 +108,25 @@ FIELDS: dict[str, Field] = {
     "chat_max_tool_calls": Field("Chat", "Most EKOS tool calls the model may make per question"),
     "chat_max_tokens": Field("Chat", "Most tokens in one answer"),
     "moderation_enabled": Field(
-        "Public demo",
+        _DEMO,
         "Check every question before it is answered: bans, blocks and daily limits (RFC 0249)",
     ),
     "moderation_model": Field(
-        "Public demo", "The model for the intent check, e.g. claude-haiku-5-5. Empty: no model"
+        _DEMO, "The model for the intent check, e.g. claude-haiku-5-5. Empty: no model"
     ),
     "moderation_base_url": Field(
-        "Public demo", "The model host; empty for OpenCode Zen. A host on this machine is free"
+        _DEMO, "The model host; empty for OpenCode Zen. A host on this machine is free"
     ),
     "moderation_key_env": Field(
-        "Public demo",
+        _DEMO,
         "Name of the variable holding the key (its value: the environment, or the keychain)",
     ),
     "moderation_trusted_hops": Field(
-        "Public demo",
+        _DEMO,
         "Proxies in front of the console whose X-Forwarded-For entry is trusted; 0 = none",
     ),
     "moderation_limits": Field(
-        "Public demo",
+        _DEMO,
         'The published numbers as JSON, e.g. {"questions_per_day": 30, "block_hours": 24}',
     ),
     "instance_lease": Field(

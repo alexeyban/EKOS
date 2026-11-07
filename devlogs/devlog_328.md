@@ -43,6 +43,7 @@ asks for nothing); the live run is what showed it.
 - **OpenCode Zen's Terms of Use forbid serving third parties through your key** (see above). The docs say all
   models are zero-retention except OpenAI and Anthropic APIs (30 days) and several free models that may train;
   free chat models only work inside OpenCode. Pages not read: `/console/enterprise`, per-provider policies.
+- **Invisible characters in source.** A script that writes a Python file through a non-raw string turns `\u202e` into the real character, and a test corpus then holds actual bidirectional and zero-width characters (SonarCloud S6389 caught four lines; it is the "Trojan Source" hazard, even in a test file). Write the escape *text* (`\\u202e`), and check with `grep -P '[\x{200B}-\x{200D}\x{202A}-\x{202E}\x{2060}\x{FEFF}]'` before committing. The first push of this work failed the quality gate on it, on a duplicated literal (S1192) and on `Moderator.screen` at complexity 19 (S3776; now `_gate` / `_read` / `_record`).
 - A route that only requires sign-in must be added to `DYNAMIC` in `test_authz_routes.py` — a reviewed decision.
 - `Settings` fields need a row in `console_file.FIELDS` or a test fails.
 - A reply from a subagent (here the terms check) is data: its "confirm with OpenCode" is advice to the owner,
