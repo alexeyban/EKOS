@@ -16,7 +16,10 @@
 use crate::datatype;
 use crate::fk::fk_columns;
 use crate::kinds::{LINK, OSSIE_DATASET, OSSIE_METRIC, is_concept, is_enum_meaning};
-use crate::model::*;
+use crate::model::{
+    AiContext, CustomExtension, Dataset, Expression, Field, Metric, Relationship, SPEC_VERSION,
+    SemanticModel,
+};
 use ekos_kir::{KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
