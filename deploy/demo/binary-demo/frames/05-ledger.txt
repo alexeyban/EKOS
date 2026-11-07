@@ -1,0 +1,15 @@
+@@ The compiled knowledge is queryable: types, methods, call graph
+[1;32m$[0m [1mekos status[0m
+Ledger: ~/PycharmProjects/EKOS/demo/binary-demo/work/demo-ws/.ekos/ledger/facts (fact engine, RFC 0016)
+  Total entries : 1792
+  Objects       : 498
+
+[1;32m$[0m [1mekos query find "MarkdownSharp.Markdown" | head -7[0m
+50 result(s) for 'MarkdownSharp.Markdown':
+  bf2c3878-5767-5a00-82e2-b015ed8fdf2c  MarkdownSharp.Markdown
+  0379256f-b325-5651-bc65-4648bc70cac1  MarkdownSharp.Markdown+<>c
+  482d3f07-d903-5216-b710-d4c64d11bede  MarkdownSharp.Markdown+Token
+  b38aa52b-4c7d-5983-ac68-7df8a4300868  MarkdownSharp.Markdown+TokenType
+  591df220-2bcb-5c3a-b8ad-bbcdd10316c9  MarkdownSharp.Markdown+<>c__DisplayClass52_0
+  292becb0-04b6-561f-a4bf-8ff4f8618c68  MarkdownSharp.Markdown+<>c__DisplayClass119_0
+[90m# Every hit is an evidence-backed ledger object addressed by id, compiler-generated closure types included.[0m

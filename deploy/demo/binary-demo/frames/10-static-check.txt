@@ -1,0 +1,22 @@
+@@ ekos_binary_migration_check: what the rewrite touches vs what the original touches
+[1;35mmcp>[0m [1mekos_binary_migration_check {"id": "MarkdownSharp.Markdown", "python_source": <mdport/markdown.py>}[0m
+type MarkdownSharp.Markdown   rewrite markdown.py
+summary  matches 42   differs 22   missing 14   python_only 5
+
+verdict   original method                          first difference
+differs   .ctor                                    7 string constant(s) of the original are not in the rewrite
+differs   .cctor                                   24 string constant(s) of the original are not in the rewrite
+differs   GetNestedBracketsPattern                 2 string constant(s) of the original are not in the rewrite
+differs   GetNestedParensPattern                   2 string constant(s) of the original are not in the rewrite
+differs   GetBlockPattern                          4 string constant(s) of the original are not in the rewrite
+differs   GetHashKey                               2 numeric constant(s) of the original are not in the rewrite
+differs   AnchorInlineEvaluator                    3 string constant(s) of the original are not in the rewrite
+differs   ImageTag                                 2 string constant(s) of the original are not in the rewrite
+differs   SetextHeaderEvaluator                    1 string constant(s) of the original are not in the rewrite
+differs   AtxHeaderEvaluator                       1 string constant(s) of the original are not in the rewrite
+differs   DoHorizontalRules                        the original calls get_EmptyElementSuffix; the rewrite does not
+differs   ListEvaluator                            1 string constant(s) of the original are not in the rewrite
+…         10 more rows: constants that moved into _literals.py, format strings written as f-strings, one dead method
+missing   get_*/set_* (13 accessors)               C# properties are plain attributes here
+
+Evidence, not a verdict: a difference is something to look at, and a match means only that nothing this check compares differs. Characterization tests agains…

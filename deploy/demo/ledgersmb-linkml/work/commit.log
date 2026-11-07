@@ -1,0 +1,82 @@
+  writing evidence 1/11257 (0%) · 0s elapsed, ~2m11s left (est.)
+  writing evidence 563/11257 (5%) · 6s elapsed, ~2m00s left (est.)
+  writing evidence 1126/11257 (10%) · 12s elapsed, ~1m55s left (est.)
+  writing evidence 1689/11257 (15%) · 19s elapsed, ~1m49s left (est.)
+  writing evidence 2252/11257 (20%) · 25s elapsed, ~1m42s left (est.)
+  writing evidence 2815/11257 (25%) · 31s elapsed, ~1m35s left (est.)
+  writing evidence 3378/11257 (30%) · 38s elapsed, ~1m28s left (est.)
+  writing evidence 3940/11257 (35%) · 44s elapsed, ~1m22s left (est.)
+  writing evidence 4503/11257 (40%) · 51s elapsed, ~1m16s left (est.)
+  writing evidence 5066/11257 (45%) · 57s elapsed, ~1m10s left (est.)
+  writing evidence 5629/11257 (50%) · 1m04s elapsed, ~1m04s left (est.)
+  writing evidence 6192/11257 (55%) · 1m10s elapsed, ~57s left (est.)
+  writing evidence 6755/11257 (60%) · 1m17s elapsed, ~51s left (est.)
+  writing evidence 7318/11257 (65%) · 1m23s elapsed, ~45s left (est.)
+  writing evidence 7880/11257 (70%) · 1m30s elapsed, ~38s left (est.)
+  writing evidence 8443/11257 (75%) · 1m37s elapsed, ~32s left (est.)
+  writing evidence 9006/11257 (80%) · 1m43s elapsed, ~25s left (est.)
+  writing evidence 9569/11257 (85%) · 1m50s elapsed, ~19s left (est.)
+  writing evidence 10132/11257 (90%) · 1m57s elapsed, ~12s left (est.)
+  writing evidence 10695/11257 (95%) · 2m03s elapsed, ~6s left (est.)
+  writing evidence 11257/11257 (100%) · 2m10s elapsed, ~0s left (est.)
+  writing objects 1/10560 (0%) · 0s elapsed, ~5m17s left (est.)
+  writing objects 528/10560 (5%) · 6s elapsed, ~2m01s left (est.)
+  writing objects 1056/10560 (10%) · 12s elapsed, ~1m54s left (est.)
+  writing objects 1584/10560 (15%) · 19s elapsed, ~1m48s left (est.)
+  writing objects 2112/10560 (20%) · 25s elapsed, ~1m42s left (est.)
+  writing objects 2640/10560 (25%) · 32s elapsed, ~1m36s left (est.)
+  writing objects 3168/10560 (30%) · 38s elapsed, ~1m29s left (est.)
+  writing objects 3696/10560 (35%) · 44s elapsed, ~1m23s left (est.)
+  writing objects 4224/10560 (40%) · 51s elapsed, ~1m16s left (est.)
+  writing objects 4752/10560 (45%) · 57s elapsed, ~1m10s left (est.)
+  writing objects 5280/10560 (50%) · 1m04s elapsed, ~1m04s left (est.)
+  writing objects 5808/10560 (55%) · 1m10s elapsed, ~57s left (est.)
+  writing objects 6336/10560 (60%) · 1m17s elapsed, ~51s left (est.)
+  writing objects 6864/10560 (65%) · 1m23s elapsed, ~45s left (est.)
+  writing objects 7392/10560 (70%) · 1m30s elapsed, ~38s left (est.)
+  writing objects 7920/10560 (75%) · 1m37s elapsed, ~32s left (est.)
+  writing objects 8448/10560 (80%) · 1m43s elapsed, ~25s left (est.)
+  writing objects 8976/10560 (85%) · 1m50s elapsed, ~19s left (est.)
+  writing objects 9504/10560 (90%) · 1m58s elapsed, ~13s left (est.)
+  writing objects 10032/10560 (95%) · 2m03s elapsed, ~6s left (est.)
+  writing objects 10560/10560 (100%) · 2m09s elapsed, ~0s left (est.)
+  writing relationships 1/8185 (0%) · 0s elapsed, ~1m30s left (est.)
+  writing relationships 410/8185 (5%) · 4s elapsed, ~1m25s left (est.)
+  writing relationships 819/8185 (10%) · 8s elapsed, ~1m20s left (est.)
+  writing relationships 1228/8185 (15%) · 13s elapsed, ~1m15s left (est.)
+  writing relationships 1637/8185 (20%) · 17s elapsed, ~1m11s left (est.)
+  writing relationships 2047/8185 (25%) · 22s elapsed, ~1m06s left (est.)
+  writing relationships 2456/8185 (30%) · 26s elapsed, ~1m02s left (est.)
+  writing relationships 2865/8185 (35%) · 31s elapsed, ~58s left (est.)
+  writing relationships 3274/8185 (40%) · 35s elapsed, ~53s left (est.)
+  writing relationships 3684/8185 (45%) · 40s elapsed, ~49s left (est.)
+  writing relationships 4093/8185 (50%) · 45s elapsed, ~45s left (est.)
+  writing relationships 4502/8185 (55%) · 49s elapsed, ~40s left (est.)
+  writing relationships 4911/8185 (60%) · 54s elapsed, ~36s left (est.)
+  writing relationships 5321/8185 (65%) · 58s elapsed, ~31s left (est.)
+  writing relationships 5730/8185 (70%) · 1m03s elapsed, ~27s left (est.)
+  writing relationships 6139/8185 (75%) · 1m07s elapsed, ~22s left (est.)
+  writing relationships 6548/8185 (80%) · 1m12s elapsed, ~18s left (est.)
+  writing relationships 6958/8185 (85%) · 1m17s elapsed, ~13s left (est.)
+  writing relationships 7367/8185 (90%) · 1m21s elapsed, ~9s left (est.)
+  writing relationships 7776/8185 (95%) · 1m26s elapsed, ~4s left (est.)
+  writing relationships 8185/8185 (100%) · 1m31s elapsed, ~0s left (est.)
+  computing subsystem rollups…
+  computing subsystem rollups — 18s
+  linking data lineage…
+  linking data lineage — 6s
+  linking procedures…
+  linking procedures — 22s
+  recovering business semantics…
+  recovering business semantics — 30s
+Commit complete.
+  Objects written:       10560
+  Objects skipped:       0 (already in ledger)
+  Relationships written: 8185
+  Evidence records:      11257
+  Subsystem rollups:     42
+  Procedure links:       1931 new (412 reads, 308 writes, 1065 depends-on, 146 calls resolved; 5 ambiguous name(s) not linked)
+  Data lineage links:    483
+  Business semantics:    47 concept(s), 222 coded value(s) in 61 column(s) (179 explained), 60 constraint(s), 15 gap(s), 0 conflict(s), 128 rationale link(s), 17 mapping suggestion(s) — all hypotheses (458 of 649 predicate sites resolved; 1133 new ledger entries)
+  Conflicting evidence:  3 item(s): 3 open, 0 resolved, 0 dismissed — `ekos conflicts list`
+  Ledger:                /home/legion/PycharmProjects/EKOS/demo/ledgersmb-linkml/work/LedgerSMB/.ekos/ledger/facts

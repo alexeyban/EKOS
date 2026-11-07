@@ -1,0 +1,27 @@
+name: linkml
+prefixes:
+  rdf: http://www.w3.org/1999/02/22-rdf-syntax-ns#
+  rdfs: http://www.w3.org/2000/01/rdf-schema#
+  linkml: https://w3id.org/linkml/
+  dcterms: http://purl.org/dc/terms/
+  skos: http://www.w3.org/2004/02/skos/core#
+  skosxl: http://www.w3.org/2008/05/skos-xl#
+  oboInOwl: http://www.geneontology.org/formats/oboInOwl#
+  NCIThesaurus: http://ncicb.nci.nih.gov/xml/owl/EVS/Thesaurus.owl#
+  pav: http://purl.org/pav/
+  oslc: http://open-services.net/ns/core#
+  schema: http://schema.org/
+  bibo: http://purl.org/ontology/bibo/
+  swrl: http://www.w3.org/2003/11/swrl#
+  sh: http://www.w3.org/ns/shacl#
+  owl: http://www.w3.org/2002/07/owl#
+  qb: http://purl.org/linked-data/cube#
+  prov: http://www.w3.org/ns/prov#
+  vann: https://vocab.org/vann/
+  qudt: http://qudt.org/schema/qudt/
+  xsd: http://www.w3.org/2001/XMLSchema#
+  shex: http://www.w3.org/ns/shex#
+  biolink: https://w3id.org/biolink/vocab/
+  foaf: http://xmlns.com/foaf/0.1/
+
+

@@ -1,0 +1,1694 @@
+{
+    "$defs": {
+        "Account": {
+            "additionalProperties": false,
+            "description": "This table stores the main account info.",
+            "properties": {
+                "accno": {
+                    "type": "string"
+                },
+                "category": {
+                    "$ref": "#/$defs/AccountCategory",
+                    "description": "A=asset,L=liability,Q=Equity,I=Income,E=expense"
+                },
+                "contra": {
+                    "type": "boolean"
+                },
+                "description": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "gifi_accno": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "heading": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_temp": {
+                    "description": "Only affects equity accounts.  If set, close at end of year.",
+                    "type": "boolean"
+                },
+                "obsolete": {
+                    "type": "boolean"
+                },
+                "tax": {
+                    "type": "boolean"
+                }
+            },
+            "required": [
+                "id",
+                "accno",
+                "is_temp",
+                "category",
+                "heading",
+                "contra",
+                "tax",
+                "obsolete"
+            ],
+            "title": "Account",
+            "type": "object"
+        },
+        "AccountCategory": {
+            "description": "Coded values of `account.category` recovered from code traces.",
+            "enum": [
+                "A",
+                "E",
+                "I",
+                "L",
+                "Q"
+            ],
+            "title": "AccountCategory",
+            "type": "string"
+        },
+        "ActivePart": {
+            "additionalProperties": false,
+            "description": "A part still offered: not obsolete.",
+            "properties": {
+                "alternate": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "assembly": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "avgcost": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "bin": {
+                    "description": "Text identifier for where a part is stored.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "bom": {
+                    "description": "Show on Bill of Materials.",
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "description": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "drawing": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "expense_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "image": {
+                    "description": "Hyperlink to product image.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "income_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "inventory_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "lastcost": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "listprice": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "makemodel": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "microfiche": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "notes": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "obsolete": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "onhand": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "partnumber": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "partsgroup_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "priceupdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "returns_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "rop": {
+                    "description": "Re-order point.  Used to select parts for short inventory report.",
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "sellprice": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "unit": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "weight": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "id"
+            ],
+            "title": "ActivePart",
+            "type": "object"
+        },
+        "ActiveYearEnd": {
+            "additionalProperties": false,
+            "description": "Rows of `yearend` where yearend.reversed IS FALSE.",
+            "properties": {
+                "reversed": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "trans_id": {
+                    "type": "integer"
+                },
+                "transdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "trans_id"
+            ],
+            "title": "ActiveYearEnd",
+            "type": "object"
+        },
+        "ApprovedTransaction": {
+            "additionalProperties": false,
+            "description": "A posted transaction: approved, so it counts in reports.",
+            "properties": {
+                "approved": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "approved_at": {
+                    "format": "date-time",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "approved_by": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "locked_by": {
+                    "description": "This should only be used in pessimistic locking measures as required by large\nbatch work flows.",
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "table_name": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "id"
+            ],
+            "title": "ApprovedTransaction",
+            "type": "object"
+        },
+        "Assembly": {
+            "additionalProperties": false,
+            "description": "A part built from other parts.",
+            "properties": {
+                "alternate": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "assembly": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "avgcost": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "bin": {
+                    "description": "Text identifier for where a part is stored.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "bom": {
+                    "description": "Show on Bill of Materials.",
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "description": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "drawing": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "expense_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "image": {
+                    "description": "Hyperlink to product image.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "income_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "inventory_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "lastcost": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "listprice": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "makemodel": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "microfiche": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "notes": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "obsolete": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "onhand": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "partnumber": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "partsgroup_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "priceupdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "returns_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "rop": {
+                    "description": "Re-order point.  Used to select parts for short inventory report.",
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "sellprice": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "unit": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "weight": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "id"
+            ],
+            "title": "Assembly",
+            "type": "object"
+        },
+        "CustomerAccount": {
+            "additionalProperties": false,
+            "description": "A credit account held by a customer (entity_class 2).",
+            "properties": {
+                "ar_ap_account_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "bank_account": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "business_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "cash_account_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "creditlimit": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "curr": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "description": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "discount": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "discount_account_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "discount_terms": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "employee_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "enddate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "entity_class": {
+                    "type": "integer"
+                },
+                "entity_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "language_code": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "meta_number": {
+                    "description": "This stores the human readable control code for the customer/vendor record.\nThis is typically called the customer/vendor \"account\" in the application.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "pay_to_name": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "pricegroup_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "primary_contact": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "startdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "taxform_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "taxincluded": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "terms": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "threshold": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "id",
+                "entity_id",
+                "entity_class"
+            ],
+            "title": "CustomerAccount",
+            "type": "object"
+        },
+        "EntityCreditAccount": {
+            "additionalProperties": false,
+            "description": "This table stores information relating to general relationships regarding\nmoneys owed on invoice.  Invoices, whether AR or AP, must be attached to\na record in this table.",
+            "properties": {
+                "ar_ap_account_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "bank_account": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "business_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "cash_account_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "creditlimit": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "curr": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "description": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "discount": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "discount_account_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "discount_terms": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "employee_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "enddate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "entity_class": {
+                    "type": "integer"
+                },
+                "entity_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "language_code": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "meta_number": {
+                    "description": "This stores the human readable control code for the customer/vendor record.\nThis is typically called the customer/vendor \"account\" in the application.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "pay_to_name": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "pricegroup_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "primary_contact": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "startdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "taxform_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "taxincluded": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "terms": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "threshold": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "id",
+                "entity_id",
+                "entity_class"
+            ],
+            "title": "EntityCreditAccount",
+            "type": "object"
+        },
+        "EntityCreditAccountEntityClass": {
+            "description": "Coded values of `entity_credit_account.entity_class` recovered from code traces.",
+            "enum": [
+                "1",
+                "2",
+                "3"
+            ],
+            "title": "EntityCreditAccountEntityClass",
+            "type": "string"
+        },
+        "InventoryPart": {
+            "additionalProperties": false,
+            "description": "A part stocked as goods: it has an inventory account.",
+            "properties": {
+                "alternate": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "assembly": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "avgcost": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "bin": {
+                    "description": "Text identifier for where a part is stored.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "bom": {
+                    "description": "Show on Bill of Materials.",
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "description": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "drawing": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "expense_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "image": {
+                    "description": "Hyperlink to product image.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "income_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "inventory_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "lastcost": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "listprice": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "makemodel": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "microfiche": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "notes": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "obsolete": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "onhand": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "partnumber": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "partsgroup_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "priceupdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "returns_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "rop": {
+                    "description": "Re-order point.  Used to select parts for short inventory report.",
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "sellprice": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "unit": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "weight": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "id"
+            ],
+            "title": "InventoryPart",
+            "type": "object"
+        },
+        "Oe": {
+            "additionalProperties": false,
+            "description": "Header information for:\n* Sales orders\n* Purchase Orders\n* Quotations\n* Requests for Quotation",
+            "properties": {
+                "amount": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "closed": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "curr": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "entity_credit_account": {
+                    "type": "integer"
+                },
+                "entity_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "intnotes": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "language_code": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "netamount": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "notes": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "oe_class_id": {
+                    "type": "integer"
+                },
+                "ordnumber": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "person_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "ponumber": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "quonumber": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "quotation": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "reqdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "shippingpoint": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "shipvia": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "taxincluded": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "terms": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "transdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "id",
+                "entity_credit_account",
+                "oe_class_id"
+            ],
+            "title": "Oe",
+            "type": "object"
+        },
+        "OeOeClassId": {
+            "description": "Coded values of `oe.oe_class_id` recovered from code traces.",
+            "enum": [
+                "1",
+                "2",
+                "3",
+                "4"
+            ],
+            "title": "OeOeClassId",
+            "type": "string"
+        },
+        "OpenOrder": {
+            "additionalProperties": false,
+            "description": "An order or quotation not yet closed.",
+            "properties": {
+                "amount": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "closed": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "curr": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "entity_credit_account": {
+                    "type": "integer"
+                },
+                "entity_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "intnotes": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "language_code": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "netamount": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "notes": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "oe_class_id": {
+                    "type": "integer"
+                },
+                "ordnumber": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "person_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "ponumber": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "quonumber": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "quotation": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "reqdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "shippingpoint": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "shipvia": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "taxincluded": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "terms": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "transdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "id",
+                "entity_credit_account",
+                "oe_class_id"
+            ],
+            "title": "OpenOrder",
+            "type": "object"
+        },
+        "Parts": {
+            "additionalProperties": false,
+            "description": "This stores detail information about goods and services.  The type of part\nis currently defined according to the following rules:\n* If assembly is true, then an assembly\n* If inventory_accno_id, income_accno_id, and expense_accno_id are not null then\n  a part.\n* If inventory_accno_id is null but the other two are not, then a service.\n* Otherwise, a labor/overhead entry.",
+            "properties": {
+                "alternate": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "assembly": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "avgcost": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "bin": {
+                    "description": "Text identifier for where a part is stored.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "bom": {
+                    "description": "Show on Bill of Materials.",
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "description": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "drawing": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "expense_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "image": {
+                    "description": "Hyperlink to product image.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "income_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "inventory_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "lastcost": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "listprice": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "makemodel": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "microfiche": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "notes": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "obsolete": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "onhand": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "partnumber": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "partsgroup_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "priceupdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "returns_accno_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "rop": {
+                    "description": "Re-order point.  Used to select parts for short inventory report.",
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "sellprice": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "unit": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "weight": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "id"
+            ],
+            "title": "Parts",
+            "type": "object"
+        },
+        "Transactions": {
+            "additionalProperties": false,
+            "description": "This table provides referential integrity between AR, AP, GL tables on one\nhand and acc_trans on the other, pending the refactoring of those tables.  It\nalso is used to provide discretionary locking of financial transactions across\ndatabase connections, for example in batch payment workflows.",
+            "properties": {
+                "approved": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "approved_at": {
+                    "format": "date-time",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "approved_by": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "locked_by": {
+                    "description": "This should only be used in pessimistic locking measures as required by large\nbatch work flows.",
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "table_name": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "id"
+            ],
+            "title": "Transactions",
+            "type": "object"
+        },
+        "VendorAccount": {
+            "additionalProperties": false,
+            "description": "A credit account held by a vendor (entity_class 1).",
+            "properties": {
+                "ar_ap_account_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "bank_account": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "business_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "cash_account_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "creditlimit": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "curr": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "description": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "discount": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                },
+                "discount_account_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "discount_terms": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "employee_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "enddate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "entity_class": {
+                    "type": "integer"
+                },
+                "entity_id": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "language_code": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "meta_number": {
+                    "description": "This stores the human readable control code for the customer/vendor record.\nThis is typically called the customer/vendor \"account\" in the application.",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "pay_to_name": {
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "pricegroup_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "primary_contact": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "startdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                },
+                "taxform_id": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "taxincluded": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "terms": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ]
+                },
+                "threshold": {
+                    "type": [
+                        "number",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "id",
+                "entity_id",
+                "entity_class"
+            ],
+            "title": "VendorAccount",
+            "type": "object"
+        },
+        "Yearend": {
+            "additionalProperties": false,
+            "description": "An extension to the journal_entry table to track transactionsactions which close out\nthe books at yearend.",
+            "properties": {
+                "reversed": {
+                    "type": [
+                        "boolean",
+                        "null"
+                    ]
+                },
+                "trans_id": {
+                    "type": "integer"
+                },
+                "transdate": {
+                    "format": "date",
+                    "type": [
+                        "string",
+                        "null"
+                    ]
+                }
+            },
+            "required": [
+                "trans_id"
+            ],
+            "title": "Yearend",
+            "type": "object"
+        }
+    },
+    "$id": "https://w3id.org/ekos/ledgersmb",
+    "$schema": "https://json-schema.org/draft/2019-09/schema",
+    "additionalProperties": true,
+    "metamodel_version": "1.11.0",
+    "title": "ledgersmb",
+    "type": "object",
+    "version": null
+}
+

@@ -1,0 +1,24 @@
+@@ ekos_binary_explain on the type: what it is, and the order to port it in
+[1;35mmcp>[0m [1mekos_binary_explain {"id": "MarkdownSharp.Markdown"}[0m
+type        MarkdownSharp.Markdown   (BinaryType, id bf2c3878…)
+binary      MarkdownSharp.dll   sha256 3d23eace6f2009d8…   locator 0x02000004
+extractor   ekos-cil-metadata/v4
+methods     78   control_flow 2   statements 76
+external IO 0 boundaries (no files, network, database)
+
+migration order — callees first (78 methods; port these top to bottom):
+   1. Setup                              statements
+   2. StripLinkDefinitions               statements
+   3. HashHTMLBlocks                     statements
+   4. GetHashKey                         statements
+   5. TokenizeHTML                       statements
+   6. DoAnchors                          statements
+   7. SaveFromAutoLinking                statements
+   8. DoImages                           statements
+   9. DoHeaders                          statements
+  10. DoLists                            statements
+  11. ProcessListItems                   statements
+  12. DoCodeBlocks                       statements
+  13. DoCodeSpans                        statements
+  14. DoBlockQuotes                      statements
+  … 51 more (accessors omitted)

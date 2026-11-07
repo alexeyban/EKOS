@@ -283,3 +283,28 @@ run "no_registry_no_pull_role" {
     error_message = "a public image needs no role."
   }
 }
+
+run "container_ingress_is_narrowed_by_allowed_cidrs" {
+  command = plan
+  variables {
+    compute       = "container"
+    allowed_cidrs = ["203.0.113.7/32", "198.51.100.0/24"]
+  }
+
+  assert {
+    condition     = length(azurerm_container_app.ekos[0].ingress[0].ip_security_restriction) == 2
+    error_message = "each allowed range becomes one Allow rule on the ingress."
+  }
+}
+
+run "container_ingress_is_unrestricted_by_default" {
+  command = plan
+  variables {
+    compute = "container"
+  }
+
+  assert {
+    condition     = length(azurerm_container_app.ekos[0].ingress[0].ip_security_restriction) == 0
+    error_message = "the default 0.0.0.0/0 adds no rule."
+  }
+}

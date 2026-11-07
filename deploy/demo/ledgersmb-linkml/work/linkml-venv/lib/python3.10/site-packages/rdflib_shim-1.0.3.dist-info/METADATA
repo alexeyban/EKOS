@@ -1,0 +1,27 @@
+Metadata-Version: 2.1
+Name: rdflib-shim
+Version: 1.0.3
+Summary: Shim for rdflib 5 and 6 incompatibilities
+Home-page: http://hsolbrig.github.io/rdflib-shim
+Author: Harold Solbrig
+Author-email: solbrig@jhu.edu
+License: CC0 1.0 Universal
+Keywords: rdflib,serialize,bytearray,str,jsonld,rdflib-jsonld
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Developers
+Classifier: License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication
+Classifier: Programming Language :: Python :: 3 :: Only
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Requires-Python: >=3.7
+License-File: LICENSE
+License-File: AUTHORS
+Requires-Dist: rdflib (>=5.0.0)
+Requires-Dist: rdflib-jsonld (==0.6.1)
+
+UNKNOWN
+

@@ -1,0 +1,91 @@
+# This is a JSON Grammar (JSG) file for the ShEx JSON format.
+# The form "OBJNAME  { property:PROPTYPE ... }" matches an object of type OBJTYPE
+# The form "RULENAME = NAME1 | NAME2 ..." matches any of NAMEn.
+# the form "TERMNAME : "RegExp" matches any literal matching RegExp
+# A PROPTYPE can be:
+#   TERMINAL - a terminal, all caps in this example.
+#   [PROPTYPE] - an array of PROPTYPE.
+#   {TERMINAL->PROPTYPE} - a map from TERMINAL to PROPTYPE.
+#   (PROPTYPE1|PROPTYPE2...) - any of PROPTYPEn.
+
+.TYPE type - ObjectLiteral InnerContext;
+
+# All objects have a type property corresponding to the production name, e.g. "Schema"
+
+Schema           {
+  "@context":("http://www.w3.org/ns/shex.jsonld" | ["http://www.w3.org/ns/shex.jsonld"|InnerContext])
+   imports:[IRIREF+]? startActs:[SemAct+]? start:shapeExpr? shapes:[shapeExpr+]?
+}
+
+# Complex context
+InnerContext    {,}
+
+
+# Shape Expressions
+shapeExpr        = (ShapeDecl | ShapeOr | ShapeAnd | ShapeNot | NodeConstraint | Shape | shapeExprLabel | ShapeExternal) ;
+ShapeDecl        {id:shapeExprLabel? abstract:@bool? restricts:[shapeExprLabel+]? shapeExpr:shapeExpr }
+ShapeOr          {id:shapeExprLabel? shapeExprs:[shapeExpr{2,}] }
+ShapeAnd         {id:shapeExprLabel? shapeExprs:[shapeExpr{2,}] }
+ShapeNot         {id:shapeExprLabel? shapeExpr:shapeExpr }
+ShapeExternal    {id:shapeExprLabel?  }
+shapeExprLabel   = IRIREF|BNODE ;
+# TODO: Explain why xsFacet* here causes a fail
+NodeConstraint   {id:shapeExprLabel? nodeKind:("iri"|"bnode"|"nonliteral"|"literal")? datatype:IRIREF? xsFacet? values:[valueSetValue+]? }
+
+# XML Schema facets
+xsFacet          = stringFacet | numericFacet ;
+# TODO: Explain why there is no '|' inside these two constructs
+stringFacet      = (length minlength maxlength):@int | pattern:@string flags:@string? ;
+numericFacet     = (mininclusive minexclusive maxinclusive maxexclusive):@number
+                   (totaldigits fractiondigits):@int ;
+
+# Value Sets
+valueSetValue    = (objectValue | IriStem | IriStemRange | LiteralStem | LiteralStemRange | Language | LanguageStem | LanguageStemRange) ;
+objectValue      = (IRIREF | ObjectLiteral) ;
+ObjectLiteral    { value:@string language:LANGTAG? type:IRIREF? }
+IriStem          { stem:IRIREF }
+IriStemRange     { stem:(IRIREF|Wildcard) exclusions:[(IRIREF | IriStem)+] }
+LiteralStem      { stem:@string }
+LiteralStemRange { stem:(@string|Wildcard) exclusions:[(@string | LiteralStem)+] }
+Language         { languageTag:LANGTAG }
+LanguageStem     { stem:@string }
+LanguageStemRange{ stem:(@string|Wildcard) exclusions:[(LANGTAG | LanguageStem) +] }
+Wildcard         {  }
+
+Shape            {id:shapeExprLabel? extends:[shapeExprLabel+]? closed:@bool? extra:[IRIREF+]? expression:tripleExpr? semActs:[SemAct+]? annotations:[Annotation+]? }
+
+# Triple Expressions
+tripleExpr       = (EachOf | OneOf | TripleConstraint | tripleExprLabel) ;
+EachOf           { id:tripleExprLabel? expressions:[tripleExpr{2,}] min:@int? max:@int? semActs:[SemAct+]? annotations:[Annotation+]? }
+OneOf            { id:tripleExprLabel? expressions:[tripleExpr{2,}] min:@int? max:@int? semActs:[SemAct+]? annotations:[Annotation+]? }
+TripleConstraint { id:tripleExprLabel? inverse:@bool? predicate:IRIREF valueExpr:shapeExpr? min:@int? max:@int? onShapeExpression:shapeExpr? semActs:[SemAct+]? annotations:[Annotation+]? }
+# TODO: Figure out why this indirection causes issues (reference is from tripleExpr)
+# tripleExprRef    = tripleExprLabel ;
+tripleExprLabel  = IRIREF|BNODE ;
+
+SemAct           { name:IRIREF code:@string? }
+Annotation       { predicate:IRIREF object:objectValue }
+
+# Terminals used in productions:
+@terminals
+# Turtle IRIREF without enclosing "<>"s
+IRIREF           : ([^\u0000-\u0020\u005C\u007B\u007D<>"|^`] | UCHAR)*     ; # <http://www.w3.org/TR/turtle/#grammar-production-IRIREF> - "<>"s
+# Turtle BLANK_NODE_LABEL
+BNODE            : '_:' (PN_CHARS_U | [0-9]) ((PN_CHARS | '.')* PN_CHARS)? ; # <http://www.w3.org/TR/turtle/#grammar-production-BLANK_NODE_LABEL>
+# BCP47 Language-Tag
+LANGTAG          : [a-zA-Z]+('-'([a-zA-Z0-9])+)* ;
+
+# Terminals use only in other terminals:
+PN_PREFIX        : PN_CHARS_BASE ((PN_CHARS | '.')* PN_CHARS)? ;
+PN_CHARS_BASE    : [A-Z] | [a-z] | [\u00C0-\u00D6] | [\u00D8-\u00F6]
+                 | [\u00F8-\u02FF] | [\u0370-\u037D] | [\u037F-\u1FFF]
+                 | [\u200C-\u200D] | [\u2070-\u218F] | [\u2C00-\u2FEF]
+                 | [\u3001-\uD7FF] | [\uF900-\uFDCF] | [\uFDF0-\uFFFD]
+                 | [\u10000-\uEFFFF] ;
+PN_CHARS         : PN_CHARS_U | '-' | [0-9] | '\u00B7' | [\u0300-\u036F] | [\u203F-\u2040] ;
+PN_CHARS_U       : PN_CHARS_BASE | '_' ;
+UCHAR            : '\\u' HEX HEX HEX HEX
+                 | '\\U' HEX HEX HEX HEX HEX HEX HEX HEX ;
+HEX              : [0-9] | [A-F] | [a-f] ;
+
+

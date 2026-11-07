@@ -1,0 +1,39 @@
+@@ The rewrite: written callees-first from the recovered statements
+[1;32m$[0m [1mfind . -name '*.py' | sort | xargs wc -l[0m
+    3 ./mdport/__init__.py
+   76 ./mdport/_literals.py
+    8 ./mdport/__main__.py
+  615 ./mdport/markdown.py
+    6 ./port_entry.py
+  708 total
+
+[90m# What was recovered (excerpt of the spec):[0m
+[1;32m$[0m [1mekos_binary_explain … DoItalicsAndBold   (excerpt)[0m
+pseudocode (every line cites its IL offset):
+  if (text.Contains("*") || text.Contains("_")) {  // IL_000B
+      if (!this.StrictBoldItalic) {  // IL_0022
+          text = MarkdownSharp.Markdown._bold.Replace(text, "<strong>$2</strong>");  // IL_0088
+          text = MarkdownSharp.Markdown._italic.Replace(text, "<em>$2</em>");  // IL_009A
+      } else if (!this.AsteriskIntraWordEmphasis) {  // IL_002A
+          text = MarkdownSharp.Markdown._strictBold.Replace(text, "$1<strong>$3</strong>");  // IL_0062
+          text = MarkdownSharp.Markdown._strictItalic.Replace(text, "$1<em>$3</em>");  // IL_0074
+      } else {
+          text = MarkdownSharp.Markdown._semiStrictBold.Replace(text, "$1<strong>$3</strong>");  // IL_003C
+          text = MarkdownSharp.Markdown._semiStrictItalic.Replace(text, "$1<em>$3</em>");  // IL_004E
+      }
+      return text;  // IL_009D
+
+[90m# Written in Python, citing the method token it came from:[0m
+[1;32m$[0m [1msnippet mdport/markdown.py _do_italics_and_bold[0m
+def _do_italics_and_bold(self, text: str) -> str:  # 0x06000043
+    if "*" in text or "_" in text:
+        if not self.strict_bold_italic:
+            text = _BOLD.sub(lambda m: f"<strong>{_g(m, 2)}</strong>", text)
+            text = _ITALIC.sub(lambda m: f"<em>{_g(m, 2)}</em>", text)
+        elif not self.asterisk_intra_word_emphasis:
+            text = _STRICT_BOLD.sub(lambda m: f"{_g(m, 1)}<strong>{_g(m, 3)}</strong>", text)
+            text = _STRICT_ITALIC.sub(lambda m: f"{_g(m, 1)}<em>{_g(m, 3)}</em>", text)
+        else:
+            text = _SEMI_STRICT_BOLD.sub(lambda m: f"{_g(m, 1)}<strong>{_g(m, 3)}</strong>", text)
+            text = _SEMI_STRICT_ITALIC.sub(lambda m: f"{_g(m, 1)}<em>{_g(m, 3)}</em>", text)
+    return text

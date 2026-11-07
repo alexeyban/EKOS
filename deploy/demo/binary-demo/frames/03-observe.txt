@@ -1,0 +1,21 @@
+@@ ekos build: observe the binary (bytes only, nothing is executed)
+[1;32m$[0m [1mcat ekos.toml[0m
+[workspace]
+root = "."
+log-level = "warn"
+
+[observe]
+paths = ["app-binary"]
+ignore-patterns = [".ekos"]
+
+[1;32m$[0m [1mekos init[0m
+ekos.toml already exists — skipping
+Initialized .ekos/ workspace at ~/PycharmProjects/EKOS/demo/binary-demo/work/demo-ws/.ekos
+  artifacts: ~/PycharmProjects/EKOS/demo/binary-demo/work/demo-ws/.ekos/artifacts
+  ledger:    ~/PycharmProjects/EKOS/demo/binary-demo/work/demo-ws/.ekos/ledger
+[1;32m$[0m [1mekos build[0m
+Build complete.
+  Files observed (new): 1
+  Total objects in ledger: 1
+  Connectors re-scanned: 10
+  Snapshot: .ekos/snapshots/20260921T142951Z.json.zst

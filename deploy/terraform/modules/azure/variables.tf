@@ -176,7 +176,7 @@ variable "admin_cidrs" {
 }
 
 variable "allowed_cidrs" {
-  description = "VM only: addresses allowed to reach the console over HTTPS."
+  description = "VM and Container Apps: addresses allowed to reach the console over HTTPS (0.0.0.0/0 = anyone)."
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }

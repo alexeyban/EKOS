@@ -1,0 +1,3 @@
+[console_scripts]
+curies = curies.cli:main
+

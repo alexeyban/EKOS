@@ -1,0 +1,39 @@
+@@ Run the original as-is: this is the behaviour to reproduce
+[1;32m$[0m [1mcat inputs/12-mixed-document.md[0m
+Project Notes
+=============
+
+The **quick** brown fox, see [the docs][docs] for `details`.
+
+## Steps
+
+1. Install it
+2. Configure it:
+
+        key = "value"
+
+3. Run it
+
+> **Note**: keep the config *private*.
+
+[docs]: http://example.com/docs "Docs"
+
+[1;32m$[0m [1mwine mdcli.exe < inputs/12-mixed-document.md     # original, on wine-mono[0m
+<h1>Project Notes</h1>
+
+<p>The <strong>quick</strong> brown fox, see <a href="http://example.com/docs" title="Docs">the docs</a> for <code>details</code>.</p>
+
+<h2>Steps</h2>
+
+<ol>
+<li>Install it</li>
+<li><p>Configure it:</p>
+
+<pre><code>key = "value"
+</code></pre></li>
+<li><p>Run it</p></li>
+</ol>
+
+<blockquote>
+  <p><strong>Note</strong>: keep the config <em>private</em>.</p>
+</blockquote>

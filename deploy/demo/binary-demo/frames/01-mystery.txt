@@ -1,0 +1,12 @@
+@@ The starting point: a compiled library and nothing else
+[90m# All we have is a compiled .NET assembly. No repository, no source, no docs.[0m
+[1;32m$[0m [1mls -l MarkdownSharp.dll[0m
+-rw-rw-r-- 1 legion legion 51712 Sep 21 16:10 MarkdownSharp.dll
+[1;32m$[0m [1mfile MarkdownSharp.dll[0m
+MarkdownSharp.dll: PE32 executable (DLL) (console) Intel 80386 Mono/.Net assembly, for MS Windows
+[90m# The only readable traces are string constants in the metadata:[0m
+[1;32m$[0m [1mstrings -e l -n 34 MarkdownSharp.dll | head -4[0m
+Markdown.AsteriskIntraWordEmphasis
+                        ^[ ]{{0,{0}}}\[([^\[\]]+)\]:  # id = $1
+                          \n?                   # maybe *one* newline
+                        <?(\S+?)>?              # url = $2

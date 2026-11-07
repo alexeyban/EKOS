@@ -1,0 +1,48 @@
+- name: obo
+  description: OBO prefix registry
+  format: shacl.ttl
+  location: http://purl.obolibrary.org/meta/obo_prefixes.ttl
+
+- name: linked_data
+  description: Curated Linked Data Prefixes
+  comments:
+    - note that only a small subset are curated, to serve as tie-breakers for prefixes.cc
+  format: linkml.yaml
+  location: linked_data.curated.yaml
+
+- name: go
+  description: GO Semantic Prefixes
+  format: go-dbxrefs.yaml
+  location: https://raw.githubusercontent.com/geneontology/go-site/master/metadata/db-xrefs.yaml
+
+- name: prefixcc
+  description: prefix.cc registry
+  format: context.jsonld
+  location: http://prefix.cc/context.jsonld
+  comments:
+    - prefix.cc is quite a messy source, it has many outdated expansions for OBO ontologies, lots of strange duplicates etc
+    - we recommend this is not used in isolation but is instead combined, lower in the priority order
+
+- name: bioportal
+  description: bioportal
+  comments:
+    - prefixes are specific to bioportal and may conflict with other contexts
+    - canonical, prefix_alias, and namespace_alias entries are present
+  format: linkml.yaml
+  location: bioportal.curated.yaml
+
+- name: bioregistry
+  description: bioregistry
+  format: bioregistry_api
+
+- name: bioregistry.upper
+  description: bioregistry normalized to upper-case for MIRIAM entries
+  upper: true
+  format: bioregistry_api
+  comments:
+    - The correct form for most databases such as MGI, ZFIN, GO, CGD, COG, EC, ENSEMBL, etc is upper-case
+    - the need for this will disappear if we can curated a preferred form in bioregistry
+
+- name: merged
+  description: merged entries
+  merged_from: ["obo", "go", "linked_data", "bioregistry.upper", "prefixcc"]

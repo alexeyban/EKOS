@@ -1,0 +1,3 @@
+[console_scripts]
+slurp-prefixmaps=prefixmaps.ingest.etl_runner:cli
+

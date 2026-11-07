@@ -1,0 +1,3 @@
+[console_scripts]
+jfl = json_flattener.cli:main
+

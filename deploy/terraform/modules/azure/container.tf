@@ -160,6 +160,16 @@ resource "azurerm_container_app" "ekos" {
     external_enabled = true
     target_port      = 8000
     transport        = "http"
+    # allowed_cidrs narrows who can reach the console at the platform edge (the default,
+    # 0.0.0.0/0, adds no rule). Each range becomes one Allow rule; the rest are denied.
+    dynamic "ip_security_restriction" {
+      for_each = contains(var.allowed_cidrs, "0.0.0.0/0") ? {} : { for i, c in var.allowed_cidrs : "allow-${i}" => c }
+      content {
+        name             = ip_security_restriction.key
+        action           = "Allow"
+        ip_address_range = ip_security_restriction.value
+      }
+    }
     traffic_weight {
       latest_revision = true
       percentage      = 100
