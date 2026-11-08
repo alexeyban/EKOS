@@ -1,4 +1,4 @@
-# Devlog 329 — Superset answers from EKOS; `ekos_sql_generate` over MCP (RFC 0250)
+# Devlog 329 — Superset answers from EKOS; `ekos_sql_generate` over MCP (RFC 0250); public sign-in (RFC 0251)
 
 **Date:** 2026-11-08
 **PRs:** none (direct commits: EKOS main, `alexeyban/ekos-superset` `ekos-4.1.1`, `alexeyban/ekos-demo-public` main)
@@ -68,6 +68,31 @@ must query EKOS via MCP and answer from EKOS.
 
 ---
 
+## RFC 0251 — Public sign-in through Azure Container Apps
+
+### Problem / motivation
+The public demo needs GitHub/Google sign-in for the console (read-only) and Superset (a user role).
+GitHub is not an OIDC provider, and no console binding meant "everyone who signed in".
+
+### What was built
+| Piece | File |
+|---|---|
+| `platform_auth = "aca"`, `platform_auth_providers`, `signed_in_group`; `Settings.signs_in` | `web/api/app/settings.py`, `console_file.py` |
+| Person from `X-MS-CLIENT-PRINCIPAL-IDP`/`-NAME` (`<idp>:<name>`); token wins; sign-in page; logout via `/.auth/logout` | `web/api/app/auth.py`, `routes/auth.py`, UI `Layout.tsx`, `api/client.ts` |
+| The signed-in group in every user's bindings | `web/api/app/authz.py` |
+| Superset: `PlatformUser` WSGI middleware → `REMOTE_USER`; `EkosPublic` role (Gamma − SQL Lab + Ask (AI) + the database) and `EKOS_ADMINS` | `ekos-superset` `superset/ekos_ai/{remote_user,public_role}.py` |
+| Terraform: `public_sign_in`, client ids, Key Vault secret names, `terraform_data` + `az containerapp auth …`; console and Superset open to anyone only with it on; iDempiere stays IP-limited | `ekos-demo-public/terraform/{auth,main,idempiere,variables}.tf` |
+| Tests: 7 console, 6 Superset (+ a real-image probe: header sign-in registers `EkosPublic`, owner `Admin`, SQL Lab refused, no headers → login) | `web/api/tests/test_platform_auth.py`, `tests/unit_tests/ekos_ai/test_public_access.py` |
+
+### Decisions
+- Container Apps' authentication over a second OIDC issuer (Dex): no sign-in code, both providers.
+- The console allows anonymous requests and decides itself, so Superset's bearer-token MCP calls pass;
+  Superset requires sign-in outright (it has no server-to-server callers).
+- azurerm has no auth resource and the azapi provider's GitHub-hosted release could not be fetched from
+  this machine (timeouts, sandbox or not), so Terraform applies the settings with the Azure CLI.
+
+---
+
 ## Knowledge Captured
 - `requests` decodes a JSON body without a charset as Latin-1: EKOS's `—` came back as `â€”`. Set
   `response.encoding = "utf-8"` before reading `.text`.
@@ -79,6 +104,12 @@ must query EKOS via MCP and answer from EKOS.
   to compare with. Worth a look.
 - The fork's CI mounts the tests at `/t` with `--noconftest`: test helpers must be imported relatively
   (`from .fake_ekos import …`), not as `tests.unit_tests…`.
+- **The Ask (AI) page answered 500 in the published fork image** (`TemplateNotFound:
+  ekos_ai/ask.html`): Flask-AppBuilder resolves a view's relative `template_folder` against its own
+  package. An absolute path beside the module fixes it; found only by driving the real image.
+- `Settings(oidc_issuer=…)` is ignored: the field reads the alias `EKOS_CONSOLE_OIDC_ISSUER` only; set the
+  variable in a test.
+- The console has no single-workspace GET route; visibility is `GET /api/workspaces`.
 - The PostToolUse hook asks for the Sonar routine after any `git push`; it applies to EKOS main only.
 
 ---

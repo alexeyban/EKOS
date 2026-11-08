@@ -49,6 +49,10 @@ def _bindings(principal: Principal) -> list[models.RoleBinding]:
     if principal.kind == "user":
         holders = [("user", principal.id)]
         holders += [("group", g) for g in models.groups_of(principal.id, set(principal.claims))]
+        # RFC 0251: everyone who signed in is in this group (a public demo's readers).
+        everyone = get_settings().signed_in_group
+        if everyone and ("group", everyone) not in holders:
+            holders.append(("group", everyone))
         return models.bindings_for(holders)
     return []
 

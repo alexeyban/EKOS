@@ -169,6 +169,24 @@ sign-in with that address.
 
 Removing a role takes effect on that person's next request.
 
+### Sign-in by the platform: a public demo (RFC 0251)
+
+On Azure Container Apps the platform can do the sign-in (GitHub, Google, …) instead of an OIDC
+issuer. Set `platform_auth = "aca"` (`EKOS_CONSOLE_PLATFORM_AUTH`) and turn on the app's
+authentication with *allow unauthenticated requests*: the console reads the person from the
+headers Container Apps sets (`X-MS-CLIENT-PRINCIPAL-IDP` / `-NAME`) and calls them
+`<provider>:<name>` — `github:octocat`, `google:ann@example.com`. Name owners the same way in
+`EKOS_CONSOLE_OWNERS`. The sign-in page offers `platform_auth_providers` (default
+`github,google`); API tokens keep working, so agents and Superset reach `/mcp/…` as before.
+
+Only use it where the console is reachable **only** through that authentication: Container Apps
+strips those headers from outside requests, but another app in the same environment could send
+them. It cannot be combined with OIDC or local mode, and static tokens are refused.
+
+To give everyone who signs in read access: create a group (**Admin → Groups**), bind `viewer`
+on the project to it, and put the group's id in `signed_in_group`. Every signed-in person is in
+that group; a token never is. Remove the binding to close the project again.
+
 ## 4. Projects
 
 A tenant admin adds a project in **Add a workspace → New project from a source directory**,

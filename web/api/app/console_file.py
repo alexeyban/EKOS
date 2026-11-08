@@ -116,6 +116,15 @@ FIELDS: dict[str, Field] = {
         _DEMO,
         "The same per API token: a service such as Superset, which limits its own users",
     ),
+    "platform_auth": Field(
+        "Sign-in",
+        "aca: Azure Container Apps' authentication signs people in (GitHub, Google); "
+        "only behind it (RFC 0251)",
+    ),
+    "platform_auth_providers": Field("Sign-in", "Providers on the sign-in page, comma-separated"),
+    "signed_in_group": Field(
+        "Sign-in", "A group every signed-in person is in: bind it to give everyone a role"
+    ),
     "moderation_enabled": Field(
         _DEMO,
         "Check every question before it is answered: bans, blocks and daily limits (RFC 0249)",

@@ -122,6 +122,22 @@ async def _tools_list(caller: _Caller) -> dict[str, Any]:
     return {"tools": [t for t in tools if caller.may(str(t.get("name", "")))]}
 
 
+def _metered_refusal(caller: _Caller, name: str) -> str | None:
+    """RFC 0250: for a tool that calls a model, spend one of today's calls (audited), or say why
+    not. `None` for every other tool."""
+    if name not in mcp_policy.METERED_TOOLS:
+        return None
+    why = caller.spend_metered(name)
+    authz.audit(
+        caller.principal,
+        f"mcp: {name} (metered)",
+        "allowed" if why is None else "denied",
+        tenant_id=caller.ws.tenant_id,
+        workspace_id=caller.ws.id,
+    )
+    return why
+
+
 async def _tools_call(caller: _Caller, params: Any) -> dict[str, Any]:
     name = params.get("name") if isinstance(params, dict) else None
     arguments = params.get("arguments") if isinstance(params, dict) else None
@@ -146,17 +162,9 @@ async def _tools_call(caller: _Caller, params: Any) -> dict[str, Any]:
                 f"{name} is not available to a reader with restricted access to this project"
             )
         return _refusal(f"{name} needs the right to {mcp_policy.action_for(name)} this project")
-    if name in mcp_policy.METERED_TOOLS:
-        why = caller.spend_metered(name)
-        authz.audit(
-            caller.principal,
-            f"mcp: {name} (metered)",
-            "allowed" if why is None else "denied",
-            tenant_id=caller.ws.tenant_id,
-            workspace_id=caller.ws.id,
-        )
-        if why is not None:
-            return _refusal(why)
+    why = _metered_refusal(caller, name)
+    if why is not None:
+        return _refusal(why)
     try:
         # Built from the name and arguments only: whatever else the client sent, `_meta`
         # included, stops here. The scope is the one computed from the caller's bindings.

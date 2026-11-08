@@ -7,6 +7,8 @@ interface Me {
   mode: "oidc" | "token" | "local";
   kind?: string;
   email: string | null;
+  /** RFC 0251: the platform sign-in name (`github:<login>`) when there is no e-mail. */
+  name?: string | null;
   role: "read" | "write";
   // RFC 0180. Optional so an older API still type-checks.
   owner?: boolean;
@@ -66,11 +68,15 @@ function Identity({ me }: { me: Me }) {
   const qc = useQueryClient();
   return (
     <span className="muted" style={{ fontSize: "0.82rem" }}>
-      {me.email ?? (me.kind === "local" ? "this machine" : "token")} · <span className={`chip ${me.role === "write" ? "ok" : ""}`}>{me.role}</span>{" "}
+      {me.email ?? me.name ?? (me.kind === "local" ? "this machine" : "token")} · <span className={`chip ${me.role === "write" ? "ok" : ""}`}>{me.role}</span>{" "}
       <button
         className="linkish"
         onClick={async () => {
-          await logout();
+          const out = await logout();
+          if (out?.redirect) {
+            window.location.href = out.redirect;
+            return;
+          }
           // Refetch every active query under the now-cleared session. The `me` query 401s, which
           // `Layout`'s `unauthorized` check turns into the sign-in screen — without this refetch
           // the stale `me.data` would keep the console looking signed in.

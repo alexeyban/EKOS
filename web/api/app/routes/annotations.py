@@ -67,7 +67,7 @@ async def _run(
     settings: Settings, ws: models.Workspace, build, principal: Principal, typed: str | None
 ) -> dict:
     try:
-        who = semantics_write.reviewer_for(principal, settings.oidc_enabled, typed)
+        who = semantics_write.reviewer_for(principal, settings.signs_in, typed)
         message = await semantics_write.review(settings.ekos_bin, ws.path, build(who))
     except semantics_write.ReviewError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

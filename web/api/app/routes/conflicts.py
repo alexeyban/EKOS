@@ -72,7 +72,7 @@ async def resolve(
 ) -> dict:
     """Decide one conflict — `ekos conflicts resolve <id> --pick=<n> | --both-valid --as <you>`."""
     try:
-        who = semantics_write.reviewer_for(principal, settings.oidc_enabled, body.reviewer)
+        who = semantics_write.reviewer_for(principal, settings.signs_in, body.reviewer)
         argv = conflicts_write.resolve_argv(
             conflict_id, who, pick=body.pick, both_valid=body.both_valid, note=body.note
         )

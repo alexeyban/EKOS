@@ -183,7 +183,7 @@ class ReviewIn(BaseModel):
 
 def _reviewer(principal: Principal, settings: Settings, typed: str | None) -> str:
     try:
-        return semantics_write.reviewer_for(principal, settings.oidc_enabled, typed)
+        return semantics_write.reviewer_for(principal, settings.signs_in, typed)
     except semantics_write.ReviewError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

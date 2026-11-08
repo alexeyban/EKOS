@@ -43,7 +43,8 @@ class LocalCode(BaseModel):
 def _mode(settings: Settings) -> str:
     if settings.local:
         return "local"
-    return "oidc" if settings.oidc_enabled else "token"
+    # RFC 0251: platform sign-in looks like OIDC to the UI — a "Sign in" button to /api/auth/login.
+    return "oidc" if settings.signs_in else "token"
 
 
 @router.get("/me", responses={401: UNAUTHORIZED})
@@ -78,6 +79,7 @@ async def me(
         "mode": _mode(settings),
         "kind": principal.kind,
         "email": principal.email,
+        "name": principal.subject if principal.kind == "user" else None,
         "role": "write" if writes else "read",
         "owner": principal.owner,
         "tenants": tenants,
@@ -85,9 +87,10 @@ async def me(
 
 
 @router.post("/logout")
-async def logout(request: Request) -> dict:
+async def logout(request: Request, settings: Settings = Depends(get_settings)) -> dict:
     request.session.pop("user", None)
-    return {"ok": True}
+    # RFC 0251: the platform holds the sign-in; the UI follows `redirect` to end it there.
+    return {"ok": True, **({"redirect": "/.auth/logout"} if settings.aca_auth else {})}
 
 
 @router.post("/token-login", responses={400: BAD_REQUEST, 401: UNAUTHORIZED})
@@ -96,8 +99,8 @@ async def token_login(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> dict:
-    if settings.oidc_enabled:
-        raise HTTPException(status_code=400, detail="OIDC is configured; use /api/auth/login")
+    if settings.signs_in:
+        raise HTTPException(status_code=400, detail="sign-in is configured; use /api/auth/login")
     if settings.production:
         raise HTTPException(status_code=400, detail="static tokens are off in production mode")
     if settings.local:
@@ -138,8 +141,36 @@ async def local_code(
     return {"ok": True}
 
 
+_PROVIDER_LABELS = {"github": "GitHub", "google": "Google", "aad": "Microsoft", "x": "X"}
+
+
+def platform_login_page(settings: Settings) -> str:
+    """RFC 0251: one link per provider the platform's authentication offers."""
+    import html
+
+    links = "".join(
+        f'<p><a class="b" href="/.auth/login/{html.escape(p)}?post_login_redirect_uri=/">'
+        f"Sign in with {html.escape(_PROVIDER_LABELS.get(p, p))}</a></p>"
+        for p in settings.platform_provider_list()
+    )
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>Sign in · EKOS</title><style>"
+        "body{font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem}"
+        ".b{display:block;padding:.7rem 1rem;border:1px solid #888;border-radius:6px;"
+        "text-decoration:none;color:inherit}</style></head><body><h1>Sign in to EKOS</h1>"
+        "<p>Sign in to read this demo. EKOS keeps only the name your provider gives.</p>"
+        f"{links}</body></html>"
+    )
+
+
 @router.get("/login", responses={400: BAD_REQUEST, 502: BAD_GATEWAY})
 async def login(request: Request, settings: Settings = Depends(get_settings)):
+    if settings.aca_auth:
+        from fastapi.responses import HTMLResponse
+
+        return HTMLResponse(platform_login_page(settings))
     if not settings.oidc_enabled:
         raise HTTPException(status_code=400, detail="OIDC is not configured")
     try:

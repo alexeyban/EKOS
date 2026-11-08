@@ -107,12 +107,37 @@ class Settings(BaseSettings):
     # everyone-can-read mapping is off, so access comes from role bindings only.
     production: bool = False
 
+    # ── RFC 0251: sign-in done by the platform in front of the console ─────
+    # "aca": Azure Container Apps' built-in authentication signs people in (GitHub, Google, …)
+    # and the console reads who they are from the headers it sets, which it strips from outside
+    # requests. Only for a console whose ingress is behind that authentication, in an environment
+    # holding only this deployment's apps. Cannot be combined with OIDC or local mode.
+    platform_auth: Literal["", "aca"] = ""
+    # The providers offered on the sign-in page, comma-separated (`/.auth/login/<provider>`).
+    platform_auth_providers: str = "github,google"
+    # The id of a console group every signed-in person counts as a member of: a binding of this
+    # group gives everyone who signs in that role (a public demo's read-only access). Never a token.
+    signed_in_group: str = ""
+
     def owner_set(self) -> set[str]:
         return {v.strip().lower() for v in self.owners.split(",") if v.strip()}
 
     @property
     def oidc_enabled(self) -> bool:
         return bool(self.oidc_issuer)
+
+    @property
+    def aca_auth(self) -> bool:
+        return self.platform_auth == "aca"
+
+    @property
+    def signs_in(self) -> bool:
+        """People sign in with an identity (OIDC or the platform's): static tokens are refused
+        and a review is recorded under the person's own name."""
+        return self.oidc_enabled or self.aca_auth
+
+    def platform_provider_list(self) -> list[str]:
+        return [p.strip() for p in self.platform_auth_providers.split(",") if p.strip()]
 
     def oidc_write_value_set(self) -> set[str]:
         return {v.strip() for v in self.oidc_write_values.split(",") if v.strip()}
@@ -211,8 +236,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _local_mode_is_alone(self) -> Settings:
+        if self.aca_auth and self.oidc_enabled:
+            raise ValueError(
+                "platform_auth = aca signs people in through the platform; unset "
+                "EKOS_CONSOLE_OIDC_ISSUER"
+            )
         if self.mode != "local":
             return self
+        if self.aca_auth:
+            raise ValueError("local mode signs in without a provider; unset platform_auth")
         if self.oidc_enabled:
             raise ValueError(
                 "local mode signs in without a provider; unset EKOS_CONSOLE_OIDC_ISSUER or use "
@@ -244,8 +276,11 @@ class Settings(BaseSettings):
         if not self.production:
             return self
         missing = []
-        if not self.oidc_enabled:
-            missing.append("EKOS_CONSOLE_OIDC_ISSUER (static tokens are for development)")
+        if not self.signs_in:
+            missing.append(
+                "EKOS_CONSOLE_OIDC_ISSUER or EKOS_CONSOLE_PLATFORM_AUTH (static tokens are for "
+                "development)"
+            )
         if not self.owner_set():
             missing.append("EKOS_CONSOLE_OWNERS (nobody could administer the console)")
         # With a home, a generated key is kept in it (`_home_session_key`), as good as a set one.
@@ -271,7 +306,7 @@ class Settings(BaseSettings):
                     "keep them."
                 )
                 self.session_secret = secrets.token_urlsafe(32)
-        if not self.oidc_enabled and not self.local and self.console_token == DEFAULT_CONSOLE_TOKEN:
+        if not self.signs_in and not self.local and self.console_token == DEFAULT_CONSOLE_TOKEN:
             log.warning(
                 "EKOS_CONSOLE_CONSOLE_TOKEN is the published default %r: anyone who can reach this "
                 "console can read every workspace. Set it in api/.env for anything but local use.",

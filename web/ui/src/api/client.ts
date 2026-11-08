@@ -45,4 +45,5 @@ export const apiDelete = (path: string) => request<void>("DELETE", path);
 
 export const tokenLogin = (token: string) => apiPost<{ role: string }>("/auth/token-login", { token });
 export const localLogin = (code: string) => apiPost<{ ok: boolean }>("/auth/local", { code });
-export const logout = () => apiPost("/auth/logout");
+// RFC 0251: behind the platform's sign-in the answer names where to end it (`/.auth/logout`).
+export const logout = () => apiPost<{ ok: boolean; redirect?: string }>("/auth/logout");

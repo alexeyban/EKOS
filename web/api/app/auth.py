@@ -15,7 +15,9 @@ decided in `authz`, and only there.
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -159,7 +161,7 @@ def _static(role: str) -> Principal:
 
 def static_role(supplied: str, settings: Settings) -> str | None:
     """Which static console token `supplied` is, if static tokens are accepted at all."""
-    if settings.oidc_enabled or settings.production or settings.local or not supplied:
+    if settings.signs_in or settings.production or settings.local or not supplied:
         return None
     if settings.console_write_token and secrets.compare_digest(
         supplied, settings.console_write_token
@@ -203,7 +205,7 @@ def _from_session(request: Request, settings: Settings) -> Principal | None:
     if kind == "local":
         return None
     if kind == "static":
-        if settings.oidc_enabled or settings.production or data.get("id") not in ("read", "write"):
+        if settings.signs_in or settings.production or data.get("id") not in ("read", "write"):
             return None
         return _static(data["id"])
     if kind == "user" and settings.oidc_enabled:
@@ -214,12 +216,48 @@ def _from_session(request: Request, settings: Settings) -> Principal | None:
     return None
 
 
+# RFC 0251: the headers Azure Container Apps' authentication sets after sign-in. It strips them
+# from every outside request, so with `platform_auth = "aca"` only it can have set them.
+ACA_IDP = "x-ms-client-principal-idp"
+ACA_NAME = "x-ms-client-principal-name"
+_ACA_PART = re.compile(r"^[A-Za-z0-9._@+-]{1,200}$")
+_ACA_TOUCH_GRANULARITY = timedelta(hours=1)
+
+
+def aca_subject(idp: str, name: str) -> str | None:
+    """`<idp>:<name>`, lower case, or None for a header pair that is missing or malformed."""
+    idp, name = idp.strip().lower(), name.strip().lower()
+    if not idp or not name or not _ACA_PART.match(idp) or not _ACA_PART.match(name):
+        return None
+    return f"{idp}:{name}"
+
+
+def _from_platform(request: Request, settings: Settings) -> Principal | None:
+    subject = aca_subject(request.headers.get(ACA_IDP, ""), request.headers.get(ACA_NAME, ""))
+    if subject is None:
+        return None
+    now = models._now()
+    user = models.user_by_subject(subject)
+    if user is None:
+        email = subject.split(":", 1)[1] if "@" in subject else ""
+        user = models.User(
+            id=uuid.uuid4().hex[:16], subject=subject, email=email, last_login_at=now
+        )
+        models.add(user)
+    elif user.last_login_at is None or now - _aware(user.last_login_at) > _ACA_TOUCH_GRANULARITY:
+        models.touch_user(user.id, last_login_at=now)
+    return user_principal(user, [], settings)
+
+
 def resolve_principal(request: Request, authorization: str, settings: Settings) -> Principal | None:
     prefix = "Bearer "
     supplied = authorization[len(prefix) :] if authorization.startswith(prefix) else ""
     # An explicit API token is a deliberate choice of identity; it is not overridden by a cookie.
     if supplied.startswith(TOKEN_PREFIX):
         return _from_api_token(supplied)
+    if settings.aca_auth:
+        # Sign-in is the platform's: no session, no static token. No headers, nobody.
+        return _from_platform(request, settings)
     from_session = _from_session(request, settings)
     if from_session is not None:
         return from_session

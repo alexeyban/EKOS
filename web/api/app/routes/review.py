@@ -129,7 +129,7 @@ async def decide(
 ) -> dict:
     """Decide items — `ekos review <subject> … --as <you> -- <items>`."""
     try:
-        who = semantics_write.reviewer_for(principal, settings.oidc_enabled, body.reviewer)
+        who = semantics_write.reviewer_for(principal, settings.signs_in, body.reviewer)
     except semantics_write.ReviewError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     message = await _write(
@@ -160,7 +160,7 @@ async def signoff(
     if body.confirm.strip() != subject:
         raise HTTPException(status_code=400, detail=f"type `{subject}` to confirm the sign-off")
     try:
-        who = semantics_write.reviewer_for(principal, settings.oidc_enabled, body.reviewer)
+        who = semantics_write.reviewer_for(principal, settings.signs_in, body.reviewer)
     except semantics_write.ReviewError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     message = await _write(
@@ -179,7 +179,7 @@ async def revoke(
 ) -> dict:
     """Withdraw a subject's sign-off."""
     try:
-        who = semantics_write.reviewer_for(principal, settings.oidc_enabled, body.reviewer)
+        who = semantics_write.reviewer_for(principal, settings.signs_in, body.reviewer)
     except semantics_write.ReviewError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     message = await _write(
