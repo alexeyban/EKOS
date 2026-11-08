@@ -208,11 +208,14 @@ resource "azurerm_container_app" "ekos" {
     max_replicas                     = 1
     termination_grace_period_seconds = 60
 
-    # NFS shares start owned by root; the image runs as uid 1000.
+    # NFS shares start owned by root; the image runs as uid 1000. Everything not already owned
+    # by it is handed over: files uploaded to the share from outside (a project published with
+    # `az storage file upload-batch`) arrive owned by root, and a write there failed with
+    # "Permission denied". After the first start this touches nothing.
     init_container {
       name    = "own-volumes"
       image   = "docker.io/library/busybox:1.37"
-      command = ["sh", "-c", "chown 1000:1000 /mnt/home /mnt/sources"]
+      command = ["sh", "-c", "chown 1000:1000 /mnt/home /mnt/sources && find /mnt/home /mnt/sources -xdev ! -user 1000 -exec chown 1000:1000 {} +"]
       cpu     = 0.25
       memory  = "0.5Gi"
       volume_mounts {
