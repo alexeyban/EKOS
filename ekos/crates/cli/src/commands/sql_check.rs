@@ -71,7 +71,11 @@ pub fn schema_of(
 }
 
 /// [`schema_of`] for a workspace: its own Ossie file list.
-fn schema_for(config: &EkosConfig, cwd: &Path, store: &dyn KnowledgeReader) -> Result<Schema> {
+pub(crate) fn schema_for(
+    config: &EkosConfig,
+    cwd: &Path,
+    store: &dyn KnowledgeReader,
+) -> Result<Schema> {
     schema_of(
         store,
         super::export::current_ossie_files(config, cwd).as_ref(),
@@ -162,6 +166,15 @@ pub fn agent_check(
     let dialect = dialect_name(config, args.get("dialect").and_then(Value::as_str));
     match args.get("sql").and_then(Value::as_str) {
         Some(sql) => check(&schema_for(config, workspace, store)?, sql, &dialect),
+        None => Ok(json!({ "dialect": dialect, "dialect_notes": notes(&dialect)? })),
+    }
+}
+
+/// [`agent_check`] over a schema already built (the MCP server keeps one per store state).
+pub fn agent_check_schema(config: &EkosConfig, schema: &Schema, args: &Value) -> Result<Value> {
+    let dialect = dialect_name(config, args.get("dialect").and_then(Value::as_str));
+    match args.get("sql").and_then(Value::as_str) {
+        Some(sql) => check(schema, sql, &dialect),
         None => Ok(json!({ "dialect": dialect, "dialect_notes": notes(&dialect)? })),
     }
 }
@@ -659,6 +672,42 @@ pub fn agent_generate_with(
     args: &Value,
     make_llm: &LlmFactory<'_>,
 ) -> Result<Value> {
+    generate_core(
+        config,
+        workspace,
+        &|| schema_for(config, workspace, store),
+        args,
+        make_llm,
+    )
+}
+
+/// [`agent_generate`] over a schema already built (the MCP server keeps one per store state).
+pub fn agent_generate_schema(
+    config: &EkosConfig,
+    workspace: &Path,
+    schema: &Schema,
+    args: &Value,
+) -> Result<Value> {
+    generate_core(config, workspace, &|| Ok(schema.clone()), args, &|| {
+        super::recover::build_llm_provider_strict_for(
+            config,
+            ekos_recovery::Task::NlSql,
+            &config.artifact_dir(workspace),
+        )
+    })
+}
+
+type SchemaSource<'a> = dyn Fn() -> Result<Schema> + 'a;
+
+/// The checks, the cap and the agent; the schema is built (or taken) only once a model call
+/// is going to happen.
+fn generate_core(
+    config: &EkosConfig,
+    workspace: &Path,
+    schema_source: &SchemaSource<'_>,
+    args: &Value,
+    make_llm: &LlmFactory<'_>,
+) -> Result<Value> {
     let limits = &config.sql_generate;
     if !limits.mcp {
         bail!("ekos_sql_generate is off: set `[sql-generate] mcp = true` in ekos.toml");
@@ -693,7 +742,7 @@ pub fn agent_generate_with(
                 _ => None,
             });
     let target = Target::pick(config, database, None)?;
-    let schema = target.narrow(schema_for(config, workspace, store)?);
+    let schema = target.narrow(schema_source()?);
     if schema.tables.is_empty() {
         bail!("the ledger holds no tables to write SQL against — run the pipeline first");
     }

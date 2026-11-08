@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.4.2 — 2026-11-08
+
+**Fixes**
+- **The MCP server keeps the SQL schema between calls.** `ekos_sql_check` and `ekos_sql_generate`
+  rebuilt it from the whole store on every call (20–25 s on a 140,000-object project); it is now
+  built once per store state and read scope and dropped when the store changes (0.003 s for a
+  repeat check). `ekos_ossie_export` is classified expensive, so a repeated export comes from the
+  result cache (37 s → 0.025 s).
+- **Console:** `mcp_call_timeout_seconds` (default 30) — how long the console waits for one reply
+  from a project's MCP server; a large project's first schema read can need more.
+
 ## v1.4.1 — 2026-11-08
 
 RFCs 0250–0251, devlog 329.

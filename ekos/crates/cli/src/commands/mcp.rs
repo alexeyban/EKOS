@@ -87,6 +87,10 @@ pub struct StoreCache {
     /// fingerprint check below), so a cached answer can never outlive the workspace state it was
     /// computed against.
     result_cache: std::collections::HashMap<(String, String), Value>,
+    /// The SQL schema built from the whole store (`sql_check::schema_for`), with the scope key it
+    /// was built under. Building it walks every object (20 s on a 140k-object project), and
+    /// `ekos_sql_check` / `ekos_sql_generate` need it on every call; cleared with `result_cache`.
+    schema: Option<(String, std::sync::Arc<ekos_sqlgen::Schema>)>,
     /// RFC 0171 — the last source-freshness check and when it ran, reused for
     /// `[freshness] ttl-seconds` so a busy server does not walk the tree on every call.
     freshness: Option<(std::time::Instant, crate::freshness::Freshness)>,
@@ -205,6 +209,7 @@ impl StoreCache {
             request_scope: None,
             fingerprint: None,
             result_cache: std::collections::HashMap::new(),
+            schema: None,
             freshness: None,
         }
     }
@@ -272,6 +277,28 @@ impl StoreCache {
         Ok(self.store.as_ref().expect("just set above"))
     }
 
+    /// The SQL schema of the current store under the current call's scope, built once and
+    /// reused until the store changes (then `refresh` drops it).
+    fn schema(
+        &mut self,
+        config: &EkosConfig,
+        workspace: &Path,
+    ) -> Result<std::sync::Arc<ekos_sqlgen::Schema>> {
+        self.refresh(config, workspace)?;
+        let key = self.scope_key();
+        if let Some((built_for, schema)) = &self.schema
+            && *built_for == key
+        {
+            return Ok(std::sync::Arc::clone(schema));
+        }
+        let built = {
+            let ledger = self.get(config, workspace)?;
+            std::sync::Arc::new(super::sql_check::schema_for(config, workspace, ledger)?)
+        };
+        self.schema = Some((key, std::sync::Arc::clone(&built)));
+        Ok(built)
+    }
+
     /// Reopens the store (and clears the RFC 0114 result cache) if the on-disk fingerprint has
     /// moved since the last successful open — the same check `get` does, factored out so
     /// `tools_call` can force it *before* consulting the result cache even on a call that turns
@@ -288,6 +315,7 @@ impl StoreCache {
                 Ok(RefreshOutcome::Unchanged) => return Ok(()),
                 Ok(RefreshOutcome::Incremental { .. } | RefreshOutcome::Reopened) => {
                     self.result_cache.clear();
+                    self.schema = None;
                     return Ok(());
                 }
                 // No snapshot to refresh (SQLite, partitioned, distributed): fall through to the
@@ -304,6 +332,7 @@ impl StoreCache {
             self.store = Some(ScopedStore::new(open_store_read_only(config, workspace)?));
             self.fingerprint = store_fingerprint(&root);
             self.result_cache.clear();
+            self.schema = None;
             // A reopened store starts unrestricted; the call in progress keeps its scope.
             self.apply_scope()?;
         }
@@ -1926,15 +1955,19 @@ fn call_tool(
     }
 
     if name == "ekos_sql_check" {
-        let ledger = cache.get(config, workspace)?;
-        return super::sql_check::agent_check(config, workspace, ledger, args);
+        if args.get("sql").and_then(Value::as_str).is_none() {
+            let ledger = cache.get(config, workspace)?;
+            return super::sql_check::agent_check(config, workspace, ledger, args);
+        }
+        let schema = cache.schema(config, workspace)?;
+        return super::sql_check::agent_check_schema(config, &schema, args);
     }
 
     // RFC 0250: a model call. `agent_generate` refuses unless `[sql-generate] mcp` is on, and
     // applies the metered-call rule and the daily cap itself.
     if name == "ekos_sql_generate" {
-        let ledger = cache.get(config, workspace)?;
-        return super::sql_check::agent_generate(config, workspace, ledger, args);
+        let schema = cache.schema(config, workspace)?;
+        return super::sql_check::agent_generate_schema(config, workspace, &schema, args);
     }
 
     if name == "ekos_signoff_status" {
@@ -6426,6 +6459,49 @@ mod tests {
         assert_eq!(
             super::super::sql_check::Usage::today(&config, tmp.path(), &day).calls,
             0
+        );
+    }
+    #[test]
+    fn sql_check_reuses_the_schema_until_the_ledger_changes() {
+        use ekos_kir::{KirObject, ObjectKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let table = |name: &str| {
+            let mut t = KirObject::new(name, ObjectKind::Table);
+            t.properties.insert(
+                "columns".into(),
+                json!([{"name": "id", "data_type": "integer", "primary_key": true}]),
+            );
+            t
+        };
+        let writer = ekos_ledger::FactLedger::open(&facts_dir(&config, dir)).unwrap();
+        writer.append_object(&table("orders")).unwrap();
+        let mut cache = StoreCache::new();
+        let check = |cache: &mut StoreCache, sql: &str| -> Value {
+            let line = req(
+                1,
+                "tools/call",
+                json!({ "name": "ekos_sql_check", "arguments": { "sql": sql } }),
+            );
+            tool_json(&parse(&handle_message(&config, dir, &line, cache).unwrap()))
+        };
+        assert_eq!(
+            check(&mut cache, "select id from orders")["tables_known"],
+            1
+        );
+        let first = std::sync::Arc::clone(&cache.schema.as_ref().unwrap().1);
+        check(&mut cache, "select id from orders");
+        assert!(
+            std::sync::Arc::ptr_eq(&first, &cache.schema.as_ref().unwrap().1),
+            "an unchanged store reuses the schema"
+        );
+
+        // A new table: the next check sees it (the cached schema was dropped and rebuilt).
+        writer.append_object(&table("customers")).unwrap();
+        assert_eq!(
+            check(&mut cache, "select id from customers")["tables_known"],
+            2
         );
     }
 }

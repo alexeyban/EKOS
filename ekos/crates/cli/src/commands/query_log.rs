@@ -159,6 +159,11 @@ pub fn classify_tool(name: &str, args: &serde_json::Value) -> (CostClass, String
             CostClass::Expensive,
             "whole-store walk (all_objects + all_relationships)".into(),
         ),
+        // A BI tool asks for the same model on every question (34 s on a 140k-object project).
+        "ekos_ossie_export" => (
+            CostClass::Expensive,
+            "whole-store walk (every table, column and foreign key)".into(),
+        ),
         _ => (CostClass::Cheap, "not classified as expensive".into()),
     }
 }

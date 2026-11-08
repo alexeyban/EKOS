@@ -165,6 +165,10 @@ class Settings(BaseSettings):
     # used longest ago. Each server holds its project's index in memory.
     mcp_idle_seconds: int = 900
     mcp_max_servers: int = 8
+    # How long the console waits for one reply from a project's MCP server. A large project's
+    # first schema read (ekos_ossie_export, ekos_sql_check) walks the whole store; later calls
+    # are served from the server's cache.
+    mcp_call_timeout_seconds: float = Field(default=30.0, gt=0, le=3600)
 
     # ── Chat (RFC 0187) ─────────────────────────────────────────────────────
     # `anthropic`, `openai` (any OpenAI-compatible host), `ollama`, or empty for no chat.

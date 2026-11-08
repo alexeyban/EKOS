@@ -92,6 +92,9 @@ FIELDS: dict[str, Field] = {
     "mcp_port_base": Field("MCP", "First loopback port for project MCP servers"),
     "mcp_idle_seconds": Field("MCP", "Stop a project's MCP server unused this long (0: never)"),
     "mcp_max_servers": Field("MCP", "Most project MCP servers running at once"),
+    "mcp_call_timeout_seconds": Field(
+        "MCP", "Seconds to wait for one reply from a project's MCP server"
+    ),
     "chat_provider": Field(
         "Chat", "anthropic, openai (any OpenAI-compatible host), ollama, or empty for no chat"
     ),

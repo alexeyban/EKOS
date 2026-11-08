@@ -231,7 +231,9 @@ class McpSupervisor:
             return handle
 
         try:
-            client = EkosMcpClient("127.0.0.1", port, token)
+            client = EkosMcpClient(
+                "127.0.0.1", port, token, timeout=self._settings.mcp_call_timeout_seconds
+            )
             await asyncio.wait_for(self._connect_when_up(client, handle), timeout=_READY_TIMEOUT)
             await client.list_tools()
             handle.client = client

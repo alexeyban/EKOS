@@ -93,6 +93,17 @@ GitHub is not an OIDC provider, and no console binding meant "everyone who signe
 
 ---
 
+## Azure demo deployment — what broke and why (later the same day)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Ledger did not open on Azure (`expected value at line 1 column 1`) | the 1 GB upload to Azure Files timed out once: 30 files (`manifest.json`, 28 segments) arrived **full-length but partly zero** — size checks passed | byte-for-byte compare after download; re-upload the 30 |
+| Every Ask (AI) call failed after 30/60 s | `ekos_sql_check` / `ekos_ossie_export` rebuilt the schema from all 142k objects per call (20–37 s locally, longer on Azure); the console waits 30 s per reply | schema cache in `StoreCache` + ossie export classified expensive (v1.4.2); `mcp_call_timeout_seconds`; idle stop off for the demo |
+| Superset fork never started (`ActivationFailed`), plain Superset kept serving | the start-up role script used `DatabaseDAO`, whose per-user filter needs a signed-in user (`AttributeError: user`), under `set -e` | query `Database` directly; the step can no longer stop start-up (ekos-superset 8e461eb) |
+| `/ekos-ai/` answered 500 | Flask-AppBuilder resolved the view's relative template folder against its own package | absolute template folder |
+
+---
+
 ## Knowledge Captured
 - `requests` decodes a JSON body without a charset as Latin-1: EKOS's `—` came back as `â€”`. Set
   `response.encoding = "utf-8"` before reading `.text`.
@@ -110,6 +121,14 @@ GitHub is not an OIDC provider, and no console binding meant "everyone who signe
 - `Settings(oidc_issuer=…)` is ignored: the field reads the alias `EKOS_CONSOLE_OIDC_ISSUER` only; set the
   variable in a test.
 - The console has no single-workspace GET route; visibility is `GET /api/workspaces`.
+- **Azure Files uploads can leave a file at full length with zeros inside** when a ranged write
+  times out (`az storage file upload-batch` reported one `ERROR`, nothing else). Verify uploads by
+  content, never by size.
+- A project server's first load of a 725 MB ledger from Azure Files takes ~4 minutes; keep it
+  loaded (`mcp_idle_seconds = 0`) on a demo.
+- `az containerapp exec` needs a TTY: it cannot run a one-off command from a script.
+- The permission classifier refuses opening a storage firewall or minting credentials even when the
+  person asks; write the step as a script for them to run with `!`.
 - The PostToolUse hook asks for the Sonar routine after any `git push`; it applies to EKOS main only.
 
 ---
