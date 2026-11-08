@@ -38,7 +38,7 @@ describe("Layout sign-out", () => {
     });
     const logoutSpy = vi.spyOn(client, "logout").mockImplementation(async () => {
       signedIn = false;
-      return {};
+      return { ok: true };
     });
 
     renderLayout();

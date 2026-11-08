@@ -353,5 +353,5 @@ def test_metered_calls_are_capped_per_person_and_per_token(
 
 def test_the_chat_never_offers_a_metered_tool() -> None:
     assert mcp_policy.action_for("ekos_sql_generate") == "read"
-    src = (Path(__file__).parents[1] / "app" / "routes" / "chat.py").read_text()
+    src = (Path(__file__).parents[1] / "app" / "routes" / "chat.py").read_text(encoding="utf-8")
     assert "METERED_TOOLS" in src

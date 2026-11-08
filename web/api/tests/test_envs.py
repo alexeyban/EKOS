@@ -130,7 +130,7 @@ def test_every_process_the_console_starts_is_given_an_environment() -> None:
     for path in sorted(app.rglob("*.py")):
         if path.name == "_proc.py":
             continue
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         for match in re.finditer(r"_proc\.(spawn|run_streaming)\(", text):
             depth, i = 0, match.end() - 1
             while True:
@@ -143,7 +143,7 @@ def test_every_process_the_console_starts_is_given_an_environment() -> None:
                 missing.append(f"{path.relative_to(app)}:{line}")
     assert missing == [], f"spawned without an environment: {missing}"
     # And the helper itself reaches the OS with what it was given.
-    proc_text = (app / "_proc.py").read_text()
+    proc_text = (app / "_proc.py").read_text(encoding="utf-8")
     assert proc_text.count("env=env") == 2
 
 

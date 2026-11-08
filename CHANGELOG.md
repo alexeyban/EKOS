@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.4.1 — 2026-11-08
+
+RFCs 0250–0251, devlog 329.
+
+**New capabilities**
+- **`ekos_sql_generate`** (RFC 0250): EKOS's own text-to-SQL agent (`ekos sql generate`, the one
+  measured on BIRD) as an MCP tool, with read-only probes on the project's live database. The first
+  MCP tool that calls a model, so it is off unless `[sql-generate] mcp = true`; a provider other than
+  a local Ollama model also needs `allow-metered = true`; a daily cap per project (default 50 calls,
+  200 000 tokens) is counted before the model is called. Through the console gateway the tenant must
+  allow metered calls and each caller has a daily allowance (`mcp_metered_per_person_per_day`,
+  default 5; `mcp_metered_per_token_per_day`, default 50). The console chat never offers it.
+- **Sign-in by the platform** (RFC 0251): `platform_auth = "aca"` lets Azure Container Apps'
+  authentication (GitHub, Google, …) sign people in to the console; the person is `<provider>:<name>`
+  and API tokens keep working. `signed_in_group` puts everyone who signs in in one group, so a
+  `viewer` binding opens a project to a public audience.
+
 ## v1.4.0 — 2026-11-08
 
 RFCs 0245–0249, devlogs 324–328.
