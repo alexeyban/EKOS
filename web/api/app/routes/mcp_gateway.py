@@ -11,6 +11,7 @@ sent reaches the server, so a caller cannot supply or widen a scope.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
@@ -21,6 +22,7 @@ from .. import authz, mcp_policy, models
 from ..auth import Principal
 from ..deps import get_supervisor
 from ..mcp_client import McpError, McpToolError, ScopedMcp
+from ..settings import get_settings
 from ..supervisor import McpSupervisor, _NotReady
 from ._responses import NOT_FOUND
 from .workspaces import workspace_id_for
@@ -82,6 +84,38 @@ class _Caller:
     async def backend(self) -> ScopedMcp:
         return ScopedMcp(await self.supervisor.acquire(self.ws), self.scope)
 
+    def spend_metered(self, tool: str) -> str | None:
+        """RFC 0250: why a call to a model-calling tool may not go ahead, or `None` once one call
+        of today's allowance is spent. The tenant must allow metered calls; a person gets
+        `mcp_metered_per_person_per_day`, an API token (a service) the token allowance."""
+        tenant = models.get_tenant(self.ws.tenant_id)
+        if tenant is None or not tenant.allow_metered:
+            return (
+                f"{tool} calls a model that is paid per call, and metered calls are off for "
+                f"tenant {self.ws.tenant_id}; a platform owner turns them on in Admin"
+            )
+        settings = get_settings()
+        cap = (
+            settings.mcp_metered_per_token_per_day
+            if self.principal.kind == "token"
+            else settings.mcp_metered_per_person_per_day
+        )
+        day = datetime.now(UTC).strftime("%Y-%m-%d")
+        who = f"{self.principal.kind}:{self.principal.id}"
+        with models.session() as s:
+            row = s.get(models.McpMeteredUsage, f"{who}|{day}") or models.McpMeteredUsage(
+                key=f"{who}|{day}", caller=who, day=day
+            )
+            if row.calls >= cap:
+                return (
+                    f"the daily limit of {cap} calls to tools that call a model is reached; "
+                    "it resets at 00:00 UTC"
+                )
+            row.calls += 1
+            s.add(row)
+            s.commit()
+        return None
+
 
 async def _tools_list(caller: _Caller) -> dict[str, Any]:
     tools = await (await caller.backend()).list_tools()
@@ -112,6 +146,17 @@ async def _tools_call(caller: _Caller, params: Any) -> dict[str, Any]:
                 f"{name} is not available to a reader with restricted access to this project"
             )
         return _refusal(f"{name} needs the right to {mcp_policy.action_for(name)} this project")
+    if name in mcp_policy.METERED_TOOLS:
+        why = caller.spend_metered(name)
+        authz.audit(
+            caller.principal,
+            f"mcp: {name} (metered)",
+            "allowed" if why is None else "denied",
+            tenant_id=caller.ws.tenant_id,
+            workspace_id=caller.ws.id,
+        )
+        if why is not None:
+            return _refusal(why)
     try:
         # Built from the name and arguments only: whatever else the client sent, `_meta`
         # included, stops here. The scope is the one computed from the caller's bindings.

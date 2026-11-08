@@ -165,6 +165,11 @@ class Settings(BaseSettings):
     moderation_trusted_hops: int = Field(default=0, ge=0, le=5)
     # JSON overrides of the published numbers: {"questions_per_day": 30, "block_hours": 24, ...}.
     moderation_limits: str = ""
+    # RFC 0250: MCP tools that call a model (`ekos_sql_generate`), per caller per UTC day. A
+    # person signs in for themselves; an API token stands for a service (e.g. Superset), which
+    # keeps its own per-user limit, so it gets a larger allowance. 0 turns the tools off.
+    mcp_metered_per_person_per_day: int = Field(default=5, ge=0)
+    mcp_metered_per_token_per_day: int = Field(default=50, ge=0)
 
     # RFC 0232: in a cloud. The lease keeps one console writing a home on a network share; a
     # backup URL turns on scheduled `ekos home backup --to` (cron in UTC) and, over an empty home,

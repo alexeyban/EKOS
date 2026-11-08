@@ -49,6 +49,9 @@ pub struct EkosConfig {
     /// RFC 0233: `[xref]` — the cross-reference integrity check.
     #[serde(default)]
     pub xref: XrefConfig,
+    /// RFC 0250: `[sql-generate]` — EKOS's SQL agent over MCP (`ekos_sql_generate`).
+    #[serde(default)]
+    pub sql_generate: SqlGenerateConfig,
     /// RFC 0219: issue-tracker keys whose ticket ids join commits, change sets and code.
     #[serde(default)]
     pub tickets: TicketsConfig,
@@ -489,6 +492,53 @@ impl Default for XrefConfig {
             ignore_file: None,
             severity: std::collections::BTreeMap::new(),
             entry_points: Vec::new(),
+        }
+    }
+}
+
+/// RFC 0250 — `[sql-generate]`: the `ekos_sql_generate` MCP tool, which runs `ekos sql generate`'s
+/// agent (a model call) for an MCP client. Off by default: it is the first MCP tool that calls a
+/// model, so it is listed only when `mcp = true`, a metered provider also needs
+/// `allow-metered = true`, and every call counts toward a daily cap kept in the state directory.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct SqlGenerateConfig {
+    /// `true`: the MCP server lists and serves `ekos_sql_generate`.
+    #[serde(default)]
+    pub mcp: bool,
+    /// `true`: a provider other than Ollama may be called (the CLI's `--allow-metered`).
+    #[serde(default)]
+    pub allow_metered: bool,
+    /// Generations per UTC day for the whole project; over it the tool answers `limit` and no
+    /// model is called.
+    #[serde(default = "default_sql_generate_daily_calls")]
+    pub daily_calls: u32,
+    /// Model tokens (input + output) per UTC day for the whole project.
+    #[serde(default = "default_sql_generate_daily_tokens")]
+    pub daily_tokens: u64,
+    /// Agent turns per question (the CLI's `--max-turns`).
+    #[serde(default = "default_sql_generate_max_turns")]
+    pub max_turns: usize,
+}
+
+fn default_sql_generate_daily_calls() -> u32 {
+    50
+}
+fn default_sql_generate_daily_tokens() -> u64 {
+    200_000
+}
+fn default_sql_generate_max_turns() -> usize {
+    6 // the CLI's default, the setting BIRD was measured with
+}
+
+impl Default for SqlGenerateConfig {
+    fn default() -> Self {
+        Self {
+            mcp: false,
+            allow_metered: false,
+            daily_calls: default_sql_generate_daily_calls(),
+            daily_tokens: default_sql_generate_daily_tokens(),
+            max_turns: default_sql_generate_max_turns(),
         }
     }
 }
@@ -1241,6 +1291,7 @@ impl Default for EkosConfig {
             freshness: FreshnessConfig::default(),
             conflicts: ConflictsConfig::default(),
             xref: XrefConfig::default(),
+            sql_generate: SqlGenerateConfig::default(),
             tickets: TicketsConfig::default(),
             review: ReviewConfig::default(),
             docs_estate: DocsEstateConfig::default(),

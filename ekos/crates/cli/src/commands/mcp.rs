@@ -148,6 +148,11 @@ pub const SCOPE_REFUSED_TOOLS: &[(&str, &str)] = &[
     ),
     ("ekos_session_note", "writes"),
     (
+        "ekos_sql_generate",
+        "builds its prompt from the whole compiled schema and probes the live database, \
+         neither of which a read scope narrows",
+    ),
+    (
         "ekos_session_recall",
         "session memory is not attributed to a source",
     ),
@@ -1094,6 +1099,9 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     }
     tools.push(signoff_status_tool_definition());
     tools.push(sql_check_tool_definition());
+    if config.sql_generate.mcp {
+        tools.push(sql_generate_tool_definition());
+    }
     tools.push(ossie_export_tool_definition());
     tools.push(annotations_tool_definition());
     for e in ext.iter() {
@@ -1203,6 +1211,23 @@ fn sql_check_tool_definition() -> Value {
                 "sql": { "type": "string", "description": "One SELECT statement; leave out to get only the dialect's rules" },
                 "dialect": { "type": "string", "description": "sqlite, postgres, mysql, mssql, snowflake, databricks, clickhouse, trino, oracle or generic (default: the project's SQL dialect)" }
             }
+        }
+    })
+}
+
+/// RFC 0250 — listed only with `[sql-generate] mcp = true`: the first MCP tool that calls a model.
+fn sql_generate_tool_definition() -> Value {
+    json!({
+        "name": "ekos_sql_generate",
+        "description": "Write one SQL query that answers a business question, using EKOS's own text-to-SQL agent (the one measured on BIRD): it works from the schema EKOS compiled (tables, columns, descriptions, keys, foreign-key joins, semantic-model metrics), checks every draft against it and, when the project has a live database, runs read-only probes there (value spellings, empty results, repeated rows). Returns `status` (ok, open_findings, no_sql, limit), the `sql`, the `dialect`, the finding codes raised and still open, and how it was checked. Calls a model: counted toward the project's daily limit. It never runs the query for you and never writes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": { "type": "string", "description": "The business question, in plain words (at most 2000 characters)" },
+                "database": { "type": "string", "description": "The [[databases]] name to probe (default: the project's only one, if it has exactly one)" },
+                "dialect": { "type": "string", "description": "The SQL dialect (default: the database's, else the project's)" }
+            },
+            "required": ["question"]
         }
     })
 }
@@ -1903,6 +1928,13 @@ fn call_tool(
     if name == "ekos_sql_check" {
         let ledger = cache.get(config, workspace)?;
         return super::sql_check::agent_check(config, workspace, ledger, args);
+    }
+
+    // RFC 0250: a model call. `agent_generate` refuses unless `[sql-generate] mcp` is on, and
+    // applies the metered-call rule and the daily cap itself.
+    if name == "ekos_sql_generate" {
+        let ledger = cache.get(config, workspace)?;
+        return super::sql_check::agent_generate(config, workspace, ledger, args);
     }
 
     if name == "ekos_signoff_status" {
@@ -3446,6 +3478,7 @@ mod tests {
         config.semantics.enabled = true;
         config.session_memory.enabled = true;
         config.conflicts.enabled = true;
+        config.sql_generate.mcp = true; // RFC 0250: off by default, decided all the same
         let tmp = tempfile::tempdir().unwrap();
         let resp = parse(
             &handle_message(
@@ -6255,5 +6288,144 @@ mod tests {
             json!({ "query": "exporter batch" }),
         ));
         assert!(!search.to_string().contains("session-note"), "{search}");
+    }
+    // ── RFC 0250: ekos_sql_generate ─────────────────────────────────────────────────────────
+
+    fn sql_generate_config() -> EkosConfig {
+        let mut c = EkosConfig::default();
+        c.sql_generate.mcp = true;
+        c.llm.provider = Some("ollama".into()); // local: no metered-call consent needed
+        c
+    }
+
+    fn seed_orders_table(config: &EkosConfig, dir: &Path) {
+        use ekos_kir::{KirObject, ObjectKind};
+        use ekos_ledger::Ledger;
+        let mut orders = KirObject::new("orders", ObjectKind::Table);
+        orders.properties.insert(
+            "columns".into(),
+            json!([{"name": "id", "data_type": "integer", "primary_key": true},
+                   {"name": "amount", "data_type": "integer"}]),
+        );
+        Ledger::open(&config.ledger_path(dir))
+            .unwrap()
+            .append_object(&orders)
+            .unwrap();
+    }
+
+    fn tool_names(config: &EkosConfig) -> Vec<String> {
+        tool_definitions(config, &Extensions::default())
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn sql_generate_is_listed_only_when_switched_on() {
+        assert!(!tool_names(&EkosConfig::default()).contains(&"ekos_sql_generate".to_string()));
+        assert!(tool_names(&sql_generate_config()).contains(&"ekos_sql_generate".to_string()));
+    }
+
+    #[test]
+    fn sql_generate_refuses_when_off_and_when_metered_without_consent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let off = call(
+            &EkosConfig::default(),
+            tmp.path(),
+            "ekos_sql_generate",
+            json!({"question": "q"}),
+        );
+        assert_eq!(off["result"]["isError"], true, "{off}");
+        assert!(off.to_string().contains("[sql-generate] mcp"), "{off}");
+
+        let mut metered = sql_generate_config();
+        metered.llm.provider = Some("anthropic".into());
+        let refused = call(
+            &metered,
+            tmp.path(),
+            "ekos_sql_generate",
+            json!({"question": "q"}),
+        );
+        assert_eq!(refused["result"]["isError"], true, "{refused}");
+        assert!(refused.to_string().contains("allow-metered"), "{refused}");
+    }
+
+    #[test]
+    fn sql_generate_runs_the_agent_and_the_daily_cap_stops_the_model() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let mut config = sql_generate_config();
+        config.sql_generate.daily_calls = 1;
+        let tmp = tempfile::tempdir().unwrap();
+        seed_orders_table(&config, tmp.path());
+        let made = AtomicUsize::new(0);
+        let factory = || -> anyhow::Result<std::sync::Arc<dyn ekos_recovery::LlmProvider>> {
+            made.fetch_add(1, Ordering::SeqCst);
+            Ok(std::sync::Arc::new(
+                ekos_recovery::llm::MockLlmProvider::new(
+                    "```sql\nSELECT sum(amount) FROM orders\n```\nThe total of all order amounts.",
+                ),
+            ))
+        };
+        let store = super::super::store::open_store_read_only(&config, tmp.path()).unwrap();
+        let args = json!({"question": "total order amount"});
+
+        let first = super::super::sql_check::agent_generate_with(
+            &config,
+            tmp.path(),
+            store.as_ref(),
+            &args,
+            &factory,
+        )
+        .unwrap();
+        assert!(first["sql"].as_str().unwrap().contains("orders"), "{first}");
+        assert_ne!(first["status"], "limit", "{first}");
+        assert_eq!(first["usage"]["calls"], 1, "{first}");
+        assert!(
+            first["checked"]
+                .as_str()
+                .unwrap()
+                .starts_with("static checks only"),
+            "{first}"
+        );
+
+        let second = super::super::sql_check::agent_generate_with(
+            &config,
+            tmp.path(),
+            store.as_ref(),
+            &args,
+            &factory,
+        )
+        .unwrap();
+        assert_eq!(second["status"], "limit", "{second}");
+        assert!(second["sql"].is_null());
+        assert_eq!(
+            made.load(Ordering::SeqCst),
+            1,
+            "no provider is built past the cap"
+        );
+    }
+
+    #[test]
+    fn sql_generate_needs_a_question_and_tables() {
+        let config = sql_generate_config();
+        let tmp = tempfile::tempdir().unwrap();
+        let no_q = call(&config, tmp.path(), "ekos_sql_generate", json!({}));
+        assert!(
+            no_q.to_string().contains("`question` is required"),
+            "{no_q}"
+        );
+        let empty = call(
+            &config,
+            tmp.path(),
+            "ekos_sql_generate",
+            json!({"question": "how many"}),
+        );
+        assert!(empty.to_string().contains("no tables"), "{empty}");
+        // Nothing was counted: the refusals came before any model call.
+        let day = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        assert_eq!(
+            super::super::sql_check::Usage::today(&config, tmp.path(), &day).calls,
+            0
+        );
     }
 }

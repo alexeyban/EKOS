@@ -107,6 +107,15 @@ FIELDS: dict[str, Field] = {
     ),
     "chat_max_tool_calls": Field("Chat", "Most EKOS tool calls the model may make per question"),
     "chat_max_tokens": Field("Chat", "Most tokens in one answer"),
+    "mcp_metered_per_person_per_day": Field(
+        _DEMO,
+        "Calls a signed-in person may make per day to MCP tools that call a model "
+        "(ekos_sql_generate, RFC 0250)",
+    ),
+    "mcp_metered_per_token_per_day": Field(
+        _DEMO,
+        "The same per API token: a service such as Superset, which limits its own users",
+    ),
     "moderation_enabled": Field(
         _DEMO,
         "Check every question before it is answered: bans, blocks and daily limits (RFC 0249)",

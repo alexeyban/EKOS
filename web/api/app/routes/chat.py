@@ -153,6 +153,7 @@ async def _offered_tools(backend: ScopedMcp, caller: _Caller) -> list[dict]:
         t
         for t in await backend.list_tools()
         if mcp_policy.action_for(str(t.get("name", ""))) == "read"
+        and str(t.get("name", "")) not in mcp_policy.METERED_TOOLS
         and caller.may(str(t.get("name", "")))
     ]
 

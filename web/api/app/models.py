@@ -175,6 +175,16 @@ class ModUsage(SQLModel, table=True):
     modifying: int = 0
 
 
+class McpMeteredUsage(SQLModel, table=True):
+    """RFC 0250: calls a caller made today to MCP tools that call a model.
+    `key` is `<principal kind>:<id>|<YYYY-MM-DD>` (UTC)."""
+
+    key: str = Field(primary_key=True)
+    caller: str = Field(index=True)
+    day: str
+    calls: int = 0
+
+
 class ModIpBlock(SQLModel, table=True):
     """RFC 0249: an address blocked for a while after an automatic ban."""
 

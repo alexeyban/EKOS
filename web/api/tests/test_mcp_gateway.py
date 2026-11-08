@@ -30,6 +30,7 @@ TOOLS = [
     "ekos_session_note",
     "ekos_identity_review",
     "ekos_architecture_review",
+    "ekos_sql_generate",
 ]
 
 
@@ -171,6 +172,8 @@ def test_a_viewer_token_sees_and_calls_only_read_tools(world, client, backend) -
         "ekos_state",
         "ekos_status",
         "ekos_conflicts",
+        # A read; calling it also needs the tenant's metered permission (RFC 0250).
+        "ekos_sql_generate",
     ]
     ok = rpc(bot, "tools/call", {"name": "ekos_search", "arguments": {"query": "orders"}})
     assert ok.json()["result"]["isError"] is False
@@ -305,3 +308,50 @@ def test_every_tool_call_is_recorded_without_its_arguments(world, client, backen
     ]
     assert all(e["actor"].startswith("token:agent#") for e in mcp_entries)
     assert "zebra-secret-query" not in json.dumps(log)
+
+
+# ── RFC 0250: tools that call a model ─────────────────────────────────────────
+
+
+def _generate(who: As):
+    return rpc(who, "tools/call", {"name": "ekos_sql_generate", "arguments": {"question": "q"}})
+
+
+def test_a_metered_tool_needs_the_tenants_permission(world, client, backend) -> None:
+    from app import models
+
+    bot, _ = token(world, client)
+    r = _generate(bot)
+    assert r.json()["result"]["isError"] is True
+    assert "metered calls are off for tenant acme" in r.text
+    assert backend.calls == []
+    models.update_tenant("acme", allow_metered=True)
+    assert _generate(bot).json()["result"]["isError"] is False
+    assert [c[0] for c in backend.calls] == ["ekos_sql_generate"]
+
+
+def test_metered_calls_are_capped_per_person_and_per_token(
+    world, client, backend, monkeypatch
+) -> None:
+    from app import models
+    from app.settings import get_settings
+
+    models.update_tenant("acme", allow_metered=True)
+    monkeypatch.setattr(get_settings(), "mcp_metered_per_person_per_day", 2)
+    monkeypatch.setattr(get_settings(), "mcp_metered_per_token_per_day", 3)
+    vic = world["vic"]
+    assert [_generate(vic).json()["result"]["isError"] for _ in range(3)] == [False, False, True]
+    assert "daily limit of 2" in _generate(vic).text
+    # Another person has their own allowance; a token (a service) has the larger one.
+    assert _generate(world["ann"]).json()["result"]["isError"] is False
+    bot, _ = token(world, client)
+    assert [_generate(bot).json()["result"]["isError"] for _ in range(4)] == [False] * 3 + [True]
+    assert len(backend.calls) == 2 + 1 + 3
+    # Ordinary reads are not counted.
+    assert rpc(vic, "tools/call", {"name": "ekos_search"}).json()["result"]["isError"] is False
+
+
+def test_the_chat_never_offers_a_metered_tool() -> None:
+    assert mcp_policy.action_for("ekos_sql_generate") == "read"
+    src = (Path(__file__).parents[1] / "app" / "routes" / "chat.py").read_text()
+    assert "METERED_TOOLS" in src

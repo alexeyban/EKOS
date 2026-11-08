@@ -35,6 +35,11 @@ REVIEW_TOOLS = frozenset({"ekos_identity_review", "ekos_architecture_review"})
 # Writes that are not review decisions. `ekos_session_note` appends to the session inbox.
 OPERATE_TOOLS = frozenset({"ekos_session_note"})
 
+# Tools that call a model on the project's key (RFC 0250). A read for the role check, but the
+# gateway also needs the tenant's `allow_metered` and spends a daily allowance per caller; the
+# console chat never offers them (its own model would be paying for a second one).
+METERED_TOOLS = frozenset({"ekos_sql_generate"})
+
 
 def action_for(tool: str) -> str:
     """The right (RFC 0180) a call to `tool` needs. A tool this module has never heard of is

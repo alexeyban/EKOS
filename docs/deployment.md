@@ -251,6 +251,25 @@ A project's MCP server starts on first use and stops after 15 idle minutes; at m
 once (`EKOS_CONSOLE_MCP_IDLE_SECONDS`, `EKOS_CONSOLE_MCP_MAX_SERVERS`). Each holds its project's
 index in memory, so size the cap to the machine.
 
+### SQL written by EKOS for an agent (RFC 0250)
+
+`ekos_sql_generate` runs EKOS's own text-to-SQL agent (the one measured on BIRD) for an MCP
+client — the EKOS Superset fork uses it. It calls a model, so it is off until the project says so:
+
+```toml
+[sql-generate]
+mcp = true
+allow-metered = true   # only for a provider other than a local Ollama model
+daily-calls = 50       # the whole project, per UTC day; over it the tool answers `limit`
+daily-tokens = 200000
+```
+
+Through the console it also needs **Allow metered model calls** on the tenant, and each caller
+has a daily allowance: `mcp_metered_per_person_per_day` (default 5) for a signed-in person,
+`mcp_metered_per_token_per_day` (default 50) for an API token, which stands for a service that
+limits its own users (**Settings → Public demo**). The console chat never offers this tool. With
+one `[[databases]]` entry the agent probes that database read-only; it never runs the answer.
+
 ### Extension pages
 
 A console started by an extension's binary (`ekos-lakehouse console start`, or `EKOS_BIN`

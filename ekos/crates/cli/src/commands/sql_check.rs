@@ -572,6 +572,204 @@ pub async fn generate(config: &EkosConfig, cwd: &Path, o: GenerateOpts<'_>) -> R
     print_generated(&outcome, &dialect, &probed, o.json)
 }
 
+/// RFC 0250 — today's use of `ekos_sql_generate`, kept per UTC day in
+/// `<state>/sqlgen/usage.json` (a run-state file beside the ledger, never the ledger).
+#[derive(Debug, Default, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Usage {
+    pub day: String,
+    pub calls: u32,
+    pub tokens: u64,
+}
+
+impl Usage {
+    fn path(config: &EkosConfig, workspace: &Path) -> PathBuf {
+        config.ekos_dir(workspace).join("sqlgen").join("usage.json")
+    }
+
+    /// Today's counts; another day's file (or none, or an unreadable one) counts as zero.
+    pub fn today(config: &EkosConfig, workspace: &Path, day: &str) -> Usage {
+        std::fs::read_to_string(Self::path(config, workspace))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Usage>(&s).ok())
+            .filter(|u| u.day == day)
+            .unwrap_or_else(|| Usage {
+                day: day.to_string(),
+                ..Usage::default()
+            })
+    }
+
+    fn save(&self, config: &EkosConfig, workspace: &Path) -> Result<()> {
+        let path = Self::path(config, workspace);
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
+        std::fs::rename(&tmp, &path)?;
+        Ok(())
+    }
+
+    /// Why a new generation may not start today, if it may not.
+    pub fn refusal(
+        &self,
+        limits: &ekos_compiler_core::config::SqlGenerateConfig,
+    ) -> Option<String> {
+        if self.calls >= limits.daily_calls {
+            return Some(format!(
+                "the daily limit of {} SQL generations for this project is reached; it resets at \
+                 00:00 UTC",
+                limits.daily_calls
+            ));
+        }
+        if self.tokens >= limits.daily_tokens {
+            return Some(format!(
+                "the daily limit of {} model tokens for SQL generation is reached; it resets at \
+                 00:00 UTC",
+                limits.daily_tokens
+            ));
+        }
+        None
+    }
+}
+
+/// `ekos_sql_generate {question, database?, dialect?}` (RFC 0250): `ekos sql generate`'s agent
+/// for an MCP client, behind `[sql-generate] mcp`, the metered-call rule and a daily cap.
+pub fn agent_generate(
+    config: &EkosConfig,
+    workspace: &Path,
+    store: &dyn KnowledgeReader,
+    args: &Value,
+) -> Result<Value> {
+    agent_generate_with(config, workspace, store, args, &|| {
+        super::recover::build_llm_provider_strict_for(
+            config,
+            ekos_recovery::Task::NlSql,
+            &config.artifact_dir(workspace),
+        )
+    })
+}
+
+type LlmFactory<'a> = dyn Fn() -> Result<Arc<dyn LlmProvider>> + 'a;
+
+/// [`agent_generate`] with the provider supplied, so tests script the model.
+pub fn agent_generate_with(
+    config: &EkosConfig,
+    workspace: &Path,
+    store: &dyn KnowledgeReader,
+    args: &Value,
+    make_llm: &LlmFactory<'_>,
+) -> Result<Value> {
+    let limits = &config.sql_generate;
+    if !limits.mcp {
+        bail!("ekos_sql_generate is off: set `[sql-generate] mcp = true` in ekos.toml");
+    }
+    super::migrate_logic::model_call_allowed(config, limits.allow_metered).map_err(|_| {
+        anyhow!(
+            "the configured model is not local, so a call may be billed: set \
+             `[sql-generate] allow-metered = true` to allow it"
+        )
+    })?;
+    let question = args
+        .get("question")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+        .ok_or_else(|| anyhow!("`question` is required"))?;
+    if question.chars().count() > 2000 {
+        bail!("`question` is longer than 2000 characters");
+    }
+    let day = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let mut usage = Usage::today(config, workspace, &day);
+    if let Some(why) = usage.refusal(limits) {
+        return Ok(json!({ "status": "limit", "sql": null, "reason": why, "usage": usage }));
+    }
+
+    // One database: its live probes by default. Several: only the one asked for.
+    let database =
+        args.get("database")
+            .and_then(Value::as_str)
+            .or(match config.databases.as_slice() {
+                [only] => Some(only.name.as_str()),
+                _ => None,
+            });
+    let target = Target::pick(config, database, None)?;
+    let schema = target.narrow(schema_for(config, workspace, store)?);
+    if schema.tables.is_empty() {
+        bail!("the ledger holds no tables to write SQL against — run the pipeline first");
+    }
+    let dialect = pick_dialect(config, args.get("dialect").and_then(Value::as_str), &target);
+    let prompt = generation_prompt(&schema, &dialect, question)?;
+    let llm = make_llm()?;
+
+    // The call counts before it is made, so a failure cannot be retried past the cap.
+    usage.calls += 1;
+    usage.save(config, workspace)?;
+
+    let cfg = AgentConfig {
+        max_turns: limits.max_turns.clamp(1, 12),
+        max_tokens: 4096,
+        prompt_version: "ekos-sql-generate-v1",
+        tools: true,
+        verify: true,
+    };
+    let job = Job {
+        schema: &schema,
+        dialect: &dialect,
+        prompt: &prompt,
+        target: &target,
+        allow_writable_role: false, // never over MCP
+        cfg: &cfg,
+    };
+    let (outcome, probed) = std::thread::scope(|s| {
+        s.spawn(|| job.run(llm))
+            .join()
+            .map_err(|_| anyhow!("the generation thread panicked"))?
+    })?;
+    let tokens: u64 = outcome
+        .calls
+        .iter()
+        .map(|c| c.input_tokens + c.output_tokens)
+        .sum();
+    usage.tokens += tokens;
+    usage.save(config, workspace)?;
+    Ok(generated_json(&outcome, &dialect, &probed, &usage))
+}
+
+fn checked_label(probed: &Option<Result<String, String>>) -> String {
+    match probed {
+        Some(Ok(label)) => format!("checked against {label}, read-only"),
+        Some(Err(why)) => format!("static checks only — the database was not queried: {why}"),
+        None => "static checks only (no database to probe)".into(),
+    }
+}
+
+fn generated_json(
+    o: &AgentOutcome,
+    dialect: &str,
+    probed: &Option<Result<String, String>>,
+    usage: &Usage,
+) -> Value {
+    let status = match (&o.sql, o.open_findings.is_empty()) {
+        (None, _) => "no_sql",
+        (Some(_), false) => "open_findings",
+        (Some(_), true) => "ok",
+    };
+    json!({
+        "status": status,
+        "sql": o.sql,
+        "dialect": dialect,
+        "turns": o.turns,
+        "tools": o.tools,
+        "findings": o.findings,
+        "open_findings": o.open_findings,
+        "checked": checked_label(probed),
+        "truncated": o.truncated,
+        "input_tokens": o.calls.iter().map(|c| c.input_tokens).sum::<u64>(),
+        "output_tokens": o.calls.iter().map(|c| c.output_tokens).sum::<u64>(),
+        "usage": usage,
+    })
+}
+
 /// One generation, run on its own thread.
 struct Job<'a> {
     schema: &'a Schema,
