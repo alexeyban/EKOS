@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.4.3 — 2026-11-08
+
+**Fixes**
+- **`ekos_ossie_export` builds the whole model once.** The MCP server keeps it per store state,
+  status, database and read scope; `match`, `max_datasets` and the new `names` only narrow it.
+  A BI tool that asks for a few tables at a time used to walk the whole store on every ask
+  (minutes each on a network file share); on the 1,233-table iDempiere project the first call
+  takes 40 s and every later one milliseconds.
+- **`names`**: `ekos_ossie_export` takes exact table names (case-insensitive, up to 500), so a known
+  set of tables comes back in one call.
+
 ## v1.4.2 — 2026-11-08
 
 **Fixes**

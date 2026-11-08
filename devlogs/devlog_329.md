@@ -100,6 +100,7 @@ GitHub is not an OIDC provider, and no console binding meant "everyone who signe
 | Ledger did not open on Azure (`expected value at line 1 column 1`) | the 1 GB upload to Azure Files timed out once: 30 files (`manifest.json`, 28 segments) arrived **full-length but partly zero** — size checks passed | byte-for-byte compare after download; re-upload the 30 |
 | Every Ask (AI) call failed after 30/60 s | `ekos_sql_check` / `ekos_ossie_export` rebuilt the schema from all 142k objects per call (20–37 s locally, longer on Azure); the console waits 30 s per reply | schema cache in `StoreCache` + ossie export classified expensive (v1.4.2); `mcp_call_timeout_seconds`; idle stop off for the demo |
 | Superset fork never started (`ActivationFailed`), plain Superset kept serving | the start-up role script used `DatabaseDAO`, whose per-user filter needs a signed-in user (`AttributeError: user`), under `set -e` | query `Database` directly; the step can no longer stop start-up (ekos-superset 8e461eb) |
+| Ask (AI) still slow on Azure after 1.4.2 | 24 of the demo's 25 tables were beyond the export's 500-table cap, so Superset fetched each one with `match`, and every ask rebuilt the whole Ossie model (minutes each on Azure) | whole model cached in `StoreCache` (v1.4.3), `names` fetches the 25 in one call (5 ms) |
 | `/ekos-ai/` answered 500 | Flask-AppBuilder resolved the view's relative template folder against its own package | absolute template folder |
 
 ---

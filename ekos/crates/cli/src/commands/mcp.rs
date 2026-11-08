@@ -91,6 +91,13 @@ pub struct StoreCache {
     /// was built under. Building it walks every object (20 s on a 140k-object project), and
     /// `ekos_sql_check` / `ekos_sql_generate` need it on every call; cleared with `result_cache`.
     schema: Option<(String, std::sync::Arc<ekos_sqlgen::Schema>)>,
+    /// The whole Ossie model per (scope, status, database), before `ekos_ossie_export`'s `match`,
+    /// `names` and `max_datasets` narrow it: a BI tool asks for a few tables at a time, and each
+    /// ask used to walk the whole store again (minutes on Azure Files). Cleared with `result_cache`.
+    ossie_models: std::collections::HashMap<
+        (String, String, String),
+        std::sync::Arc<ekos_ossie::SemanticModel>,
+    >,
     /// RFC 0171 — the last source-freshness check and when it ran, reused for
     /// `[freshness] ttl-seconds` so a busy server does not walk the tree on every call.
     freshness: Option<(std::time::Instant, crate::freshness::Freshness)>,
@@ -210,6 +217,7 @@ impl StoreCache {
             fingerprint: None,
             result_cache: std::collections::HashMap::new(),
             schema: None,
+            ossie_models: std::collections::HashMap::new(),
             freshness: None,
         }
     }
@@ -299,6 +307,42 @@ impl StoreCache {
         Ok(built)
     }
 
+    /// The whole Ossie model for `status` and `database` under the current call's scope, built
+    /// once and reused until the store changes.
+    fn ossie_model(
+        &mut self,
+        config: &EkosConfig,
+        workspace: &Path,
+        status: super::export::StatusFilter,
+        database: Option<&str>,
+    ) -> Result<std::sync::Arc<ekos_ossie::SemanticModel>> {
+        self.refresh(config, workspace)?;
+        let key = (
+            self.scope_key(),
+            status.as_str().to_string(),
+            database.unwrap_or_default().to_string(),
+        );
+        if let Some(model) = self.ossie_models.get(&key) {
+            return Ok(std::sync::Arc::clone(model));
+        }
+        let built = {
+            let ledger = self.get(config, workspace)?;
+            std::sync::Arc::new(super::export::ossie_model(
+                config,
+                workspace,
+                ledger,
+                &super::export::OssieRequest {
+                    status,
+                    name: None,
+                    database,
+                    source: None,
+                },
+            )?)
+        };
+        self.ossie_models.insert(key, std::sync::Arc::clone(&built));
+        Ok(built)
+    }
+
     /// Reopens the store (and clears the RFC 0114 result cache) if the on-disk fingerprint has
     /// moved since the last successful open — the same check `get` does, factored out so
     /// `tools_call` can force it *before* consulting the result cache even on a call that turns
@@ -316,6 +360,7 @@ impl StoreCache {
                 Ok(RefreshOutcome::Incremental { .. } | RefreshOutcome::Reopened) => {
                     self.result_cache.clear();
                     self.schema = None;
+                    self.ossie_models.clear();
                     return Ok(());
                 }
                 // No snapshot to refresh (SQLite, partitioned, distributed): fall through to the
@@ -333,6 +378,7 @@ impl StoreCache {
             self.fingerprint = store_fingerprint(&root);
             self.result_cache.clear();
             self.schema = None;
+            self.ossie_models.clear();
             // A reopened store starts unrestricted; the call in progress keeps its scope.
             self.apply_scope()?;
         }
@@ -1167,6 +1213,7 @@ fn ossie_export_tool_definition() -> Value {
                 "status": { "type": "string", "enum": ["confirmed", "hypothesis", "all"], "description": "Which business meanings to include (default confirmed); tables are always included" },
                 "database": { "type": "string", "description": "Only tables of this [[databases]] name" },
                 "match": { "type": "string", "description": "Only datasets whose name contains this (case-insensitive)" },
+                "names": { "type": "array", "items": { "type": "string" }, "description": "Only these datasets, by exact name (case-insensitive; at most 500) — fetch a known set of tables in one call" },
                 "format": { "type": "string", "enum": ["json", "yaml"], "description": "Default json" },
                 "max_datasets": { "type": "integer", "description": "Max datasets (default 50, max 500)" }
             }
@@ -1174,11 +1221,12 @@ fn ossie_export_tool_definition() -> Value {
     })
 }
 
-/// `ekos_ossie_export`: the model, narrowed and capped for a tool result.
+/// `ekos_ossie_export`: the model, narrowed and capped for a tool result. The whole model comes
+/// from the server's cache ([`StoreCache::ossie_model`]); only the narrowing runs per call.
 fn ossie_export(
     config: &EkosConfig,
     workspace: &Path,
-    ledger: &dyn KnowledgeStore,
+    cache: &mut StoreCache,
     args: &Value,
 ) -> Result<Value> {
     let status = match args.get("status").and_then(Value::as_str) {
@@ -1187,22 +1235,24 @@ fn ossie_export(
             .ok_or_else(|| anyhow::anyhow!("status must be confirmed, hypothesis or all"))?,
     };
     let max = bounded_arg(args, "max_datasets", 50, 1, 500)? as usize;
-    let mut model = super::export::ossie_model(
+    let names = exact_names(args)?;
+    let whole = cache.ossie_model(
         config,
         workspace,
-        ledger,
-        &super::export::OssieRequest {
-            status,
-            name: None,
-            database: args.get("database").and_then(Value::as_str),
-            source: None,
-        },
+        status,
+        args.get("database").and_then(Value::as_str),
     )?;
+    let mut model = (*whole).clone();
     if let Some(m) = args.get("match").and_then(Value::as_str) {
         let m = m.to_lowercase();
         model
             .datasets
             .retain(|d| d.name.to_lowercase().contains(&m));
+    }
+    if let Some(names) = &names {
+        model
+            .datasets
+            .retain(|d| names.contains(&d.name.to_lowercase()));
     }
     let total = model.datasets.len();
     model.datasets.truncate(max);
@@ -1227,6 +1277,27 @@ fn ossie_export(
         "truncated": total > model.datasets.len(),
         "model": body,
     }))
+}
+
+/// `names`: exact dataset names (case-insensitive), at most 500.
+fn exact_names(args: &Value) -> Result<Option<std::collections::BTreeSet<String>>> {
+    let Some(raw) = args.get("names") else {
+        return Ok(None);
+    };
+    let list = raw
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("names must be an array of table names"))?;
+    if list.len() > 500 {
+        anyhow::bail!("names holds at most 500 table names");
+    }
+    list.iter()
+        .map(|v| {
+            v.as_str()
+                .map(str::to_lowercase)
+                .ok_or_else(|| anyhow::anyhow!("names must be an array of table names"))
+        })
+        .collect::<Result<_>>()
+        .map(Some)
 }
 
 /// RFC 0242 — read-only: lints SQL against the compiled schema. Runs nothing on a database.
@@ -1950,8 +2021,7 @@ fn call_tool(
     }
 
     if name == "ekos_ossie_export" {
-        let ledger = cache.get(config, workspace)?;
-        return ossie_export(config, workspace, ledger, args);
+        return ossie_export(config, workspace, cache, args);
     }
 
     if name == "ekos_sql_check" {
@@ -6503,5 +6573,72 @@ mod tests {
             check(&mut cache, "select id from customers")["tables_known"],
             2
         );
+    }
+    #[test]
+    fn ossie_export_narrows_a_cached_model_and_takes_exact_names() {
+        use ekos_kir::{KirObject, ObjectKind};
+        let config = EkosConfig::default();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let table = |name: &str| {
+            let mut t = KirObject::new(name, ObjectKind::Table);
+            t.properties.insert(
+                "columns".into(),
+                json!([{"name": "id", "data_type": "integer", "primary_key": true}]),
+            );
+            t
+        };
+        let writer = ekos_ledger::FactLedger::open(&facts_dir(&config, dir)).unwrap();
+        for name in ["c_order", "c_invoice", "m_product"] {
+            writer.append_object(&table(name)).unwrap();
+        }
+        let mut cache = StoreCache::new();
+        let export = |cache: &mut StoreCache, args: Value| -> Value {
+            let line = req(
+                1,
+                "tools/call",
+                json!({ "name": "ekos_ossie_export", "arguments": args }),
+            );
+            tool_json(&parse(&handle_message(&config, dir, &line, cache).unwrap()))
+        };
+        let names = |v: &Value| -> Vec<String> {
+            let mut n: Vec<String> = v["model"]["datasets"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|d| d["name"].as_str().unwrap().to_string())
+                .collect();
+            n.sort();
+            n
+        };
+        let two = export(
+            &mut cache,
+            json!({ "names": ["C_ORDER", "m_product", "absent"] }),
+        );
+        assert_eq!(names(&two), ["c_order", "m_product"]);
+        assert_eq!(cache.ossie_models.len(), 1);
+        let first = std::sync::Arc::clone(cache.ossie_models.values().next().unwrap());
+        let one = export(&mut cache, json!({ "match": "invoice" }));
+        assert_eq!(names(&one), ["c_invoice"]);
+        assert!(
+            std::sync::Arc::ptr_eq(&first, cache.ossie_models.values().next().unwrap()),
+            "a second narrowing of the same model does not rebuild it"
+        );
+        let bad = handle_message(
+            &config,
+            dir,
+            &req(
+                1,
+                "tools/call",
+                json!({ "name": "ekos_ossie_export", "arguments": { "names": "c_order" } }),
+            ),
+            &mut cache,
+        )
+        .unwrap();
+        assert!(bad.contains("names must be an array"), "{bad}");
+
+        writer.append_object(&table("c_payment")).unwrap();
+        let after = export(&mut cache, json!({ "match": "c_" }));
+        assert_eq!(names(&after), ["c_invoice", "c_order", "c_payment"]);
     }
 }
