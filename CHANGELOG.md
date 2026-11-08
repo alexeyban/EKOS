@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.4.0 — 2026-11-08
+
+RFCs 0245–0249, devlogs 324–328.
+
+**New capabilities**
+- **Apache Ossie interchange** (RFC 0245/0246): `ekos export ossie` / `ekos import ossie`
+  (import is human-only), Ossie files ingested as knowledge, and the resulting synonyms, joins and
+  metrics used by text-to-SQL, dbt-semantic export, business semantics and search.
+- **Annotations on any entity** (RFC 0247): comments, instructions and synonyms attached to a table,
+  column, mart or anything else in the ledger. Validity is computed from the entity's digest, so a
+  note goes stale when its target changes. `ekos annotate add|list|show|withdraw|approve|confirm`;
+  writes are human-only, the MCP tool `ekos_annotations` is read-only. `ekos annotate resolve --rule`
+  decides conflicts in bulk (dry run unless `--apply`; a rationale and a matcher are mandatory).
+  Console: an Annotations tab and a Notes panel on every object.
+- **Public-demo safety** (RFC 0249, console backend, off unless `moderation_enabled`): deterministic
+  injection / secret / hidden-text / forbidden-schema / abuse signals, standing (ban, temporary block),
+  daily limits, per-IP rate limit, an optional model intent check that can only add refusals and fails
+  closed, and an owner log with unban.
+- **Azure module**: `allowed_cidrs` ingress restriction and `external_secrets` (Key Vault secrets a
+  person adds, referenced by managed identity, never held by Terraform).
+- Release workflow: build provenance attestation and a glibc install check.
+
+**Fixes**
+- The SQL statement splitter honours quotes, comments and dollar-quoting instead of splitting on `;`.
+- Duplicate memory-path boost removed from search; truncation detection for Ollama uses the prompt
+  token count.
+
 ## v1.3.0 — 2026-11-05
 
 RFCs 0242–0244, devlogs 319–320.
