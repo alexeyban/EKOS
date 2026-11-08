@@ -433,12 +433,12 @@ jobs:
           # start and `install.sh` must fall back to the static musl build. (Debian 11 would do,
           # but it is end-of-life and its mirrors 404, which would break this job for no reason.)
           - image: rockylinux:8
-            deps: dnf install -y -q curl ca-certificates tar gzip
+            deps: dnf install -y -q --allowerasing curl ca-certificates tar gzip
             expect_fallback: "yes"
           # glibc 2.34 (RHEL 9 family) — the floor in practice: the v1.3.0 gnu binary needs at most
           # GLIBC_2.34 even though it is built on 22.04 (2.35). Must keep the gnu build.
           - image: rockylinux:9
-            deps: dnf install -y -q curl ca-certificates tar gzip
+            deps: dnf install -y -q --allowerasing curl ca-certificates tar gzip
             expect_fallback: "no"
           # glibc 2.35 — the build host's own release: must keep the gnu build.
           - image: ubuntu:22.04
