@@ -274,6 +274,32 @@ impl Schema {
         self
     }
 
+    /// RFC 0250 amendment: only the named tables (bare or schema-qualified, any case), with only
+    /// the joins, indexed values and metrics among them — what a caller allows its users to query.
+    /// Returns the narrowed schema and the names that matched no table.
+    pub fn retain_tables(mut self, names: &[String]) -> (Schema, Vec<String>) {
+        let short = |n: &str| -> String {
+            let n = unquote(n.rsplit('.').next().unwrap_or(n));
+            n.to_ascii_lowercase()
+        };
+        let wanted: BTreeSet<String> = names.iter().map(|n| short(n)).collect();
+        let present: BTreeSet<String> = self.tables.iter().map(|t| short(&t.name)).collect();
+        let unknown = names
+            .iter()
+            .filter(|n| !present.contains(&short(n)))
+            .cloned()
+            .collect();
+        let keep = |t: &str| wanted.contains(&short(t));
+        self.tables.retain(|t| keep(&t.name));
+        self.foreign_keys
+            .retain(|fk| keep(&fk.from_table) && keep(&fk.to_table));
+        self.declared_joins
+            .retain(|fk| keep(&fk.from_table) && keep(&fk.to_table));
+        self.values.retain(|(table, _), _| keep(table));
+        self.metrics.retain(|m| m.tables.iter().all(|t| keep(t)));
+        (self, unknown)
+    }
+
     pub fn column(&self, table: &str, column: &str) -> Option<&Column> {
         self.table(table)?.column(column)
     }
@@ -878,5 +904,29 @@ pub(crate) mod tests {
         assert!(d.contains("9 rows hold 0 (likely 'unknown')"));
         assert!(d.contains("joins: rulings.card_id = cards.id"));
         assert!(s.search("card rulings")[0].contains("rulings"));
+    }
+
+    #[test]
+    fn retain_tables_keeps_the_named_tables_and_only_their_joins() {
+        let names = vec!["CARDS".to_string(), "main.rulings".into(), "nope".into()];
+        let (s, unknown) = fixture().retain_tables(&names);
+        let kept: Vec<&str> = s.tables.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(kept, ["cards", "rulings"]);
+        assert_eq!(
+            s.foreign_keys.len(),
+            1,
+            "rulings → cards is between kept tables"
+        );
+        assert!(
+            s.values.keys().all(|(t, _)| t != "sets"),
+            "values of a dropped table go"
+        );
+        assert_eq!(unknown, ["nope"]);
+
+        let (alone, _) = fixture().retain_tables(&["rulings".to_string()]);
+        assert!(
+            alone.foreign_keys.is_empty(),
+            "a join to a dropped table goes"
+        );
     }
 }

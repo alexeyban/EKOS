@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.4 — 2026-11-09
+
+**Features**
+- **`ekos_sql_generate` takes `tables`** (RFC 0250 amendment 1): the tables a caller lets its users
+  query, up to 500. The agent sees only those tables and the joins among them; names EKOS has not
+  compiled come back in `tables_unknown`. A BI tool's allow-list no longer turns a good question into
+  a refused query over some other table.
+
 ## v1.4.3 — 2026-11-08
 
 **Fixes**

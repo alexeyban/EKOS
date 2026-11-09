@@ -85,3 +85,27 @@ instance quotas on SQLite.
 1. Should the console be able to raise the cap per tenant (a console setting passed as env)?
 2. Cache identical questions (same ledger digest + question) to spare the model — likely yes for the
    demo question set.
+
+## Amendment 1 (2026-11-09): `tables`, the caller's allow-list
+
+**Problem.** On the Azure demo, Superset lets questions use 25 iDempiere tables, but the agent saw
+all 1,233 compiled ones. For "what does Joe Block buy the most?" it wrote SQL over `ad_user` (a
+login, not the customer `c_bpartner`), and Superset's read-only guard refused it: the person got
+"refused" for a question the allowed tables answer.
+
+**Change.** `ekos_sql_generate` takes an optional `tables` (1–500 names, bare or
+schema-qualified, any case). `generate_core` narrows the schema with `Schema::retain_tables`
+(`sqlgen`, pure) before the prompt is built: the named tables, and only the foreign keys, declared
+joins, indexed values and metrics among them. The agent therefore never sees — and its lint flags as
+unknown — any other table. Names that match no compiled table come back in `tables_unknown`; a list
+that matches none is refused before the cap is counted or a provider is built.
+
+**Callers.** Superset's fork passes its `EKOS_AI_TABLES` when the tool's input schema lists
+`tables`, and, against an older EKOS, falls back to its own draft-and-check path over the allowed
+tables when the guard refuses EKOS's SQL.
+
+**Tests.** `sqlgen::schema::retain_tables_keeps_the_named_tables_and_only_their_joins`;
+`commands/mcp.rs::sql_generate_sees_only_the_tables_the_caller_allows` (a recording provider: the
+allowed table is in the prompt, the other table and its columns are not; `tables_unknown`; no model
+call for an allow-list that names nothing compiled).
+

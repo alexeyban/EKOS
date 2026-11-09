@@ -1325,7 +1325,8 @@ fn sql_generate_tool_definition() -> Value {
             "properties": {
                 "question": { "type": "string", "description": "The business question, in plain words (at most 2000 characters)" },
                 "database": { "type": "string", "description": "The [[databases]] name to probe (default: the project's only one, if it has exactly one)" },
-                "dialect": { "type": "string", "description": "The SQL dialect (default: the database's, else the project's)" }
+                "dialect": { "type": "string", "description": "The SQL dialect (default: the database's, else the project's)" },
+                "tables": { "type": "array", "items": { "type": "string" }, "description": "Only these tables (bare or schema-qualified, at most 500) — e.g. the ones your users may query; the agent sees no other. Names not compiled come back in `tables_unknown`" }
             },
             "required": ["question"]
         }
@@ -6505,6 +6506,89 @@ mod tests {
             made.load(Ordering::SeqCst),
             1,
             "no provider is built past the cap"
+        );
+    }
+
+    /// Records every prompt it is sent; always answers with one SELECT over `orders`.
+    struct Recording(std::sync::Mutex<Vec<String>>);
+
+    #[async_trait::async_trait]
+    impl ekos_recovery::LlmProvider for Recording {
+        fn model_name(&self) -> &str {
+            "recording"
+        }
+        async fn complete(
+            &self,
+            req: &ekos_recovery::LlmRequest<'_>,
+        ) -> std::result::Result<ekos_recovery::LlmResponse, ekos_recovery::LlmError> {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("{}\n{}", req.system, req.user));
+            Ok(ekos_recovery::LlmResponse {
+                content: "```sql\nSELECT sum(amount) FROM orders\n```\nThe total.".into(),
+                model: "recording".into(),
+                ..Default::default()
+            })
+        }
+    }
+
+    #[test]
+    fn sql_generate_sees_only_the_tables_the_caller_allows() {
+        use ekos_kir::{KirObject, ObjectKind};
+        use ekos_ledger::Ledger;
+        let config = sql_generate_config();
+        let tmp = tempfile::tempdir().unwrap();
+        seed_orders_table(&config, tmp.path());
+        let mut users = KirObject::new("app_users", ObjectKind::Table);
+        users.properties.insert(
+            "columns".into(),
+            json!([{"name": "id", "data_type": "integer", "primary_key": true},
+                   {"name": "password_hint", "data_type": "text"}]),
+        );
+        Ledger::open(&config.ledger_path(tmp.path()))
+            .unwrap()
+            .append_object(&users)
+            .unwrap();
+        let store = super::super::store::open_store_read_only(&config, tmp.path()).unwrap();
+        let recording = std::sync::Arc::new(Recording(Default::default()));
+        let provider = recording.clone();
+        let factory = move || -> anyhow::Result<std::sync::Arc<dyn ekos_recovery::LlmProvider>> {
+            Ok(provider.clone())
+        };
+
+        let out = super::super::sql_check::agent_generate_with(
+            &config,
+            tmp.path(),
+            store.as_ref(),
+            &json!({"question": "total order amount", "tables": ["ORDERS", "customers"]}),
+            &factory,
+        )
+        .unwrap();
+        assert_eq!(out["tables_unknown"], json!(["customers"]), "{out}");
+        let prompts = recording.0.lock().unwrap().join("\n");
+        assert!(prompts.contains("orders"), "the allowed table is shown");
+        assert!(
+            !prompts.contains("app_users") && !prompts.contains("password_hint"),
+            "a table outside the list never reaches the model"
+        );
+
+        let calls_before = recording.0.lock().unwrap().len();
+        let none = super::super::sql_check::agent_generate_with(
+            &config,
+            tmp.path(),
+            store.as_ref(),
+            &json!({"question": "q", "tables": ["nothing_here"]}),
+            &factory,
+        );
+        assert!(
+            none.unwrap_err().to_string().contains("none of the tables"),
+            "an allow-list that names no compiled table is refused before a model call"
+        );
+        assert_eq!(
+            recording.0.lock().unwrap().len(),
+            calls_before,
+            "no model call"
         );
     }
 

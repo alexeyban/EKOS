@@ -645,7 +645,7 @@ impl Usage {
     }
 }
 
-/// `ekos_sql_generate {question, database?, dialect?}` (RFC 0250): `ekos sql generate`'s agent
+/// `ekos_sql_generate {question, database?, dialect?, tables?}` (RFC 0250): `ekos sql generate`'s agent
 /// for an MCP client, behind `[sql-generate] mcp`, the metered-call rule and a daily cap.
 pub fn agent_generate(
     config: &EkosConfig,
@@ -742,9 +742,24 @@ fn generate_core(
                 _ => None,
             });
     let target = Target::pick(config, database, None)?;
-    let schema = target.narrow(schema_source()?);
+    let allowed = allowed_tables(args)?;
+    let mut schema = target.narrow(schema_source()?);
     if schema.tables.is_empty() {
         bail!("the ledger holds no tables to write SQL against — run the pipeline first");
+    }
+    // The caller's own allow-list (e.g. the tables a BI tool lets its users query): the agent
+    // sees, and so writes SQL over, only these.
+    let mut unknown_tables = Vec::new();
+    if let Some(names) = &allowed {
+        let (narrowed, unknown) = schema.retain_tables(names);
+        if narrowed.tables.is_empty() {
+            bail!(
+                "none of the tables in `tables` is in the compiled schema: {}",
+                names.join(", ")
+            );
+        }
+        schema = narrowed;
+        unknown_tables = unknown;
     }
     let dialect = pick_dialect(config, args.get("dialect").and_then(Value::as_str), &target);
     let prompt = generation_prompt(&schema, &dialect, question)?;
@@ -781,7 +796,34 @@ fn generate_core(
         .sum();
     usage.tokens += tokens;
     usage.save(config, workspace)?;
-    Ok(generated_json(&outcome, &dialect, &probed, &usage))
+    let mut out = generated_json(&outcome, &dialect, &probed, &usage);
+    if !unknown_tables.is_empty() {
+        out["tables_unknown"] = json!(unknown_tables);
+    }
+    Ok(out)
+}
+
+/// `tables`: the names the agent may use (bare or schema-qualified), at most 500. Absent: all.
+fn allowed_tables(args: &Value) -> Result<Option<Vec<String>>> {
+    let Some(value) = args.get("tables").filter(|v| !v.is_null()) else {
+        return Ok(None);
+    };
+    let list = value
+        .as_array()
+        .ok_or_else(|| anyhow!("`tables` must be a list of table names"))?;
+    if list.is_empty() || list.len() > 500 {
+        bail!("`tables` must name between 1 and 500 tables");
+    }
+    list.iter()
+        .map(|v| {
+            v.as_str()
+                .map(str::trim)
+                .filter(|n| !n.is_empty() && n.len() <= 200)
+                .map(str::to_string)
+                .ok_or_else(|| anyhow!("every entry of `tables` must be a table name"))
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(Some)
 }
 
 fn checked_label(probed: &Option<Result<String, String>>) -> String {
