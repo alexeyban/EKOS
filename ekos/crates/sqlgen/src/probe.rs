@@ -260,7 +260,7 @@ pub(crate) mod tests {
     impl Probe for Mem {
         fn preview(&self, sql: &str, max_rows: usize) -> Result<Preview, String> {
             let mut stmt = self.0.prepare(sql).map_err(|e| e.to_string())?;
-            let columns: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+            let columns: Vec<String> = stmt.column_names().map(|s| s.to_string()).collect();
             let n = columns.len();
             let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
             let mut out = Preview {

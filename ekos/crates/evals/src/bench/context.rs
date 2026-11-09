@@ -12,7 +12,7 @@ use sqlparser::dialect::SQLiteDialect;
 use sqlparser::parser::Parser;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ops::ControlFlow;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// `"name"` / `` `name` `` / `[name]` → `name`.
 pub fn unquote(name: &str) -> String {
@@ -300,7 +300,7 @@ impl ValueIndex {
                 }
                 let (qt, qc) = (quote(t), quote(c));
                 let limit = Duration::from_secs(PROFILE_QUERY_SECONDS);
-                let values = bounded(conn, limit, &format!("values of {t}.{c}"), || {
+                let values = bounded(db, limit, &format!("values of {t}.{c}"), || {
                     let distinct: i64 = conn.query_row(
                         &format!("SELECT COUNT(DISTINCT {qc}) FROM {qt}"),
                         [],
@@ -491,18 +491,14 @@ fn is_list_column(distinct_values: &[String]) -> bool {
 /// databases, and `prepare` must finish).
 pub const PROFILE_QUERY_SECONDS: u64 = 60;
 
-/// Runs `f` with a deadline on `conn`; `None` (logged) when it fails or runs out of time.
+/// Runs `f` with a deadline on `db`; `None` (logged) when it fails or runs out of time.
 fn bounded<T>(
-    conn: &rusqlite::Connection,
+    db: &Db,
     limit: Duration,
     what: &str,
     f: impl FnOnce() -> rusqlite::Result<T>,
 ) -> Option<T> {
-    let deadline = Instant::now() + limit;
-    conn.progress_handler(10_000, Some(move || Instant::now() > deadline));
-    let result = f();
-    conn.progress_handler(0, None::<fn() -> bool>);
-    match result {
+    match db.with_deadline(limit, |_| f()) {
         Ok(v) => Some(v),
         Err(e) => {
             tracing::warn!("{what}: left out ({e})");
@@ -629,7 +625,7 @@ impl Profile {
         let mut tables = BTreeMap::new();
         for t in &schema.table_names {
             let qt = quote(t);
-            let Some(rows) = bounded(conn, limit, &format!("row count of {t}"), || {
+            let Some(rows) = bounded(db, limit, &format!("row count of {t}"), || {
                 conn.query_row(&format!("SELECT COUNT(*) FROM {qt}"), [], |r| {
                     r.get::<_, i64>(0)
                 })
@@ -639,7 +635,7 @@ impl Profile {
             let mut columns = BTreeMap::new();
             for (c, _, _) in &schema.tables[&t.to_lowercase()] {
                 let qc = quote(c);
-                if let Some(cp) = bounded(conn, limit, &format!("profile of {t}.{c}"), || {
+                if let Some(cp) = bounded(db, limit, &format!("profile of {t}.{c}"), || {
                     column_profile(conn, &qt, &qc, rows)
                 }) {
                     columns.insert(c.to_lowercase(), cp);

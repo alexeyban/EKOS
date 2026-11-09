@@ -11,6 +11,7 @@ use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OpenFlags};
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// One result cell, normalised so that equal-under-Python means equal here.
@@ -84,33 +85,62 @@ impl Default for Limits {
 /// A read-only connection to one benchmark database.
 pub struct Db {
     conn: Connection,
+    /// When the statement now running must stop; `None` between deadline-bound calls. The
+    /// progress handler that reads it is installed once, at [`Db::open`] (rusqlite ≥ 0.41 needs
+    /// `&mut Connection` to install one, and every reader here holds a shared `&Db`).
+    deadline: Arc<Mutex<Option<Instant>>>,
 }
 
 impl Db {
     pub fn open(path: &Path) -> Result<Db> {
-        let conn = Connection::open_with_flags(
+        let mut conn = Connection::open_with_flags(
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )
         .map_err(|e| anyhow!("opening {}: {e}", path.display()))?;
         // No other database file can be reached from a model's SQL.
-        conn.set_limit(rusqlite::limits::Limit::SQLITE_LIMIT_ATTACHED, 0);
+        conn.set_limit(rusqlite::limits::Limit::SQLITE_LIMIT_ATTACHED, 0)
+            .map_err(|e| anyhow!("limiting attached databases: {e}"))?;
         register_math_functions(&conn)?;
-        Ok(Db { conn })
+        let deadline: Arc<Mutex<Option<Instant>>> = Arc::default();
+        let watched = Arc::clone(&deadline);
+        conn.progress_handler(
+            10_000,
+            Some(move || {
+                watched
+                    .lock()
+                    .map(|d| d.is_some_and(|d| Instant::now() > d))
+                    .unwrap_or(false)
+            }),
+        )
+        .map_err(|e| anyhow!("installing the query deadline: {e}"))?;
+        Ok(Db { conn, deadline })
     }
 
     pub fn connection(&self) -> &Connection {
         &self.conn
     }
 
+    /// Runs `f` with SQLite interrupting any statement still running after `limit`.
+    pub fn with_deadline<T>(&self, limit: Duration, f: impl FnOnce(Instant) -> T) -> T {
+        let deadline = Instant::now() + limit;
+        self.set_deadline(Some(deadline));
+        let result = f(deadline);
+        self.set_deadline(None);
+        result
+    }
+
+    fn set_deadline(&self, value: Option<Instant>) {
+        if let Ok(mut d) = self.deadline.lock() {
+            *d = value;
+        }
+    }
+
     /// Run one statement and fetch every row, as `cursor.execute(sql); cursor.fetchall()` does.
     pub fn query(&self, sql: &str, limits: Limits) -> Result<Vec<Row>, ExecError> {
-        let deadline = Instant::now() + limits.timeout;
-        self.conn
-            .progress_handler(10_000, Some(move || Instant::now() > deadline));
-        let result = self.query_inner(sql, limits.max_rows, deadline);
-        self.conn.progress_handler(0, None::<fn() -> bool>);
-        result
+        self.with_deadline(limits.timeout, |deadline| {
+            self.query_inner(sql, limits.max_rows, deadline)
+        })
     }
 
     fn query_inner(
@@ -160,10 +190,8 @@ pub struct SqliteProbe<'a> {
 
 impl ekos_sqlgen::probe::Probe for SqliteProbe<'_> {
     fn preview(&self, sql: &str, max_rows: usize) -> Result<ekos_sqlgen::probe::Preview, String> {
-        let deadline = Instant::now() + self.timeout;
         let conn = &self.db.conn;
-        conn.progress_handler(10_000, Some(move || Instant::now() > deadline));
-        let result = (|| {
+        self.db.with_deadline(self.timeout, |deadline| {
             let map = |e: rusqlite::Error| {
                 if Instant::now() > deadline {
                     "timeout".to_string()
@@ -172,7 +200,7 @@ impl ekos_sqlgen::probe::Probe for SqliteProbe<'_> {
                 }
             };
             let mut stmt = conn.prepare(sql).map_err(map)?;
-            let columns: Vec<String> = stmt.column_names().iter().map(|c| c.to_string()).collect();
+            let columns: Vec<String> = stmt.column_names().map(|c| c.to_string()).collect();
             let width = columns.len();
             let mut rows = stmt.query([]).map_err(map)?;
             let mut out = ekos_sqlgen::probe::Preview {
@@ -197,9 +225,7 @@ impl ekos_sqlgen::probe::Probe for SqliteProbe<'_> {
                 out.rows.push(cells);
             }
             Ok(out)
-        })();
-        conn.progress_handler(0, None::<fn() -> bool>);
-        result
+        })
     }
 }
 
@@ -485,6 +511,19 @@ mod tests {
             )
             .unwrap_err();
         assert_eq!(err, ExecError::Timeout);
+        // The deadline ends with its query: the handler stays installed, but a later statement
+        // outside any deadline — long enough to reach the handler many times — is not interrupted
+        // by the deadline that has already passed.
+        let n: i64 = db
+            .connection()
+            .query_row(
+                "WITH RECURSIVE r(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM r WHERE i < 200000) \
+                 SELECT count(*) FROM r",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 200_000);
     }
 
     #[test]

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+**Security**
+- **`rusqlite` 0.32 → 0.41** (bundled SQLite via `libsqlite3-sys` 0.30 → 0.39) for
+  RUSTSEC-2026-0459; `cargo audit` is clean again in all three workspaces. rusqlite now needs
+  `&mut Connection` to install a progress handler, so the benchmark's `Db` installs its query
+  deadline once at open and each query sets the deadline (`Db::with_deadline`).
+
 ## v1.4.6 — 2026-11-09
 
 **Features**
