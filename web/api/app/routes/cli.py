@@ -26,7 +26,7 @@ from ..runner import QueueFull
 from ..settings import Settings, get_settings
 from ._responses import NOT_FOUND, TOO_MANY, UNPROCESSABLE
 
-router = APIRouter(tags=["commands"])
+router = APIRouter(tags=["commands"], dependencies=[Depends(authz.not_read_only)])
 
 FORBIDDEN = {"description": "Not allowed for this person, or not run from the web"}
 CONFLICT = {"description": "Needs the command's name typed as a confirmation"}

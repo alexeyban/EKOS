@@ -13,6 +13,8 @@ interface Me {
   // RFC 0180. Optional so an older API still type-checks.
   owner?: boolean;
   tenants?: { id: string; name: string; roles: string[] }[];
+  /** RFC 0251 amendment 1: a read-only showcase — no Schedules, Admin or Settings. */
+  read_only?: boolean;
 }
 
 // The Admin page is for a platform owner or an admin of at least one tenant.
@@ -46,12 +48,12 @@ export function Layout() {
             Schedules
           </Link>
         )}
-        {identity && administers(identity) && (
+        {identity && !identity.read_only && administers(identity) && (
           <Link to="/admin" className="hdr-link">
             Admin
           </Link>
         )}
-        {identity?.owner === true && (
+        {identity?.owner === true && !identity.read_only && (
           <Link to="/settings" className="hdr-link">
             Settings
           </Link>
@@ -68,7 +70,7 @@ function Identity({ me }: { me: Me }) {
   const qc = useQueryClient();
   return (
     <span className="muted" style={{ fontSize: "0.82rem" }}>
-      {me.email ?? me.name ?? (me.kind === "local" ? "this machine" : "token")} · <span className={`chip ${me.role === "write" ? "ok" : ""}`}>{me.role}</span>{" "}
+      {me.email ?? me.name ?? (me.kind === "local" ? "this machine" : "token")} · <span className={`chip ${me.role === "write" ? "ok" : ""}`}>{me.read_only ? "read-only" : me.role}</span>{" "}
       <button
         className="linkish"
         onClick={async () => {

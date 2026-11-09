@@ -68,3 +68,24 @@ strips a client-sent `REMOTE_USER`.
 
 1. A per-person daily allowance already exists (RFC 0249/0250); should a person need to accept the published
    rules before their first question (RFC 0249 §2.4 consent)? Likely yes before launch.
+
+## Amendment 1 (2026-11-09): a read-only showcase
+
+**Problem.** On the public demo, signed-in people are viewers, but the owners' sign-ins could still
+run, configure and administer, and three pages act with read rights alone: Commands (read-class
+CLI commands), Chat (a paid model call per message) and ekos.toml. The owner asked for a console
+where nobody can run anything.
+
+**Change.** `Settings.read_only` (`EKOS_CONSOLE_READ_ONLY`, default off). `authz.authorize` and
+`authz.can_anywhere` refuse every action but `read` while it is on — for owners and tokens too, so
+the platform settings are closed as well. `authz.not_read_only` refuses the Commands (`routes/cli.py`),
+Chat (`routes/chat.py`) and ekos.toml (`routes/config.py`) routers. `/api/auth/me` reports
+`read_only` and the role `read`; the UI hides Run, Commands, Chat, ekos.toml, extension pages,
+Init & compile, Schedules, Admin and Settings, and shows "read-only". The MCP gateway is unchanged:
+reads (and `ekos_sql_generate` with its caps) still work.
+
+**Tests.** `test_platform_auth.py`: an owner in a read-only console reads the workspace list, and a
+new tenant, the platform settings, Commands, Chat and ekos.toml are all 403; without the setting
+nothing changes. UI: `Layout.test.tsx` (no Admin/Settings/Schedules, "read-only"),
+`WorkspaceShell.test.ts` (the hidden tabs).
+

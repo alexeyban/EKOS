@@ -128,6 +128,11 @@ FIELDS: dict[str, Field] = {
     "signed_in_group": Field(
         "Sign-in", "A group every signed-in person is in: bind it to give everyone a role"
     ),
+    "read_only": Field(
+        _DEMO,
+        "Read-only showcase: everyone, owners included, may only read; Run, Commands, Chat and "
+        "ekos.toml are off (RFC 0251)",
+    ),
     "moderation_enabled": Field(
         _DEMO,
         "Check every question before it is answered: bans, blocks and daily limits (RFC 0249)",

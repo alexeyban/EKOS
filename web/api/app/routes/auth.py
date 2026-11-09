@@ -69,7 +69,7 @@ async def me(
         )
     # `role` is the two-value summary older UI code reads: "write" when the caller may change
     # anything anywhere. It grants nothing; every route checks its own action.
-    writes = (
+    writes = not settings.read_only and (
         principal.owner
         or authz.can_anywhere(principal, "operate")
         or authz.can_anywhere(principal, "review")
@@ -82,6 +82,8 @@ async def me(
         "name": principal.subject if principal.kind == "user" else None,
         "role": "write" if writes else "read",
         "owner": principal.owner,
+        # RFC 0251 amendment 1: the UI hides every control that acts (the API refuses them).
+        "read_only": settings.read_only,
         "tenants": tenants,
     }
 

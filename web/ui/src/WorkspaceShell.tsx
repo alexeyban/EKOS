@@ -14,6 +14,8 @@ export interface Me {
   canReview?: boolean;
   // The caller sees only part of the open workspace (RFC 0181).
   restricted?: boolean;
+  // RFC 0251 amendment 1: a read-only showcase — nothing that acts is shown (the API refuses it).
+  read_only?: boolean;
 }
 
 interface Workspace {
@@ -26,6 +28,8 @@ interface Workspace {
 // What someone who sees only part of a workspace can open (RFC 0181): the pages that read
 // through their scope. The API refuses the others for them.
 const RESTRICTED_TABS = new Set(["graph"]);
+// What a read-only showcase leaves out: the pages that act or call a paid model (RFC 0251).
+export const READ_ONLY_HIDDEN = new Set(["run", "commands", "chat", "config"]);
 
 // What the caller may do in the open workspace. Outside a workspace shell (or against an API
 // that sends no roles) the summary decides. These only hide controls; the API enforces.
@@ -76,14 +80,17 @@ export function WorkspaceShell() {
   });
   const { pathname } = useLocation();
   const onScopedPage = pathname.replace(/\/$/, "").endsWith("/graph");
-  const scoped: Me = roles
-    ? {
-        ...me,
-        canOperate: roles.includes("operator") || roles.includes("admin"),
-        canReview: roles.includes("reviewer") || roles.includes("admin"),
-        restricted,
-      }
-    : me;
+  const readOnly = me.read_only === true;
+  const scoped: Me = readOnly
+    ? { ...me, canOperate: false, canReview: false, restricted }
+    : roles
+      ? {
+          ...me,
+          canOperate: roles.includes("operator") || roles.includes("admin"),
+          canReview: roles.includes("reviewer") || roles.includes("admin"),
+          restricted,
+        }
+      : me;
 
   return (
     <>
@@ -93,8 +100,9 @@ export function WorkspaceShell() {
         </NavLink>
         <span className="ws-nav-name">{name}</span>
         <span className="ws-nav-tabs">
-          {[...TABS, ...(restricted ? [] : extensionTabs(extPages.data?.pages))]
+          {[...TABS, ...(restricted || readOnly ? [] : extensionTabs(extPages.data?.pages))]
             .filter((t) => !restricted || RESTRICTED_TABS.has(t.to))
+            .filter((t) => !readOnly || !READ_ONLY_HIDDEN.has(t.to))
             .map((t) => (
             <NavLink
               key={t.to}

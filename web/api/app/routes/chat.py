@@ -26,7 +26,7 @@ from ..settings import Settings, get_settings
 from ._responses import NOT_FOUND, UNPROCESSABLE
 from .mcp_gateway import _Caller
 
-router = APIRouter(tags=["chat"])
+router = APIRouter(tags=["chat"], dependencies=[Depends(authz.not_read_only)])
 
 CONFLICT = {"description": "No chat model, or a paid model while metered calls are off"}
 

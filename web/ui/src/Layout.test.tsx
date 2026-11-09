@@ -57,3 +57,22 @@ describe("Layout sign-out", () => {
     expect(screen.queryByRole("button", { name: "sign out" })).not.toBeInTheDocument();
   });
 });
+
+describe("Layout read-only showcase", () => {
+  it("hides Admin and Settings from an owner and says read-only (RFC 0251)", async () => {
+    vi.spyOn(client, "api").mockImplementation((path: string) => {
+      if (path === "/auth/me") {
+        return Promise.resolve({
+          mode: "oidc", email: null, name: "github:root", role: "read", owner: true,
+          read_only: true, tenants: [{ id: "demo", name: "Demo", roles: ["admin"] }],
+        });
+      }
+      throw new Error(`unexpected path ${path}`);
+    });
+    renderLayout();
+    expect(await screen.findByText("read-only")).toBeTruthy();
+    expect(screen.queryByText("Admin")).toBeNull();
+    expect(screen.queryByText("Settings")).toBeNull();
+    expect(screen.queryByText("Schedules")).toBeNull();
+  });
+});

@@ -165,6 +165,8 @@ def sees_all_of(principal: Principal, ws: models.Workspace) -> bool:
 def authorize(
     principal: Principal, action: str, tenant_id: str, workspace_id: str | None = None
 ) -> bool:
+    if action != "read" and get_settings().read_only:
+        return False  # RFC 0251 amendment 1: a read-only showcase, for owners too
     if principal.kind == "token" and action not in TOKEN_ACTIONS:
         return False
     if action == "platform":
@@ -185,6 +187,8 @@ def can_anywhere(principal: Principal, action: str) -> bool:
     """True when the principal may do `action` on at least one workspace. Routes that look a
     thing up by its own id (a run, a schedule) check this first, so a caller without the role
     gets 403 for every id and cannot probe which ones exist."""
+    if action != "read" and get_settings().read_only:
+        return False
     if principal.kind != "token" and principal.owner:
         return True
     return any(authorize(principal, action, ws.tenant_id, ws.id) for ws in models.list_workspaces())
@@ -197,6 +201,13 @@ def require_anywhere(principal: Principal, action: str) -> None:
 
 def sees_workspace(principal: Principal, ws: models.Workspace) -> bool:
     return bool(roles_in(principal, ws.tenant_id, ws.id))
+
+
+def not_read_only() -> None:
+    """For a page that acts although it needs only `read` (Commands, Chat, ekos.toml): refused
+    while the console is a read-only showcase (RFC 0251 amendment 1)."""
+    if get_settings().read_only:
+        raise HTTPException(status_code=403, detail="this console is a read-only showcase")
 
 
 # ── audit ────────────────────────────────────────────────────────────────────

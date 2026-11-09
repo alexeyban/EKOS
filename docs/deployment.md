@@ -187,6 +187,13 @@ To give everyone who signs in read access: create a group (**Admin → Groups**)
 on the project to it, and put the group's id in `signed_in_group`. Every signed-in person is in
 that group; a token never is. Remove the binding to close the project again.
 
+**A read-only showcase** (`read_only = true`, `EKOS_CONSOLE_READ_ONLY`): every principal — owners and
+API tokens included — may only read. Runs, schedules, review decisions, `ekos.toml`, the Admin and
+Settings pages are refused, and so are three pages that act with read rights alone: **Commands**
+(read-class CLI commands), **Chat** (a paid model) and **ekos.toml**. The UI hides them and shows
+"read-only". MCP reads still work, so a BI tool keeps answering; `ekos_sql_generate` keeps its own
+caps. To change the console's set-up, switch it off, make the change, and switch it on again.
+
 ## 4. Projects
 
 A tenant admin adds a project in **Add a workspace → New project from a source directory**,

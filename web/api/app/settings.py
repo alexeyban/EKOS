@@ -118,6 +118,10 @@ class Settings(BaseSettings):
     # The id of a console group every signed-in person counts as a member of: a binding of this
     # group gives everyone who signs in that role (a public demo's read-only access). Never a token.
     signed_in_group: str = ""
+    # RFC 0251 amendment 1: a public showcase. Every principal, owners and tokens included, may
+    # only read: nothing runs, nothing is reviewed or configured, and the pages that act — Run,
+    # Commands, the Chat (a paid model) and ekos.toml — are refused. MCP reads still work.
+    read_only: bool = False
 
     def owner_set(self) -> set[str]:
         return {v.strip().lower() for v in self.owners.split(",") if v.strip()}

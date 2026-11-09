@@ -47,6 +47,16 @@ reason is a table outside the allowed ones, and logs the real reason.
 
 ---
 
+## RFC 0251 amendment 1 — a read-only showcase (v1.4.6)
+
+The owner asked for the public console to be read-only for everyone, with Run, Commands, config and
+ekos.toml off. Viewers were already refused writes, but owners were not, and Commands, Chat and
+ekos.toml need only `read`. `read_only` makes `authorize` refuse every action but `read` (owners
+and tokens too) and refuses those three routers; `/me` reports it and the UI hides the controls.
+MCP reads are untouched, so Superset keeps answering.
+
+---
+
 ## Azure demo (ekos-demo-public)
 
 ### Lakehouse — six faults, then off

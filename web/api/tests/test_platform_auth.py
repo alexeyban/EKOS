@@ -181,3 +181,34 @@ def test_platform_auth_cannot_be_combined_with_oidc_or_local_mode(
     monkeypatch.delenv("EKOS_CONSOLE_OIDC_ISSUER")
     with pytest.raises(ValidationError, match="platform_auth"):
         Settings(platform_auth="aca", mode="local")
+
+
+def _read_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.settings as settings_mod
+
+    monkeypatch.setenv("EKOS_CONSOLE_READ_ONLY", "true")
+    settings_mod._settings = None
+
+
+def test_a_read_only_console_lets_everyone_read_and_nobody_act(client, env, monkeypatch) -> None:
+    # RFC 0251 amendment 1: owners included; the pages that act on `read` are refused too.
+    project = _demo_project(client, env)
+    _read_only(monkeypatch)
+    me = client.get("/api/auth/me", headers=ROOT).json()
+    assert me["read_only"] is True and me["role"] == "read" and me["owner"] is True
+    assert visible(client, ROOT) == [project], "reading still works"
+    refused = {
+        "new tenant": client.post("/api/tenants", headers=ROOT, json={"id": "x", "name": "X"}),
+        "platform settings": client.get("/api/platform/settings", headers=ROOT),
+        "commands": client.get(f"/api/workspaces/{project}/cli", headers=ROOT),
+        "chat": client.get(f"/api/workspaces/{project}/chat", headers=ROOT),
+        "ekos.toml": client.get(f"/api/workspaces/{project}/config", headers=ROOT),
+    }
+    assert {k: r.status_code for k, r in refused.items()} == {k: 403 for k in refused}, {
+        k: r.text[:120] for k, r in refused.items()
+    }
+
+
+def test_without_the_switch_nothing_changes(client) -> None:
+    me = client.get("/api/auth/me", headers=ROOT).json()
+    assert me["read_only"] is False and me["role"] == "write"

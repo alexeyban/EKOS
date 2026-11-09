@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.6 — 2026-11-09
+
+**Features**
+- **Console: a read-only showcase** (`read_only`, `EKOS_CONSOLE_READ_ONLY`; RFC 0251 amendment 1).
+  Everyone, owners and tokens included, may only read: runs, schedules, reviews, ekos.toml, Admin
+  and Settings are refused, and so are Commands and Chat, which act with read rights alone. The UI
+  hides them; MCP reads keep working for BI tools.
+
 ## v1.4.5 — 2026-11-09
 
 **Fixes**

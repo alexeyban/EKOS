@@ -16,13 +16,17 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from .. import _afile, config_io, home, models, readproc, roots
+from .. import _afile, authz, config_io, home, models, readproc, roots
 from ..authz import allow
 from ..deps import require_workspace
 from ..settings import Settings, get_settings
 from ._responses import BAD_GATEWAY, UNPROCESSABLE
 
-router = APIRouter(prefix="/workspaces", tags=["config"], dependencies=[Depends(allow("read"))])
+router = APIRouter(
+    prefix="/workspaces",
+    tags=["config"],
+    dependencies=[Depends(allow("read")), Depends(authz.not_read_only)],
+)
 
 
 class ConfigOut(BaseModel):
