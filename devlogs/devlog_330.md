@@ -37,6 +37,16 @@ refused afterwards.
 
 ---
 
+## RFC 0250 amendment 2 — the tool never returns a write (v1.4.5)
+
+Found while recording the demo video: "Delete all invoices of Joe Block" came back as a `DELETE`
+with status `open_findings`; Superset's guard refused it and nothing ran. `generate_core` now checks
+the final SQL with `guard::single_select` (or, unparsed, by writing verbs outside literals) and
+answers `refused` with no SQL. Superset no longer retries a refusal by drafting again unless the
+reason is a table outside the allowed ones, and logs the real reason.
+
+---
+
 ## Azure demo (ekos-demo-public)
 
 ### Lakehouse — six faults, then off
@@ -69,6 +79,8 @@ Iceberg files and Polaris's catalog in PostgreSQL kept.
 
 ## Knowledge Captured
 
+- **A text-to-SQL tool must check its own output is read-only.** The model will write a DELETE when
+  asked to delete; lint findings are advice, not a gate.
 - **An agent that writes SQL must be told the caller's allow-list.** A guard after the fact turns a
   good question into "refused".
 - **Azure Container Apps HTTP ingress and Trino do not mix**: the forwarded proto is `https` even for

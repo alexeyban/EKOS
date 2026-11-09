@@ -796,11 +796,76 @@ fn generate_core(
         .sum();
     usage.tokens += tokens;
     usage.save(config, workspace)?;
+    // The tool writes one read-only SELECT. A model can still answer "delete …" with a DELETE
+    // (it did, 2026-11-09): such SQL is never handed back, only the reason.
+    if let Some(why) = outcome
+        .sql
+        .as_deref()
+        .and_then(|sql| read_only_refusal(sql, &dialect))
+    {
+        return Ok(json!({
+            "status": "refused",
+            "sql": null,
+            "reason": format!(
+                "EKOS writes read-only SELECT queries only; this question asks for a change to the \
+                 data ({why})"
+            ),
+            "dialect": dialect,
+            "usage": usage,
+        }));
+    }
     let mut out = generated_json(&outcome, &dialect, &probed, &usage);
     if !unknown_tables.is_empty() {
         out["tables_unknown"] = json!(unknown_tables);
     }
     Ok(out)
+}
+
+/// Why `sql` is not one read-only query, or `None` when it is. When it does not parse in the
+/// dialect (the agent's lint reports that), it counts as a write only when it starts with a
+/// writing keyword or names a writing verb outside string literals — a SELECT the parser cannot
+/// read is not refused for that alone.
+fn read_only_refusal(sql: &str, dialect: &str) -> Option<String> {
+    use sqlparser::parser::Parser;
+    let parser_dialect = sqlparser::dialect::dialect_from_str(dialect)
+        .unwrap_or_else(|| Box::new(sqlparser::dialect::GenericDialect {}));
+    if Parser::parse_sql(parser_dialect.as_ref(), sql).is_ok() {
+        return ekos_sqlgen::guard::single_select(sql, parser_dialect.as_ref())
+            .err()
+            .map(|e| e.trim_start_matches("not sent: ").to_string());
+    }
+    const WRITES: &[&str] = &[
+        "insert", "update", "delete", "merge", "upsert", "replace", "drop", "create", "alter",
+        "truncate", "grant", "revoke", "copy", "call", "exec", "execute", "do", "set", "lock",
+        "vacuum", "comment", "rename",
+    ];
+    // Verbs that never appear as whole words in a plain SELECT (string literals left out), so a
+    // data-modifying CTE the parser cannot read is still caught.
+    const STRONG: &[&str] = &[
+        "insert", "update", "delete", "merge", "drop", "truncate", "alter", "grant", "revoke",
+        "create",
+    ];
+    let mut outside_literals = String::with_capacity(sql.len());
+    let mut in_literal = false;
+    for c in sql.chars() {
+        if c == '\'' {
+            in_literal = !in_literal;
+        } else if !in_literal {
+            outside_literals.push(c.to_ascii_lowercase());
+        }
+    }
+    let words: Vec<&str> = outside_literals
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .filter(|w| !w.is_empty())
+        .collect();
+    let first = words.first().copied().unwrap_or("");
+    if WRITES.contains(&first) {
+        return Some(format!("a {} statement", first.to_ascii_uppercase()));
+    }
+    words
+        .iter()
+        .find(|w| STRONG.contains(w))
+        .map(|w| format!("{} inside the query", w.to_ascii_uppercase()))
 }
 
 /// `tables`: the names the agent may use (bare or schema-qualified), at most 500. Absent: all.
@@ -954,6 +1019,39 @@ fn print_generated(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn read_only_refusal_names_writes_and_passes_queries() {
+        use super::read_only_refusal as r;
+        assert!(r("SELECT name FROM c_bpartner", "postgres").is_none());
+        assert!(r("WITH t AS (SELECT 1 AS x) SELECT x FROM t", "postgres").is_none());
+        assert!(r("DELETE FROM c_invoice WHERE c_bpartner_id = 1", "postgres").is_some());
+        assert!(r("UPDATE c_invoice SET ispaid = 'Y'", "postgres").is_some());
+        assert!(
+            r(
+                "WITH d AS (DELETE FROM c_invoice RETURNING *) SELECT * FROM d",
+                "postgres"
+            )
+            .is_some(),
+            "a data-modifying CTE"
+        );
+        assert!(
+            r("SELECT 1; DROP TABLE x", "postgres").is_some(),
+            "two statements"
+        );
+        // Not parsed: refused only when it starts with a writing keyword.
+        assert!(r("SELEC name FRM t", "postgres").is_none());
+        assert!(r("DELETE c_invoice WHERE ((", "postgres").is_some());
+        assert!(
+            r(
+                "SELECT 'please delete me' AS note FROM c_invoice WHERE ((",
+                "postgres"
+            )
+            .is_none(),
+            "a writing word inside a string literal is text"
+        );
+    }
+
     use super::*;
     use ekos_sqlgen::{Column, ForeignKey, Table};
 

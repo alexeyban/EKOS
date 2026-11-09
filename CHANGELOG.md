@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.5 — 2026-11-09
+
+**Fixes**
+- **`ekos_sql_generate` never returns SQL that writes** (RFC 0250 amendment 2). Asked to "delete
+  all invoices of Joe Block", the agent wrote a DELETE and the tool returned it with an open finding;
+  a client without its own guard could have run it. A write — parsed, or recognised by its verbs when
+  the dialect's parser cannot read it — is now answered `status: "refused"` with a reason and no SQL.
+
 ## v1.4.4 — 2026-11-09
 
 **Features**

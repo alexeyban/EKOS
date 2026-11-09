@@ -109,3 +109,25 @@ tables when the guard refuses EKOS's SQL.
 allowed table is in the prompt, the other table and its columns are not; `tables_unknown`; no model
 call for an allow-list that names nothing compiled).
 
+## Amendment 2 (2026-11-09): never hand back SQL that writes
+
+**Problem.** Recording the demo, "Delete all invoices of Joe Block" came back from
+`ekos_sql_generate` as `DELETE FROM c_invoice WHERE c_bpartner_id IN (…)` with status
+`open_findings` (lint `E001`). Superset's guard refused it and nothing ran, but a tool that
+promises one read-only SELECT must not rely on every client having a guard.
+
+**Change.** After the agent, `generate_core` checks the final SQL (`read_only_refusal`): parsed in
+the dialect, it must pass `guard::single_select` (one query, no `SELECT … INTO`, no locking clause,
+no data-modifying part); when the parser cannot read it, it counts as a write if it starts with a
+writing keyword or names a strong writing verb (INSERT, UPDATE, DELETE, MERGE, DROP, TRUNCATE,
+ALTER, GRANT, REVOKE, CREATE) outside string literals. A write is answered `status: "refused"`,
+`sql: null` and a `reason`; the SQL itself is never returned. The call still counts toward the
+daily cap (the model was asked).
+
+**Callers.** Superset's fork answers EKOS's refusal plainly and no longer retries a refusal by its
+own guard unless the reason is a table outside the allowed ones.
+
+**Tests.** `sql_check::tests::read_only_refusal_names_writes_and_passes_queries` (DELETE, UPDATE, a
+data-modifying CTE, two statements, unparsed writes, a writing word inside a literal);
+`mcp.rs::sql_generate_never_hands_back_sql_that_writes` (a model that answers with a DELETE).
+

@@ -6593,6 +6593,35 @@ mod tests {
     }
 
     #[test]
+    fn sql_generate_never_hands_back_sql_that_writes() {
+        let config = sql_generate_config();
+        let tmp = tempfile::tempdir().unwrap();
+        seed_orders_table(&config, tmp.path());
+        let store = super::super::store::open_store_read_only(&config, tmp.path()).unwrap();
+        let factory = || -> anyhow::Result<std::sync::Arc<dyn ekos_recovery::LlmProvider>> {
+            Ok(std::sync::Arc::new(
+                ekos_recovery::llm::MockLlmProvider::new(
+                    "```sql\nDELETE FROM orders WHERE amount > 10\n```\nDeletes the large orders.",
+                ),
+            ))
+        };
+        let out = super::super::sql_check::agent_generate_with(
+            &config,
+            tmp.path(),
+            store.as_ref(),
+            &json!({"question": "delete the large orders"}),
+            &factory,
+        )
+        .unwrap();
+        assert_eq!(out["status"], "refused", "{out}");
+        assert!(out["sql"].is_null(), "the DELETE is never returned: {out}");
+        assert!(
+            out["reason"].as_str().unwrap().contains("read-only SELECT"),
+            "{out}"
+        );
+    }
+
+    #[test]
     fn sql_generate_needs_a_question_and_tables() {
         let config = sql_generate_config();
         let tmp = tempfile::tempdir().unwrap();
