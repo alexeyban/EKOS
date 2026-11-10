@@ -1212,6 +1212,9 @@ pub enum DatabaseKind {
     Clickhouse,
     /// RFC 0252 §3.5: `connect` is `host[:port]/database`, `owners` are schemas.
     Sqlserver,
+    /// RFC 0252 §3.5: `connect` is `host[:port]/database@server` (Informix Client SDK) or
+    /// `drda://host[:port]/database` (IBM Data Server Driver), `owners` are table owners.
+    Informix,
 }
 
 impl DatabaseKind {
@@ -1221,6 +1224,7 @@ impl DatabaseKind {
             Self::Postgres => "postgres",
             Self::Clickhouse => "clickhouse",
             Self::Sqlserver => "sqlserver",
+            Self::Informix => "informix",
         }
     }
 }
@@ -1822,6 +1826,7 @@ path = "/tmp/ekos-containers/b"
             ("postgres", "db.local:5432/shop"),
             ("clickhouse", "https://ch.local:8443"),
             ("sqlserver", "mssql.local:1433/shop"),
+            ("informix", "ifx.local:9088/stores@ol_ifx"),
         ] {
             let db = format!(
                 "[[databases]]\nname = \"wh\"\nkind = \"{kind}\"\nconnect = \"{connect}\"\n\

@@ -47,6 +47,7 @@ fn as_text(flavor: Flavor, col: &str) -> String {
         Flavor::Postgres => format!("{col}::text"),
         Flavor::SqlServer => format!("CAST({col} AS nvarchar(4000))"),
         Flavor::ClickHouse => format!("toString({col})"),
+        Flavor::Informix => format!("CAST({col} AS LVARCHAR(4000))"),
     }
 }
 
@@ -57,6 +58,8 @@ fn month(flavor: Flavor, expr: &str) -> String {
         Flavor::Postgres => format!("to_char({expr}, 'YYYY-MM')"),
         Flavor::SqlServer => format!("CONVERT(char(7), {expr}, 126)"),
         Flavor::ClickHouse => format!("formatDateTime({expr}, '%Y-%m')"),
+        // GL_DATETIME directives; a `DATE` takes the date ones.
+        Flavor::Informix => format!("TO_CHAR({expr}, '%Y-%m')"),
     }
 }
 
@@ -66,6 +69,7 @@ fn count(flavor: Flavor) -> &'static str {
         Flavor::Oracle => "COUNT(*)",
         Flavor::Postgres => "count(*)",
         Flavor::SqlServer => "COUNT_BIG(*)",
+        Flavor::Informix => "COUNT(*)",
     }
 }
 
@@ -112,10 +116,21 @@ pub fn literal_coverage_sql(
                 month(flavor, &format!("MAX({t})")),
             )
         }
+        // Informix wants a typed NULL in a select list.
+        None if flavor == Flavor::Informix => (
+            "CAST(NULL AS CHAR(7))".to_string(),
+            "CAST(NULL AS CHAR(7))".to_string(),
+        ),
         None => ("NULL".to_string(), "NULL".to_string()),
     };
+    // Informix groups by a select-list position, not by an expression.
+    let group = if flavor == Flavor::Informix {
+        "1"
+    } else {
+        bucket.as_str()
+    };
     Ok(format!(
-        "SELECT {bucket}, {}, {first}, {last} FROM {tbl} WHERE {col} IS NOT NULL GROUP BY {bucket}",
+        "SELECT {bucket}, {}, {first}, {last} FROM {tbl} WHERE {col} IS NOT NULL GROUP BY {group}",
         count(flavor)
     ))
 }
@@ -420,6 +435,7 @@ mod tests {
             Flavor::Oracle,
             Flavor::ClickHouse,
             Flavor::SqlServer,
+            Flavor::Informix,
         ] {
             let sql = literal_coverage_sql(
                 f,

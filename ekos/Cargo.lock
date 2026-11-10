@@ -168,6 +168,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "atoi"
+version = "3.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d12c37257553c19e9aee6cba77814fdc9e07844abfc8b3a2c377cd920ee5a993"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "atoi_simd"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1079,6 +1088,7 @@ dependencies = [
  "ekos-plugin-git",
  "ekos-plugin-github",
  "ekos-plugin-governance",
+ "ekos-plugin-informix",
  "ekos-plugin-java",
  "ekos-plugin-javascript",
  "ekos-plugin-localdocs",
@@ -1720,6 +1730,21 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ekos-plugin-informix"
+version = "1.4.6"
+dependencies = [
+ "async-trait",
+ "ekos-common",
+ "ekos-observation-sdk",
+ "ekos-sql-dialect-sdk",
+ "odbc-api",
+ "serde_json",
+ "sqlparser",
  "tokio",
  "tracing",
 ]
@@ -3765,6 +3790,25 @@ dependencies = [
  "web-time",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "odbc-api"
+version = "30.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07df20ae00dc7fc31c9ae32451bb0d83fb9d18ddb970e066b26e43d6a76cd9a0"
+dependencies = [
+ "atoi",
+ "log",
+ "odbc-sys",
+ "thiserror",
+ "widestring",
+]
+
+[[package]]
+name = "odbc-sys"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19e3a0f2c6531470f498c7cc5054f6b2a5922b5e82a5151065a257c1eb5ee1cd"
 
 [[package]]
 name = "odpic-sys"
@@ -6584,6 +6628,12 @@ dependencies = [
  "wasite",
  "web-sys",
 ]
+
+[[package]]
+name = "widestring"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
 name = "winapi"

@@ -30,6 +30,10 @@ distributed = ["ekos-distributed/object-store", "ekos-segment-backend/object-sto
 # compiler to build and Oracle Instant Client at run time. Without it, a `[[databases]]` entry of
 # kind `oracle` fails `ekos build` with a message saying so.
 oracle = ["ekos-plugin-oracle/oracle"]
+# RFC 0252 §3.5 — the live Informix binding (odbc-api over unixODBC). Off by default: it links
+# libodbc, and needs the IBM Informix Client SDK (or the IBM Data Server Driver, over DRDA) at run
+# time. Without it, a `[[databases]]` entry of kind `informix` fails `ekos build` saying so.
+informix = ["ekos-plugin-informix/informix"]
 # RFC 0232 — `ekos home backup --to <url>` / `ekos home restore <url>`: backups in S3, Azure Blob
 # or Google Cloud Storage, authenticated by the machine's cloud identity. Only the `object_store`
 # client, never the distributed services (RFC 0113 keeps those out of a stock build). Off by
@@ -82,6 +86,7 @@ ekos-plugin-clickhouse.workspace = true
 ekos-plugin-oracle.workspace = true
 ekos-plugin-postgres.workspace = true
 ekos-plugin-sqlserver.workspace = true
+ekos-plugin-informix.workspace = true
 ekos-plugin-localdocs.workspace = true
 ekos-plugin-pentaho.workspace = true
 ekos-plugin-python.workspace = true

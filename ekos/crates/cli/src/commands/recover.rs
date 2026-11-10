@@ -269,6 +269,7 @@ fn print_live_catalog_stats(
         CatalogDialect::Postgres => "PostgreSQL",
         CatalogDialect::ClickHouse => "ClickHouse",
         CatalogDialect::SqlServer => "SQL Server",
+        CatalogDialect::Informix => "Informix",
     };
     // A pass served from cache does not run, so it fills no counters; zeros would read as an
     // empty database.
@@ -316,6 +317,13 @@ fn print_live_catalog_stats(
         s.routines.triggers,
         s.invalid_objects
     );
+    if dialect == CatalogDialect::Informix && r.routines > 0 {
+        println!(
+            "  {label} catalog: {} routine(s) at signature fidelity, without IR — no Informix SPL \
+             reader yet (RFC 0252 §3.5)",
+            r.routines
+        );
+    }
     if dialect != CatalogDialect::Oracle {
         println!(
             "  {label} catalog: {} object(s) no longer in the database",
@@ -1620,6 +1628,7 @@ pub async fn run_with(
         CatalogDialect::Postgres,
         CatalogDialect::ClickHouse,
         CatalogDialect::SqlServer,
+        CatalogDialect::Informix,
     ] {
         let ids = collect_artifact_ids_for_connector(&*artifact_store, dialect.observer());
         if ids.is_empty() {

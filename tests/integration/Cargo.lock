@@ -990,6 +990,7 @@ dependencies = [
  "ekos-plugin-git",
  "ekos-plugin-github",
  "ekos-plugin-governance",
+ "ekos-plugin-informix",
  "ekos-plugin-java",
  "ekos-plugin-javascript",
  "ekos-plugin-localdocs",
@@ -1564,6 +1565,20 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ekos-plugin-informix"
+version = "1.4.6"
+dependencies = [
+ "async-trait",
+ "ekos-common",
+ "ekos-observation-sdk",
+ "ekos-sql-dialect-sdk",
+ "serde_json",
+ "sqlparser",
  "tokio",
  "tracing",
 ]

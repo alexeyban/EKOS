@@ -1,0 +1,34 @@
+# RFC 0252 §3.5 — the Informix EKOS's live Informix source is developed and tested against.
+#
+# Separate from the other compose files: nothing else needs Informix. The developer edition image
+# is free for development and testing (LICENSE=accept); it listens for SQLI on 9088 (the Informix
+# Client SDK's protocol) and DRDA on 9089 (the IBM Data Server Driver's). Both are bound to
+# loopback. deploy/fixtures/informix/load.sh creates the read-only OS user `ekos_ro` in the
+# container and loads deploy/fixtures/informix/shop.sql (two owners, keys, foreign keys, a check,
+# a view, an SPL procedure and function, a trigger).
+#
+# Usage:
+#   docker compose -f docker-compose.informix.yml up -d --wait     # server (healthy in ~1 min)
+#   deploy/fixtures/informix/load.sh                               # user + fixture
+#   EKOS_INFORMIX_LIVE=1 EKOS_INFORMIX_PW=Ekos-ro-local-1 EKOS_INFORMIX_ADMIN_PW=in4mix \
+#     EKOS_INFORMIX_CONNECT='drda://127.0.0.1:59089/shop?driver=<clidriver>/lib/libdb2.so' \
+#     cargo test -p ekos-plugin-informix --features informix --test live   (from ekos/)
+#   docker compose -f docker-compose.informix.yml down -v          # -v also drops the data
+#
+# The passwords are deliberately local-only (`in4mix` is the image's own default for `informix`).
+services:
+  informix:
+    image: icr.io/informix/informix-developer-database:latest
+    environment:
+      LICENSE: accept
+      SIZE: small
+      TZ: UTC
+    ports:
+      - "127.0.0.1:59088:9088"
+      - "127.0.0.1:59089:9089"
+    volumes:
+      - informix-data:/opt/ibm/data
+    # The image's own healthcheck (informix_status.sh) is kept.
+
+volumes:
+  informix-data:

@@ -1,0 +1,30 @@
+[package]
+name = "ekos-plugin-informix"
+description = "RFC 0252 §3.5 — live Informix catalog observer and profiler: one artifact per catalog object, read over ODBC"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[features]
+# The ODBC binding (odbc-api over unixODBC). Off by default: it links libodbc, and reading a
+# database needs an Informix-capable ODBC driver at run time (the IBM Informix Client SDK, or the
+# IBM Data Server Driver over DRDA). Without it, a `[[databases]]` entry of kind `informix` fails
+# with a message saying so; every pure part (catalog mapping, profile plan, probe guard) builds.
+informix = ["dep:odbc-api"]
+
+[dependencies]
+ekos-common.workspace = true
+ekos-observation-sdk.workspace = true
+ekos-sql-dialect-sdk.workspace = true
+sqlparser.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+odbc-api = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }

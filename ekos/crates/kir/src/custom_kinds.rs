@@ -228,6 +228,11 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(database, schema) — RFC 0252 §3.5; one live catalog summary per schema read",
     },
     CustomKind {
+        name: "InformixCatalog",
+        structurally_keyed: true,
+        note: "(database, owner) — RFC 0252 §3.5; one live catalog summary per owner read",
+    },
+    CustomKind {
         name: "WriteBehaviour",
         structurally_keyed: true,
         note: "the table it describes — RFC 0212; one per table, derived at commit",
@@ -562,6 +567,7 @@ mod tests {
             "PostgresCatalog",
             "ClickHouseCatalog",
             "SqlServerCatalog",
+            "InformixCatalog",
             "WriteBehaviour",
             "Ticket",
             "JsModule",

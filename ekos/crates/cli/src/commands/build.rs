@@ -15,6 +15,9 @@ use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
 use ekos_plugin_github::{GitHubApiClient, GitHubObserver};
 use ekos_plugin_governance::{DEFAULT_HUB_URL, SnapshotClient, SnapshotObserver};
+use ekos_plugin_informix::{
+    InformixConnection, InformixObserver, LiveReader as InformixLiveReader,
+};
 use ekos_plugin_java::JavaObserver;
 use ekos_plugin_javascript::JavaScriptObserver;
 use ekos_plugin_localdocs::{LocalDocsObserver, LocalDocsSettings, TesseractOcr};
@@ -347,6 +350,18 @@ fn database_observers(config: &EkosConfig) -> Result<Vec<(String, Box<dyn Observ
                         )
                         .map_err(|e| anyhow::anyhow!("database {}: {e}", d.name))?,
                         schemas: d.owners.clone(),
+                        run_id: format!("build/{}", d.name),
+                        redaction: config.redaction_config(),
+                        profile: profile_tier(d.profile),
+                    }),
+                )),
+                // RFC 0252 §3.5.
+                ekos_compiler_core::DatabaseKind::Informix => Box::new(InformixObserver::new(
+                    d.name.clone(),
+                    Arc::new(InformixLiveReader {
+                        connection: InformixConnection::parse(&d.connect, &d.user, &d.password_env)
+                            .map_err(|e| anyhow::anyhow!("database {}: {e}", d.name))?,
+                        owners: d.owners.clone(),
                         run_id: format!("build/{}", d.name),
                         redaction: config.redaction_config(),
                         profile: profile_tier(d.profile),

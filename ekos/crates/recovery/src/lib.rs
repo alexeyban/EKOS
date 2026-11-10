@@ -53,6 +53,7 @@ pub mod rust_analyzer;
 pub mod schema_history;
 pub mod semantics_llm;
 mod source_evidence;
+pub mod spl_routines;
 pub mod sql_analyzer;
 pub mod sql_comments;
 pub mod sql_dialect_registry;
