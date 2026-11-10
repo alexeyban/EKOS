@@ -569,12 +569,13 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
         }
     }
     let path = current_path(config, cwd);
-    std::fs::create_dir_all(path.parent().expect("a state directory"))?;
+    tokio::fs::create_dir_all(path.parent().expect("a state directory")).await?;
     let mut doc = serde_json::to_value(&signals)?;
     doc["grain_ids"] = json!(grain_ids);
     doc["errors"] = json!(errors);
     doc["report"] = json!(report);
-    std::fs::write(&path, serde_json::to_vec_pretty(&doc)?)
+    tokio::fs::write(&path, serde_json::to_vec_pretty(&doc)?)
+        .await
         .with_context(|| format!("writing {}", path.display()))?;
     // Fold into the meanings now, not at the next commit.
     let folded = super::semantics::commit_step(config, cwd, &*ledger, true).await?;

@@ -292,7 +292,9 @@ pub async fn add(
         (name, bytes, Some(final_url))
     } else {
         let p = Path::new(what);
-        let bytes = std::fs::read(p).with_context(|| format!("reading {what}"))?;
+        let bytes = tokio::fs::read(p)
+            .await
+            .with_context(|| format!("reading {what}"))?;
         let name = p
             .file_name()
             .and_then(|n| n.to_str())

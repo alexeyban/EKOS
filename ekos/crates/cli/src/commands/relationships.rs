@@ -687,12 +687,12 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
     let overlap_count = overlaps.len();
     ids.extend(overlaps);
     let path = current_path(config, cwd);
-    std::fs::create_dir_all(path.parent().expect("a state directory"))?;
+    tokio::fs::create_dir_all(path.parent().expect("a state directory")).await?;
     let doc = json!({
         "rfc": "0252", "measured_at": measured_at, "ids": ids, "report": report,
         "errors": errors, "cross_database_overlaps": overlap_count,
     });
-    std::fs::write(&path, serde_json::to_vec_pretty(&doc)?)?;
+    tokio::fs::write(&path, serde_json::to_vec_pretty(&doc)?).await?;
     // RFC 0254: lookups on non-unique keys and unclear references become findings and questions.
     let questions = super::questions::commit_step(config, cwd, &*ledger)?;
     if let (Some(q), false) = (&questions, opts.json) {
