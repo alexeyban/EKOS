@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -74,6 +75,9 @@ def _text(event: dict, bot_user: str) -> str:
     text = str(event.get("text") or "")
     if bot_user:
         text = text.replace(f"<@{bot_user}>", "")
+    elif event.get("type") == "app_mention":
+        # Over the Events API alone the bot's own id is not known; a mention starts the text.
+        text = re.sub(r"^\s*<@[A-Z0-9]+>", "", text)
     return text.strip()
 
 

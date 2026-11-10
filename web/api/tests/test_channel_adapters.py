@@ -188,6 +188,9 @@ def test_slack_events_and_button_presses() -> None:
     mention = slack.parse_event(r["event_mention"], bot_user="U0BOT")
     assert mention is not None and not mention.direct
     assert mention.text == "what does status 7 mean?"
+    # Over the Events API alone the bot's id is unknown: the leading mention still goes.
+    unknown_bot = slack.parse_event(r["event_mention"])
+    assert unknown_bot is not None and unknown_bot.text == "what does status 7 mean?"
     assert slack.parse_event(r["event_channel_plain"], bot_user="U0BOT") is None
     assert slack.parse_event(r["event_bot"], bot_user="U0BOT") is None
     file = slack.parse_event(r["event_file"], bot_user="U0BOT")

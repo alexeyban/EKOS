@@ -174,7 +174,8 @@ async def slack_events(request: Request) -> Response:
     if payload.get("type") == "url_verification":
         return JSONResponse({"challenge": str(payload.get("challenge", ""))})
     msg = slack.parse_event(payload, bot_user=adapter.bot_user)
-    if msg is not None:
+    # Slack resends an event it thinks was not received; the first delivery is being handled.
+    if msg is not None and not request.headers.get("x-slack-retry-num"):
         service.spawn(service.on_message(adapter, msg))
     return Response(status_code=200)
 

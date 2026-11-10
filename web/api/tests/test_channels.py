@@ -305,6 +305,18 @@ async def test_an_edit_replaces_the_words_saved(env) -> None:
     assert call[2] == "--text=Status 7: cancelled."
 
 
+async def test_an_answer_to_a_question_card_names_the_question(env) -> None:
+    svc, adapter = env["svc"], env["svc"].adapters["telegram"]
+    _link(env, "7001", _ann())
+    _tell_model(env)
+    (card,) = await svc.on_message(adapter, _dm("7001", f"/ekos answer {QID[:8]} {STATEMENT}"))
+    assert card.buttons
+    (row,) = [p for p in _all(models.Proposal)]
+    assert row.answers == QID[:8] and row.text == STATEMENT
+    (out,) = await svc.on_message(adapter, _dm("7001", "/ekos answer ../x it is"))
+    assert "/ekos answer <question id>" in out.text
+
+
 async def test_a_reader_cannot_record_testimony(env) -> None:
     svc, adapter = env["svc"], env["svc"].adapters["telegram"]
     _link(env, "7002", Principal(kind="user", id="u2", subject="s-u2", email="bob@x.io"))

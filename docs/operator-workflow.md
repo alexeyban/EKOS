@@ -222,6 +222,35 @@ The decisions flow on: out-of-scope tables are never planned (step 5), confirmed
 (`hash` → HMAC, `redact` → NULL), and write-behaviour overrides change a table's load mode and delete plan. Only
 subjects whose sign-off is **valid** are applied.
 
+### Asking people: the inbox, questions and testimony (RFC 0253/0254)
+
+Some meaning is in nobody's code: what status 7 is, which values in a column are refunds. EKOS asks for it and
+records the answer as **testimony** — a person's own words, with who said it, where and when — which a reviewer then
+sees as evidence on the item. Testimony never decides an item by itself.
+
+- **Questions tab.** The open questions, highest priority first, derived at `ekos commit` from gaps, conflicts,
+  unclear references and stale notes; their status (open, answered, closed, obsolete) is computed on every read.
+  Filter by status, type, table or the person it is with. *Reveal values* reads a column's unexplained values live
+  from the source for the person looking (counts only for a personal-data column, small cells hidden; nothing is
+  stored). *Record an answer* takes an answer heard in a meeting: it is recorded as **your** testimony naming who
+  said it (`--on-behalf-of`), never as theirs. Operators *reassign* a question; the person it is with can say
+  *Not me* and it moves to the next person who may know.
+- **Inbox tab.** Files and links people sent (from the Chat tab or a chat channel). What someone without the
+  reviewer role sends waits as *pending* until a reviewer accepts it; accepted material is compiled on the next
+  build. *Purge* (admin, the item's id typed) deletes the original; the redacted text already compiled stays.
+- **Chat tab.** *Tell EKOS something* turns a statement into a card of proposals, each quoting your words; *Save*
+  records your own (or edited) text as testimony, *Discard* drops it. Attach a file, or send a lone link, to put it
+  in the inbox.
+- **Channels.** The same in Telegram, Slack or Teams once the person has linked their account on the console's
+  Channels page; the questions digest reaches them there (`docs/deployment.md`, Chat channels).
+
+```bash
+ekos questions list --status open --table c_order --json
+ekos questions show <id> --reveal
+ekos testimony add --text "7 is a customer cancellation" --as ann@example.com --about "c_order.docstatus = 7"
+ekos inbox list --status pending && ekos inbox accept <id> --as ann@example.com
+```
+
 **On iDempiere:** the review computes in 1.8 s (cached). Identity candidates must agree word for word, which took the
 identity review from 25 candidates to the 1 genuine one (RFC 0224). A full sign-off still needs a person to settle 195
 conflicts; on the testbed, 4 of 6 subjects are signed, which is why steps 4–7 show as blocked there.

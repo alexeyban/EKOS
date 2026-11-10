@@ -338,3 +338,57 @@ redacted; both the address and the number are absent from the parser's output.
   not into the slide's own section.
 - Not done here: the inbox source itself, URL snapshots, the intake reply (pages/sheets/confidence
   counts) — other Phase 1 items.
+
+### 2026-11-10 — Console, chat tell mode, channels (Phases 1–4, console side)
+
+**What.** Built on the CLI surface (`ekos inbox|testimony|questions`), in `web/`:
+
+| Part | Where |
+|---|---|
+| Write seam: every inbox/testimony/question write as an argv list, `--as` = the signed-in person | `web/api/app/people_write.py`, `routes/_people.py` |
+| Inbox: list, send (base64 file or link), accept (`review`), purge (`admin`, id typed) | `routes/inbox.py`, `ui/src/pages/Inbox.tsx` |
+| Testimony: list (entity panels: "What people said"), record, withdraw; proposal Save / Discard | `routes/testimony.py`, `app/proposals.py`, `ui/src/pages/ObjectTestimony.tsx` |
+| Tell mode (§3.5): the model, with read tools only, answers JSON proposals; each must quote a span of the statement or it is dropped and counted (normalised whitespace and quotation marks; a hedged meaning is dropped too) | `app/chat/tell.py`, `POST …/chat/tell` (scoped), `ui/src/pages/TellCard.tsx` |
+| Tool offering shared by the console chat and every channel (read tools the caller may call; never a metered one) | `app/chat/tools.py` |
+| Channel core: `ChannelMessage`, `ButtonClick`, `OutMessage`, `/ekos` commands, the group rule | `app/channels/core.py` |
+| Dispatcher, linking, buttons, intake, digest; the service runs only with a configured channel | `app/channels/service.py`, `actions.py`, `agent.py`, `routes/channels.py`, `ui/src/pages/Channels.tsx` |
+| Adapters | `app/channels/telegram.py` (Bot API long polling), `slack.py` (Socket Mode + Events API, HMAC-SHA256 signature, 5-minute replay window), `teams.py` (Bot Framework, RS256 JWT against the published keys via `joserfc`, Adaptive Card `Action.Execute`) |
+
+**Decisions.**
+- *Save is a separate, human route*, never the model's: `Proposal` rows (console database, not the
+  ledger) hold the statement and the kept proposals; only the author (`kind:id`) may save or
+  discard, and from a channel only the account a button was sent to (`ButtonRef.account`). Save
+  needs the `review` right, which an API token never holds. One testimony per code-value meaning
+  (the CLI takes one `--meaning`), each with the same text.
+- *Writers are not importable from agent code*: `tests/test_chat.py::test_no_agent_code_names_a_writer`
+  scans `app/chat/*`, `routes/chat.py`, `channels/agent.py` and `channels/core.py` for the writer
+  helpers and argv shapes.
+- *Group rule*: an answer that called any tool goes privately unless every member is a linked
+  person whose read scope on the project is unrestricted; an unlinked member, a restricted one, or
+  unknown membership (Telegram) means private.
+- *A reader may send material* (held pending), *ask*, and say "not me" or mute for themselves (the
+  console checks that the question is with them); *recording* testimony needs `review`, *reassign*
+  `operate`, *purge* `admin`.
+- Settings: `inbox_upload_max_mb`, `channels_*` (secrets by variable name, environment or
+  keychain), `channels_link_code_minutes`, `channels_digest_cron`; `Settings.public` =
+  `moderation_enabled or read_only` — no intake and no digest there.
+- Database: `Conversation.channel` (migration 5), new tables `Proposal`, `ChannelAccount`,
+  `LinkCode` (hash only, one use), `ChannelBinding`, `ButtonRef`.
+
+**Tests.** `tests/test_people.py` (13), `test_channels.py` (19), `test_channel_adapters.py` (13),
+`test_chat.py` (+2); web API 637 passed, 46 skipped (590 before). Adapter tests run against shapes written
+from the platforms' documentation (`tests/fixtures/channels/`), through `httpx.MockTransport`; the
+Slack signature vector and the Teams JWTs are computed with test keys. UI: `People.test.tsx` (11; 212 in all).
+
+**Not done.**
+- No live run against Telegram, Slack or Teams workspaces.
+- Proposals become testimony only (`about`, `meaning`, `answers`); a description, synonym or rule
+  is not yet turned into an RFC 0247 annotation, and `[testimony] decides_for` is the CLI's.
+- Attachment text is not quoted by proposals (the model sees the statement only; attachments go to
+  the inbox and are compiled later). The intake reply gives name, id and status, not pages or OCR
+  confidence.
+- Edit is a `/ekos edit <card> <text>` message, not a Slack modal or Teams task module; no Teams
+  AAD auto-linking; the Azure module's Bot resource; `ekos channels status` (the console's
+  `GET /api/channels` is the status).
+- `review_guard::HUMAN_ONLY` is unchanged: the console reaches the human-only commands only through
+  the CLI, under the signed-in person.

@@ -277,3 +277,33 @@ the workshop go back through the Questions page (§3.3, as operator-recorded tes
 - [ ] A question answered in Telegram closes after the reviewer decides its origin, with the testimony cited in
       the review item and on the table's passport page.
 - [ ] Ledger scan after reveals and probes: zero source values beyond code literals.
+
+## 9. Implementation log
+
+### 2026-11-10 — Console Questions page and digest delivery (Phases 1 and 3, console side)
+
+**What.** Over `ekos questions list|show|digest|reassign|decline|mute`:
+
+- `web/api/app/routes/questions.py`: list (filters status, type, table, addressee, limit), show,
+  `GET …/{id}/reveal` (`questions show --reveal`; who looked is audited, the values are not),
+  `POST …/{id}/answer` (an answer heard elsewhere: `testimony add --answers <id> --on-behalf-of
+  <who said it> --as <the operator>`, `review` right), reassign (`operate`), decline ("not me":
+  only the person the question is with, as themselves) and mute (for oneself). Reads go through
+  the `readproc` allowlist (`questions show` takes `--json [--reveal] <hex id>` and nothing else).
+- `web/ui/src/pages/Questions.tsx`: the tab, with the panel's context, answers, *Reveal values*,
+  *Record an answer*, *Reassign* and *Not me*.
+- Delivery (§3.3): `ChannelService.digest` (`web/api/app/channels/service.py`) runs `questions
+  digest --json` per project and sends each person, through the channel they last wrote to
+  directly, a header and one card per question with **Answer** (`/ekos answer <id> <text>`, which
+  makes an RFC 0253 card with `answers` preset) and **Not me** (`questions decline --as <them>`).
+  Scheduled by `channels_digest_cron`; `POST /api/channels/digest` sends now (owner). People are
+  matched to linked accounts by the e-mail the CLI names them with. Nothing is sent when
+  `Settings.public` (RFC 0249 checks on, or a read-only showcase).
+
+**Tests.** `web/api/tests/test_people.py` (the argv of every route, reveal audited without
+values, not-me refused for anyone else), `test_channels.py` (digest delivery with Not me; none
+from a public deployment), `web/ui/src/pages/People.test.tsx`.
+
+**Not done.** Question badges on entity pages and the step bar's "blocking questions" item; the
+console does not decide who an unmatched author is (the CLI's routing does); the per-person cap
+is the CLI's `[questions] per-person-per-day`, applied by `questions digest`.
