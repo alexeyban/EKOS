@@ -847,7 +847,10 @@ PostgreSQL and ClickHouse databases are declared the same way (RFC 0235): `kind 
 server's own counts; every ClickHouse catalog query carries `readonly=1`. Both probe a write that
 must be refused and compile to the same `origin: live` objects as Oracle — tables with keys and
 foreign keys, views, PL/pgSQL routines and triggers through the readers files use — and a dropped
-object leaves the model. Profiles and the application dictionary stay Oracle-only.
+object leaves the model. `profile = "p0" | "p1" | "p2"` works for every kind (RFC 0252): P0 reads the
+optimizer's statistics, P1 counts rows, P2 scans each table once for exact null counts, number and date
+bounds and text lengths — never a text value. ClickHouse scans only engines that store their own rows.
+The application dictionary stays Oracle-only.
 
 ```bash
 ekos database add shop --kind postgres --connect db.local:5432/shop --user shop_ro --password-env SHOP_PW --owner public

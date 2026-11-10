@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+**Features**
+- **Profiles for every live database** (RFC 0252 §3.1). `[[databases]] profile = "p1" | "p2"` now works
+  for PostgreSQL and ClickHouse as well as Oracle: P1 counts each table's rows, P2 scans each table once
+  for exact null counts, number and date bounds and the longest text — never a text value, never a
+  bound of a column whose name says personal data. PostgreSQL also gets P0 (the planner's row and
+  column estimates, from `pg_class` and `pg_stats` counts only); ClickHouse P0 is `system.tables`'
+  row total, and only engines that store their own rows are scanned (no `SELECT` from a Kafka,
+  RabbitMQ, S3Queue, MySQL, S3 … table). One planner (`ekos_observation_sdk::profile`) renders the
+  queries for all three engines. The console's Sources form offers the tier for every kind.
+- RFCs 0252 (profiling for source understanding), 0253 (people as a source) and 0254 (the analyst
+  loop) accepted.
+
 **Security**
 - **`rusqlite` 0.32 → 0.41** (bundled SQLite via `libsqlite3-sys` 0.30 → 0.39) for
   RUSTSEC-2026-0459; `cargo audit` is clean again in all three workspaces. rusqlite now needs

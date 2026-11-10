@@ -11,6 +11,7 @@
 
 use ekos_common::redaction::{RedactionConfig, redact};
 use ekos_observation_sdk::live_catalog::{self, LiveObject, OwnerCatalog};
+use ekos_observation_sdk::profile::{self, Flavor, ProfileStats, ProfileTier, TableOutcome};
 use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -113,11 +114,109 @@ impl Http {
         Ok(body)
     }
 
+    /// One row of one aggregate query (RFC 0211 §3.4), cells as text, `None` for NULL. Sent with
+    /// `readonly=1` and a server-side time limit below the client's.
+    pub(crate) async fn aggregate_row(&self, sql: &str) -> Result<Vec<Option<String>>, String> {
+        let resp = self
+            .client
+            .post(&self.conn.url)
+            .header("X-ClickHouse-User", &self.conn.user)
+            .header("X-ClickHouse-Key", &self.password)
+            .query(&[("readonly", "1"), ("max_execution_time", "55")])
+            .body(format!("{sql} FORMAT JSONCompact"))
+            .send()
+            .await
+            .map_err(|e| format!("cannot connect: {e}"))?;
+        let status = resp.status();
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        if !status.is_success() {
+            return Err(body.trim().chars().take(500).collect());
+        }
+        compact_row(&body)
+    }
+
     async fn rows(&self, sql: &str) -> Result<Vec<Value>, String> {
         let body = self.send(&format!("{sql} FORMAT JSON"), true).await?;
         let v: Value = serde_json::from_str(&body).map_err(|e| format!("not JSON: {e}"))?;
         Ok(v["data"].as_array().cloned().unwrap_or_default())
     }
+}
+
+/// The first row of a `FORMAT JSONCompact` answer, as text cells.
+fn compact_row(body: &str) -> Result<Vec<Option<String>>, String> {
+    let v: Value = serde_json::from_str(body).map_err(|e| format!("not JSON: {e}"))?;
+    let row = v["data"]
+        .get(0)
+        .and_then(Value::as_array)
+        .ok_or("an aggregate query returned no row")?;
+    Ok(row
+        .iter()
+        .map(|c| match c {
+            Value::Null => None,
+            Value::String(s) => Some(s.clone()),
+            other => Some(other.to_string()),
+        })
+        .collect())
+}
+
+/// Engines whose rows are stored on this server and can be read without side effects. A stream
+/// engine (`Kafka`, `RabbitMQ`, `NATS`, `FileLog`, `S3Queue`) consumes what a `SELECT` reads, and an
+/// integration engine (`MySQL`, `PostgreSQL`, `S3`, `URL`, …) runs the scan on another system: none
+/// of those is profiled.
+fn profiled_engine(engine: &str) -> bool {
+    engine.ends_with("MergeTree") || matches!(engine, "Memory" | "Log" | "TinyLog" | "StripeLog")
+}
+
+/// RFC 0211 §3.4: P1 / P2 over every table of `catalog` whose engine stores its own rows.
+pub(crate) async fn profile_catalog(
+    http: &Http,
+    catalog: &mut OwnerCatalog,
+    tier: ProfileTier,
+    redaction: &RedactionConfig,
+) -> ProfileStats {
+    let mut stats = ProfileStats::new(tier);
+    if tier == ProfileTier::P0 {
+        return stats;
+    }
+    let owner = catalog.owner.clone();
+    for o in catalog.objects.iter_mut().filter(|o| o.kind == "table") {
+        let engine = o.detail["engine"].as_str().unwrap_or_default().to_string();
+        if !profiled_engine(&engine) {
+            o.detail["profile"]["not_profiled"] =
+                format!("the {engine} engine is not scanned by a profile").into();
+            continue;
+        }
+        let columns = o.detail["columns"].as_array().cloned().unwrap_or_default();
+        let outcome = match profile::plan_table(Flavor::ClickHouse, &owner, &o.name, &columns, tier)
+        {
+            Ok(plan) => {
+                let mut answers = Vec::new();
+                let mut failed = None;
+                for q in &plan.queries {
+                    match http.aggregate_row(q).await {
+                        Ok(row) => answers.push(row),
+                        Err(e) => {
+                            failed = Some(e);
+                            break;
+                        }
+                    }
+                }
+                match failed {
+                    Some(e) => Err(e),
+                    None => plan.apply(&answers, &mut o.detail, redaction),
+                }
+            }
+            Err(e) => Err(e),
+        };
+        match outcome {
+            Ok(outcome) => stats.record(&outcome),
+            Err(e) => {
+                profile::record_failure(&mut o.detail, &e, redaction);
+                stats.record(&TableOutcome::Failed);
+            }
+        }
+    }
+    stats
 }
 
 /// What one read found.
@@ -132,6 +231,7 @@ pub async fn read(
     conn: &ChConnection,
     databases: &[String],
     redaction: &RedactionConfig,
+    tier: ProfileTier,
 ) -> Result<DatabaseReading, String> {
     let http = Http::new(conn)?;
     let list = databases
@@ -153,7 +253,12 @@ pub async fn read(
              FROM system.columns WHERE database IN ({list}) ORDER BY database, table, position"
         ))
         .await?;
-    let catalogs = normalize(databases, &tables, &columns, redaction);
+    let mut catalogs = normalize(databases, &tables, &columns, redaction);
+    if tier != ProfileTier::P0 {
+        for c in &mut catalogs {
+            c.profile = Some(profile_catalog(&http, c, tier, redaction).await);
+        }
+    }
     let probe = catalogs
         .iter()
         .find_map(|c| c.objects.iter().find(|o| o.kind == "table"));
@@ -272,6 +377,10 @@ pub fn normalize(
                 }
                 if let Ok(n) = s(t, "total_rows").parse::<u64>() {
                     detail["num_rows"] = n.into();
+                    // P0: `system.tables.total_rows`, as stored parts count them (unmerged
+                    // replacements and deletes still counted), so not exact.
+                    detail["profile"] =
+                        json!({ "tier": "p0", "row_count": n, "row_count_exact": false });
                 }
                 LiveObject {
                     kind: "table".into(),
@@ -301,7 +410,7 @@ pub async fn test_connection(
     databases: &[String],
     redaction: &RedactionConfig,
 ) -> Result<Value, String> {
-    let reading = read(conn, databases, redaction).await?;
+    let reading = read(conn, databases, redaction, ProfileTier::P0).await?;
     Ok(test_report(&conn.label(), &reading))
 }
 
@@ -327,6 +436,7 @@ pub struct ClickHouseCatalogObserver {
     conn: ChConnection,
     databases: Vec<String>,
     redaction: RedactionConfig,
+    profile: ProfileTier,
 }
 
 impl ClickHouseCatalogObserver {
@@ -335,12 +445,14 @@ impl ClickHouseCatalogObserver {
         conn: ChConnection,
         databases: Vec<String>,
         redaction: RedactionConfig,
+        profile: ProfileTier,
     ) -> Self {
         Self {
             database: database.into(),
             conn,
             databases,
             redaction,
+            profile,
         }
     }
 }
@@ -352,7 +464,7 @@ impl Observer for ClickHouseCatalogObserver {
     }
 
     async fn scan(&self, _ctx: &ScanContext) -> Result<ObservationPackage, ObserveError> {
-        let reading = read(&self.conn, &self.databases, &self.redaction)
+        let reading = read(&self.conn, &self.databases, &self.redaction, self.profile)
             .await
             .map_err(|e| {
                 ObserveError::connector(format!("clickhouse database {}: {e}", self.database))
@@ -394,6 +506,68 @@ mod tests {
             json!({ "database": "wh", "table": "daily", "name": "d", "type": "Date", "default_kind": "", "default_expression": "", "comment": "" }),
         ];
         (tables, columns)
+    }
+
+    #[test]
+    fn an_aggregate_answer_reads_as_text_cells_with_null_kept() {
+        let body = r#"{"meta":[],"data":[["12", 3, null, "2026-01-01 00:00:00"]],"rows":1}"#;
+        assert_eq!(
+            compact_row(body).unwrap(),
+            vec![
+                Some("12".to_string()),
+                Some("3".to_string()),
+                None,
+                Some("2026-01-01 00:00:00".to_string())
+            ]
+        );
+        assert!(compact_row(r#"{"data":[]}"#).is_err(), "no row is not zero");
+    }
+
+    /// A `SELECT` from a stream engine consumes its messages, and an integration engine scans
+    /// another system: a profile reads only tables stored on this server.
+    #[test]
+    fn only_engines_that_store_their_own_rows_are_scanned() {
+        for e in [
+            "MergeTree",
+            "ReplacingMergeTree",
+            "ReplicatedSummingMergeTree",
+            "Memory",
+            "Log",
+        ] {
+            assert!(profiled_engine(e), "{e}");
+        }
+        for e in [
+            "Kafka",
+            "RabbitMQ",
+            "NATS",
+            "S3Queue",
+            "FileLog",
+            "MySQL",
+            "PostgreSQL",
+            "S3",
+            "URL",
+            "Distributed",
+            "Merge",
+            "Null",
+            "Dictionary",
+            "View",
+        ] {
+            assert!(!profiled_engine(e), "{e}");
+        }
+    }
+
+    #[test]
+    fn total_rows_is_the_p0_estimate() {
+        let (tables, columns) = rows();
+        let c = normalize(
+            &["wh".into()],
+            &tables,
+            &columns,
+            &RedactionConfig::default(),
+        );
+        let events = c[0].objects.iter().find(|o| o.name == "events").unwrap();
+        assert_eq!(events.detail["profile"]["row_count"], 42);
+        assert_eq!(events.detail["profile"]["row_count_exact"], false);
     }
 
     #[test]

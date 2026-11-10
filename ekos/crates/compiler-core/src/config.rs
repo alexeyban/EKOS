@@ -1122,9 +1122,10 @@ pub struct DatabaseConfig {
     pub password_env: String,
     /// The schemas (owners) to read, as the dictionary spells them (`ADEMPIERE`).
     pub owners: Vec<String>,
-    /// How much `ekos build` may measure (RFC 0211 §3.4). `p0` (default) reads optimizer
-    /// statistics only; `p1` counts each table's rows; `p2` scans each table once for exact null
-    /// counts, number and date bounds and text lengths. No tier stores a text value.
+    /// How much `ekos build` may measure (RFC 0211 §3.4), for every kind. `p0` (default) reads
+    /// the optimizer's statistics only; `p1` counts each table's rows; `p2` scans each table once
+    /// for exact null counts, number and date bounds and text lengths. No tier stores a text value.
+    /// ClickHouse scans only engines that store their own rows (`*MergeTree`, `Memory`, `Log`).
     #[serde(default)]
     pub profile: DatabaseProfile,
     /// RFC 0212: also read the application dictionary's table flags (`idempiere`: whether users
@@ -1395,22 +1396,13 @@ impl EkosConfig {
             if d.owners.is_empty() {
                 anyhow::bail!("[[databases]] {:?} lists no owners to read", d.name);
             }
-            // RFC 0235: profiles and dictionaries are read for Oracle only; refused rather than
-            // silently ignored for the other kinds.
-            if d.kind != DatabaseKind::Oracle {
-                if d.profile != DatabaseProfile::P0 {
-                    anyhow::bail!(
-                        "[[databases]] {:?}: profile {:?} is read for oracle databases only",
-                        d.name,
-                        d.profile
-                    );
-                }
-                if d.dictionary.is_some() {
-                    anyhow::bail!(
-                        "[[databases]] {:?}: an application dictionary is read for oracle databases only",
-                        d.name
-                    );
-                }
+            // RFC 0235: the application dictionary is read for Oracle only; refused rather than
+            // silently ignored for the other kinds. Profiles are read for every kind (RFC 0252).
+            if d.kind != DatabaseKind::Oracle && d.dictionary.is_some() {
+                anyhow::bail!(
+                    "[[databases]] {:?}: an application dictionary is read for oracle databases only",
+                    d.name
+                );
             }
         }
         Ok(())
@@ -1760,8 +1752,8 @@ path = "/tmp/ekos-containers/b"
         );
     }
 
-    /// RFC 0235: PostgreSQL and ClickHouse databases parse; profiles and dictionaries are
-    /// Oracle-only and refused for them.
+    /// RFC 0235: PostgreSQL and ClickHouse databases parse; the dictionary is Oracle-only and
+    /// refused for them. Profiles are read for every kind (RFC 0252).
     #[test]
     fn postgres_and_clickhouse_databases_parse_without_oracle_only_settings() {
         for (kind, connect) in [
@@ -1775,13 +1767,13 @@ path = "/tmp/ekos-containers/b"
             let cfg: EkosConfig = toml::from_str(&db).unwrap();
             cfg.check_sources().unwrap();
             assert_eq!(cfg.databases[0].kind.as_str(), kind);
-            for extra in ["profile = \"p1\"\n", "dictionary = \"idempiere\"\n"] {
-                let c: EkosConfig = toml::from_str(&format!("{db}{extra}")).unwrap();
-                let err = c.check_sources().unwrap_err().to_string();
-                assert!(
-                    err.contains("oracle databases only"),
-                    "{kind} {extra}: {err}"
-                );
+            let c: EkosConfig =
+                toml::from_str(&format!("{db}dictionary = \"idempiere\"\n")).unwrap();
+            let err = c.check_sources().unwrap_err().to_string();
+            assert!(err.contains("oracle databases only"), "{kind}: {err}");
+            for tier in ["p1", "p2"] {
+                let c: EkosConfig = toml::from_str(&format!("{db}profile = \"{tier}\"\n")).unwrap();
+                c.check_sources().unwrap();
             }
         }
     }

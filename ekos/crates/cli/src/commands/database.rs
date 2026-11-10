@@ -556,10 +556,15 @@ mod tests {
         );
         assert_eq!(c.databases[1].kind, DatabaseKind::Clickhouse);
         assert_eq!(infos(&c)[1].kind, "clickhouse");
-        // Oracle-only settings are refused for the other kinds.
+        // RFC 0252: every kind is profiled; the dictionary stays Oracle-only.
         let mut p2 = args("pg2", "postgres", "h/db");
         p2.profile = Some("p2".into());
-        assert!(add(&p, p2).is_err());
+        add(&p, p2).unwrap();
+        let c: EkosConfig = toml::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(c.databases[2].profile, DatabaseProfile::P2);
+        let mut d = args("pg3", "postgres", "h/db");
+        d.dictionary = Some("idempiere".into());
+        assert!(add(&p, d).is_err());
     }
 
     #[test]

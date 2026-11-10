@@ -16,6 +16,7 @@ oracle = ["dep:oracle"]
 [dependencies]
 oracle = { workspace = true, optional = true }
 ekos-common.workspace = true
+ekos-observation-sdk.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

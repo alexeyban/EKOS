@@ -221,8 +221,9 @@ A project's **Sources** tab lists its directories and databases. An operator add
 must lie under the tenant's source roots) or a database. **Kind** chooses Oracle, PostgreSQL or
 ClickHouse (RFC 0235), which sets the connect form: Oracle `host:port/service`, PostgreSQL
 `host[:port]/database`, ClickHouse `http[s]://host[:port]`. Then a read-only user, the password and
-the schemas to read (for ClickHouse, the databases); for Oracle also the profile tier and,
-optionally, the iDempiere dictionary. The first directory added to a project created from one
+the schemas to read (for ClickHouse, the databases) and the profile tier (`p0` statistics, `p1` row
+counts, `p2` one aggregate scan per table, for every kind); for Oracle also, optionally, the iDempiere
+dictionary. The first directory added to a project created from one
 directory names that directory as a source too, so it keeps being read.
 
 **The password** is kept in the server's keychain under a variable the console names

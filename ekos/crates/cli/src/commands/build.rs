@@ -281,6 +281,15 @@ fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Ob
     observers
 }
 
+/// RFC 0211 §3.4: a `[[databases]] profile` tier, the same for every engine.
+fn profile_tier(p: ekos_compiler_core::DatabaseProfile) -> ProfileTier {
+    match p {
+        ekos_compiler_core::DatabaseProfile::P0 => ProfileTier::P0,
+        ekos_compiler_core::DatabaseProfile::P1 => ProfileTier::P1,
+        ekos_compiler_core::DatabaseProfile::P2 => ProfileTier::P2,
+    }
+}
+
 /// RFC 0211: one observer per `[[databases]]` entry, with its name. Kept apart from the file
 /// observers: a database is live state, so it is read once per build — never once per source
 /// directory, and never skipped because the source tree's fingerprint is unchanged.
@@ -299,6 +308,7 @@ fn database_observers(config: &EkosConfig) -> Result<Vec<(String, Box<dyn Observ
                         schemas: d.owners.clone(),
                         run_id: format!("build/{}", d.name),
                         redaction: config.redaction_config(),
+                        profile: profile_tier(d.profile),
                     }),
                 )),
                 ekos_compiler_core::DatabaseKind::Clickhouse => {
@@ -308,6 +318,7 @@ fn database_observers(config: &EkosConfig) -> Result<Vec<(String, Box<dyn Observ
                             .map_err(|e| anyhow::anyhow!("database {}: {e}", d.name))?,
                         d.owners.clone(),
                         config.redaction_config(),
+                        profile_tier(d.profile),
                     ))
                 }
                 ekos_compiler_core::DatabaseKind::Oracle => Box::new(OracleObserver::new(
@@ -318,11 +329,7 @@ fn database_observers(config: &EkosConfig) -> Result<Vec<(String, Box<dyn Observ
                         run_id: format!("build/{}", d.name),
                         policy: Default::default(),
                         redaction: config.redaction_config(),
-                        profile: match d.profile {
-                            ekos_compiler_core::DatabaseProfile::P0 => ProfileTier::P0,
-                            ekos_compiler_core::DatabaseProfile::P1 => ProfileTier::P1,
-                            ekos_compiler_core::DatabaseProfile::P2 => ProfileTier::P2,
-                        },
+                        profile: profile_tier(d.profile),
                         dictionary: d.dictionary.map(|k| match k {
                             ekos_compiler_core::DatabaseDictionary::Idempiere => {
                                 DictionaryKind::Idempiere

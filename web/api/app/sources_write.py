@@ -86,8 +86,8 @@ def database_add_argv(
         raise ReviewError("profile is p0, p1 or p2")
     if dictionary not in (None, "idempiere"):
         raise ReviewError("dictionary is idempiere or none")
-    if kind != "oracle" and (profile != "p0" or dictionary):
-        raise ReviewError("profiles and application dictionaries are read for Oracle only")
+    if kind != "oracle" and dictionary:
+        raise ReviewError("an application dictionary is read for Oracle only")
     if not envs.is_valid_name(password_env):
         raise ReviewError("not a usable variable name")
     argv = [

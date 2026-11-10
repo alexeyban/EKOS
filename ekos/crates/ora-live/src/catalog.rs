@@ -662,7 +662,8 @@ fn column_statistics(
 ) -> BTreeMap<(String, String), serde_json::Value> {
     rows.iter()
         .map(|row| {
-            let mut p = serde_json::json!({ "tier": "p0", "nulls_exact": false });
+            let mut p =
+                serde_json::json!({ "tier": "p0", "nulls_exact": false, "distinct_exact": false });
             for (i, key) in [(2, "nulls"), (3, "distinct"), (4, "avg_length")] {
                 if let Some(n) = number(row, i) {
                     p[key] = n.into();

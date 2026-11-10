@@ -136,7 +136,7 @@ describe("Sources page", () => {
     expect(screen.getByLabelText("password")).toHaveValue("");
   });
 
-  it("adds a PostgreSQL or ClickHouse database without Oracle's profile and dictionary", async () => {
+  it("adds a PostgreSQL or ClickHouse database with a profile and without Oracle's dictionary", async () => {
     vi.spyOn(client, "api").mockResolvedValue({
       sources: [],
       databases: [],
@@ -155,7 +155,7 @@ describe("Sources page", () => {
     expect(
       screen.getByPlaceholderText("db.local:5432/shop"),
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText("profile")).toBeNull();
+    expect(screen.getByLabelText("profile")).toBeInTheDocument();
     expect(screen.queryByLabelText("dictionary")).toBeNull();
     fireEvent.change(screen.getByLabelText("database kind"), {
       target: { value: "clickhouse" },
@@ -178,13 +178,16 @@ describe("Sources page", () => {
     fireEvent.change(screen.getByLabelText("owners"), {
       target: { value: "analytics" },
     });
+    fireEvent.change(screen.getByLabelText("profile"), {
+      target: { value: "p1" },
+    });
     fireEvent.click(screen.getByText("Add database"));
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     expect(post.mock.calls[0][1]).toMatchObject({
       kind: "clickhouse",
       connect: "https://ch.local:8443",
       owners: ["analytics"],
-      profile: "p0",
+      profile: "p1",
       dictionary: null,
     });
   });

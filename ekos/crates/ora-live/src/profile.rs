@@ -15,35 +15,12 @@
 use crate::OraError;
 use crate::catalog::{CatalogSnapshot, ObjectKind, Rows};
 use crate::session::guard_identifier;
-use ekos_common::pii;
-use ekos_common::redaction::{RedactionConfig, redact};
+use ekos_common::redaction::RedactionConfig;
+use ekos_observation_sdk::profile::{self, Flavor, TableOutcome};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-/// How much work a profile may do. Ordered: a higher tier includes everything below it.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum ProfileTier {
-    /// Optimizer statistics only. No scan of user data.
-    #[default]
-    P0,
-    /// An exact row count per table.
-    P1,
-    /// One aggregate scan per table.
-    P2,
-}
-
-impl ProfileTier {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::P0 => "p0",
-            Self::P1 => "p1",
-            Self::P2 => "p2",
-        }
-    }
-}
+pub use ekos_observation_sdk::profile::{ProfileStats, ProfileTier};
 
 /// A table's row count and how it was obtained.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,148 +53,33 @@ pub trait ScanSource {
     fn end_transaction(&self) -> Result<(), OraError>;
 }
 
-/// What a profile run did, for the summary line and the `OracleCatalog` object.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProfileStats {
-    pub tier: ProfileTier,
-    pub tables_profiled: usize,
-    /// Tables whose scan failed (timeout, privilege): recorded on the table, not fatal.
-    pub tables_failed: usize,
-    /// Tables not scanned because the session was lost (an ODPI-C call timeout closes it).
-    pub tables_skipped: usize,
-    /// Columns with an exact null count.
-    pub columns_measured: usize,
-    /// Columns whose bounds were withheld because their name classifies them as personal data.
-    pub values_suppressed: usize,
-}
-
-/// Oracle refuses more expressions than this in one select list; leave room for `COUNT(*)`.
-const EXPRESSIONS_PER_QUERY: usize = 900;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Family {
-    Number,
-    Date,
-    Text,
-    /// Counted (nulls) only: LOBs, RAW, XML, objects. `COUNT(lob)` is `ORA-00932`, so these are
-    /// counted through `IS NOT NULL`, which every type accepts.
-    Other,
-    /// `LONG` / `LONG RAW`: not even `COUNT(col)` is legal.
-    Long,
-}
-
-fn family(data_type: &str) -> Family {
-    let t = data_type.to_ascii_uppercase();
-    let base = t.split('(').next().unwrap_or_default().trim();
-    match base {
-        "LONG" | "LONG RAW" => Family::Long,
-        "NUMBER" | "FLOAT" | "BINARY_FLOAT" | "BINARY_DOUBLE" | "INTEGER" => Family::Number,
-        "DATE" => Family::Date,
-        "VARCHAR2" | "NVARCHAR2" | "CHAR" | "NCHAR" => Family::Text,
-        _ if base.starts_with("TIMESTAMP") => Family::Date,
-        _ => Family::Other,
-    }
-}
-
-/// One aggregate the P2 scan computes, and where its answer goes.
-#[derive(Debug, Clone)]
-struct Measure {
-    column: usize,
-    key: &'static str,
-    sql: String,
-}
-
-/// The P2 aggregates for one table's columns. Pure, so the "never a text value" rule is tested
-/// directly on the SQL it produces.
-fn measures(columns: &[Value]) -> (Vec<Measure>, Vec<usize>) {
-    let mut out = Vec::new();
-    let mut suppressed = Vec::new();
-    for (i, c) in columns.iter().enumerate() {
-        let Some(name) = c["name"].as_str() else {
-            continue;
-        };
-        let Ok(name) = guard_identifier(name) else {
-            continue;
-        };
-        let col = format!("\"{name}\"");
-        let fam = family(c["data_type"].as_str().unwrap_or_default());
-        if fam == Family::Long {
-            continue;
-        }
-        out.push(Measure {
-            column: i,
-            key: "non_null",
-            sql: if fam == Family::Other {
-                format!("COUNT(CASE WHEN {col} IS NOT NULL THEN 1 END)")
-            } else {
-                format!("COUNT({col})")
-            },
-        });
-        match fam {
-            Family::Number | Family::Date => {
-                if pii::classify_name(name).is_some() {
-                    suppressed.push(i);
-                } else {
-                    out.push(Measure {
-                        column: i,
-                        key: "min",
-                        sql: format!("MIN({col})"),
-                    });
-                    out.push(Measure {
-                        column: i,
-                        key: "max",
-                        sql: format!("MAX({col})"),
-                    });
-                }
-            }
-            Family::Text => out.push(Measure {
-                column: i,
-                key: "max_length",
-                sql: format!("MAX(LENGTH({col}))"),
-            }),
-            Family::Other | Family::Long => {}
-        }
-    }
-    (out, suppressed)
-}
-
-fn target(owner: &str, table: &str) -> Result<String, OraError> {
-    Ok(format!(
-        "\"{}\".\"{}\"",
-        guard_identifier(owner)?,
-        guard_identifier(table)?
-    ))
-}
-
 fn count_of(rows: &Rows) -> Option<i64> {
     rows.first()?.first()?.as_deref()?.trim().parse().ok()
 }
 
 /// The session is gone after an ODPI-C call timeout (`DPI-1067`) or a lost connection; every later
 /// call would fail the same way.
-fn session_lost(e: &OraError) -> bool {
-    let m = e.to_string();
+fn session_lost(m: &str) -> bool {
     ["DPI-1067", "DPI-1080", "DPI-1010", "ORA-03113", "ORA-03135"]
         .iter()
         .any(|c| m.contains(c))
 }
 
 /// Profile every table of `snapshot` at `tier` (P1 or P2; P0 is read with the catalog), writing
-/// the results into each table's `detail.profile` and its columns' `profile`.
+/// the results into each table's `detail.profile` and its columns' `profile`. The queries are
+/// planned by `ekos_observation_sdk::profile` (the rules every engine shares) and run here inside
+/// one read-only transaction.
 pub fn scan(
     source: &dyn ScanSource,
     snapshot: &mut CatalogSnapshot,
     tier: ProfileTier,
     redaction: &RedactionConfig,
 ) -> Result<ProfileStats, OraError> {
-    let mut stats = ProfileStats {
-        tier,
-        ..Default::default()
-    };
+    let mut stats = ProfileStats::new(tier);
     if tier == ProfileTier::P0 {
         return Ok(stats);
     }
-    let owner = snapshot.owner.clone();
+    let owner = guard_identifier(&snapshot.owner)?.to_string();
     source.begin_read_only()?;
     let mut lost = false;
     for t in snapshot
@@ -226,36 +88,30 @@ pub fn scan(
         .filter(|o| o.kind == ObjectKind::Table)
     {
         if lost {
-            stats.tables_skipped += 1;
-            t.detail["profile"]["skipped"] = "session lost after an earlier failure".into();
+            profile::record_skipped(&mut t.detail);
+            stats.record(&TableOutcome::Skipped);
             continue;
         }
-        let result = match tier {
-            ProfileTier::P1 => count_rows(source, &owner, &t.name).map(|n| (n, 0, 0)),
-            _ => {
-                let columns = t.detail["columns"].as_array_mut();
-                match columns {
-                    Some(cols) => scan_table(source, &owner, &t.name, cols, redaction),
-                    None => count_rows(source, &owner, &t.name).map(|n| (n, 0, 0)),
-                }
-            }
+        let mut run = |sql: &str| -> Result<Vec<Option<String>>, String> {
+            let rows = source.scan(sql).map_err(|e| e.to_string())?;
+            rows.into_iter()
+                .next()
+                .ok_or_else(|| "an aggregate query returned no row".to_string())
         };
-        match result {
-            Ok((rows, measured, suppressed)) => {
-                t.detail["profile"] = TableProfile {
-                    tier,
-                    row_count: rows,
-                    row_count_exact: true,
-                }
-                .into_json();
-                stats.tables_profiled += 1;
-                stats.columns_measured += measured;
-                stats.values_suppressed += suppressed;
-            }
+        let outcome = profile::profile_table(
+            Flavor::Oracle,
+            &owner,
+            &t.name,
+            &mut t.detail,
+            tier,
+            redaction,
+            &mut run,
+        );
+        match outcome {
+            Ok(o) => stats.record(&o),
             Err(e) => {
                 lost = session_lost(&e);
-                stats.tables_failed += 1;
-                t.detail["profile"]["error"] = redact(&e.to_string(), redaction).into();
+                stats.record(&TableOutcome::Failed);
             }
         }
     }
@@ -263,96 +119,6 @@ pub fn scan(
         source.end_transaction()?;
     }
     Ok(stats)
-}
-
-fn count_rows(source: &dyn ScanSource, owner: &str, table: &str) -> Result<i64, OraError> {
-    let sql = format!("SELECT COUNT(*) FROM {}", target(owner, table)?);
-    let rows = source.scan(&sql)?;
-    count_of(&rows).ok_or_else(|| OraError::Query {
-        sql,
-        message: "COUNT(*) returned no number".into(),
-    })
-}
-
-/// One table's P2 scan. Returns (rows, columns measured, columns suppressed).
-fn scan_table(
-    source: &dyn ScanSource,
-    owner: &str,
-    table: &str,
-    columns: &mut [Value],
-    redaction: &RedactionConfig,
-) -> Result<(i64, usize, usize), OraError> {
-    let from = target(owner, table)?;
-    let (measures, suppressed) = measures(columns);
-    let mut rows_total = None;
-    let mut answers: Vec<(usize, &'static str, Option<String>)> = Vec::new();
-    // A table without columns to measure still gets its count.
-    let chunks: Vec<&[Measure]> = if measures.is_empty() {
-        vec![&[]]
-    } else {
-        measures.chunks(EXPRESSIONS_PER_QUERY).collect()
-    };
-    for chunk in chunks {
-        let list: Vec<&str> = std::iter::once("COUNT(*)")
-            .chain(chunk.iter().map(|m| m.sql.as_str()))
-            .collect();
-        let sql = format!("SELECT {} FROM {from}", list.join(", "));
-        let rows = source.scan(&sql)?;
-        let row = rows.into_iter().next().ok_or_else(|| OraError::Query {
-            sql: sql.clone(),
-            message: "an aggregate query returned no row".into(),
-        })?;
-        rows_total = row
-            .first()
-            .and_then(|v| v.as_deref())
-            .and_then(|v| v.trim().parse::<i64>().ok());
-        for (m, v) in chunk.iter().zip(row.into_iter().skip(1)) {
-            answers.push((m.column, m.key, v));
-        }
-    }
-    let rows = rows_total.ok_or_else(|| OraError::Query {
-        sql: format!("SELECT COUNT(*) FROM {from}"),
-        message: "COUNT(*) returned no number".into(),
-    })?;
-    let mut measured = 0;
-    for (i, key, v) in answers {
-        let p = profile_of(&mut columns[i]);
-        p["tier"] = "p2".into();
-        match key {
-            "non_null" => {
-                if let Some(n) = v.and_then(|v| v.trim().parse::<i64>().ok()) {
-                    p["nulls"] = (rows - n).into();
-                    p["nulls_exact"] = true.into();
-                    measured += 1;
-                }
-            }
-            "max_length" => {
-                if let Some(n) = v.and_then(|v| v.trim().parse::<i64>().ok()) {
-                    p["max_length"] = n.into();
-                }
-            }
-            _ => {
-                if let Some(v) = v {
-                    p[key] = redact(&v, redaction).into();
-                }
-            }
-        }
-    }
-    for &i in &suppressed {
-        let p = profile_of(&mut columns[i]);
-        p["values_suppressed"] = true.into();
-        if let Some(c) = columns[i]["name"].as_str().and_then(pii::classify_name) {
-            columns[i]["profile"]["pii"] = serde_json::to_value(c).unwrap_or(Value::Null);
-        }
-    }
-    Ok((rows, measured, suppressed.len()))
-}
-
-fn profile_of(column: &mut Value) -> &mut Value {
-    if !column["profile"].is_object() {
-        column["profile"] = json!({});
-    }
-    &mut column["profile"]
 }
 
 /// Archive-log and supplemental-logging state (§3.4), for the CDC part of the plan. A refusal is
@@ -477,33 +243,8 @@ mod tests {
         )
     }
 
-    /// The rule the whole tier rests on: a text column is never the argument of `MIN` or `MAX`.
-    #[test]
-    fn no_text_column_is_ever_an_argument_of_min_or_max() {
-        let (m, suppressed) = measures(invoice().detail["columns"].as_array().unwrap());
-        let sql: Vec<&str> = m.iter().map(|m| m.sql.as_str()).collect();
-        for text in ["DOCUMENTNO", "EMAIL"] {
-            assert!(
-                sql.iter()
-                    .filter(|s| s.contains(text))
-                    .all(|s| s.starts_with("COUNT(") || s.starts_with("MAX(LENGTH(")),
-                "{text}: {sql:?}"
-            );
-        }
-        assert!(sql.contains(&"MIN(\"DATEINVOICED\")"));
-        assert!(
-            !sql.iter().any(|s| s.contains("NOTES")),
-            "LONG is not countable"
-        );
-        assert!(sql.contains(&"COUNT(CASE WHEN \"ATTACHMENT\" IS NOT NULL THEN 1 END)"));
-        // A number whose name says personal data gets a count and nothing else.
-        assert!(
-            sql.iter()
-                .filter(|s| s.contains("PHONE_NUMBER"))
-                .all(|s| s.starts_with("COUNT("))
-        );
-        assert_eq!(suppressed, vec![4]);
-    }
+    // The "never a text value, never a personal bound" rule is tested on the SQL itself, for
+    // every engine, in `ekos_observation_sdk::profile`.
 
     #[test]
     fn p2_records_exact_nulls_bounds_and_lengths_inside_a_read_only_transaction() {

@@ -18,6 +18,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 pub mod probe;
+pub mod profile;
+
+pub use ekos_observation_sdk::profile::ProfileTier;
 
 /// The observer's name, and the `source_kind` its artifacts carry.
 pub const OBSERVER: &str = "postgres";
@@ -102,6 +105,8 @@ pub struct LiveReader {
     pub schemas: Vec<String>,
     pub run_id: String,
     pub redaction: RedactionConfig,
+    /// RFC 0211 §3.4: how much the read measures beyond the planner's statistics.
+    pub profile: ProfileTier,
 }
 
 impl CatalogReader for LiveReader {
@@ -111,26 +116,49 @@ impl CatalogReader for LiveReader {
             &self.schemas,
             &self.run_id,
             &self.redaction,
+            self.profile,
         )
     }
 }
 
-/// Connect, read and reconcile the schemas' catalog, and probe a write. Blocking.
+/// Connect, read and reconcile the schemas' catalog, profile it at `tier`, and probe a write.
+/// Blocking.
 pub fn read(
     connection: &PgConnection,
     schemas: &[String],
     run_id: &str,
     redaction: &RedactionConfig,
+    tier: ProfileTier,
 ) -> Result<DatabaseReading, PgError> {
     let source = connection.connect(run_id)?;
     let snapshot = ekos_pg_live::introspect(&source, schemas, redaction)?;
     ekos_pg_live::reconcile(&source, &snapshot, schemas)?;
+    let mut catalogs = normalize(&snapshot, schemas);
+    for c in &mut catalogs {
+        let started = std::time::Instant::now();
+        let mut run = |sql: &str| {
+            source
+                .preview(sql, usize::MAX)
+                .map(|p| p.rows)
+                .map_err(|e| e.to_string())
+        };
+        profile::profile_owner(c, tier, redaction, &mut run).map_err(|message| PgError::Query {
+            sql: format!("statistics of schema {}", c.owner),
+            message,
+        })?;
+        let mut line = json!({ "owner": c.owner, "tier": tier.as_str() });
+        if let Some(p) = &c.profile {
+            line["counts"] = serde_json::to_value(p).unwrap_or_default();
+        }
+        line["ms"] = (started.elapsed().as_millis() as u64).into();
+        ekos_common::run_log::emit("postgres.profile", "profiled", &line);
+    }
     let write_check = live_catalog::write_check(match source.check_write_refused()? {
         ekos_pg_live::WriteCheck::RefusedByServer { message } => Err(message),
         ekos_pg_live::WriteCheck::RoleCanWrite => Ok(()),
     });
     Ok(DatabaseReading {
-        catalogs: normalize(&snapshot, schemas),
+        catalogs,
         write_check: Some(write_check),
     })
 }
@@ -350,7 +378,7 @@ pub fn test_connection(
     run_id: &str,
     redaction: &RedactionConfig,
 ) -> Result<Value, PgError> {
-    let reading = read(connection, schemas, run_id, redaction)?;
+    let reading = read(connection, schemas, run_id, redaction, ProfileTier::P0)?;
     Ok(test_report(&connection.label(), &reading))
 }
 

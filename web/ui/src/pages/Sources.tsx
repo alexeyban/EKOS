@@ -154,7 +154,8 @@ function AddDirectory({ workspace }: { workspace: string }) {
   );
 }
 
-// RFC 0235: what each kind's form asks for. Profiles and the application dictionary are Oracle's.
+// RFC 0235: what each kind's form asks for. Every kind is profiled (RFC 0252); the application
+// dictionary is Oracle's.
 const KINDS = {
   oracle: {
     label: "Oracle",
@@ -208,7 +209,7 @@ function AddDatabase({ workspace }: { workspace: string }) {
             .split(/[,\s]+/)
             .map((o) => o.trim())
             .filter(Boolean),
-          profile: f.kind === "oracle" ? f.profile : "p0",
+          profile: f.profile,
           dictionary: f.kind === "oracle" ? f.dictionary || null : null,
         },
       ),
@@ -283,34 +284,32 @@ function AddDatabase({ workspace }: { workspace: string }) {
             placeholder={k.ownersHint}
           />
         </label>
+        <label className="sem-field">
+          <span>Profile</span>
+          <select
+            aria-label="profile"
+            value={f.profile}
+            onChange={set("profile")}
+          >
+            <option value="p0">p0 — optimizer statistics only</option>
+            <option value="p1">p1 — row counts</option>
+            <option value="p2">
+              p2 — one scan per table (null counts, bounds)
+            </option>
+          </select>
+        </label>
         {f.kind === "oracle" && (
-          <>
-            <label className="sem-field">
-              <span>Profile</span>
-              <select
-                aria-label="profile"
-                value={f.profile}
-                onChange={set("profile")}
-              >
-                <option value="p0">p0 — optimizer statistics only</option>
-                <option value="p1">p1 — row counts</option>
-                <option value="p2">
-                  p2 — one scan per table (null counts, bounds)
-                </option>
-              </select>
-            </label>
-            <label className="sem-field">
-              <span>Application dictionary</span>
-              <select
-                aria-label="dictionary"
-                value={f.dictionary}
-                onChange={set("dictionary")}
-              >
-                <option value="">none</option>
-                <option value="idempiere">iDempiere / ADempiere</option>
-              </select>
-            </label>
-          </>
+          <label className="sem-field">
+            <span>Application dictionary</span>
+            <select
+              aria-label="dictionary"
+              value={f.dictionary}
+              onChange={set("dictionary")}
+            >
+              <option value="">none</option>
+              <option value="idempiere">iDempiere / ADempiere</option>
+            </select>
+          </label>
         )}
       </div>
       <div className="btnrow">
@@ -360,7 +359,7 @@ function DatabaseRow({
         </code>{" "}
         · {db.kind === "clickhouse" ? "databases" : "schemas"}{" "}
         {db.owners.join(", ")}
-        {db.kind === "oracle" ? ` · profile ${db.profile}` : ""}
+        {` · profile ${db.profile}`}
         {db.dictionary ? ` · dictionary ${db.dictionary}` : ""} ·{" "}
         {db.password_stored ? (
           <span className="chip ok">password stored</span>

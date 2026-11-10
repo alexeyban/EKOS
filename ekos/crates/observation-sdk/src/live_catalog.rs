@@ -46,6 +46,9 @@ pub struct OwnerCatalog {
     pub census: BTreeMap<String, Census>,
     pub columns: usize,
     pub objects: Vec<LiveObject>,
+    /// What the `[[databases]] profile` run measured in this owner (RFC 0211 §3.4); `None` when
+    /// nothing beyond the catalog's statistics was read.
+    pub profile: Option<crate::profile::ProfileStats>,
 }
 
 impl OwnerCatalog {
@@ -107,6 +110,7 @@ pub fn artifacts(
             "listed": c.listed(),
             "columns": c.columns,
             "write_check": write_check,
+            "profile": c.profile,
             "objects": c.entries(),
         });
         out.push(
@@ -149,6 +153,7 @@ mod tests {
                 status: None,
                 detail: json!({ "columns": [] }),
             }],
+            profile: None,
         };
         let wc = write_check(Err("permission denied".into()));
         let a = artifacts("postgres", "p", "postgres", "shop", &[c], Some(&wc));

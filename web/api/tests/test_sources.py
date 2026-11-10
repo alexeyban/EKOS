@@ -126,11 +126,13 @@ def test_argv_builders_take_names_only() -> None:
         "wh", "https://ch.local:8443", "ro", "V", ["wh"], "p0", None, "clickhouse"
     )
     assert ch[3:5] == ["--kind=clickhouse", "--connect=https://ch.local:8443"]
+    # RFC 0252: every kind is profiled.
+    pg = database_add_argv("wh", "h/shop", "ro", "V", ["public"], "p2", None, "postgres")
+    assert "--profile=p2" in pg
     for kind, connect, profile, dictionary in (
         ("postgres", "https://h:8443", "p0", None),
         ("clickhouse", "h:5432/shop", "p0", None),
         ("clickhouse", "http://u:p@h:8123", "p0", None),
-        ("postgres", "h/shop", "p2", None),
         ("postgres", "h/shop", "p0", "idempiere"),
         ("mysql", "h/shop", "p0", None),
     ):

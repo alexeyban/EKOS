@@ -27,7 +27,8 @@ once per build, read-only, outside the build fingerprint, a failure fatal; its o
 | `clickhouse` | `http[s]://host[:port]` (8123 / 8443) | databases | HTTP, every catalog query with `readonly=1` |
 
 `profile` other than `p0` and `dictionary` stay Oracle-only; the config check refuses them for the
-other kinds instead of ignoring them.
+other kinds instead of ignoring them. *(Amended by RFC 0252, 2026-11-10: profiles are read for every
+kind; only `dictionary` stays Oracle-only.)*
 
 ### 2.1 Observers
 
