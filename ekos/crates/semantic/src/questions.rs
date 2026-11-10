@@ -304,7 +304,15 @@ fn reference_draft(o: &KirObject) -> Option<Draft<'_>> {
     })
 }
 
-fn grain_draft<'a>(o: &'a KirObject, rels: &[KirRelationship]) -> Option<Draft<'a>> {
+fn grain_draft<'a>(
+    o: &'a KirObject,
+    rels: &[KirRelationship],
+    keyed: &BTreeSet<String>,
+) -> Option<Draft<'a>> {
+    // Another copy of the table (another database) declares its key: nothing to ask.
+    if keyed.contains(&s(o, "table").to_lowercase()) {
+        return None;
+    }
     // An empty table has no grain to measure; asking about it is noise.
     if s(o, "source") != "none"
         || o.properties
@@ -450,6 +458,18 @@ fn dependents(rels: &[KirRelationship]) -> HashMap<KirId, usize> {
 
 /// Every open question the current origins raise, keyed and prioritised.
 pub fn derive(o: &Origins<'_>) -> Vec<KirObject> {
+    let keyed: BTreeSet<String> = o
+        .objects
+        .iter()
+        .filter(|t| t.kind == ObjectKind::Table)
+        .filter(|t| {
+            t.properties
+                .get("primary_key")
+                .and_then(Value::as_array)
+                .is_some_and(|a| !a.is_empty())
+        })
+        .map(|t| t.name.to_lowercase())
+        .collect();
     let mut drafts: Vec<Draft<'_>> = Vec::new();
     for x in o.objects {
         match custom(x) {
@@ -468,7 +488,7 @@ pub fn derive(o: &Origins<'_>) -> Vec<KirObject> {
                 drafts.extend(reference_draft(x));
             }
             Some("GrainCandidate") if current(o.grain_current, x) => {
-                drafts.extend(grain_draft(x, o.relationships));
+                drafts.extend(grain_draft(x, o.relationships, &keyed));
             }
             _ => {}
         }
@@ -581,6 +601,38 @@ pub struct Reading<'a> {
     pub answers: &'a HashMap<String, Vec<&'a KirObject>>,
 }
 
+/// Origins already answered through some question — an answer stays with its origin when the
+/// question that carried it is regrouped into another (a new id).
+pub fn answered_origins(r: &Reading<'_>) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for qid in r.answers.keys() {
+        let Some(q) = r.by_id.get(qid) else { continue };
+        out.insert(s(q, "origin_id").to_string());
+        if let Some(Value::Array(also)) = q
+            .properties
+            .get("context")
+            .and_then(|c| c.get("also_origins"))
+        {
+            out.extend(also.iter().filter_map(|x| x.as_str().map(str::to_string)));
+        }
+    }
+    out
+}
+
+/// Whether an answer given to an earlier question about the same origin carries over to `q`.
+fn carried(q: &KirObject, r: &Reading<'_>) -> bool {
+    let answered = answered_origins(r);
+    answered.contains(s(q, "origin_id"))
+        || q.properties
+            .get("context")
+            .and_then(|c| c.get("also_origins"))
+            .and_then(Value::as_array)
+            .is_some_and(|a| {
+                a.iter()
+                    .any(|x| x.as_str().is_some_and(|x| answered.contains(x)))
+            })
+}
+
 /// `closed` when the origin was decided; `obsolete` when the latest derivation no longer raised
 /// the question; `answered` when a person's active testimony answers it.
 pub fn status(q: &KirObject, r: &Reading<'_>) -> Status {
@@ -606,6 +658,7 @@ pub fn status(q: &KirObject, r: &Reading<'_>) -> Status {
         .answers
         .get(&q.id.to_string())
         .is_some_and(|a| !a.is_empty())
+        || carried(q, r)
     {
         Status::Answered
     } else {

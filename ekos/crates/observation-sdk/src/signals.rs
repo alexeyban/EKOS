@@ -595,7 +595,7 @@ pub fn distinct_tuples_sql(
 /// Columns worth testing as part of a key: non-null, countable, not personal, not long text;
 /// highest distinct count first, at most `limit`.
 pub fn key_candidates(flavor: Flavor, columns: &[Value], limit: usize) -> Vec<String> {
-    let mut scored: Vec<(i64, String)> = columns
+    let mut scored: Vec<(i64, bool, String)> = columns
         .iter()
         .filter_map(|c| {
             let name = c["name"].as_str()?;
@@ -614,29 +614,26 @@ pub fn key_candidates(flavor: Flavor, columns: &[Value], limit: usize) -> Vec<St
             if fam == Family::Text && p["max_length"].as_i64().is_some_and(|l| l > 100) {
                 return None;
             }
-            // Free text that happens to be unique is not what a row is.
+            // Notes that happen to be unique are not what a row is. (A `description` can be a
+            // code column — `account_link.description` — so it stays, ranked after numbers.)
             let l = name.to_ascii_lowercase();
             if fam == Family::Text
-                && [
-                    "description",
-                    "name",
-                    "note",
-                    "comment",
-                    "title",
-                    "remark",
-                    "memo",
-                    "text",
-                ]
-                .iter()
-                .any(|w| l == *w || l.ends_with(&format!("_{w}")))
+                && ["note", "comment", "remark", "memo"]
+                    .iter()
+                    .any(|w| l == *w || l.ends_with(&format!("_{w}")))
             {
                 return None;
             }
-            Some((p["distinct"].as_i64().unwrap_or(-1), name.to_string()))
+            Some((
+                p["distinct"].as_i64().unwrap_or(-1),
+                fam != Family::Number,
+                name.to_string(),
+            ))
         })
         .collect();
-    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-    scored.into_iter().take(limit).map(|(_, n)| n).collect()
+    // Highest distinct first; on a tie, numbers before text (an id before a description).
+    scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    scored.into_iter().take(limit).map(|(_, _, n)| n).collect()
 }
 
 /// What a key search found.

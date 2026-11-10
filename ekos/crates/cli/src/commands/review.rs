@@ -398,8 +398,11 @@ fn find<'a>(items: &'a [Item], target: &str) -> Result<&'a Item> {
     let m: Vec<&Item> = items
         .iter()
         .filter(|i| {
+            let label = i.label.to_ascii_lowercase();
             i.id.to_ascii_lowercase() == t
-                || i.label.to_ascii_lowercase() == t
+                || label == t
+                // An inferred reference's label starts with its database (`pg: a.x → b.y`).
+                || label.split_once(": ").is_some_and(|(_, rest)| rest == t)
                 || i.id.split_once(':').is_some_and(|(_, rest)| rest == t)
         })
         .collect();

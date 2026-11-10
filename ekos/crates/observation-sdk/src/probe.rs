@@ -56,17 +56,8 @@ pub struct Cond {
     pub value: Option<Value>,
 }
 
-const OPS: &[&str] = &[
-    "=",
-    "!=",
-    "<",
-    "<=",
-    ">",
-    ">=",
-    "in",
-    "is_null",
-    "is_not_null",
-];
+/// No `!=`: its count is the total minus the `=` count, which undoes small-cell suppression.
+const OPS: &[&str] = &["=", "<", "<=", ">", ">=", "in", "is_null", "is_not_null"];
 
 /// A column as the catalog states it.
 fn column<'a>(columns: &'a [Value], name: &str) -> Result<&'a Value, String> {
@@ -119,7 +110,7 @@ fn condition(flavor: Flavor, columns: &[Value], c: &Cond) -> Result<String, Stri
     // A range over text lets a caller bisect a value prefix by prefix: equality only.
     if fam == Family::Text && matches!(c.op.as_str(), "<" | "<=" | ">" | ">=") {
         return Err(format!(
-            "{} is text: only =, !=, in, is_null and is_not_null",
+            "{} is text: only =, in, is_null and is_not_null",
             c.column
         ));
     }
@@ -142,7 +133,6 @@ fn condition(flavor: Flavor, columns: &[Value], c: &Cond) -> Result<String, Stri
         }
         op => {
             let v = c.value.as_ref().ok_or("a comparison needs a value")?;
-            let op = if op == "!=" { "<>" } else { op };
             Ok(format!("{id} {op} {}", literal(flavor, fam, v)?))
         }
     }
@@ -344,7 +334,8 @@ pub fn shape(
                         .map_or(Value::Null, |f| {
                             // With a filter, an exact small count says whether a row exists.
                             let n = f as i64;
-                            if n > 0 && n < min_cell {
+                            // 0 too: "none" against "a few" answers a yes/no question.
+                            if n < min_cell {
                                 json!(format!("<{min_cell}"))
                             } else {
                                 json!(n)
@@ -403,6 +394,16 @@ mod tests {
             render(Flavor::Postgres, "s", "t", &cols(), &ok, None).unwrap(),
             "SELECT COUNT(*) FROM \"s\".\"t\" WHERE \"status\" IN (1, 2)"
         );
+    }
+
+    #[test]
+    fn a_complement_and_a_zero_reveal_nothing() {
+        let complement = p(
+            json!({"template": "count", "where": [{"column": "status", "op": "!=", "value": 1}]}),
+        );
+        assert!(render(Flavor::Postgres, "s", "t", &cols(), &complement, None).is_err());
+        let none = shape(&[vec![Some("0".into())]], 0, &[], 5, &Default::default());
+        assert_eq!(none[0]["counts"][0], "<5", "zero and a few look the same");
     }
 
     #[test]

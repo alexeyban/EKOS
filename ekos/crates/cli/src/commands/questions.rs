@@ -767,6 +767,7 @@ pub fn check(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
         .objects
         .iter()
         .map(|o| json!({"check": s(o, "check"), "table": s(o, "subject_name"), "attribute": s(o, "attribute"),
+                        "database": database_of(o),
                         "claims": o.properties.get("claims"), "measured": o.properties.get("measured")}))
         .collect();
     if json_out {
@@ -781,15 +782,28 @@ pub fn check(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
             .map(|c| c["value"].as_str().unwrap_or("").to_string())
             .collect();
         println!(
-            "[{}] {}: {}",
+            "[{}] {} ({}): {}",
             r["check"].as_str().unwrap_or(""),
             r["table"].as_str().unwrap_or(""),
+            r["database"].as_str().unwrap_or("?"),
             claims.join(" / ")
         );
         println!("    measured: {}", r["measured"]);
     }
     println!("{} finding(s).", rows.len());
     Ok(())
+}
+
+/// The database a code-vs-data finding measured (from its data claim's `profile://<db>/…`).
+fn database_of(o: &KirObject) -> Option<String> {
+    o.properties
+        .get("claims")?
+        .as_array()?
+        .iter()
+        .filter_map(|c| c["path"].as_str())
+        .find_map(|p| p.strip_prefix("profile://"))
+        .and_then(|rest| rest.split('/').next())
+        .map(str::to_string)
 }
 
 /// MCP `ekos_questions` (read-only): the questions through the caller's store.
