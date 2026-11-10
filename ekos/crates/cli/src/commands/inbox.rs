@@ -39,7 +39,7 @@ fn root(config: &EkosConfig, cwd: &Path) -> PathBuf {
 /// The build's observe base for accepted material, when there is any.
 pub fn observe_base(config: &EkosConfig, cwd: &Path) -> Option<ObserveBase> {
     let path = root(config, cwd).join("accepted");
-    std::fs::read_dir(&path).ok()?.next()?;
+    let _first = std::fs::read_dir(&path).ok()?.next()?;
     Some(ObserveBase {
         path,
         key: SOURCE_KEY.into(),

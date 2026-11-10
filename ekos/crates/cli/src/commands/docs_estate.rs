@@ -268,6 +268,46 @@ fn integrity_summary(index: &super::check::Index) -> estate::IntegritySummary {
     }
 }
 
+/// RFC 0254 §3.6: what the table pages' passport sections read beside the ledger — which derived
+/// items are current, review decisions in words, and each open question's computed state.
+fn passport_input(
+    config: &EkosConfig,
+    cwd: &Path,
+    review: &super::review::ReviewState,
+    objects: &[ekos_kir::KirObject],
+) -> estate::PassportInput {
+    use ekos_semantic::review::Subject;
+    let mut reviewed = BTreeMap::new();
+    for subject in [Subject::Relationships, Subject::WriteBehaviour] {
+        for item in review.items(subject) {
+            if let Some(w) = estate::decision_words(item.decision.as_ref(), item.outdated) {
+                reviewed.insert(format!("{}:{}", subject.as_str(), item.id), w);
+            }
+        }
+    }
+    let semantics: Option<BTreeSet<String>> =
+        std::fs::read(config.ekos_dir(cwd).join("semantics").join("current.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|v| {
+                v["ids"].as_array().map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+            });
+    estate::PassportInput {
+        current_grain: super::profile::grain_ids(config, cwd),
+        current_references: super::relationships::current_ids(config, cwd),
+        current_semantics: semantics,
+        reviewed,
+        questions: super::questions::states(config, cwd, objects)
+            .into_iter()
+            .map(|(id, (status, addressee))| (id, estate::QuestionState { status, addressee }))
+            .collect(),
+    }
+}
+
 pub fn generate(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()> {
     let ledger = open_store_read_only(config, cwd).map_err(|e| {
         anyhow::anyhow!("{e}\nRun the pipeline (`ekos build` … `ekos commit`) first.")
@@ -317,6 +357,7 @@ pub fn generate(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()> {
     let licences = licences(config, cwd);
     let conflicts = super::conflicts::current_ids(config, cwd);
     let integrity = super::check::read_index(config, cwd).map(|i| integrity_summary(&i));
+    let passport = passport_input(config, cwd, &review, &objects);
     let pages = estate::build(&EstateInput {
         objects: &objects,
         relationships: &relationships,
@@ -327,6 +368,7 @@ pub fn generate(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()> {
         current_conflicts: conflicts.as_ref(),
         max_er_tables: config.docs_estate.max_er_tables.unwrap_or(30).max(2),
         integrity: integrity.as_ref(),
+        passport: &passport,
     });
     let w = write_pages(output, &pages)?;
     let record = serde_json::json!({

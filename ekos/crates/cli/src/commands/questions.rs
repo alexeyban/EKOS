@@ -333,6 +333,40 @@ pub fn read(
     Ok(out)
 }
 
+/// Every question's computed status and current addressee, by id, over objects already read
+/// (RFC 0254 §3.6: the estate's table pages show them).
+pub fn states(
+    config: &EkosConfig,
+    cwd: &Path,
+    objects: &[KirObject],
+) -> BTreeMap<String, (String, Option<String>)> {
+    let by_id: HashMap<String, &KirObject> =
+        objects.iter().map(|o| (o.id.to_string(), o)).collect();
+    let current = current_ids(config, cwd);
+    let decisions = ekos_semantic::review::decisions(objects);
+    let answers = questions::answers_index(objects);
+    let routing = load_routing(config, cwd);
+    let reading = Reading {
+        by_id: &by_id,
+        questions_current: current.as_ref(),
+        decisions: &decisions,
+        answers: &answers,
+    };
+    objects
+        .iter()
+        .filter(|o| is_question(o))
+        .map(|q| {
+            (
+                q.id.to_string(),
+                (
+                    questions::status(q, &reading).as_str().to_string(),
+                    current_addressee(q, &routing),
+                ),
+            )
+        })
+        .collect()
+}
+
 /// `ekos questions list`.
 pub fn list(config: &EkosConfig, cwd: &Path, f: &Filter<'_>, json_out: bool) -> Result<()> {
     let ledger = super::store::open_store_read_only(config, cwd)?;

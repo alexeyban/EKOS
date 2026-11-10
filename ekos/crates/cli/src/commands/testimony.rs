@@ -14,7 +14,7 @@ use ekos_compiler_core::EkosConfig;
 use ekos_kir::{
     KirEvidence, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
 };
-use ekos_ledger::{KnowledgeReader, KnowledgeStore};
+use ekos_ledger::KnowledgeReader;
 use ekos_semantic::questions::TESTIMONY;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
