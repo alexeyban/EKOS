@@ -277,3 +277,39 @@ the workshop go back through the Questions page (§3.3, as operator-recorded tes
 - [ ] A question answered in Telegram closes after the reviewer decides its origin, with the testimony cited in
       the review item and on the table's passport page.
 - [ ] Ledger scan after reveals and probes: zero source values beyond code literals.
+
+## 9. Implementation log
+
+### 2026-11-10 — §3.6: the source passport on RFC 0214's table pages
+
+| Part | What |
+|---|---|
+| `docs-gen/src/estate/passport.rs` | Pure. `PassportInput` (current grain / reference / semantics ids, review decisions in words, each question's computed state), `QuestionState`, `decision_words`; an index of `GrainCandidate`, `FkCandidate`, `EnumMeaning` + `data_only_values` gaps, `code_vs_data` conflicts, newest active `Testimony`, current RFC 0247 annotations and non-obsolete `OpenQuestion`s per table; one renderer per section |
+| `docs-gen/src/estate.rs` | `EstateInput.passport`; the table page calls the seven sections in order (row → columns → keys and references → codes → how it changes → what the code assumes → what people said → open questions → notes). `ESTATE_VERSION` 1 → 2: "Foreign keys" is now "Keys and references", "Write behaviour" "How it changes"; `code_vs_data` findings are no longer repeated under "Open conflicts" on the table page (the Findings page still counts them) |
+| `cli/src/commands/docs_estate.rs` | `passport_input`: `profile::grain_ids`, `relationships::current_ids`, `semantics/current.json`, the `relationships` and `write-behaviour` review items' decisions (an outdated decision reads "hypothesis (decision outdated)"), `questions::states` |
+| `cli/src/commands/questions.rs` | `states`: every question's `questions::status` (with `answers_index` and review decisions) and current addressee (routing), by id |
+
+Decisions worth keeping:
+
+- **Status words.** A fact reads `hypothesis` until a person decided it; review decisions become `confirmed`,
+  `confirmed (with orphans)`, `confirmed (overridden)` or `rejected`; a grain read from the catalog is
+  `confirmed (declared)`; a code-vs-data finding is `open`, `confirmed: the code/data is right by <reviewer>` or
+  `dismissed: both valid`.
+- **Evidence** is the place a fact rests on: the `profile://database/owner.table[.column]` measurement with its day,
+  `path:line` of a code claim or a meaning's statement, an `FkCandidate`'s `code_sources`, a testimony's permalink.
+- **Gates.** Values shown in *Codes* are the code literals `EnumMeaning`s carry, never data; values no code names are
+  one counted row. A finding's `measured` contributes counts, shares and verdicts only — `min`, `max` and `constant`
+  are never read. A meaning's text passes the licence gate (the item's own sources, else the table's); a meaning a
+  person stated (`source: testimony`), testimony and notes are people's statements, redacted at intake, and shown
+  as plain text (no Markdown or HTML survives).
+- **Membership.** A testimony belongs to every table it is `about` (a table, or an item with `table` /
+  `child_table` / `subject_name`) and to the table of the question it `answers`. A reference appears on both its
+  child's and its parent's page.
+
+Tests (`docs-gen` `estate::tests`): sections in order with status and evidence; stale grain / reference, withdrawn
+testimony, obsolete question and a finding's measured min/max never reach any page, and an empty table gets no
+passport section; a meaning from an unlicensed source is left out; output independent of input order;
+`decision_words`.
+
+Not built here: `ekos questions export` as the workshop questionnaire is §3.6's second half (shipped with the
+questions commands); growth over time in *What a row is* (no measurement records it yet); a per-month usage chart.

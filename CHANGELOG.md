@@ -3,6 +3,17 @@
 ## Unreleased
 
 **Features**
+- **The source passport** (RFC 0254 §3.6). Every table page of `ekos docs generate --layout estate`
+  gains the analyst's sections, each only when it has content and each fact with its status and
+  evidence: *What a row is* (grain, row count), *Keys and references* (declared, then code- and
+  data-seeded `FkCandidate`s with verdict and review decision), *Codes* (value, meaning, where it is
+  stated, share, first/last seen, dead/never seen — counts only), *How it changes* (write behaviour,
+  its review status, measured history), *What the code assumes* (`code_vs_data` findings and their
+  decisions, never a measured min/max), *What people said* (testimony "According to *author*
+  (*channel*, *date*)", withdrawn left out; RFC 0247 notes) and *Open questions* (computed status and
+  addressee). Only current items are read (`profile/current.json`, `profile/relationships.json`,
+  `semantics/current.json`, `questions/current.json`). Estate page format version 2: the
+  "Foreign keys" and "Write behaviour" headings are now "Keys and references" and "How it changes".
 - **What the data says about the code** (RFC 0252 §3.2). `ekos profile run` measures, on every
   `[[databases]]` entry with profile p1/p2: how many rows hold each value code names and when each
   was first and last seen (`dead` after 24 months without a row), how many rows hold values *no*
