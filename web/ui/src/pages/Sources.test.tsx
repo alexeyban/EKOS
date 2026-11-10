@@ -169,6 +169,18 @@ describe("Sources page", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("profile")).toBeInTheDocument();
     expect(screen.queryByLabelText("dictionary")).toBeNull();
+    // RFC 0252 §3.5: Informix reads table owners, is profiled, has no dictionary.
+    fireEvent.change(screen.getByLabelText("database kind"), {
+      target: { value: "informix" },
+    });
+    expect(
+      screen.getByPlaceholderText("ifx.local:9088/stores@ol_ifx"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Table owners to read (comma-separated)"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("profile")).toBeInTheDocument();
+    expect(screen.queryByLabelText("dictionary")).toBeNull();
     fireEvent.change(screen.getByLabelText("database kind"), {
       target: { value: "clickhouse" },
     });

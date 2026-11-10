@@ -142,6 +142,29 @@ def test_argv_builders_take_names_only() -> None:
         "--connect=mssql.local:1433/shop?trust-server-certificate=true",
     ]
     assert ms[-2:] == ["--owner=sales", "--owner=hr"]
+    # RFC 0252 §3.5: Informix, over the Client SDK (a server name) or DRDA (none).
+    ifx = database_add_argv(
+        "stores",
+        "ifx.local:9088/stores@ol_ifx",
+        "ekos_ro",
+        "V",
+        ["informix"],
+        "p1",
+        None,
+        "informix",
+    )
+    assert ifx[3:5] == ["--kind=informix", "--connect=ifx.local:9088/stores@ol_ifx"]
+    drda = database_add_argv(
+        "stores",
+        "drda://ifx.local/stores?db-locale=en_US.utf8",
+        "ro",
+        "V",
+        ["sales"],
+        "p0",
+        None,
+        "informix",
+    )
+    assert drda[4] == "--connect=drda://ifx.local/stores?db-locale=en_US.utf8"
     # RFC 0252: every kind is profiled.
     pg = database_add_argv("wh", "h/shop", "ro", "V", ["public"], "p2", None, "postgres")
     assert "--profile=p2" in pg
@@ -154,6 +177,10 @@ def test_argv_builders_take_names_only() -> None:
         ("sqlserver", "h/shop?encrypt=false", "p0", None),
         ("sqlserver", "h/shop", "p0", "idempiere"),
         ("sqlserver", "https://h:1433", "p0", None),
+        ("informix", "h:9088/stores", "p0", None),
+        ("informix", "drda://h/stores@ol", "p0", None),
+        ("informix", "h/stores@ol?driver=/tmp/evil.so", "p0", None),
+        ("informix", "h/stores@ol", "p0", "idempiere"),
     ):
         with pytest.raises(ReviewError):
             database_add_argv("x", connect, "u", "V", ["s"], profile, dictionary, kind)
