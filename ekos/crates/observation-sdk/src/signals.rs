@@ -275,6 +275,56 @@ pub fn time_column(flavor: Flavor, columns: &[Value]) -> Option<String> {
     None
 }
 
+// ── Reveal on read (RFC 0254 §3.2) ─────────────────────────────────────────────────────────
+
+/// The most frequent values of a column that no literal names, with their counts. **Returns data
+/// values**: only for the person reading a question, live, never stored (RFC 0254 §3.2). The
+/// caller withholds personal columns and passes the answer through [`suppress_small`].
+pub fn reveal_sql(
+    flavor: Flavor,
+    owner: &str,
+    table: &str,
+    column: &str,
+    literals: &[String],
+    _top: usize,
+) -> Result<String, String> {
+    let texts = literal_texts(literals);
+    let tbl = profile::table_ref(flavor, owner, table)?;
+    let col = profile::ident(flavor, column)?;
+    let txt = as_text(flavor, &col);
+    let not_in = if texts.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {txt} NOT IN ({})", in_list(flavor, &texts))
+    };
+    let n = count(flavor);
+    Ok(format!(
+        "SELECT {txt}, {n} FROM {tbl} WHERE {col} IS NOT NULL{not_in} GROUP BY {txt} ORDER BY {n} DESC"
+    ))
+}
+
+/// Small-cell suppression: a value held by fewer than `min_cell` rows is shown as `<min_cell`
+/// without the value; every shown value passes the built-in redaction.
+pub fn suppress_small(
+    rows: &[Vec<Option<String>>],
+    min_cell: i64,
+    redaction: &ekos_common::redaction::RedactionConfig,
+) -> Vec<Value> {
+    rows.iter()
+        .map(|r| {
+            let n = cell(r, 1)
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(0.0) as i64;
+            if n < min_cell {
+                serde_json::json!({"value": null, "rows": format!("<{min_cell}")})
+            } else {
+                let v = row_value(r).map(|v| ekos_common::redaction::redact(&v, redaction));
+                serde_json::json!({"value": v, "rows": n})
+            }
+        })
+        .collect()
+}
+
 // ── Conditional profile (c) ────────────────────────────────────────────────────────────────
 
 /// Rows a value needs before an implication about it is reported.
@@ -729,6 +779,23 @@ mod tests {
         assert_eq!(
             time_column(Flavor::Postgres, only_birth.as_array().unwrap()),
             None
+        );
+    }
+
+    #[test]
+    fn a_small_cell_hides_its_value() {
+        let rows = vec![
+            vec![Some("X".into()), Some("40".into())],
+            vec![Some("rare".into()), Some("2".into())],
+        ];
+        let v = suppress_small(&rows, 5, &Default::default());
+        assert_eq!(v[0]["value"], "X");
+        assert_eq!(v[1]["value"], Value::Null);
+        assert_eq!(v[1]["rows"], "<5");
+        let sql = reveal_sql(Flavor::Postgres, "s", "t", "c", &lits(&["1"]), 10).unwrap();
+        assert!(
+            sql.contains("NOT IN ('1')") && sql.ends_with("DESC"),
+            "{sql}"
         );
     }
 

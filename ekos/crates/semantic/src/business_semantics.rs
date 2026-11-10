@@ -2043,6 +2043,7 @@ fn dbt_check_site(t: &TableInfo, col: &str, op: &str, values: Vec<String>) -> Va
         top_level: true,
         subquery: false,
         label: None,
+        case_else: None,
         line: 0,
     })
     .unwrap_or_default()

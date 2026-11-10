@@ -68,6 +68,15 @@ pub struct EkosConfig {
     /// RFC 0253: `[inbox]` — how material people send is read.
     #[serde(default)]
     pub inbox: InboxConfig,
+    /// RFC 0254: `[questions]` — who is asked what nobody can explain, and how much.
+    #[serde(default)]
+    pub questions: QuestionsConfig,
+    /// RFC 0254: `[code-vs-data]` — thresholds of the code-against-data checks.
+    #[serde(default)]
+    pub code_vs_data: CodeVsDataConfig,
+    /// RFC 0253: `[testimony]` — what a person's statement may decide.
+    #[serde(default)]
+    pub testimony: TestimonyConfig,
     /// RFC 0178 Part 2: the project's named inputs (`[[sources]]`). Empty = one unnamed source,
     /// the directories of `[observe] paths`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1108,6 +1117,95 @@ impl Default for OcrConfig {
     }
 }
 
+/// RFC 0254: one `[[questions.owners]]` rule: a table / `table.column` name or `*` glob, and the
+/// people (console user names or e-mail addresses) who know it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct QuestionOwner {
+    pub pattern: String,
+    pub people: Vec<String>,
+}
+
+/// RFC 0254: `[questions]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct QuestionsConfig {
+    /// Derive open questions at `ekos commit` (default on; deterministic, no model call).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Who knows which tables, strongest signal first.
+    #[serde(default)]
+    pub owners: Vec<QuestionOwner>,
+    /// Asked when no owner or code author is known.
+    #[serde(default)]
+    pub reviewers: Vec<String>,
+    /// At most this many questions per person per digest (default 5).
+    #[serde(default = "default_per_person")]
+    pub per_person_per_day: usize,
+    /// Values shown when a person reveals a question's unexplained values (default 10).
+    #[serde(default = "default_reveal_top")]
+    pub reveal_top: usize,
+    /// A value held by fewer rows is shown as `<N rows` without the value (default 5).
+    #[serde(default = "default_min_cell")]
+    pub min_cell: i64,
+}
+
+fn default_per_person() -> usize {
+    5
+}
+
+fn default_reveal_top() -> usize {
+    10
+}
+
+fn default_min_cell() -> i64 {
+    5
+}
+
+impl Default for QuestionsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            owners: Vec::new(),
+            reviewers: Vec::new(),
+            per_person_per_day: default_per_person(),
+            reveal_top: default_reveal_top(),
+            min_cell: default_min_cell(),
+        }
+    }
+}
+
+/// RFC 0254: `[code-vs-data]`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct CodeVsDataConfig {
+    /// Share of a column's rows an enumeration leaves unhandled before it is a finding (0.01).
+    #[serde(default = "default_min_share")]
+    pub min_share: f64,
+}
+
+fn default_min_share() -> f64 {
+    0.01
+}
+
+impl Default for CodeVsDataConfig {
+    fn default() -> Self {
+        Self {
+            min_share: default_min_share(),
+        }
+    }
+}
+
+/// RFC 0253: `[testimony]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct TestimonyConfig {
+    /// People (console user names) whose saved testimony also records their review decision on
+    /// the item it answers (RFC 0253 §3.7). Empty: testimony is evidence only.
+    #[serde(default)]
+    pub decides_for: Vec<String>,
+}
+
 /// RFC 0253: `[inbox]`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -1358,6 +1456,9 @@ impl Default for EkosConfig {
             docs_estate: DocsEstateConfig::default(),
             ocr: OcrConfig::default(),
             inbox: InboxConfig::default(),
+            questions: QuestionsConfig::default(),
+            code_vs_data: CodeVsDataConfig::default(),
+            testimony: TestimonyConfig::default(),
             sources: Vec::new(),
             databases: Vec::new(),
             extensions: std::collections::BTreeMap::new(),

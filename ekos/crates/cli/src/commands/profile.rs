@@ -65,6 +65,31 @@ pub fn load(config: &EkosConfig, cwd: &Path) -> Option<DataSignals> {
     serde_json::from_slice(&bytes).ok()
 }
 
+/// The profile dialect of a database kind.
+pub(crate) fn flavor_of(kind: DatabaseKind) -> Flavor {
+    flavor(kind)
+}
+
+/// The `GrainCandidate` ids the latest run wrote; `None` before the first run.
+pub fn grain_ids(config: &EkosConfig, cwd: &Path) -> Option<BTreeSet<String>> {
+    let v: Value = serde_json::from_slice(&std::fs::read(current_path(config, cwd)).ok()?).ok()?;
+    Some(
+        v["grain_ids"]
+            .as_array()?
+            .iter()
+            .filter_map(|x| x.as_str().map(str::to_string))
+            .collect(),
+    )
+}
+
+/// The values code names for one column (case-insensitive table and column).
+pub(crate) fn code_literals_for(items: &[KirObject], table: &str, column: &str) -> Vec<String> {
+    code_literals(items)
+        .remove(&(tail(table), column.to_lowercase()))
+        .map(|v| v.into_iter().collect())
+        .unwrap_or_default()
+}
+
 fn flavor(kind: DatabaseKind) -> Flavor {
     match kind {
         DatabaseKind::Oracle => Flavor::Oracle,
@@ -552,6 +577,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
         .with_context(|| format!("writing {}", path.display()))?;
     // Fold into the meanings now, not at the next commit.
     let folded = super::semantics::commit_step(config, cwd, &*ledger, true).await?;
+    // RFC 0254: the questions and code-vs-data findings the new measurements raise.
+    let questions = super::questions::commit_step(config, cwd, &*ledger)?;
     ekos_common::run_log::emit(
         "profile",
         "profile run finished",
@@ -566,6 +593,9 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
         );
     } else {
         print_summary(&signals, &doc, folded.as_ref().map(|f| &f.0), &path);
+        if let Some(q) = &questions {
+            println!("{}", super::questions::summary_line(q));
+        }
     }
     Ok(())
 }

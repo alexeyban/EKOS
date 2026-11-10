@@ -111,7 +111,7 @@ impl CompilerPass for PerlAnalyzerPass {
     /// `v3` = RFC 0170: subs carry the literal predicates of their SQL strings (`predicates`;
     /// includes `PREDICATES_VERSION`). `v2` = a package carries its `use constant` literals.
     fn version(&self) -> &str {
-        "v3+predicates/3"
+        "v3+predicates/4"
     }
 
     fn cache_inputs(&self) -> Vec<String> {

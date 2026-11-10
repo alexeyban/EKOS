@@ -135,6 +135,8 @@ pub const SCOPED_TOOLS: &[&str] = &[
     // RFC 0252: `FkCandidate` objects through the scoped store; they carry no source, so a
     // source-restricted reader sees none of them.
     "ekos_relationships",
+    // RFC 0254: `OpenQuestion` objects through the scoped store; they carry no source either.
+    "ekos_questions",
 ];
 
 /// Tools a restricted reader does not get, each with the reason.
@@ -1187,6 +1189,9 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     tools.push(annotations_tool_definition());
     tools.push(profile_tool_definition());
     tools.push(relationships_tool_definition());
+    if config.questions.enabled {
+        tools.push(questions_tool_definition());
+    }
     for e in ext.iter() {
         tools.extend(e.mcp_tools(config));
     }
@@ -1206,6 +1211,24 @@ fn profile_tool_definition() -> Value {
                 "database": { "type": "string", "description": "Only this [[databases]] name" }
             },
             "required": ["table"]
+        }
+    })
+}
+
+/// RFC 0254 — read-only: what nobody has explained yet. Answering is a person's act.
+fn questions_tool_definition() -> Value {
+    json!({
+        "name": "ekos_questions",
+        "description": "Open questions about the source: code values nobody explained, values only the data holds, dead codes, disagreeing sources, logic that misses values the data holds, unclear references, tables without a key, people's notes the code has since changed under. Each has a computed `status` (open / answered / closed / obsolete), a priority, who is likely to know (`addressee`), its context and any answers people gave. Use it to say what is NOT known before stating a conclusion. Read-only: only a person answers (RFC 0253 testimony); never answer on someone's behalf.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "status": { "type": "string", "enum": ["open", "answered", "closed", "obsolete", "all"], "description": "Default open" },
+                "type": { "type": "string", "enum": ["meaning_of_value", "unexplained_values", "dead_code", "which_is_right", "logic_vs_data", "is_this_a_reference", "what_is_a_row", "still_true"] },
+                "table": { "type": "string" },
+                "addressee": { "type": "string" },
+                "limit": { "type": "integer", "description": "Max questions (default 50, max 200)" }
+            }
         }
     })
 }
@@ -2069,6 +2092,11 @@ fn call_tool(
     if name == "ekos_profile" {
         let ledger = cache.get(config, workspace)?;
         return super::profile::agent_profile(config, workspace, ledger, args);
+    }
+
+    if name == "ekos_questions" {
+        let ledger = cache.get(config, workspace)?;
+        return super::questions::agent_list(config, workspace, ledger, args);
     }
 
     if name == "ekos_relationships" {
@@ -3738,7 +3766,9 @@ mod tests {
                 "ekos_annotations",
                 // RFC 0252 — read-only.
                 "ekos_profile",
-                "ekos_relationships"
+                "ekos_relationships",
+                // RFC 0254 — read-only.
+                "ekos_questions"
             ]
         );
         for tool in tools {

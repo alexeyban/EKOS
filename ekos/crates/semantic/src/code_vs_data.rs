@@ -194,7 +194,8 @@ fn enumerations(objects: &[KirObject], hits: &[Hit<'_>], cfg: Settings, out: &mu
     let mut groups: BTreeMap<GroupKey, (Vec<&Hit<'_>>, BTreeSet<String>)> = BTreeMap::new();
     for h in hits {
         let enumerates = match h.site.clause {
-            Clause::Case => h.site.op == "in",
+            // A CASE with an ELSE handles every other value on purpose.
+            Clause::Case => h.site.op == "in" && h.site.case_else == Some(false),
             Clause::Where => {
                 custom(h.carrier) == Some("TransformNode")
                     && h.site.op == "in"
@@ -513,7 +514,7 @@ mod tests {
 
     fn site(clause: &str, op: &str, values: &[&str], label: Option<&str>) -> Value {
         json!({"relation": "orders", "column": "status", "op": op, "values": values,
-               "clause": clause, "top_level": true, "line": 7, "label": label})
+               "clause": clause, "top_level": true, "line": 7, "label": label, "case_else": false})
     }
 
     fn carrier(preds: Vec<Value>) -> KirObject {
@@ -593,6 +594,15 @@ mod tests {
             !f.properties["claims"].to_string().contains("14"),
             "no count in a claim"
         );
+    }
+
+    #[test]
+    fn a_case_with_an_else_handles_the_rest_on_purpose() {
+        let mut a = site("case", "in", &["1"], None);
+        a["case_else"] = json!(true);
+        let objects = vec![table(), carrier(vec![a])];
+        let g = detect(&objects, &signals(), None, Settings::default());
+        assert!(!checks(&g).contains(&"predicate_misses_values".to_string()));
     }
 
     #[test]

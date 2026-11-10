@@ -165,6 +165,32 @@ pub fn commit_step(
     Ok(stats)
 }
 
+/// RFC 0254 §3.4: replaces the current `code_vs_data` findings with `g` (decisions carried
+/// forward) and rewrites the manifest. Returns how many findings `g` holds.
+pub fn replace_code_vs_data(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+    g: &ekos_kir::KirGraph,
+) -> Result<usize> {
+    let mut ids = commit_ids(config, cwd).unwrap_or_default();
+    let previous: BTreeSet<String> = ledger
+        .all_objects()?
+        .iter()
+        .filter(|o| {
+            conflicts::is_conflict(o)
+                && s(o, "conflict_type") == ekos_semantic::code_vs_data::CODE_VS_DATA
+        })
+        .map(|o| o.id.to_string())
+        .collect();
+    ids.retain(|i| !previous.contains(i));
+    append_conflicts(ledger, g, &mut ids)?;
+    write_manifest(config, cwd, &ids, ConflictStats::default())?;
+    let stats = count(&items_in(config, cwd, ledger)?);
+    write_manifest(config, cwd, &ids, stats)?;
+    Ok(g.objects.len())
+}
+
 /// Append a detector's conflicts, keeping review decisions; returns how many records were new.
 fn append_conflicts(
     ledger: &dyn KnowledgeStore,

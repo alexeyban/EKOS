@@ -211,20 +211,16 @@ fn conflict_draft(o: &KirObject) -> Option<Draft<'_>> {
     let claims = o.properties.get("claims")?.as_array()?;
     let subject: KirId = s(o, "subject_id").parse::<Uuid>().ok().map(KirId)?;
     let table = tail(s(o, "subject_name"));
-    let (qtype, text, share) = if s(o, "conflict_type") == crate::code_vs_data::CODE_VS_DATA
-        && s(o, "check") == "predicate_misses_values"
-    {
-        let m = &o.properties["measured"];
-        let share = m["share"].as_f64().unwrap_or(0.0);
-        (
-            "logic_vs_data",
-            format!(
-                "{} — but the data also holds other values ({:.1}% of rows). Where should they go?",
-                claims.first().map(claim_text).unwrap_or_default(),
-                share * 100.0
-            ),
-            share,
-        )
+    let code = claims
+        .iter()
+        .find(|c| c["source"] != "profile")
+        .or_else(|| claims.first())
+        .and_then(|c| c["value"].as_str())
+        .unwrap_or_default()
+        .to_string();
+    let m = o.properties.get("measured").unwrap_or(&Value::Null);
+    let (qtype, text, share) = if s(o, "conflict_type") == crate::code_vs_data::CODE_VS_DATA {
+        logic_vs_data(s(o, "check"), &code, m)
     } else {
         let a = claims.first().map(claim_text).unwrap_or_default();
         let b = claims.get(1).map(claim_text).unwrap_or_default();
@@ -246,6 +242,30 @@ fn conflict_draft(o: &KirObject) -> Option<Draft<'_>> {
         blocking: true,
         share,
     })
+}
+
+/// A `code_vs_data` finding as a question for whoever owns the logic.
+fn logic_vs_data(check: &str, code: &str, m: &Value) -> (&'static str, String, f64) {
+    let share = m["share"].as_f64().unwrap_or(0.0);
+    let text = match check {
+        "predicate_misses_values" => format!(
+            "{code} — but {:.1}% of rows hold other values, which no branch handles. Where should they go?",
+            share * 100.0
+        ),
+        "dead_branch" => format!(
+            "{code} — but {}. Is the branch still needed, or is that data not loaded yet?",
+            m["why"].as_str().unwrap_or("no row uses it")
+        ),
+        "range_assumption" => format!(
+            "{code} — but the data runs from {} to {}. Is the constant out of date?",
+            m["min"], m["max"]
+        ),
+        "lookup_not_unique" => format!(
+            "{code} — but the looked-up column is not unique. Can one row match several, and which one should win?"
+        ),
+        _ => format!("{code} — the data disagrees. Which is right?"),
+    };
+    ("logic_vs_data", text, share)
 }
 
 fn reference_draft(o: &KirObject) -> Option<Draft<'_>> {
@@ -277,7 +297,14 @@ fn reference_draft(o: &KirObject) -> Option<Draft<'_>> {
 }
 
 fn grain_draft<'a>(o: &'a KirObject, rels: &[KirRelationship]) -> Option<Draft<'a>> {
-    if s(o, "source") != "none" {
+    // An empty table has no grain to measure; asking about it is noise.
+    if s(o, "source") != "none"
+        || o.properties
+            .get("rows")
+            .and_then(Value::as_i64)
+            .unwrap_or(0)
+            <= 0
+    {
         return None;
     }
     let table = s(o, "table").to_lowercase();
@@ -440,6 +467,26 @@ pub fn derive(o: &Origins<'_>) -> Vec<KirObject> {
     }
     drafts.extend(annotation_drafts(o.objects));
     drafts.retain(|d| !o.out_of_scope.contains(&d.table));
+    // The same question about two copies of a table (two databases) is asked once; the first
+    // origin by id keys it, the others are listed.
+    drafts.sort_by(|a, b| (&a.text, a.origin.id.0).cmp(&(&b.text, b.origin.id.0)));
+    let mut merged: Vec<Draft<'_>> = Vec::new();
+    for d in drafts {
+        match merged.last_mut() {
+            Some(last) if last.text == d.text => {
+                let also = last.context["also_origins"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                let mut also = also;
+                also.push(json!(d.origin.id.to_string()));
+                last.context["also_origins"] = Value::Array(also);
+                last.blocking |= d.blocking;
+            }
+            _ => merged.push(d),
+        }
+    }
+    let drafts = merged;
     let impact = dependents(o.relationships);
     let authors = blame_authors(o);
     let mut out: Vec<KirObject> = drafts

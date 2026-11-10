@@ -125,7 +125,7 @@ impl CompilerPass for SqlTransformAnalyzerPass {
     /// `v3` = RFC 0175: a `Source` node carries the alias it was read under.
     fn version(&self) -> &str {
         // Includes `PREDICATES_VERSION`: a top-level SELECT's graph carries `predicates`.
-        "v3+predicates/3"
+        "v3+predicates/4"
     }
 
     fn cache_inputs(&self) -> Vec<String> {

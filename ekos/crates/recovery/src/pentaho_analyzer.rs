@@ -391,6 +391,7 @@ fn condition_sites(
         top_level: top,
         subquery: false,
         label: None,
+        case_else: None,
         line,
     });
 }

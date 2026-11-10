@@ -692,6 +692,11 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
         "errors": errors, "cross_database_overlaps": overlap_count,
     });
     std::fs::write(&path, serde_json::to_vec_pretty(&doc)?)?;
+    // RFC 0254: lookups on non-unique keys and unclear references become findings and questions.
+    let questions = super::questions::commit_step(config, cwd, &*ledger)?;
+    if let (Some(q), false) = (&questions, opts.json) {
+        println!("{}", super::questions::summary_line(q));
+    }
     if opts.json {
         println!(
             "{}",

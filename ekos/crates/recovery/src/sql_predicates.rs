@@ -25,7 +25,7 @@ use std::ops::ControlFlow;
 /// `2` = RFC 0170: filters through CTEs and derived tables restated on base tables.
 /// `3` = a `CASE` result labels a code only when it depends on that code alone and the `CASE` does
 /// not rewrite the column into its own codes (RFC 0172 found `'A'` → `'L'` read as a label).
-pub const PREDICATES_VERSION: &str = "predicates/3";
+pub const PREDICATES_VERSION: &str = "predicates/4";
 
 pub use ekos_kir::predicates::{Clause, NEW_ROW, OLD_ROW, PredicateSite, canonical_text};
 
@@ -295,6 +295,7 @@ fn site(col: Col, op: &str, values: Vec<String>, clause: Clause) -> PredicateSit
         top_level: false,
         subquery: false,
         label: None,
+        case_else: None,
         line,
     }
 }
@@ -575,6 +576,7 @@ fn case_sites(e: &Expr, scope: &Scope, out: &mut Vec<PredicateSite>) {
         for mut s in found {
             s.top_level = false;
             s.label = label.clone().filter(|_| !rewritten.contains(&key(&s)));
+            s.case_else = Some(else_result.is_some());
             out.push(s);
         }
     }

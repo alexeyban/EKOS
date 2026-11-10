@@ -158,6 +158,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ProfileCommands,
     },
+    /// What nobody can explain yet, as questions for the people who may know (RFC 0254)
+    Questions {
+        #[command(subcommand)]
+        subcommand: QuestionsCommands,
+    },
     /// References the data shows, beside the ones code joins: discover, list (RFC 0252)
     Relationships {
         #[command(subcommand)]
@@ -1168,6 +1173,56 @@ enum SourceCommands {
     Remove { name: String },
 }
 
+/// `ekos questions …` (RFC 0254).
+fn dispatch_questions(
+    subcommand: QuestionsCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    use crate::commands::questions::{self, Filter};
+    match subcommand {
+        QuestionsCommands::List {
+            status,
+            qtype,
+            table,
+            addressee,
+            limit,
+            json,
+        } => {
+            let f = Filter {
+                status: Some(&status),
+                qtype: qtype.as_deref(),
+                table: table.as_deref(),
+                addressee: addressee.as_deref(),
+                limit,
+            };
+            questions::list(config, cwd, &f, json)
+        }
+        QuestionsCommands::Show { id, reveal, json } => {
+            questions::show(config, cwd, &id, reveal, json)
+        }
+        QuestionsCommands::Export {
+            format,
+            status,
+            table,
+            addressee,
+            out,
+        } => {
+            let f = Filter {
+                status: Some(&status),
+                table: table.as_deref(),
+                addressee: addressee.as_deref(),
+                ..Default::default()
+            };
+            questions::export(config, cwd, &f, &format, out.as_deref())
+        }
+        QuestionsCommands::Digest { json } => questions::digest(config, cwd, json),
+        QuestionsCommands::Reassign { id, to } => questions::reassign(config, cwd, &id, &to),
+        QuestionsCommands::Decline { id, by } => questions::decline(config, cwd, &id, &by),
+        QuestionsCommands::Mute { pattern, by } => questions::mute(config, cwd, &pattern, &by),
+    }
+}
+
 /// `ekos relationships …` (RFC 0252 §3.3).
 async fn dispatch_relationships(
     subcommand: RelationshipsCommands,
@@ -1237,6 +1292,74 @@ async fn dispatch_profile(
             crate::commands::profile::show(config, cwd, table.as_deref(), json)
         }
     }
+}
+
+#[derive(Subcommand)]
+enum QuestionsCommands {
+    /// The questions, highest priority first (default: open ones)
+    List {
+        /// open, answered, closed, obsolete or all
+        #[arg(long, default_value = "open")]
+        status: String,
+        /// meaning_of_value, unexplained_values, dead_code, which_is_right, logic_vs_data,
+        /// is_this_a_reference, what_is_a_row, still_true
+        #[arg(long = "type")]
+        qtype: Option<String>,
+        #[arg(long)]
+        table: Option<String>,
+        /// Only questions now with this person
+        #[arg(long)]
+        addressee: Option<String>,
+        #[arg(long, default_value_t = 0)]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// One question with its context and answers; `--reveal` shows the unexplained values live
+    /// (never stored; counts only for a personal column; small cells hidden)
+    Show {
+        id: String,
+        #[arg(long)]
+        reveal: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// A questionnaire for a workshop, grouped by table: md, csv or json
+    Export {
+        #[arg(long, default_value = "md")]
+        format: String,
+        #[arg(long, default_value = "open")]
+        status: String,
+        #[arg(long)]
+        table: Option<String>,
+        #[arg(long)]
+        addressee: Option<String>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+    /// Each person's next questions, at most `[questions] per-person-per-day`
+    Digest {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Hand a question to someone
+    Reassign {
+        id: String,
+        #[arg(long)]
+        to: String,
+    },
+    /// "Not me": the question moves to the next person who may know
+    Decline {
+        id: String,
+        #[arg(long = "as")]
+        by: String,
+    },
+    /// No questions about tables matching a pattern for this person
+    Mute {
+        pattern: String,
+        #[arg(long = "as")]
+        by: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1739,6 +1862,13 @@ enum SqlCommands {
 
 #[derive(Subcommand)]
 enum CheckCommands {
+    /// Where recovered logic assumes something the data contradicts (RFC 0254 §3.4): CASE
+    /// branches that miss values, dead branches, constants outside the data's range, lookups on a
+    /// non-unique key. Recomputed from the ledger and the latest `ekos profile run`
+    CodeVsData {
+        #[arg(long)]
+        json: bool,
+    },
     /// References that resolve to nothing or to several objects — code, ETL and dbt into a
     /// schema, SQL routines and views to tables — with evidence, confidence and a fingerprint
     Refs {
@@ -2330,7 +2460,7 @@ fn emits_machine_output(command: &Commands) -> bool {
             subcommand: CheckCommands::Refs { format, .. },
         } => *format != crate::commands::check::Format::Table,
         Commands::Check {
-            subcommand: CheckCommands::Explain { json, .. },
+            subcommand: CheckCommands::Explain { json, .. } | CheckCommands::CodeVsData { json },
         } => *json,
         Commands::Sql {
             subcommand: SqlCommands::Check { json, .. } | SqlCommands::Generate { json, .. },
@@ -2572,6 +2702,9 @@ where
             crate::commands::coverage::run(&config, &cwd, json, strict, all)
         }
         Commands::Check { subcommand } => match subcommand {
+            CheckCommands::CodeVsData { json } => {
+                crate::commands::questions::check(&config, &cwd, json)
+            }
             CheckCommands::Explain {
                 fingerprint,
                 limit,
@@ -2681,6 +2814,7 @@ where
             dispatch_source(subcommand, &config, &cwd, &config_path, &invoked_from)
         }
         Commands::Profile { subcommand } => dispatch_profile(subcommand, &config, &cwd).await,
+        Commands::Questions { subcommand } => dispatch_questions(subcommand, &config, &cwd),
         Commands::Relationships { subcommand } => {
             dispatch_relationships(subcommand, &config, &cwd).await
         }

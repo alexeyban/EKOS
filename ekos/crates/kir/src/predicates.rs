@@ -62,6 +62,10 @@ pub struct PredicateSite {
     /// For a `CASE` branch: its literal result (`'suspended'`), the code's candidate meaning.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// For a `CASE` branch: whether its `CASE` has an `ELSE` (RFC 0254 §3.4 — without one, a row
+    /// no branch matches becomes NULL). `None` when not recorded (older extractions).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_else: Option<bool>,
     /// 1-based line within the parsed text (0 when the parser recorded none).
     pub line: u64,
 }

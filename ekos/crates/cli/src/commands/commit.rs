@@ -341,6 +341,10 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     // evidence. Read-only over the ledger; written to a file under the state directory, never to
     // the ledger (the findings are derived and change every commit).
     let xref_stats = xref_step(config, cwd, &*ledger)?;
+    // RFC 0254: code-vs-data findings and the open questions every current origin raises — last,
+    // over everything the steps above wrote. Deterministic, no model call.
+    ledger.set_write_context(Some(write_ctx("commit:questions")));
+    let question_stats = super::questions::commit_step(config, cwd, &*ledger)?;
     ledger.set_write_context(Some(write_ctx("commit:llm-description")));
 
     // RFC 0088: real, evidence-grounded `ai_overview`/`ai_usage`/`ai_comment_check` for every
@@ -457,6 +461,12 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     }
     print_write_behaviour(&write_behaviour);
     print_ticket_links(&ticket_links);
+    if let Some(q) = &question_stats {
+        println!(
+            "  Open questions:        {}",
+            super::questions::summary_line(q)
+        );
+    }
     if let Some((counts, rate)) = &xref_stats {
         let n = |s| counts.get(&s).copied().unwrap_or(0);
         use ekos_semantic::xref::Severity;
