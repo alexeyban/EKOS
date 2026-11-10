@@ -2912,7 +2912,7 @@ fn keyed_columns(src: &PgSource, schemas: &[String]) -> Result<Vec<(String, Stri
 /// only meaningful inside one graph, so resolution walks upstream through `FeedsInto` edges from
 /// each operand until it reaches a `Source` node, which carries the real `object_name`. An operand
 /// that does not reach one is skipped rather than guessed at.
-fn harvest_join_observations(
+pub(crate) fn harvest_join_observations(
     store: &dyn ekos_ledger::KnowledgeStore,
 ) -> Result<Vec<ekos_migrate_dq::JoinObservation>> {
     use std::collections::HashMap;

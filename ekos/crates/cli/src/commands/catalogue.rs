@@ -52,6 +52,8 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("source remove", Class::Admin, false),
     ("profile run", Class::External, false),
     ("profile show", Class::Read, false),
+    ("relationships discover", Class::External, false),
+    ("relationships list", Class::Read, false),
     ("database add", Class::Write, false),
     ("database list", Class::Read, false),
     // Connects to the live database.

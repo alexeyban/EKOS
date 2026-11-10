@@ -45,6 +45,7 @@ pub mod project;
 pub mod query;
 pub mod query_log;
 pub mod recover;
+pub mod relationships;
 pub mod replay;
 pub mod resolve;
 pub mod review;

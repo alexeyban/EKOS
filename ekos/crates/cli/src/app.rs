@@ -158,6 +158,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ProfileCommands,
     },
+    /// References the data shows, beside the ones code joins: discover, list (RFC 0252)
+    Relationships {
+        #[command(subcommand)]
+        subcommand: RelationshipsCommands,
+    },
     /// Run observation passes and write knowledge to the ledger
     Build {
         /// Re-observe one named source only; the others keep what the last build recorded
@@ -1163,6 +1168,42 @@ enum SourceCommands {
     Remove { name: String },
 }
 
+/// `ekos relationships …` (RFC 0252 §3.3).
+async fn dispatch_relationships(
+    subcommand: RelationshipsCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    use crate::commands::relationships;
+    match subcommand {
+        RelationshipsCommands::Discover {
+            database,
+            cross_database,
+            min_containment,
+            min_parent_distinct,
+            max_rows,
+            allow_writable_role,
+            json,
+        } => {
+            relationships::discover(
+                config,
+                cwd,
+                relationships::DiscoverOpts {
+                    database: database.as_deref(),
+                    cross_database,
+                    min_containment,
+                    min_parent_distinct,
+                    max_rows,
+                    allow_writable_role,
+                    json,
+                },
+            )
+            .await
+        }
+        RelationshipsCommands::List { json } => relationships::list(config, cwd, json),
+    }
+}
+
 /// `ekos profile …` (RFC 0252).
 async fn dispatch_profile(
     subcommand: ProfileCommands,
@@ -1196,6 +1237,38 @@ async fn dispatch_profile(
             crate::commands::profile::show(config, cwd, table.as_deref(), json)
         }
     }
+}
+
+#[derive(Subcommand)]
+enum RelationshipsCommands {
+    /// Compare column values by salted MinHash (computed in the database), propose references to
+    /// unique columns, add every code join, and check each with an inclusion query
+    Discover {
+        /// Only this database
+        #[arg(long)]
+        database: Option<String>,
+        /// Also compare key columns across databases (a `value_overlap` on `SameAs` candidates)
+        #[arg(long)]
+        cross_database: bool,
+        /// Estimated share of the child's values found in the parent to propose a pair
+        #[arg(long, default_value_t = 0.9)]
+        min_containment: f64,
+        /// A parent column needs at least this many distinct values
+        #[arg(long, default_value_t = 20)]
+        min_parent_distinct: i64,
+        /// Skip tables with more rows than this, by the catalog's estimate (0: no limit)
+        #[arg(long, default_value_t = 5_000_000)]
+        max_rows: i64,
+        #[arg(long)]
+        allow_writable_role: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The latest discovery's candidates, best first
+    List {
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2590,6 +2663,9 @@ where
             dispatch_source(subcommand, &config, &cwd, &config_path, &invoked_from)
         }
         Commands::Profile { subcommand } => dispatch_profile(subcommand, &config, &cwd).await,
+        Commands::Relationships { subcommand } => {
+            dispatch_relationships(subcommand, &config, &cwd).await
+        }
         Commands::Database { subcommand } => {
             use crate::commands::database;
             match subcommand {

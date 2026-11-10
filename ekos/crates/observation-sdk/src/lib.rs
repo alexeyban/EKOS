@@ -14,6 +14,7 @@ use thiserror::Error;
 
 /// RFC 0211 / 0235: the artifact shape every live database observer emits.
 pub mod live_catalog;
+pub mod overlap;
 pub mod profile;
 pub mod signals;
 
