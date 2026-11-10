@@ -14,6 +14,21 @@
   addressee). Only current items are read (`profile/current.json`, `profile/relationships.json`,
   `semantics/current.json`, `questions/current.json`). Estate page format version 2: the
   "Foreign keys" and "Write behaviour" headings are now "Keys and references" and "How it changes".
+
+- **People as a source in the console** (RFC 0253/0254). An **Inbox** tab (pending material from
+  people without the reviewer role, accept, purge with the id typed), a **Questions** tab (filter,
+  reveal values live, record an answer heard elsewhere as the operator's testimony, reassign, "not
+  me" by the addressee), "What people said" on entity panels, and in the Chat tab a *Tell* mode: the
+  model proposes a card whose every line quotes the person's words (cite-or-drop), and only the
+  author's **Save** records their own or edited text. Files and lone links go to the inbox.
+- **Chat channels** (RFC 0253 §3.8). Telegram (long polling), Slack (Socket Mode or the signed
+  Events API) and Microsoft Teams (Bot Framework, JWT checked) over one core: an unlinked account
+  gets only the link instructions (`/ekos link` → a one-time code entered on the **Channels** page),
+  owners bind channels to projects, answers use the person's read scope and go privately in a group
+  unless every member sees the whole project, buttons count only from the account they were sent
+  to. A questions digest (`channels_digest_cron`) sends each person their questions with
+  **Answer** / **Not me**; nothing is sent from a public deployment. The service starts only when a
+  channel's secrets (by variable name, environment or keychain) are present.
 - **What the data says about the code** (RFC 0252 §3.2). `ekos profile run` measures, on every
   `[[databases]]` entry with profile p1/p2: how many rows hold each value code names and when each
   was first and last seen (`dead` after 24 months without a row), how many rows hold values *no*

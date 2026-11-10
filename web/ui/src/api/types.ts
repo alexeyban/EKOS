@@ -614,3 +614,106 @@ export interface XrefSummary {
   metrics: XrefMetrics;
   by_severity: Partial<Record<XrefSeverity, number>>;
 }
+
+// ── RFC 0253: people as a source ─────────────────────────────────────────────
+
+export interface InboxSender {
+  by: string;
+  channel: string;
+  permalink?: string | null;
+  at?: string;
+  source_url?: string | null;
+}
+
+export interface InboxItem {
+  id: string;
+  name: string;
+  status: "pending" | "accepted";
+  size: number;
+  received_at: string;
+  senders: InboxSender[];
+  accepted_by?: string | null;
+}
+
+export interface Testimony {
+  id: string;
+  author: string;
+  on_behalf_of?: string | null;
+  channel: string;
+  permalink?: string | null;
+  sent_at: string;
+  text: string;
+  about?: string[] | null;
+  answers?: string;
+  meaning?: string | null;
+  status: string;
+}
+
+export type ProposalItem =
+  | { kind: "meaning"; about: string; meaning: string; quote: string }
+  | { kind: "about"; about: string; quote: string }
+  | { kind: "answers"; question: string; quote: string };
+
+export interface ProposalCard {
+  proposal: string;
+  text: string;
+  items: ProposalItem[];
+  lines: string[];
+  dropped: number;
+  tools: string[];
+  answers: string | null;
+}
+
+// ── RFC 0254: open questions ─────────────────────────────────────────────────
+
+export type QuestionStatus = "open" | "answered" | "closed" | "obsolete";
+
+export interface QuestionAnswer {
+  testimony: string;
+  author: string;
+  text: string;
+  channel: string;
+  sent_at: string;
+}
+
+export interface Question {
+  id: string;
+  type: string;
+  status: QuestionStatus;
+  priority?: number | null;
+  blocking?: boolean | null;
+  table: string;
+  column: string;
+  text: string;
+  addressee: string | null;
+  addressees?: string[] | null;
+  context?: unknown;
+  origin?: { kind: string; id: string };
+  answers: QuestionAnswer[];
+  revealed?: unknown;
+}
+
+export interface ChannelAccount {
+  id: string;
+  channel: string;
+  account: string;
+  label: string;
+  default_workspace: string;
+  linked_at: string;
+}
+
+export interface ChannelBinding {
+  id: string;
+  channel: string;
+  conversation: string;
+  workspace_id: string;
+  created_by: string;
+}
+
+export interface ChannelsOverview {
+  configured: Record<string, boolean>;
+  public: boolean;
+  digest_cron: string;
+  accounts: ChannelAccount[];
+  bindings: ChannelBinding[];
+}

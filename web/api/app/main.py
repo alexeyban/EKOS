@@ -20,9 +20,11 @@ from starlette.middleware.sessions import SessionMiddleware
 from starlette.responses import JSONResponse
 
 from . import cloud, home_projects, lifecycle, models, moderation
+from .channels import service as channel_service
 from .routes import annotations as annotation_routes
 from .routes import (
     auth,
+    channels,
     chat,
     cli,
     commands,
@@ -32,10 +34,12 @@ from .routes import (
     evals,
     extensions,
     graph,
+    inbox,
     integrity,
     mcp_gateway,
     meta,
     platform,
+    questions,
     review,
     runs,
     schedules,
@@ -43,6 +47,7 @@ from .routes import (
     sources,
     stats,
     tenants,
+    testimony,
     workspaces,
 )
 from .runner import JobRunner
@@ -55,6 +60,7 @@ from .supervisor import McpSupervisor
 ROUTERS = (
     meta,
     auth,
+    channels,
     commands,
     runs,
     schedules,
@@ -62,6 +68,7 @@ ROUTERS = (
     stats,
     config,
     graph,
+    inbox,
     evals,
     semantics,
     conflicts,
@@ -71,7 +78,9 @@ ROUTERS = (
     review,
     sources,
     tenants,
+    testimony,
     platform,
+    questions,
     cli,
     chat,
     extensions,
@@ -206,6 +215,15 @@ async def _lifespan(app: FastAPI):
         asyncio.create_task(lifecycle.watch(settings.control_dir)) if settings.supervised else None
     )
     holder = asyncio.create_task(lease.hold(lifecycle.shut_down)) if lease is not None else None
+    # RFC 0253: the channels service, only when a channel is configured.
+    app.state.channels = channel_service.build(settings, app.state.supervisor)
+    if app.state.channels is not None:
+        app.state.channels.start()
+        trigger = channel_service.digest_trigger(settings.channels_digest_cron)
+        if trigger is not None:
+            app.state.scheduler.add_platform_job(
+                "ekos-questions-digest", app.state.channels.digest, trigger
+            )
     if settings.backup_url:
         job = cloud.BackupJob(settings.ekos_bin, settings.backup_url)
         app.state.backup = job
@@ -224,6 +242,8 @@ async def _lifespan(app: FastAPI):
             with contextlib.suppress(asyncio.CancelledError):
                 await watcher
         await app.state.scheduler.aclose()
+        if app.state.channels is not None:
+            await app.state.channels.aclose()
         await app.state.runner.aclose()
         await app.state.supervisor.aclose()
         if lease is not None:

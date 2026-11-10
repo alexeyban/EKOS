@@ -200,6 +200,8 @@ class Conversation(SQLModel, table=True):
     workspace_id: str = Field(index=True)
     owner: str = Field(index=True)  # `Principal.kind:Principal.id`
     title: str = ""
+    # RFC 0253: where the conversation happens — "console", "telegram", "slack" or "teams".
+    channel: str = "console"
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
 
@@ -209,6 +211,87 @@ class ChatMessage(SQLModel, table=True):
     conversation_id: str = Field(index=True)
     # The internal message shape of `app/chat/providers.py`, as JSON.
     body: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_now)
+
+
+# ── RFC 0253: people as a source ─────────────────────────────────────────────
+
+
+class Proposal(SQLModel, table=True):
+    """What a model understood from a person's statement, waiting for that person's Save. Only
+    the author may save or discard it; saving writes the person's own (or edited) text."""
+
+    id: str = Field(primary_key=True)
+    workspace_id: str = Field(index=True)
+    # `Principal.kind:Principal.id` of the statement's author.
+    author: str = Field(index=True)
+    channel: str = "console"
+    # The channel account that made the statement (empty in the console): a button click from
+    # another account is not the author's.
+    channel_account: str = ""
+    message_ref: str = ""
+    permalink: str = ""
+    text: str
+    # Cite-or-drop proposals: [{"kind", "about"?, "meaning"?, "question"?, "quote"}].
+    items: list[dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
+    # A question this statement answers (a reply to a question card).
+    answers: str = ""
+    # Inbox items sent with the statement.
+    attachments: list[str] = Field(default_factory=list, sa_column=Column(JSON))
+    status: str = "open"  # open | saved | discarded
+    saved_by: str = ""
+    created_at: datetime = Field(default_factory=_now)
+
+
+class ChannelAccount(SQLModel, table=True):
+    """A Telegram, Slack or Teams account linked to a console person by a one-time code."""
+
+    id: str = Field(primary_key=True)  # "<channel>:<account id>"
+    channel: str = Field(index=True)
+    account: str
+    principal_kind: str  # "user" | "local" | "static"
+    principal_id: str = Field(index=True)
+    # How the person is named in writes and digests: their e-mail (or subject).
+    label: str = Field(index=True)
+    # The workspace a direct message uses (`/ekos project <name>`).
+    default_workspace: str = ""
+    # Where a direct message to this person goes (a Telegram chat id, a Slack user id, a Teams
+    # personal conversation as JSON with its service URL): learned from their own messages.
+    dm_ref: str = ""
+    linked_at: datetime = Field(default_factory=_now)
+
+
+class ButtonRef(SQLModel, table=True):
+    """What a button the console sent does, and the one account it was sent to: a press from any
+    other account is not counted (RFC 0253 §3.6)."""
+
+    id: str = Field(primary_key=True)
+    channel: str
+    account: str
+    workspace_id: str
+    # {"action": "save" | "discard" | "edit" | "not_me" | "answer", "proposal"?, "question"?}
+    payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_now)
+
+
+class LinkCode(SQLModel, table=True):
+    """A one-time code a bot gave an unlinked account; entered in the console while signed in.
+    Only its hash is stored."""
+
+    code_hash: str = Field(primary_key=True)
+    channel: str
+    account: str
+    expires_at: datetime
+
+
+class ChannelBinding(SQLModel, table=True):
+    """A Slack/Teams channel or a Telegram group bound to one workspace by an owner."""
+
+    id: str = Field(primary_key=True)  # "<channel>:<conversation ref>"
+    channel: str = Field(index=True)
+    conversation: str
+    workspace_id: str = Field(index=True)
+    created_by: str = ""
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -296,7 +379,16 @@ def _migration_4(conn) -> None:
         conn.execute(text("ALTER TABLE tenant ADD COLUMN source_env JSON"))
 
 
-MIGRATIONS = [_migration_1, _migration_2, _migration_3, _migration_4]
+def _migration_5(conn) -> None:
+    """RFC 0253: a conversation records its channel (the console, Telegram, Slack, Teams)."""
+    columns = {c["name"] for c in inspect(conn).get_columns("conversation")}
+    if "channel" not in columns:
+        conn.execute(
+            text("ALTER TABLE conversation ADD COLUMN channel VARCHAR NOT NULL DEFAULT 'console'")
+        )
+
+
+MIGRATIONS = [_migration_1, _migration_2, _migration_3, _migration_4, _migration_5]
 
 
 def _migrate(engine) -> None:
@@ -693,6 +785,115 @@ def add_chat_messages(conversation_id: str, bodies: list[dict]) -> None:
             conv.updated_at = _now()
             s.add(conv)
         s.commit()
+
+
+# ── RFC 0253: proposals, channel accounts, link codes, bindings ──────────────
+
+
+def get_proposal(proposal_id: str) -> Proposal | None:
+    with session() as s:
+        return s.get(Proposal, proposal_id)
+
+
+def set_proposal_status(proposal_id: str, status: str, *, saved_by: str = "") -> None:
+    with session() as s:
+        row = s.get(Proposal, proposal_id)
+        if row is None:
+            return
+        row.status = status
+        row.saved_by = saved_by
+        s.add(row)
+        s.commit()
+
+
+def get_channel_account(channel: str, account: str) -> ChannelAccount | None:
+    with session() as s:
+        return s.get(ChannelAccount, f"{channel}:{account}")
+
+
+def channel_accounts_of(principal_kind: str, principal_id: str) -> list[ChannelAccount]:
+    with session() as s:
+        stmt = select(ChannelAccount).where(
+            ChannelAccount.principal_kind == principal_kind,
+            ChannelAccount.principal_id == principal_id,
+        )
+        return list(s.exec(stmt).all())
+
+
+def channel_accounts_labelled(label: str) -> list[ChannelAccount]:
+    """The accounts linked to the person a question names (by e-mail, case-insensitive)."""
+    with session() as s:
+        rows = s.exec(select(ChannelAccount)).all()
+        return [r for r in rows if r.label.lower() == label.lower()]
+
+
+def list_channel_accounts() -> list[ChannelAccount]:
+    with session() as s:
+        return list(s.exec(select(ChannelAccount).order_by(ChannelAccount.id)).all())
+
+
+def save_channel_account(row: ChannelAccount) -> None:
+    with session() as s:
+        s.merge(row)
+        s.commit()
+
+
+def delete_channel_account(account_id: str) -> bool:
+    with session() as s:
+        row = s.get(ChannelAccount, account_id)
+        if row is None:
+            return False
+        s.delete(row)
+        s.commit()
+        return True
+
+
+def put_link_code(row: LinkCode) -> None:
+    with session() as s:
+        # One live code per account: a new `/ekos link` replaces the old one.
+        stmt = select(LinkCode).where(
+            LinkCode.channel == row.channel, LinkCode.account == row.account
+        )
+        for old in s.exec(stmt).all():
+            s.delete(old)
+        s.add(row)
+        s.commit()
+
+
+def take_link_code(code_hash: str) -> LinkCode | None:
+    """The code's row, deleted as it is read: a code works once."""
+    with session() as s:
+        row = s.get(LinkCode, code_hash)
+        if row is None:
+            return None
+        s.delete(row)
+        s.commit()
+        return row
+
+
+def get_button(ref: str) -> ButtonRef | None:
+    with session() as s:
+        return s.get(ButtonRef, ref)
+
+
+def get_channel_binding(channel: str, conversation: str) -> ChannelBinding | None:
+    with session() as s:
+        return s.get(ChannelBinding, f"{channel}:{conversation}")
+
+
+def list_channel_bindings() -> list[ChannelBinding]:
+    with session() as s:
+        return list(s.exec(select(ChannelBinding).order_by(ChannelBinding.id)).all())
+
+
+def delete_channel_binding(binding_id: str) -> bool:
+    with session() as s:
+        row = s.get(ChannelBinding, binding_id)
+        if row is None:
+            return False
+        s.delete(row)
+        s.commit()
+        return True
 
 
 def delete_conversation(conversation_id: str) -> None:

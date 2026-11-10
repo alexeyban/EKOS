@@ -185,6 +185,27 @@ class Settings(BaseSettings):
     chat_max_tool_calls: int = 12
     chat_max_tokens: int = 2048
 
+    # ── People as a source (RFC 0253) and their questions (RFC 0254) ────────
+    # The largest file the console or a channel hands to `ekos inbox add` (the project's own
+    # `[inbox] max-file-mb` also applies).
+    inbox_upload_max_mb: int = Field(default=20, ge=1, le=200)
+    # Channels. Each secret is the NAME of a variable; its value comes from the environment or
+    # the keychain entry of that name (RFC 0184), never from a file. A channel runs only when
+    # its secrets are named and present.
+    channels_telegram_token_env: str = ""
+    channels_slack_bot_token_env: str = ""
+    # Socket Mode (no inbound endpoint): the app-level token (`xapp-…`). Without it Slack is
+    # served through the Events API endpoint, which needs the signing secret.
+    channels_slack_app_token_env: str = ""
+    channels_slack_signing_secret_env: str = ""
+    channels_teams_app_id: str = ""
+    channels_teams_app_secret_env: str = ""
+    # How long a `/ekos link` code stays valid.
+    channels_link_code_minutes: int = Field(default=10, ge=1, le=60)
+    # Cron (UTC) for sending each person their open questions through their linked channel
+    # (`ekos questions digest`). Empty: no digest. Never sent from a public deployment.
+    channels_digest_cron: str = ""
+
     # ── Public-demo safety (EKOS RFC 0249) ──────────────────────────────────
     # Off by default: a console that is not a public demo runs no safety checks.
     moderation_enabled: bool = False
@@ -265,6 +286,12 @@ class Settings(BaseSettings):
     @property
     def local(self) -> bool:
         return self.mode == "local"
+
+    @property
+    def public(self) -> bool:
+        """A public deployment (RFC 0249 checks on, or a read-only showcase): it takes no
+        material from strangers and sends nobody questions (RFC 0253/0254)."""
+        return self.moderation_enabled or self.read_only
 
     @property
     def control_dir(self) -> Path:

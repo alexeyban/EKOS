@@ -397,6 +397,58 @@ It is **off** by default: `moderation_enabled = true` in **Settings → Public d
 - `web/api/tools/redteam_live.py` measures a model on the red-team corpus (it spends tokens; it is
   never run by the tests).
 
+### Chat channels: Telegram, Slack, Teams (RFC 0253)
+
+People who know what a code or a table means can answer EKOS where they already are. A bot in
+Telegram, Slack or Microsoft Teams answers questions with the person's own access, takes files
+and links into the project's inbox, records what they tell it (only when they press **Save**,
+in their own words) and delivers the open questions they were picked to answer (RFC 0254).
+
+**The service starts only when a channel is configured.** Each secret is the **name** of a
+variable, set in **Settings → Channels**; its value goes in the environment (`deploy/.env`) or
+the server's keychain under that name (the Settings page's variables; a container has no keychain, so
+there they go in `deploy/.env`), never in `console.toml`:
+
+| Channel | Settings | Transport |
+|---|---|---|
+| Telegram | `channels_telegram_token_env` (the BotFather token) | long polling: no inbound endpoint, works in local mode |
+| Slack | `channels_slack_bot_token_env` (`xoxb-…`), and `channels_slack_app_token_env` (`xapp-…`, Socket Mode) **or** `channels_slack_signing_secret_env` (Events API) | Socket Mode needs no inbound endpoint; the Events API posts to `/api/channels/slack/events` and `/api/channels/slack/interactivity`, each request checked against the signing secret (and refused when older than five minutes) |
+| Microsoft Teams | `channels_teams_app_id`, `channels_teams_app_secret_env` | Bot Framework posts to `/api/channels/teams/messages` (an HTTPS endpoint the bot's registration names); every request's JWT is checked against the Bot Framework's published keys, issuer, audience = the app id, expiry and service URL |
+
+Slack scopes: `app_mentions:read`, `chat:write`, `im:history`, `im:read`, `im:write`,
+`channels:read`/`groups:read` (members of a channel, for the group rule below) and `files:read`.
+In local mode the console takes loopback connections only, so use Telegram or Slack Socket Mode.
+
+- **Linking.** An account the console does not know gets the link instructions and nothing else.
+  The person writes `/ekos link` to the bot, which answers with a one-time code (valid
+  `channels_link_code_minutes`, only its hash is kept); they enter it on the console's **Channels**
+  page while signed in. From then on the bot acts with that person's roles and read scope. Signed-in
+  people only: a development token cannot be linked. Claims from the sign-in provider (OIDC groups
+  by claim) do not travel to a channel; role bindings to the user or a named group do.
+- **Projects.** An owner binds a Slack or Teams channel, or a Telegram group, to one project on
+  the **Channels** page (`POST /api/channels/bindings`). A direct message uses the person's own
+  choice, `/ekos project <name>`.
+- **Group chats.** An answer that read the ledger goes only to the asker (a Telegram direct
+  message, a Slack ephemeral message, a Teams personal chat) unless every member of the channel is
+  a linked person who sees the whole project. Telegram cannot list a group's members, so there it is
+  always private.
+- **Material.** A file or a lone link goes to the project's inbox as the sender's (`ekos inbox add
+  --as`); from someone without the reviewer role it waits as pending (**Inbox** tab). A public
+  deployment (`moderation_enabled` or `read_only`) takes no material. Largest file:
+  `inbox_upload_max_mb` (the project's `[inbox] max-file-mb` also applies).
+- **Testimony.** `/ekos tell <what you know>` asks the chat model (read tools only) what the
+  statement is about; it answers with a card of proposals, each quoting the person's words — a
+  proposal without such a quote is dropped. **Save** records the person's own text with `ekos
+  testimony add --as <them>`; a button press counts only from the account the card was sent to, and
+  recording needs the reviewer role. `/ekos edit <card> <text>` corrects the words first. The chat
+  model is the console's (`chat_provider`), with the same metering rule as the Chat tab.
+- **Questions digest.** `channels_digest_cron` (cron, UTC) sends each person their open questions
+  (`ekos questions digest`, at most `[questions] per-person-per-day`) to the channel they wrote
+  from last, each with **Answer** and **Not me**. Owners can send it now from the Channels page.
+  Nothing is sent from a public deployment.
+- **Erasure.** Purging an inbox item deletes the original file; the compiled, redacted text stays in
+  the ledger, which cannot forget. Only inbox originals are erasable.
+
 ## 8. Backup and restore
 
 Everything is in the volume. A backup is one file.
@@ -628,6 +680,10 @@ the environment's `logs_destination` were fixed from what it showed (devlog_316)
 - **Evaluation runs** (`ekos eval run`) write beside the sources and do not work for a project
   kept in the home.
 - The image is `linux/amd64`.
+- **Channels** (RFC 0253): the adapters are tested against the platforms' documented request and
+  response shapes, not yet against live Telegram, Slack or Teams workspaces. No voice messages; no
+  Slack modal or Teams task module for **Edit** (a `/ekos edit` message instead); no automatic Teams
+  linking by AAD object id; the Azure module does not create the Bot resource yet.
 
 ## Where things are
 

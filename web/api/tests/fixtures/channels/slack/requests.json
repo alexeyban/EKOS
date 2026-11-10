@@ -1,0 +1,59 @@
+{
+  "signed": {
+    "secret": "8f742231b10e8888abcd99yyyzzz85a5",
+    "timestamp": "1762790400",
+    "body": "{\"token\":\"x\",\"team_id\":\"T0001\",\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"channel_type\":\"im\",\"channel\":\"D0001\",\"user\":\"U0ANN\",\"text\":\"what is orders?\",\"ts\":\"1762790400.000100\"}}",
+    "signature": "v0=120efec6a236d31e5102beebd083fc81163d42358484c30046f2dafb9b9777d9"
+  },
+  "url_verification": {
+    "token": "x",
+    "challenge": "3eZbrw1aBm2rZgRNFdxV2595E9CY3gmdALWMmHkvFXO7tYXAYM8P",
+    "type": "url_verification"
+  },
+  "event_dm": {
+    "token": "x", "team_id": "T0001", "api_app_id": "A0001", "type": "event_callback",
+    "event_id": "Ev01", "event_time": 1762790400,
+    "event": {"type": "message", "channel_type": "im", "channel": "D0001", "user": "U0ANN",
+              "text": "what is orders?", "ts": "1762790400.000100"}
+  },
+  "event_mention": {
+    "token": "x", "team_id": "T0001", "type": "event_callback",
+    "event": {"type": "app_mention", "channel": "C0FIN", "user": "U0ANN",
+              "text": "<@U0BOT> what does status 7 mean?", "ts": "1762790401.000200"}
+  },
+  "event_channel_plain": {
+    "token": "x", "team_id": "T0001", "type": "event_callback",
+    "event": {"type": "message", "channel_type": "channel", "channel": "C0FIN", "user": "U0BOB",
+              "text": "lunch at noon?", "ts": "1762790402.000300"}
+  },
+  "event_bot": {
+    "token": "x", "team_id": "T0001", "type": "event_callback",
+    "event": {"type": "message", "channel_type": "im", "channel": "D0001", "bot_id": "B0BOT",
+              "text": "I understood", "ts": "1762790403.000400"}
+  },
+  "event_file": {
+    "token": "x", "team_id": "T0001", "type": "event_callback",
+    "event": {"type": "message", "subtype": "file_share", "channel_type": "im", "channel": "D0001",
+              "user": "U0ANN", "text": "", "ts": "1762790404.000500",
+              "files": [{"id": "F0001", "name": "invoice-spec.pdf", "mimetype": "application/pdf",
+                         "size": 5,
+                         "url_private_download": "https://files.slack.com/files-pri/T0001-F0001/download/invoice-spec.pdf"}]}
+  },
+  "block_actions": {
+    "type": "block_actions",
+    "user": {"id": "U0ANN", "username": "ann", "team_id": "T0001"},
+    "api_app_id": "A0001",
+    "container": {"type": "message", "message_ts": "1762790410.000600", "channel_id": "D0001"},
+    "channel": {"id": "D0001", "name": "directmessage"},
+    "response_url": "https://hooks.slack.com/actions/T0001/1/abc",
+    "actions": [{"action_id": "ekos-0", "block_id": "b1", "type": "button",
+                 "text": {"type": "plain_text", "text": "Save"}, "value": "b:REF",
+                 "action_ts": "1762790411.000700"}]
+  },
+  "socket_frames": [
+    "{\"type\":\"hello\",\"num_connections\":1,\"connection_info\":{\"app_id\":\"A0001\"}}",
+    "{\"envelope_id\":\"e1\",\"type\":\"events_api\",\"accepts_response_payload\":false,\"payload\":{\"token\":\"x\",\"team_id\":\"T0001\",\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"channel_type\":\"im\",\"channel\":\"D0001\",\"user\":\"U0ANN\",\"text\":\"what is orders?\",\"ts\":\"1762790400.000100\"}}}",
+    "{\"envelope_id\":\"e2\",\"type\":\"interactive\",\"accepts_response_payload\":false,\"payload\":{\"type\":\"block_actions\",\"user\":{\"id\":\"U0ANN\"},\"channel\":{\"id\":\"D0001\"},\"container\":{\"message_ts\":\"1\"},\"actions\":[{\"value\":\"b:REF\"}]}}",
+    "{\"type\":\"disconnect\",\"reason\":\"refresh_requested\"}"
+  ]
+}

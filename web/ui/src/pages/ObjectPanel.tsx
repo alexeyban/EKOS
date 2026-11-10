@@ -3,6 +3,7 @@ import { useOutletContext } from "react-router-dom";
 import { api } from "../api/client";
 import { type Me, seesAll } from "../WorkspaceShell";
 import { ObjectNotes } from "./ObjectNotes";
+import { ObjectTestimony } from "./ObjectTestimony";
 
 interface Evidence {
   location?: { path?: string; line?: number };
@@ -105,6 +106,7 @@ export function ObjectPanel({
           )}
 
           <ObjectNotes workspace={workspace} objectId={o.id} enabled={wholeProject && !asOf} />
+          <ObjectTestimony workspace={workspace} objectId={o.id} enabled={wholeProject && !asOf} />
 
           <details open>
             <summary>Relationships ({rels.length})</summary>

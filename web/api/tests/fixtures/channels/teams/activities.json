@@ -1,0 +1,58 @@
+{
+  "message_personal": {
+    "type": "message",
+    "id": "1762790400001",
+    "timestamp": "2026-11-10T16:00:00.000Z",
+    "serviceUrl": "https://smba.trafficmanager.net/emea/",
+    "channelId": "msteams",
+    "from": {"id": "29:1ann-bot-framework-id", "name": "Ann", "aadObjectId": "aad-ann-0001"},
+    "conversation": {"conversationType": "personal", "tenantId": "tenant-0001",
+                     "id": "a:1personal-ann"},
+    "recipient": {"id": "28:app-0001", "name": "EKOS"},
+    "text": "what is orders?",
+    "channelData": {"tenant": {"id": "tenant-0001"}}
+  },
+  "message_channel": {
+    "type": "message",
+    "id": "1762790400002",
+    "serviceUrl": "https://smba.trafficmanager.net/emea/",
+    "channelId": "msteams",
+    "from": {"id": "29:1ann-bot-framework-id", "name": "Ann", "aadObjectId": "aad-ann-0001"},
+    "conversation": {"isGroup": true, "conversationType": "channel", "tenantId": "tenant-0001",
+                     "id": "19:fin@thread.tacv2;messageid=1762790400002"},
+    "recipient": {"id": "28:app-0001", "name": "EKOS"},
+    "text": "<at>EKOS</at> what does status 7 mean?",
+    "entities": [{"type": "mention", "text": "<at>EKOS</at>",
+                  "mentioned": {"id": "28:app-0001", "name": "EKOS"}}],
+    "channelData": {"tenant": {"id": "tenant-0001"}, "teamsChannelId": "19:fin@thread.tacv2"}
+  },
+  "message_file": {
+    "type": "message",
+    "id": "1762790400003",
+    "serviceUrl": "https://smba.trafficmanager.net/emea/",
+    "from": {"id": "29:1ann-bot-framework-id", "aadObjectId": "aad-ann-0001"},
+    "conversation": {"conversationType": "personal", "id": "a:1personal-ann"},
+    "recipient": {"id": "28:app-0001"},
+    "attachments": [{
+      "contentType": "application/vnd.microsoft.teams.file.download.info",
+      "contentUrl": "https://contoso.sharepoint.com/personal/ann/Documents/invoice-spec.pdf",
+      "name": "invoice-spec.pdf",
+      "content": {"downloadUrl": "https://contoso.sharepoint.com/download.aspx?token=abc",
+                  "uniqueId": "u1", "fileType": "pdf"}
+    }],
+    "channelData": {"tenant": {"id": "tenant-0001"}}
+  },
+  "invoke_action": {
+    "type": "invoke",
+    "name": "adaptiveCard/action",
+    "id": "f:invoke-1",
+    "serviceUrl": "https://smba.trafficmanager.net/emea/",
+    "from": {"id": "29:1ann-bot-framework-id", "aadObjectId": "aad-ann-0001"},
+    "conversation": {"conversationType": "personal", "id": "a:1personal-ann"},
+    "recipient": {"id": "28:app-0001"},
+    "replyToId": "1762790400009",
+    "value": {"action": {"type": "Action.Execute", "verb": "ekos", "data": {"ekos": "REF"}},
+              "trigger": "manual"},
+    "channelData": {"tenant": {"id": "tenant-0001"}}
+  }
+}

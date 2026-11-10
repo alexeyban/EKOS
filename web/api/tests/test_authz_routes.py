@@ -25,6 +25,11 @@ PUBLIC = {
     # RFC 0182: MCP's "no stream / no session here", the same for every path.
     ("GET", "/mcp/{tenant_id}/{project}"),
     ("DELETE", "/mcp/{tenant_id}/{project}"),
+    # RFC 0253: the channel platforms' own signed requests (Slack's HMAC signature, the Bot
+    # Framework's JWT), checked in the handler before anything else.
+    ("POST", "/api/channels/slack/events"),
+    ("POST", "/api/channels/slack/interactivity"),
+    ("POST", "/api/channels/teams/messages"),
 }
 
 # Routes whose action depends on the request (which command, which workspace in the body, which
@@ -38,6 +43,10 @@ DYNAMIC = {
     ("GET", "/api/config-schema"),  # a static description, like /api/commands
     ("GET", "/api/extensions"),  # RFC 0198: the pages the binary declares; no workspace data
     ("GET", "/api/chat/model"),  # which chat model is set; no workspace
+    # RFC 0253: a person links, lists and unlinks their own channel accounts; no workspace.
+    ("POST", "/api/channels/link"),
+    ("GET", "/api/channels/me"),
+    ("DELETE", "/api/channels/me/{account_id}"),
     # RFC 0249: any signed-in person is screened and sees their own allowance; no workspace data.
     ("POST", "/api/moderation/screen"),
     ("GET", "/api/moderation/limits"),
@@ -185,6 +194,8 @@ SCOPED = {
     ("POST", "/api/workspaces/{workspace_id}/chat"),
     ("GET", "/api/workspaces/{workspace_id}/chat/{cid}"),
     ("DELETE", "/api/workspaces/{workspace_id}/chat/{cid}"),
+    # RFC 0253: tell mode reads with the same scoped tools and writes nothing.
+    ("POST", "/api/workspaces/{workspace_id}/chat/tell"),
 }
 
 
