@@ -857,6 +857,7 @@ dependencies = [
  "ekos-compiler-core",
  "ekos-identity",
  "ekos-kir",
+ "ekos-observation-sdk",
  "ekos-ossie",
  "serde",
  "serde_json",

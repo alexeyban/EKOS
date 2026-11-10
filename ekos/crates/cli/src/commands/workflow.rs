@@ -174,8 +174,10 @@ mod tests {
             .unwrap_err()
             .to_string();
         for s in Subject::ALL {
-            assert!(
+            // An optional subject without items (no inferred references) is not required.
+            assert_eq!(
                 err.contains(&format!("{}: not signed off", s.as_str())),
+                !s.is_optional(),
                 "{err}"
             );
         }

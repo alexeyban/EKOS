@@ -230,9 +230,11 @@ mod tests {
         }
     }
 
+    /// Every subject a project without inferred references lists (the optional ones have no items).
     fn all(state: impl Fn() -> SignState) -> Vec<SubjectStatus> {
         Subject::ALL
             .iter()
+            .filter(|s| !s.is_optional())
             .map(|s| subject(s.as_str(), state()))
             .collect()
     }

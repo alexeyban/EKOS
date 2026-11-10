@@ -3,6 +3,23 @@
 ## Unreleased
 
 **Features**
+- **What the data says about the code** (RFC 0252 §3.2). `ekos profile run` measures, on every
+  `[[databases]]` entry with profile p1/p2: how many rows hold each value code names and when each
+  was first and last seen (`dead` after 24 months without a row), how many rows hold values *no*
+  code names (counts only — a data value never leaves the database: the query returns a code literal
+  or `NULL`), `column = v ⇒ other IS [NOT] NULL` implications, validity periods and soft-delete
+  flags, and each table's grain (declared key, or a levelwise key search). `EnumMeaning`s gain
+  `data_usage` and `implies`, columns with unexplained values get a `data_only_values` gap,
+  `WriteBehaviour` gains `data_history`, every table a keyed `GrainCandidate`. Re-profiling never
+  stales a review. `ekos profile show [TABLE]`; MCP `ekos_profile` (read-only, scoped).
+- **References found in the data** (RFC 0252 §3.3–3.4). `ekos relationships discover
+  [--cross-database]`: a salted MinHash signature of every comparable column, computed by the
+  database itself, proposes references to unique columns; every code join is added; each pair is
+  checked exactly by RFC 0158's inclusion query. Keyed `FkCandidate`s carry `seed: code | data |
+  both` and the verdict; key overlap across databases becomes `value_overlap` on `SameAs`
+  candidates (never a merge). A new optional review subject `relationships` (`ekos review
+  relationships --confirm | --reject | --confirm-with-orphans`, human-only); MCP
+  `ekos_relationships` (read-only, scoped).
 - **Images, spreadsheets and slides as documents** (RFC 0253 Phase 1). The local-documents connector
   reads PNG, JPEG, TIFF and WebP through local Tesseract OCR (one section per recognised block, each
   with its `ocr_confidence`), XLSX and CSV (each sheet a section: header plus up to `[inbox] sheet-rows`
@@ -11,7 +28,8 @@
   without Tesseract, images are skipped with a warning. E-mail addresses and payment card numbers in
   recognised text, cells and slides are redacted before anything is held
   (`ekos_common::redaction::redact_personal_data`). Pipeline logic version 6: the next `ekos build`
-  re-reads every source once.
+  re-reads every source once. Standalone image files in a source tree are read only with
+  `[ocr] images = true`.
 - **Profiles for every live database** (RFC 0252 §3.1). `[[databases]] profile = "p1" | "p2"` now works
   for PostgreSQL and ClickHouse as well as Oracle: P1 counts each table's rows, P2 scans each table once
   for exact null counts, number and date bounds and the longest text — never a text value, never a

@@ -7,6 +7,7 @@
 pub use ekos_kir::annotations;
 pub mod bulk_resolve;
 pub mod business_semantics;
+pub mod code_vs_data;
 pub mod conflicts;
 pub mod data_lineage;
 pub mod data_usage;
@@ -15,6 +16,7 @@ pub mod live_conflicts;
 pub mod ontology;
 pub mod ossie_links;
 pub mod procedure_lineage;
+pub mod questions;
 pub mod review;
 pub mod rollup;
 pub mod schema_history;
