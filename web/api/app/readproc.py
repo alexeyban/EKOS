@@ -52,6 +52,16 @@ _ALLOWED: dict[tuple[str, ...], frozenset[str]] = {
     # RFC 0223 a project's sources and databases (names and variable names only).
     ("source", "list", "--json"): frozenset(),
     ("database", "list", "--json"): frozenset(),
+    # RFC 0253 people as a source: the inbox and the testimonies, read only. The longer
+    # `testimony list` shape comes first: shapes are matched in order.
+    ("inbox", "list", "--json"): frozenset({"--status"}),
+    ("testimony", "list", "--json", "--all"): frozenset({"--about", "--author"}),
+    ("testimony", "list", "--json"): frozenset({"--about", "--author"}),
+    # RFC 0254 open questions: the ranked list and each person's digest.
+    ("questions", "list", "--json"): frozenset(
+        {"--status", "--type", "--table", "--addressee", "--limit"}
+    ),
+    ("questions", "digest", "--json"): frozenset(),
 }
 
 # RFC 0213: `review show <subject> --json [--undecided] [--limit <n>]` — the subject is one of a
@@ -84,6 +94,21 @@ _POSITIONAL: dict[tuple[str, ...], re.Pattern[str]] = {
     ("semantics", "show", "--json"): _UUID,
 }
 
+# RFC 0254: `questions show --json [--reveal] <id>` — the id hex (a question's UUID or the first
+# characters of one), `--reveal` the only option. Revealing runs one aggregate on the live
+# source for the person reading; its answer is shown, never stored.
+_QUESTION_ID = re.compile(r"^[0-9a-f][0-9a-f-]{3,35}$")
+
+
+def _check_questions_show(extra: list[str]) -> None:
+    if extra[:1] != ["--json"]:
+        raise ReadProcError("questions show needs --json")
+    rest = extra[1:]
+    if rest[:1] == ["--reveal"]:
+        rest = rest[1:]
+    if len(rest) != 1 or not _QUESTION_ID.match(rest[0]):
+        raise ReadProcError(f"disallowed arguments {extra!r}")
+
 
 class ReadProcError(RuntimeError):
     pass
@@ -92,6 +117,9 @@ class ReadProcError(RuntimeError):
 def _check_allowed(argv: list[str]) -> None:
     if argv[:2] == ["review", "show"]:
         _check_review_show(argv[2:])
+        return
+    if argv[:2] == ["questions", "show"]:
+        _check_questions_show(argv[2:])
         return
     for prefix, pattern in _POSITIONAL.items():
         if tuple(argv[: len(prefix)]) == prefix:

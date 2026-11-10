@@ -185,6 +185,8 @@ SCOPED = {
     ("POST", "/api/workspaces/{workspace_id}/chat"),
     ("GET", "/api/workspaces/{workspace_id}/chat/{cid}"),
     ("DELETE", "/api/workspaces/{workspace_id}/chat/{cid}"),
+    # RFC 0253: tell mode reads with the same scoped tools and writes nothing.
+    ("POST", "/api/workspaces/{workspace_id}/chat/tell"),
 }
 
 

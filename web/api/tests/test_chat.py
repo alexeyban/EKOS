@@ -370,3 +370,73 @@ def test_a_restricted_reader_chats_within_their_scope(chat_client: TestClient) -
     assert sent == {"ekos_search", "ekos_state"}  # ekos_status is not a scoped tool
     _, _, scope = chat_client.fake.calls[0]  # type: ignore[attr-defined]
     assert scope is not None and any(rule.get("source") == "api" for rule in scope["rules"])
+
+
+# ── RFC 0253: tell mode ──────────────────────────────────────────────────────
+
+# What the chat and channel agents must never name: the human-only writers and the module that
+# runs them. A model proposes; only a person's own Save reaches these.
+WRITERS = (
+    "ekos_identity_review",
+    "ekos_architecture_review",
+    "semantics confirm",
+    "people_write",
+    "save_argvs",
+    "testimony_add_argv",
+    "inbox_accept_argv",
+    "inbox_purge_argv",
+    '"testimony", "add"',
+    '"inbox", "accept"',
+    '"inbox", "purge"',
+)
+# The channel modules that run a model or carry its text; the button handlers (`actions.py`)
+# are a person's and are not here.
+AGENT_FILES = {"agent.py", "core.py"}
+
+
+def _agent_sources() -> str:
+    app = Path(__file__).parents[1] / "app"
+    files = [*(app / "chat").glob("*.py"), app / "routes" / "chat.py"]
+    files += [p for p in (app / "channels").glob("*.py") if p.name in AGENT_FILES]
+    return "".join(p.read_text(encoding="utf-8") for p in files)
+
+
+def test_no_agent_code_names_a_writer() -> None:
+    src = _agent_sources()
+    assert "async def turn" in src  # the scan reads the agent loop
+    for name in WRITERS:
+        assert name not in src, name
+
+
+def test_tell_mode_proposes_with_quotes_and_writes_nothing(
+    chat_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    statement = "Status 7 in orders is when the customer cancels."
+    reply = {
+        "proposals": [
+            {"kind": "meaning", "about": "orders.status = 7",
+             "meaning": "cancelled by the customer",
+             "quote": "status 7 in orders is when the customer cancels"},
+            {"kind": "about", "about": "orders", "quote": "a sentence nobody wrote"},
+        ]
+    }  # fmt: skip
+    model = Scripted(
+        [_r(calls=[("a", "ekos_search", {"query": "orders status"})]), _r(json.dumps(reply))]
+    )
+    monkeypatch.setattr(providers, "from_settings", lambda settings: model)
+    r = chat_client.post("/api/workspaces/w/chat/tell", headers=OWNER, json={"message": statement})
+    assert r.status_code == 200, r.text
+    card = r.json()
+    assert [i["about"] for i in card["items"]] == ["orders.status = 7"]
+    assert card["dropped"] == 1 and card["tools"] == ["ekos_search"]
+    assert "cancelled by the customer" in card["lines"][0]
+    # The model was offered read tools only, and the card waits for its author.
+    offered = {t["name"] for t in model.seen[0]["tools"]}
+    assert offered == {"ekos_search", "ekos_state", "ekos_status"}
+    row = models.get_proposal(card["proposal"])
+    assert row is not None and row.status == "open" and row.author == "static:write"
+    assert row.text == statement
+    bad = {"message": "x", "answers": "../x"}
+    assert (
+        chat_client.post("/api/workspaces/w/chat/tell", headers=OWNER, json=bad).status_code == 422
+    )

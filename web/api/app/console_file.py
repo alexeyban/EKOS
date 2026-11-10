@@ -25,6 +25,7 @@ from . import keychain
 
 FILE_NAME = "console.toml"
 _DEMO = "Public demo"
+_PEOPLE = "Channels"
 
 
 @dataclass(frozen=True)
@@ -110,6 +111,35 @@ FIELDS: dict[str, Field] = {
     ),
     "chat_max_tool_calls": Field("Chat", "Most EKOS tool calls the model may make per question"),
     "chat_max_tokens": Field("Chat", "Most tokens in one answer"),
+    "inbox_upload_max_mb": Field(
+        _PEOPLE, "Largest file a person may send to the inbox from the console or a channel (MB)"
+    ),
+    "channels_telegram_token_env": Field(
+        _PEOPLE, "Name of the variable holding the Telegram bot token (its value: keychain below)"
+    ),
+    "channels_slack_bot_token_env": Field(
+        _PEOPLE, "Name of the variable holding the Slack bot token (xoxb-…)"
+    ),
+    "channels_slack_app_token_env": Field(
+        _PEOPLE,
+        "Name of the variable holding the Slack app-level token (xapp-…) for Socket Mode; "
+        "without it Slack posts to /api/channels/slack/events",
+    ),
+    "channels_slack_signing_secret_env": Field(
+        _PEOPLE, "Name of the variable holding the Slack signing secret (Events API)"
+    ),
+    "channels_teams_app_id": Field(_PEOPLE, "Microsoft Teams bot's app (client) id"),
+    "channels_teams_app_secret_env": Field(
+        _PEOPLE, "Name of the variable holding the Teams bot's client secret"
+    ),
+    "channels_link_code_minutes": Field(
+        _PEOPLE, "How long a `/ekos link` code a bot gives stays valid (minutes)"
+    ),
+    "channels_digest_cron": Field(
+        _PEOPLE,
+        "Cron (UTC) for sending each person their open questions through their linked channel; "
+        "empty: none. Never sent from a public deployment",
+    ),
     "mcp_metered_per_person_per_day": Field(
         _DEMO,
         "Calls a signed-in person may make per day to MCP tools that call a model "
