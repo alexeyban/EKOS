@@ -7104,7 +7104,7 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
       the new signals in the pack
 - [x] RFC 0253 Phase 1: images / sheets / slides parsers, the inbox source (files, links), testimony
       (meaning source, `testimony_mismatch`), MCP `ekos_testimony`
-- [ ] RFC 0253: `[testimony] decides_for` recording a review decision
+- [x] RFC 0253: `[testimony] decides-for` records the review decision (an edit of the label, `review_basis: testimony`)
 - [x] RFC 0254 §3.1–3.5: open questions (derive, rank, route, status on read, reveal, export, digest),
       code-vs-data checks, `ekos probe` / `ekos_probe`, `source-explorer` agent
 - [x] RFC 0254 §3.6: the source passport on estate table pages

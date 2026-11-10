@@ -358,6 +358,7 @@ address `[REDACTED:email]`. A link to `127.0.0.1` refused. A testimony from Slac
 `unexplained_values` question turned it `answered`; its meaning "owner capital" for `account.category
 = 'Q'` (code says "Equity") became one `testimony_mismatch` conflict.
 
-**Not built here**: `[testimony] decides_for` is recorded (`decides` in the output) but does not yet
-record a review decision; the conversation core, proposals, Save from a channel and the Telegram /
+`[testimony] decides-for`: when the author is listed, a saved meaning is also their review decision —
+an `EnumMeaning` label edit with `review_basis: testimony` (live: `account.category = 'L'` → confirmed,
+"Liability"). **Not built here**: the conversation core, proposals, Save from a channel and the Telegram /
 Slack / Teams adapters are the console's (a separate entry).

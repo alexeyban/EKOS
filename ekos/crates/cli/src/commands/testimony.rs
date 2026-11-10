@@ -311,6 +311,46 @@ fn record_mismatches(
     Ok(n)
 }
 
+/// RFC 0253 §3.7: when the author is in `[testimony] decides_for`, their saved meaning is also
+/// their review decision on the code value (an edit of its label, `review_basis: testimony`).
+/// Returns how many items it decided.
+fn decide_from_testimony(
+    config: &EkosConfig,
+    ledger: &dyn ekos_ledger::KnowledgeStore,
+    about: &[&KirObject],
+    t: &KirObject,
+    st: &Statement<'_>,
+) -> Result<usize> {
+    let decides = config
+        .testimony
+        .decides_for
+        .iter()
+        .any(|p| p.eq_ignore_ascii_case(st.by));
+    let Some(meaning) = st.meaning.filter(|_| decides) else {
+        return Ok(0);
+    };
+    let at = chrono::Utc::now().to_rfc3339();
+    let note = format!("basis: testimony {}", t.id);
+    let mut n = 0;
+    for e in about.iter().filter(|a| is_enum_meaning(a)) {
+        let decision = ekos_semantic::semantics_review::Decision::Edit {
+            name: None,
+            description: None,
+            label: Some(meaning.to_string()),
+        };
+        let mut o =
+            ekos_semantic::semantics_review::apply_review(e, &decision, st.by, &at, Some(&note))
+                .map_err(|e| anyhow!(e))?;
+        o.properties
+            .insert("review_basis".into(), json!("testimony"));
+        o.properties
+            .insert("review_testimony".into(), json!(t.id.to_string()));
+        ledger.append_object(&o)?;
+        n += 1;
+    }
+    Ok(n)
+}
+
 /// `ekos testimony add` — human-only.
 pub fn add(config: &EkosConfig, cwd: &Path, st: Statement<'_>, json_out: bool) -> Result<()> {
     if st.text.trim().is_empty() {
@@ -337,10 +377,11 @@ pub fn add(config: &EkosConfig, cwd: &Path, st: Statement<'_>, json_out: bool) -
         ledger.append_relationship(r)?;
     }
     let conflicts = record_mismatches(config, cwd, &*ledger, &about, &o, st.meaning)?;
+    let decided = decide_from_testimony(config, &*ledger, &about, &o, &st)?;
     let out = json!({
         "id": o.id.to_string(), "author": st.by, "answers": o.properties.get("answers"),
         "about": o.properties.get("about"), "conflicts": conflicts,
-        "decides": config.testimony.decides_for.iter().any(|p| p.eq_ignore_ascii_case(st.by)),
+        "decided": decided,
     });
     if json_out {
         println!("{}", serde_json::to_string_pretty(&out)?);
@@ -356,7 +397,11 @@ pub fn add(config: &EkosConfig, cwd: &Path, st: Statement<'_>, json_out: bool) -
             "  It disagrees with what code says: {conflicts} conflict(s) to review (`ekos conflicts list`)."
         );
     }
-    if st.meaning.is_some() {
+    if decided > 0 {
+        println!(
+            "  As a [testimony] decides-for reviewer, this is also your review decision on {decided} code value(s)."
+        );
+    } else if st.meaning.is_some() {
         println!(
             "  The meaning reaches the code value at the next `ekos commit` (meaning source: testimony)."
         );
