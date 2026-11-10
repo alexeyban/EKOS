@@ -1,0 +1,11 @@
+{
+  "auth.test": {"ok": true, "url": "https://ekos-test.slack.com/", "team": "EKOS", "user": "ekos",
+                "team_id": "T0001", "user_id": "U0BOT", "bot_id": "B0BOT"},
+  "chat.postMessage": {"ok": true, "channel": "D0001", "ts": "1762790410.000600",
+                       "message": {"type": "message", "text": "ok", "bot_id": "B0BOT"}},
+  "chat.postEphemeral": {"ok": true, "message_ts": "1762790411.000800"},
+  "conversations.members": {"ok": true, "members": ["U0ANN", "U0BOB", "U0BOT"],
+                            "response_metadata": {"next_cursor": ""}},
+  "apps.connections.open": {"ok": true, "url": "wss://wss-primary.slack.com/link/?ticket=t1"},
+  "not_authed": {"ok": false, "error": "invalid_auth"}
+}

@@ -1,0 +1,19 @@
+{
+  "getMe": {
+    "ok": true,
+    "result": {"id": 9000, "is_bot": true, "first_name": "EKOS", "username": "ekos_test_bot",
+               "can_join_groups": true, "can_read_all_group_messages": false}
+  },
+  "getFile": {
+    "ok": true,
+    "result": {"file_id": "BQACAgIAAxkBAAIBc2Zk", "file_unique_id": "AgADc2Zk", "file_size": 5,
+               "file_path": "documents/file_3.pdf"}
+  },
+  "sendMessage": {
+    "ok": true,
+    "result": {"message_id": 21, "from": {"id": 9000, "is_bot": true, "username": "ekos_test_bot"},
+               "chat": {"id": 7001, "type": "private"}, "date": 1762790410, "text": "ok"}
+  },
+  "answerCallbackQuery": {"ok": true, "result": true},
+  "unauthorized": {"ok": false, "error_code": 401, "description": "Unauthorized"}
+}

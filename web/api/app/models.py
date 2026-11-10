@@ -255,7 +255,23 @@ class ChannelAccount(SQLModel, table=True):
     label: str = Field(index=True)
     # The workspace a direct message uses (`/ekos project <name>`).
     default_workspace: str = ""
+    # Where a direct message to this person goes (a Telegram chat id, a Slack user id, a Teams
+    # personal conversation as JSON with its service URL): learned from their own messages.
+    dm_ref: str = ""
     linked_at: datetime = Field(default_factory=_now)
+
+
+class ButtonRef(SQLModel, table=True):
+    """What a button the console sent does, and the one account it was sent to: a press from any
+    other account is not counted (RFC 0253 §3.6)."""
+
+    id: str = Field(primary_key=True)
+    channel: str
+    account: str
+    workspace_id: str
+    # {"action": "save" | "discard" | "edit" | "not_me" | "answer", "proposal"?, "question"?}
+    payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=_now)
 
 
 class LinkCode(SQLModel, table=True):
@@ -853,6 +869,11 @@ def take_link_code(code_hash: str) -> LinkCode | None:
         s.delete(row)
         s.commit()
         return row
+
+
+def get_button(ref: str) -> ButtonRef | None:
+    with session() as s:
+        return s.get(ButtonRef, ref)
 
 
 def get_channel_binding(channel: str, conversation: str) -> ChannelBinding | None:
