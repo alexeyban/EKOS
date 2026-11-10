@@ -44,6 +44,71 @@ pub struct DataSignals {
     pub columns: Vec<ColumnSignal>,
     #[serde(default)]
     pub grain: Vec<GrainSignal>,
+    /// §3.2(c): `column = value ⇒ other IS [NOT] NULL`, per table.
+    #[serde(default)]
+    pub implications: Vec<ImplicationSignal>,
+    /// §3.2(e): validity periods and soft-delete flags.
+    #[serde(default)]
+    pub history: Vec<HistorySignal>,
+}
+
+/// One implication on one live table.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ImplicationSignal {
+    pub database: String,
+    pub owner: String,
+    pub table: String,
+    pub column: String,
+    pub value: String,
+    pub then_column: String,
+    pub then: String,
+    pub support: i64,
+}
+
+/// One history or deletion pattern measured on one live table.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct HistorySignal {
+    pub database: String,
+    pub owner: String,
+    pub table: String,
+    /// `validity` or `flag`.
+    pub kind: String,
+    pub columns: Vec<String>,
+    pub rows: i64,
+    /// `validity`: rows with an open end; `flag`: rows whose flag is set.
+    pub measured: i64,
+}
+
+/// Adds `data_history` to each `WriteBehaviour` (RFC 0212) of a table the signals measured — as
+/// evidence beside what code says, never a second write-behaviour model. Returns how many changed.
+pub fn attach_history(objects: &mut [KirObject], signals: &DataSignals) -> usize {
+    let mut n = 0;
+    for o in objects.iter_mut().filter(
+        |o| matches!(&o.kind, ekos_kir::ObjectKind::Custom(k) if k == crate::write_behaviour::KIND),
+    ) {
+        let table = lc(prop(o, "table"));
+        let entries: Vec<Value> = signals
+            .history
+            .iter()
+            .filter(|h| lc(&h.table) == table)
+            .map(|h| {
+                json!({
+                    "database": h.database, "owner": h.owner, "kind": h.kind, "columns": h.columns,
+                    "rows": h.rows, "measured": h.measured,
+                    "meaning": if h.kind == "validity" { "rows whose period is still open" } else { "rows whose flag is set" },
+                })
+            })
+            .collect();
+        if entries.is_empty() {
+            continue;
+        }
+        let v = Value::Array(entries);
+        if o.properties.get("data_history") != Some(&v) {
+            o.properties.insert("data_history".into(), v);
+            n += 1;
+        }
+    }
+    n
 }
 
 /// One coded column on one live database.
@@ -193,6 +258,16 @@ pub fn fold(
         if entries.is_empty() {
             continue;
         }
+        let implies: Vec<Value> = signals
+            .implications
+            .iter()
+            .filter(|i| lc(&i.table) == table && i.column.to_lowercase() == column && i.value == value)
+            .filter(|i| sigs.iter().any(|c| c.database == i.database))
+            .map(|i| json!({"database": i.database, "column": i.then_column, "then": i.then, "support": i.support}))
+            .collect();
+        if !implies.is_empty() {
+            o.properties.insert("implies".into(), Value::Array(implies));
+        }
         stats.values_measured += 1;
         stats.dead += usize::from(entries.iter().any(|e| e["dead"] == true));
         stats.never_seen += usize::from(entries.iter().all(|e| e["never_seen"] == true));
@@ -326,6 +401,7 @@ mod tests {
                 coverage: cov,
             }],
             grain: vec![],
+            ..Default::default()
         }
     }
 

@@ -236,108 +236,144 @@ fn declared(
     out
 }
 
-/// Signatures of every comparable column of `db`'s live tables.
-fn sign_database(
-    db: &DatabaseConfig,
-    probe: &dyn Probe,
-    tables: &[&KirObject],
-    grain: &HashMap<(String, String, String), Vec<String>>,
-    salt: &str,
-    max_rows: i64,
-    redaction: &RedactionConfig,
-    errors: &mut Vec<Value>,
-) -> Vec<Col> {
-    let f = flavor(db.kind);
-    let mut out = Vec::new();
-    for t in tables {
-        if max_rows > 0 && known_rows(t).is_some_and(|n| n > max_rows) {
-            continue;
-        }
-        let keys = unique_columns(t, grain);
-        for name in overlap::signature_columns(f, columns(t)) {
-            let ty = columns(t)
-                .iter()
-                .find(|c| c["name"].as_str() == Some(name.as_str()))
-                .and_then(|c| c["data_type"].as_str())
-                .unwrap_or("");
-            let numeric = ekos_observation_sdk::profile::family(f, ty)
-                == ekos_observation_sdk::profile::Family::Number;
-            let row = overlap::signature_sql(f, s(t, "owner"), &t.name, &name, salt, numeric)
-                .and_then(|q| probe.preview(&q, 1))
-                .and_then(|p| {
-                    p.rows
-                        .first()
-                        .and_then(|r| overlap::parse_signature(r))
-                        .ok_or_else(|| "a signature query returned no usable row".to_string())
-                });
-            match row {
-                Ok(sig) if sig.distinct > 0 => out.push(Col {
-                    database: db.name.clone(),
-                    owner: s(t, "owner").into(),
-                    table: t.name.clone(),
-                    column: name.clone(),
-                    table_id: t.id,
-                    unique: keys.contains(&name),
-                    numeric,
-                    sig,
-                }),
-                Ok(_) => {}
-                Err(e) => errors.push(json!({
-                    "database": db.name, "table": t.name, "column": name, "error": redact(&e, redaction),
-                })),
-            }
-        }
-    }
-    out
+/// Code joins, lowercased, with their sources: (left table, left column, right table, right
+/// column) → sources.
+type Joins = BTreeMap<(String, String, String, String), Vec<String>>;
+
+/// Lowercase (table, column) of a signed column.
+fn col_key(c: &Col) -> (String, String) {
+    (c.table.to_lowercase(), c.column.to_lowercase())
 }
 
-/// Pairs within one database: data-seeded (LSH, then containment) and code-seeded (joins).
-fn propose(
-    cols: &[Col],
-    code: &BTreeMap<(String, String, String, String), Vec<String>>,
-    declared: &BTreeSet<(String, String, String, String)>,
-    min_containment: f64,
-    min_parent_distinct: i64,
-) -> Vec<Pair> {
-    let mut by_band: HashMap<String, Vec<usize>> = HashMap::new();
-    for (i, c) in cols.iter().enumerate() {
-        for b in overlap::bands(&c.sig) {
-            by_band.entry(b).or_default().push(i);
+/// What one discovery shares across databases.
+struct Ctx<'a> {
+    code: &'a Joins,
+    declared: &'a BTreeSet<(String, String, String, String)>,
+    grain: &'a HashMap<(String, String, String), Vec<String>>,
+    salt: &'a str,
+    redaction: &'a RedactionConfig,
+    opts: &'a DiscoverOpts<'a>,
+    measured_at: &'a str,
+}
+
+impl Ctx<'_> {
+    fn is_declared(&self, child: &Col, parent: &Col) -> bool {
+        let (ct, cc) = col_key(child);
+        let (pt, pc) = col_key(parent);
+        self.declared.contains(&(ct, cc, pt, pc))
+    }
+
+    /// One column's signature, or `None` (an error is recorded).
+    fn sign_column(
+        &self,
+        db: &DatabaseConfig,
+        probe: &dyn Probe,
+        t: &KirObject,
+        name: &str,
+        errors: &mut Vec<Value>,
+    ) -> Option<(Signature, bool)> {
+        let f = flavor(db.kind);
+        let ty = columns(t)
+            .iter()
+            .find(|c| c["name"].as_str() == Some(name))
+            .and_then(|c| c["data_type"].as_str())
+            .unwrap_or("");
+        let numeric = ekos_observation_sdk::profile::family(f, ty)
+            == ekos_observation_sdk::profile::Family::Number;
+        let row = overlap::signature_sql(f, s(t, "owner"), &t.name, name, self.salt, numeric)
+            .and_then(|q| probe.preview(&q, 1))
+            .and_then(|p| {
+                p.rows
+                    .first()
+                    .and_then(|r| overlap::parse_signature(r))
+                    .ok_or_else(|| "a signature query returned no usable row".to_string())
+            });
+        match row {
+            Ok(sig) if sig.distinct > 0 => Some((sig, numeric)),
+            Ok(_) => None,
+            Err(e) => {
+                errors.push(json!({
+                    "database": db.name, "table": t.name, "column": name,
+                    "error": redact(&e, self.redaction),
+                }));
+                None
+            }
         }
     }
-    let key = |c: &Col| (c.table.to_lowercase(), c.column.to_lowercase());
-    let mut pairs: BTreeMap<(usize, usize), Pair> = BTreeMap::new();
-    for (p, parent) in cols.iter().enumerate() {
-        if !parent.unique || parent.sig.distinct < min_parent_distinct {
-            continue;
+
+    /// Signatures of every comparable column of `db`'s live tables.
+    fn sign(
+        &self,
+        db: &DatabaseConfig,
+        probe: &dyn Probe,
+        tables: &[&KirObject],
+        errors: &mut Vec<Value>,
+    ) -> Vec<Col> {
+        let max_rows = self.opts.max_rows;
+        let mut out = Vec::new();
+        for t in tables {
+            if max_rows > 0 && known_rows(t).is_some_and(|n| n > max_rows) {
+                continue;
+            }
+            let keys = unique_columns(t, self.grain);
+            for name in overlap::signature_columns(flavor(db.kind), columns(t)) {
+                if let Some((sig, numeric)) = self.sign_column(db, probe, t, &name, errors) {
+                    out.push(Col {
+                        database: db.name.clone(),
+                        owner: s(t, "owner").into(),
+                        table: t.name.clone(),
+                        unique: keys.contains(&name),
+                        column: name,
+                        table_id: t.id,
+                        numeric,
+                        sig,
+                    });
+                }
+            }
         }
-        let near: BTreeSet<usize> = overlap::bands(&parent.sig)
-            .iter()
-            .filter_map(|b| by_band.get(b))
-            .flatten()
-            .copied()
-            .collect();
-        for c in near {
-            let child = &cols[c];
-            if child.table_id == parent.table_id
-                || child.sig.distinct > parent.sig.distinct
-                || child.numeric != parent.numeric
+        out
+    }
+
+    /// Whether a data-seeded `child → parent` is worth checking.
+    fn plausible(&self, child: &Col, parent: &Col) -> bool {
+        if child.table_id == parent.table_id
+            || child.sig.distinct > parent.sig.distinct
+            || child.numeric != parent.numeric
+            || self.is_declared(child, parent)
+        {
+            return false;
+        }
+        // Names break ties the data cannot: a key column pointing at another key, or any column
+        // inside a dense id sequence (every small whole number is "contained" in one).
+        let affinity = overlap::name_affinity(&child.column, &parent.table, &parent.column);
+        if (child.unique || parent.sig.dense()) && !affinity {
+            return false;
+        }
+        overlap::containment(&child.sig, &parent.sig) >= self.opts.min_containment
+    }
+
+    /// Data-seeded pairs: LSH bands propose, containment decides.
+    fn data_pairs(&self, cols: &[Col], pairs: &mut BTreeMap<(usize, usize), Pair>) {
+        let mut by_band: HashMap<String, Vec<usize>> = HashMap::new();
+        for (i, c) in cols.iter().enumerate() {
+            for b in overlap::bands(&c.sig) {
+                by_band.entry(b).or_default().push(i);
+            }
+        }
+        for (p, parent) in cols.iter().enumerate() {
+            if !parent.unique || parent.sig.distinct < self.opts.min_parent_distinct {
+                continue;
+            }
+            let near: BTreeSet<usize> = overlap::bands(&parent.sig)
+                .iter()
+                .filter_map(|b| by_band.get(b))
+                .flatten()
+                .copied()
+                .collect();
+            for c in near
+                .into_iter()
+                .filter(|&c| self.plausible(&cols[c], parent))
             {
-                continue;
-            }
-            // Names break ties the data cannot: a key column pointing at another key, or any
-            // column inside a dense id sequence (every small whole number is "contained" in one).
-            let affinity = overlap::name_affinity(&child.column, &parent.table, &parent.column);
-            if (child.unique || parent.sig.dense()) && !affinity {
-                continue;
-            }
-            let (ct, cc) = key(child);
-            let (pt, pc) = key(parent);
-            if declared.contains(&(ct, cc, pt, pc)) {
-                continue;
-            }
-            let est = overlap::containment(&child.sig, &parent.sig);
-            if est >= min_containment {
                 pairs.insert(
                     (c, p),
                     Pair {
@@ -345,49 +381,41 @@ fn propose(
                         parent: p,
                         data: true,
                         code_sources: vec![],
-                        containment: Some(est),
+                        containment: Some(overlap::containment(&cols[c].sig, &parent.sig)),
                     },
                 );
             }
         }
     }
-    // Code joins between two signed columns, in either direction: the unique side is the parent.
-    let idx: HashMap<(String, String), Vec<usize>> =
-        cols.iter()
-            .enumerate()
-            .fold(HashMap::new(), |mut m, (i, c)| {
-                m.entry(key(c)).or_default().push(i);
-                m
-            });
-    for ((lt, lc, rt, rc), sources) in code {
-        let (Some(ls), Some(rs)) = (
-            idx.get(&(lt.clone(), lc.clone())),
-            idx.get(&(rt.clone(), rc.clone())),
-        ) else {
-            continue;
-        };
-        for &l in ls {
-            for &r in rs {
+
+    /// Code joins between two signed columns, in either direction: the unique side is the parent.
+    fn code_pairs(&self, cols: &[Col], pairs: &mut BTreeMap<(usize, usize), Pair>) {
+        let mut idx: HashMap<(String, String), Vec<usize>> = HashMap::new();
+        for (i, c) in cols.iter().enumerate() {
+            idx.entry(col_key(c)).or_default().push(i);
+        }
+        for ((lt, lc, rt, rc), sources) in self.code {
+            let (Some(ls), Some(rs)) = (
+                idx.get(&(lt.clone(), lc.clone())),
+                idx.get(&(rt.clone(), rc.clone())),
+            ) else {
+                continue;
+            };
+            for (&l, &r) in ls.iter().flat_map(|l| rs.iter().map(move |r| (l, r))) {
                 let (c, p) = if cols[r].unique || !cols[l].unique {
                     (l, r)
                 } else {
                     (r, l)
                 };
-                if cols[c].table_id == cols[p].table_id {
+                if cols[c].table_id == cols[p].table_id || self.is_declared(&cols[c], &cols[p]) {
                     continue;
                 }
-                let (ct, cc) = key(&cols[c]);
-                let (pt, pc) = key(&cols[p]);
-                if declared.contains(&(ct, cc, pt, pc)) {
-                    continue;
-                }
-                let est = overlap::containment(&cols[c].sig, &cols[p].sig);
                 let e = pairs.entry((c, p)).or_insert(Pair {
                     child: c,
                     parent: p,
                     data: false,
                     code_sources: vec![],
-                    containment: Some(est),
+                    containment: Some(overlap::containment(&cols[c].sig, &cols[p].sig)),
                 });
                 e.code_sources.extend(sources.iter().cloned());
                 e.code_sources.sort();
@@ -395,7 +423,98 @@ fn propose(
             }
         }
     }
-    pairs.into_values().collect()
+
+    /// Pairs within one database: data-seeded and code-seeded.
+    fn propose(&self, cols: &[Col]) -> Vec<Pair> {
+        let mut pairs = BTreeMap::new();
+        self.data_pairs(cols, &mut pairs);
+        self.code_pairs(cols, &mut pairs);
+        pairs.into_values().collect()
+    }
+
+    /// The exact inclusion check of one pair.
+    fn verify(
+        &self,
+        db: &DatabaseConfig,
+        probe: &dyn Probe,
+        cols: &[Col],
+        pair: &Pair,
+        errors: &mut Vec<Value>,
+    ) -> Option<InclusionResult> {
+        let (c, p) = (&cols[pair.child], &cols[pair.parent]);
+        let r = overlap::inclusion_sql(
+            flavor(db.kind),
+            (&c.owner, &c.table, &c.column),
+            (&p.owner, &p.table, &p.column),
+        )
+        .and_then(|q| probe.preview(&q, 1))
+        .and_then(|r| r.single_number().ok_or_else(|| "no counts".to_string()));
+        match r {
+            Ok(n) if n.len() == 2 => Some(InclusionResult {
+                population: n[0],
+                orphans: n[1],
+            }),
+            Ok(_) => None,
+            Err(e) => {
+                errors.push(json!({
+                    "database": db.name, "pair": format!("{} → {}", c.label(), p.label()),
+                    "error": redact(&e, self.redaction),
+                }));
+                None
+            }
+        }
+    }
+
+    /// One database end to end: (signed columns, pairs checked, candidates).
+    #[allow(clippy::type_complexity)]
+    fn run_database(
+        &self,
+        db: &DatabaseConfig,
+        tables: &[&KirObject],
+        errors: &mut Vec<Value>,
+    ) -> Result<(Vec<Col>, usize, Vec<(KirObject, KirEvidence)>), String> {
+        let (worker, status) =
+            ProbeWorker::start(&Target::Database(db.clone()), self.opts.allow_writable_role);
+        let Some(worker) = worker else {
+            return Err(match status {
+                Some(Err(e)) => redact(&e, self.redaction),
+                _ => "not connected".into(),
+            });
+        };
+        let cols = self.sign(db, &worker, tables, errors);
+        let pairs = self.propose(&cols);
+        let mut out = Vec::new();
+        for pair in &pairs {
+            let result = self.verify(db, &worker, &cols, pair, errors);
+            // A data-only proposal the data does not bear out is not a candidate.
+            let keep = !pair.code_sources.is_empty()
+                || result.as_ref().is_some_and(|r| {
+                    r.verdict().is_relationship() || r.verdict().as_str() == "unclear"
+                });
+            if keep {
+                out.push(candidate_object(
+                    &cols,
+                    pair,
+                    result.as_ref(),
+                    self.measured_at,
+                ));
+            }
+        }
+        Ok((cols, pairs.len(), out))
+    }
+}
+
+/// The live tables of one database, sorted.
+fn database_tables<'a>(objects: &'a [KirObject], db: &str) -> Vec<&'a KirObject> {
+    let mut v: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| {
+            o.kind == ObjectKind::Table && s(o, "origin") == "live" && s(o, "database") == db
+        })
+        .collect();
+    v.sort_by(|a, b| (s(a, "owner"), &a.name).cmp(&(s(b, "owner"), &b.name)));
+    v.dedup_by(|a, b| a.id == b.id);
+    v
 }
 
 /// The `FkCandidate` for one verified pair.
@@ -491,9 +610,7 @@ fn rank(o: &KirObject) -> (u8, u8, i64) {
 }
 
 /// Code joins, lowercased, with their sources.
-fn code_joins(
-    ledger: &dyn KnowledgeStore,
-) -> Result<BTreeMap<(String, String, String, String), Vec<String>>> {
+fn code_joins(ledger: &dyn KnowledgeStore) -> Result<Joins> {
     let mut out: BTreeMap<_, Vec<String>> = BTreeMap::new();
     for j in super::migrate::harvest_join_observations(ledger)? {
         let tail = |t: &str| t.rsplit('.').next().unwrap_or(t).to_lowercase();
@@ -528,85 +645,25 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
     let salt = salt(config, cwd)?;
     let redaction = config.redaction_config();
     let measured_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let ctx = Ctx {
+        code: &code,
+        declared: &declared,
+        grain: &grain,
+        salt: &salt,
+        redaction: &redaction,
+        opts: &opts,
+        measured_at: &measured_at,
+    };
     let (mut all_cols, mut written, mut errors, mut report) =
         (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     for db in dbs {
-        let tables: Vec<&KirObject> = {
-            let mut v: Vec<&KirObject> = objects
-                .iter()
-                .filter(|o| {
-                    o.kind == ObjectKind::Table
-                        && s(o, "origin") == "live"
-                        && s(o, "database") == db.name
-                })
-                .collect();
-            v.sort_by(|a, b| (s(a, "owner"), &a.name).cmp(&(s(b, "owner"), &b.name)));
-            v.dedup_by(|a, b| a.id == b.id);
-            v
-        };
-        let r = tokio::task::block_in_place(|| {
-            let (worker, status) =
-                ProbeWorker::start(&Target::Database(db.clone()), opts.allow_writable_role);
-            let Some(worker) = worker else {
-                let why = match status {
-                    Some(Err(e)) => redact(&e, &redaction),
-                    _ => "not connected".into(),
-                };
-                return Err(why);
-            };
-            let cols = sign_database(
-                db,
-                &worker,
-                &tables,
-                &grain,
-                &salt,
-                opts.max_rows,
-                &redaction,
-                &mut errors,
-            );
-            let pairs = propose(
-                &cols,
-                &code,
-                &declared,
-                opts.min_containment,
-                opts.min_parent_distinct,
-            );
-            let f = flavor(db.kind);
-            let mut out = Vec::new();
-            for pair in &pairs {
-                let (c, p) = (&cols[pair.child], &cols[pair.parent]);
-                let result = overlap::inclusion_sql(
-                    f,
-                    (&c.owner, &c.table, &c.column),
-                    (&p.owner, &p.table, &p.column),
-                )
-                .and_then(|q| worker.preview(&q, 1))
-                .and_then(|r| r.single_number().ok_or_else(|| "no counts".to_string()));
-                let result = match result {
-                    Ok(n) if n.len() == 2 => Some(InclusionResult {
-                        population: n[0],
-                        orphans: n[1],
-                    }),
-                    Ok(_) => None,
-                    Err(e) => {
-                        errors.push(json!({"database": db.name, "pair": format!("{} → {}", c.label(), p.label()), "error": redact(&e, &redaction)}));
-                        None
-                    }
-                };
-                // A data-only proposal the data does not bear out is not a candidate.
-                let keep = !pair.code_sources.is_empty()
-                    || result.as_ref().is_some_and(|r| {
-                        r.verdict().is_relationship() || r.verdict().as_str() == "unclear"
-                    });
-                if keep {
-                    out.push(candidate_object(&cols, pair, result.as_ref(), &measured_at));
-                }
-            }
-            Ok((cols, pairs.len(), out))
-        });
-        match r {
+        let tables = database_tables(&objects, &db.name);
+        match tokio::task::block_in_place(|| ctx.run_database(db, &tables, &mut errors)) {
             Ok((cols, proposed, out)) => {
-                report.push(json!({"database": db.name, "columns_signed": cols.len(), "pairs_checked": proposed, "candidates": out.len()}));
+                report.push(json!({
+                    "database": db.name, "columns_signed": cols.len(), "pairs_checked": proposed,
+                    "candidates": out.len(),
+                }));
                 written.extend(out);
                 all_cols.extend(cols);
             }
@@ -614,32 +671,7 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
         }
     }
     written.sort_by(|a, b| rank(&a.0).cmp(&rank(&b.0)).then(a.0.name.cmp(&b.0.name)));
-    let mut ids = Vec::new();
-    for (o, ev) in &written {
-        ledger.append_evidence(ev)?;
-        ledger.append_object(o)?;
-        for (owner, table) in [
-            ("child_owner", "child_table"),
-            ("parent_owner", "parent_table"),
-        ] {
-            let end = objects.iter().find(|t| {
-                t.kind == ObjectKind::Table
-                    && s(t, "origin") == "live"
-                    && s(t, "database") == s(o, "database")
-                    && s(t, "owner") == s(o, owner)
-                    && t.name == s(o, table)
-            });
-            if let Some(t) = end {
-                ledger.append_relationship(&KirRelationship::deterministic(
-                    RelationshipKind::Custom(ekos_semantic::business_semantics::DESCRIBES.into()),
-                    o.id,
-                    t.id,
-                    "",
-                ))?;
-            }
-        }
-        ids.push(o.id.to_string());
-    }
+    let mut ids = write_candidates(&*ledger, &objects, &written)?;
     let overlaps = if opts.cross_database {
         cross_database(
             &*ledger,
@@ -670,22 +702,7 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
         );
         return Ok(());
     }
-    for r in &report {
-        match r.get("skipped") {
-            Some(w) => println!(
-                "{}: skipped — {}",
-                r["database"].as_str().unwrap_or(""),
-                w.as_str().unwrap_or("")
-            ),
-            None => println!(
-                "{}: {} column(s) signed, {} pair(s) checked, {} candidate(s)",
-                r["database"].as_str().unwrap_or(""),
-                r["columns_signed"],
-                r["pairs_checked"],
-                r["candidates"]
-            ),
-        }
-    }
+    print_report(&report);
     print_candidates(written.iter().map(|(o, _)| o));
     if opts.cross_database {
         println!("{overlap_count} cross-database overlap(s) recorded on SameAs candidates.");
@@ -694,6 +711,54 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
         println!("{} error(s); see {}", errors.len(), path.display());
     }
     Ok(())
+}
+
+/// Appends the candidates and links each to its two tables; returns their ids.
+fn write_candidates(
+    ledger: &dyn KnowledgeStore,
+    objects: &[KirObject],
+    written: &[(KirObject, KirEvidence)],
+) -> Result<Vec<String>> {
+    let mut ids = Vec::new();
+    for (o, ev) in written {
+        ledger.append_evidence(ev)?;
+        ledger.append_object(o)?;
+        for (owner, table) in [
+            ("child_owner", "child_table"),
+            ("parent_owner", "parent_table"),
+        ] {
+            let end = objects.iter().find(|t| {
+                t.kind == ObjectKind::Table
+                    && s(t, "origin") == "live"
+                    && s(t, "database") == s(o, "database")
+                    && s(t, "owner") == s(o, owner)
+                    && t.name == s(o, table)
+            });
+            if let Some(t) = end {
+                ledger.append_relationship(&KirRelationship::deterministic(
+                    RelationshipKind::Custom(ekos_semantic::business_semantics::DESCRIBES.into()),
+                    o.id,
+                    t.id,
+                    "",
+                ))?;
+            }
+        }
+        ids.push(o.id.to_string());
+    }
+    Ok(ids)
+}
+
+fn print_report(report: &[Value]) {
+    for r in report {
+        let db = r["database"].as_str().unwrap_or("");
+        match r.get("skipped") {
+            Some(w) => println!("{db}: skipped — {}", w.as_str().unwrap_or("")),
+            None => println!(
+                "{db}: {} column(s) signed, {} pair(s) checked, {} candidate(s)",
+                r["columns_signed"], r["pairs_checked"], r["candidates"]
+            ),
+        }
+    }
 }
 
 fn brief(o: &KirObject) -> Value {

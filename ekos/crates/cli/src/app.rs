@@ -1280,7 +1280,7 @@ enum ProfileCommands {
         /// Only this database
         #[arg(long)]
         database: Option<String>,
-        /// literal, temporal, keys (comma-separated; default all)
+        /// literal, temporal, conditional, keys, history (comma-separated; default all)
         #[arg(long, value_delimiter = ',')]
         signals: Vec<String>,
         /// Skip tables with more rows than this, by the catalog's estimate (0: no limit)

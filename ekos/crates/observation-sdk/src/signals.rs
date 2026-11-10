@@ -275,6 +275,229 @@ pub fn time_column(flavor: Flavor, columns: &[Value]) -> Option<String> {
     None
 }
 
+// ── Conditional profile (c) ────────────────────────────────────────────────────────────────
+
+/// Rows a value needs before an implication about it is reported.
+pub const MIN_SUPPORT: i64 = 5;
+
+/// Per code value of `column`: its rows and the non-null count of each of `then_columns`.
+/// The value cell is a literal from code or `NULL` (everything else), as in coverage.
+pub fn conditional_sql(
+    flavor: Flavor,
+    owner: &str,
+    table: &str,
+    column: &str,
+    literals: &[String],
+    then_columns: &[String],
+) -> Result<String, String> {
+    let texts = literal_texts(literals);
+    if texts.is_empty() || then_columns.is_empty() {
+        return Err("nothing to condition on".into());
+    }
+    let tbl = profile::table_ref(flavor, owner, table)?;
+    let col = profile::ident(flavor, column)?;
+    let txt = as_text(flavor, &col);
+    let bucket = format!(
+        "CASE WHEN {txt} IN ({}) THEN {txt} END",
+        in_list(flavor, &texts)
+    );
+    let counts = then_columns
+        .iter()
+        .map(|y| {
+            profile::ident(flavor, y)
+                .map(|y| format!("COUNT(CASE WHEN {y} IS NOT NULL THEN 1 END)"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(format!(
+        "SELECT {bucket}, {}, {} FROM {tbl} WHERE {col} IS NOT NULL GROUP BY {bucket}",
+        count(flavor),
+        counts.join(", ")
+    ))
+}
+
+/// `column = value ⇒ then_column IS [NOT] NULL`, exact on the rows measured.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Implication {
+    /// The literal as the ledger writes it.
+    pub value: String,
+    pub then_column: String,
+    /// `not_null` or `null`.
+    pub then: String,
+    /// Rows holding `value`.
+    pub support: i64,
+}
+
+/// The implications in a [`conditional_sql`] answer: a value for which a column is always (or
+/// never) set, while across all rows the column is mixed.
+pub fn parse_implications(
+    literals: &[String],
+    then_columns: &[String],
+    rows: &[Vec<Option<String>>],
+) -> Vec<Implication> {
+    let num = |r: &[Option<String>], i: usize| -> i64 {
+        cell(r, i)
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0) as i64
+    };
+    let total: i64 = rows.iter().map(|r| num(r, 1)).sum();
+    let mut out = Vec::new();
+    for (j, y) in then_columns.iter().enumerate() {
+        let set: i64 = rows.iter().map(|r| num(r, 2 + j)).sum();
+        if set == 0 || set == total {
+            continue; // not mixed overall: nothing conditional about it
+        }
+        for r in rows {
+            let Some(v) = row_value(r) else { continue };
+            let Some(lit) = literals.iter().find(|l| literal_text(l) == v) else {
+                continue;
+            };
+            let (n, k) = (num(r, 1), num(r, 2 + j));
+            if n < MIN_SUPPORT {
+                continue;
+            }
+            let then = if k == n {
+                "not_null"
+            } else if k == 0 {
+                "null"
+            } else {
+                continue;
+            };
+            out.push(Implication {
+                value: lit.clone(),
+                then_column: y.clone(),
+                then: then.into(),
+                support: n,
+            });
+        }
+    }
+    out.sort_by(|a, b| (&a.value, &a.then_column).cmp(&(&b.value, &b.then_column)));
+    out
+}
+
+/// Nullable, non-personal columns of a table worth conditioning: at most `limit`, by name.
+pub fn conditional_targets(columns: &[Value], except: &str, limit: usize) -> Vec<String> {
+    let mut v: Vec<String> = columns
+        .iter()
+        .filter(|c| c["not_null"] != true && c["primary_key"] != true)
+        .filter_map(|c| c["name"].as_str())
+        .filter(|n| !n.eq_ignore_ascii_case(except))
+        .filter(|n| ekos_common::pii::classify_name(n).is_none())
+        .map(str::to_string)
+        .collect();
+    v.sort();
+    v.truncate(limit);
+    v
+}
+
+// ── History and deletion patterns (e) ──────────────────────────────────────────────────────
+
+/// Validity-period column pairs by name: (from, to).
+const VALIDITY: &[(&str, &str)] = &[
+    ("valid_from", "valid_to"),
+    ("validfrom", "validto"),
+    ("effective_from", "effective_to"),
+    ("effective_date", "expiry_date"),
+    ("start_date", "end_date"),
+    ("startdate", "enddate"),
+    ("date_from", "date_to"),
+    ("datefrom", "dateto"),
+    ("begin_date", "end_date"),
+];
+
+/// Soft-delete or activity flags by name.
+const FLAGS: &[&str] = &[
+    "deleted",
+    "is_deleted",
+    "isdeleted",
+    "archived",
+    "is_archived",
+    "voided",
+    "obsolete",
+    "isactive",
+    "is_active",
+    "active",
+    "inactive",
+    "disabled",
+    "enabled",
+];
+
+/// Texts a flag column holds when it is set. A literal set of ours, never one read from data.
+const TRUTHY: &[&str] = &[
+    "Y", "y", "1", "t", "T", "true", "TRUE", "True", "yes", "YES",
+];
+
+/// A history or deletion pattern a table's column names suggest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryPattern {
+    /// `validity` (from/to dates) or `flag` (a soft-delete or activity flag).
+    pub kind: String,
+    pub columns: Vec<String>,
+}
+
+/// The patterns `columns`' names suggest.
+pub fn history_patterns(flavor: Flavor, columns: &[Value]) -> Vec<HistoryPattern> {
+    let names: Vec<(String, Family)> = columns
+        .iter()
+        .filter_map(|c| {
+            Some((
+                c["name"].as_str()?.to_string(),
+                profile::family(flavor, c["data_type"].as_str().unwrap_or("")),
+            ))
+        })
+        .collect();
+    let find = |n: &str| names.iter().find(|(x, _)| x.eq_ignore_ascii_case(n));
+    let mut out = Vec::new();
+    for (from, to) in VALIDITY {
+        if let (Some(f), Some(t)) = (find(from), find(to))
+            && f.1 == Family::Date
+            && t.1 == Family::Date
+        {
+            out.push(HistoryPattern {
+                kind: "validity".into(),
+                columns: vec![f.0.clone(), t.0.clone()],
+            });
+        }
+    }
+    for flag in FLAGS {
+        if let Some((n, fam)) = find(flag)
+            && *fam != Family::Date
+        {
+            out.push(HistoryPattern {
+                kind: "flag".into(),
+                columns: vec![n.clone()],
+            });
+        }
+    }
+    out
+}
+
+/// `rows, measured`: for `validity`, rows whose end is open (`to IS NULL`); for `flag`, rows
+/// whose flag is set.
+pub fn history_sql(
+    flavor: Flavor,
+    owner: &str,
+    table: &str,
+    p: &HistoryPattern,
+) -> Result<String, String> {
+    let tbl = profile::table_ref(flavor, owner, table)?;
+    let measured = match p.kind.as_str() {
+        "validity" => {
+            let to = profile::ident(flavor, &p.columns[1])?;
+            format!("COUNT(CASE WHEN {to} IS NULL THEN 1 END)")
+        }
+        _ => {
+            let c = profile::ident(flavor, &p.columns[0])?;
+            let set: Vec<String> = TRUTHY.iter().map(|t| sql_string(flavor, t)).collect();
+            format!(
+                "COUNT(CASE WHEN {} IN ({}) THEN 1 END)",
+                as_text(flavor, &c),
+                set.join(", ")
+            )
+        }
+    };
+    Ok(format!("SELECT {}, {measured} FROM {tbl}", count(flavor)))
+}
+
 // ── Candidate keys ─────────────────────────────────────────────────────────────────────────────
 
 /// Rows whose `columns` are all non-null, counted as distinct tuples.
@@ -507,6 +730,83 @@ mod tests {
             time_column(Flavor::Postgres, only_birth.as_array().unwrap()),
             None
         );
+    }
+
+    #[test]
+    fn an_implication_needs_support_and_a_mixed_column() {
+        let lits = lits(&["7", "1"]);
+        let ys = lits_y();
+        // value, rows, count(cancelled_at), count(note)
+        let rows = vec![
+            vec![
+                Some("7".into()),
+                Some("10".into()),
+                Some("10".into()),
+                Some("4".into()),
+            ],
+            vec![
+                Some("1".into()),
+                Some("90".into()),
+                Some("0".into()),
+                Some("90".into()),
+            ],
+            vec![None, Some("3".into()), Some("1".into()), Some("3".into())],
+        ];
+        let got = parse_implications(&lits, &ys, &rows);
+        assert_eq!(
+            got,
+            vec![
+                Implication {
+                    value: "1".into(),
+                    then_column: "cancelled_at".into(),
+                    then: "null".into(),
+                    support: 90
+                },
+                Implication {
+                    value: "1".into(),
+                    then_column: "note".into(),
+                    then: "not_null".into(),
+                    support: 90
+                },
+                Implication {
+                    value: "7".into(),
+                    then_column: "cancelled_at".into(),
+                    then: "not_null".into(),
+                    support: 10
+                },
+            ]
+        );
+    }
+
+    fn lits_y() -> Vec<String> {
+        lits(&["cancelled_at", "note"])
+    }
+
+    #[test]
+    fn conditional_targets_skip_personal_and_required_columns() {
+        let cols = json!([
+            {"name": "status", "data_type": "int"},
+            {"name": "email", "data_type": "text"},
+            {"name": "id", "data_type": "int", "not_null": true},
+            {"name": "cancelled_at", "data_type": "date"},
+        ]);
+        assert_eq!(
+            conditional_targets(cols.as_array().unwrap(), "status", 10),
+            lits(&["cancelled_at"])
+        );
+    }
+
+    #[test]
+    fn history_patterns_by_name_and_a_flag_counted_against_our_own_literals() {
+        let cols = json!([
+            {"name": "valid_from", "data_type": "date"},
+            {"name": "valid_to", "data_type": "date"},
+            {"name": "IsActive", "data_type": "char(1)"},
+        ]);
+        let p = history_patterns(Flavor::Oracle, cols.as_array().unwrap());
+        assert_eq!(p.len(), 2);
+        let sql = history_sql(Flavor::Postgres, "s", "t", &p[1]).unwrap();
+        assert!(sql.contains("IN ('Y', 'y', '1'"), "{sql}");
     }
 
     #[test]

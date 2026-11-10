@@ -25,7 +25,9 @@ use ekos_ledger::KnowledgeStore;
 use ekos_observation_sdk::profile::Flavor;
 use ekos_observation_sdk::signals::{self, Coverage};
 use ekos_semantic::business_semantics::{self, ENUM_MEANING, GAP};
-use ekos_semantic::data_usage::{ColumnSignal, DataSignals, GrainSignal};
+use ekos_semantic::data_usage::{
+    ColumnSignal, DataSignals, GrainSignal, HistorySignal, ImplicationSignal,
+};
 use ekos_sqlgen::probe::Probe;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
@@ -268,7 +270,87 @@ fn wants(opts: &RunOpts<'_>, signal: &str) -> bool {
     opts.signals.is_empty() || opts.signals.iter().any(|s| s == signal)
 }
 
-/// One database: coverage per coded column, grain per table.
+/// What one database run measured.
+#[derive(Default)]
+struct Measured {
+    columns: Vec<ColumnSignal>,
+    grain: Vec<GrainSignal>,
+    implications: Vec<ImplicationSignal>,
+    history: Vec<HistorySignal>,
+    errors: Vec<Value>,
+}
+
+/// Coded columns with at most this many values are conditioned on (RFC `conditional_max_distinct`).
+const CONDITIONAL_MAX_VALUES: usize = 32;
+/// Columns tested for nulls per conditioned column (RFC `conditional_max_pairs`, per X).
+const CONDITIONAL_MAX_TARGETS: usize = 40;
+
+impl Measure<'_> {
+    fn conditional(
+        &mut self,
+        t: &KirObject,
+        column: &str,
+        literals: &[String],
+    ) -> Vec<ImplicationSignal> {
+        let (owner, table) = (s(t, "owner"), t.name.as_str());
+        if literals.len() > CONDITIONAL_MAX_VALUES
+            || ekos_common::pii::classify_name(column).is_some()
+        {
+            return Vec::new();
+        }
+        let ys = signals::conditional_targets(columns(t), column, CONDITIONAL_MAX_TARGETS);
+        if ys.is_empty() {
+            return Vec::new();
+        }
+        let rows = signals::conditional_sql(self.flavor, owner, table, column, literals, &ys)
+            .and_then(|q| self.probe.preview(&q, 10_000).map(|p| p.rows));
+        match rows {
+            Ok(rows) => signals::parse_implications(literals, &ys, &rows)
+                .into_iter()
+                .map(|i| ImplicationSignal {
+                    database: self.db.name.clone(),
+                    owner: owner.into(),
+                    table: table.into(),
+                    column: column.into(),
+                    value: i.value,
+                    then_column: i.then_column,
+                    then: i.then,
+                    support: i.support,
+                })
+                .collect(),
+            Err(e) => {
+                self.fail(owner, table, "conditional", &e);
+                Vec::new()
+            }
+        }
+    }
+
+    fn history(&mut self, t: &KirObject) -> Vec<HistorySignal> {
+        let (owner, table) = (s(t, "owner"), t.name.as_str());
+        let mut out = Vec::new();
+        for p in signals::history_patterns(self.flavor, columns(t)) {
+            let r = signals::history_sql(self.flavor, owner, table, &p)
+                .and_then(|q| self.probe.preview(&q, 1))
+                .and_then(|r| r.single_number().ok_or_else(|| "no counts".to_string()));
+            match r {
+                Ok(n) if n.len() == 2 => out.push(HistorySignal {
+                    database: self.db.name.clone(),
+                    owner: owner.into(),
+                    table: table.into(),
+                    kind: p.kind,
+                    columns: p.columns,
+                    rows: n[0],
+                    measured: n[1],
+                }),
+                Ok(_) => {}
+                Err(e) => self.fail(owner, table, "history", &e),
+            }
+        }
+        out
+    }
+}
+
+/// One database: coverage and implications per coded column, grain and history per table.
 fn measure_database(
     db: &DatabaseConfig,
     objects: &[KirObject],
@@ -276,10 +358,10 @@ fn measure_database(
     opts: &RunOpts<'_>,
     redaction: &RedactionConfig,
     report: &mut Vec<Value>,
-) -> (Vec<ColumnSignal>, Vec<GrainSignal>, Vec<Value>) {
+) -> Measured {
     let Some(tier) = tier_name(db.profile) else {
         report.push(json!({"database": db.name, "skipped": "profile = p0 measures no signal; set p1 or p2"}));
-        return Default::default();
+        return Measured::default();
     };
     let target = Target::Database(db.clone());
     let (worker, status) = ProbeWorker::start(&target, opts.allow_writable_role);
@@ -289,7 +371,7 @@ fn measure_database(
             _ => "not connected".into(),
         };
         report.push(json!({"database": db.name, "skipped": why}));
-        return Default::default();
+        return Measured::default();
     };
     let mut m = Measure {
         db,
@@ -299,7 +381,8 @@ fn measure_database(
         tier,
         errors: Vec::new(),
     };
-    let (mut cols, mut grain, mut skipped) = (Vec::new(), Vec::new(), 0usize);
+    let mut out = Measured::default();
+    let mut skipped = 0usize;
     for t in live_tables(objects, &db.name) {
         if opts.max_rows > 0 && known_rows(t).is_some_and(|n| n > opts.max_rows) {
             skipped += 1;
@@ -312,21 +395,29 @@ fn measure_database(
             let Some(lits) = literals.get(&(tail(&t.name), name.to_lowercase())) else {
                 continue;
             };
-            if !wants(opts, "literal") {
-                continue;
-            }
             let lits: Vec<String> = lits.iter().cloned().collect();
-            cols.extend(m.coverage(t, name, &lits, wants(opts, "temporal")));
+            if wants(opts, "literal") {
+                out.columns
+                    .extend(m.coverage(t, name, &lits, wants(opts, "temporal")));
+            }
+            if wants(opts, "conditional") {
+                out.implications.extend(m.conditional(t, name, &lits));
+            }
         }
         if wants(opts, "keys") {
-            grain.extend(m.grain(t));
+            out.grain.extend(m.grain(t));
+        }
+        if wants(opts, "history") {
+            out.history.extend(m.history(t));
         }
     }
     report.push(json!({
-        "database": db.name, "tier": tier, "columns": cols.len(), "tables": grain.len(),
+        "database": db.name, "tier": tier, "columns": out.columns.len(), "tables": out.grain.len(),
+        "implications": out.implications.len(), "history_patterns": out.history.len(),
         "skipped_large": skipped, "errors": m.errors.len(),
     }));
-    (cols, grain, m.errors)
+    out.errors = m.errors;
+    out
 }
 
 fn kid(key: &str) -> KirId {
@@ -414,24 +505,43 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
     let redaction = config.redaction_config();
     let measured_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     // Probes are synchronous and may block: one database at a time, off the async runtime.
-    let (mut columns_out, mut grain_out, mut errors, mut report) =
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut all = Measured::default();
+    let mut report = Vec::new();
     for db in dbs {
-        let (c, g, e) = tokio::task::block_in_place(|| {
+        let m = tokio::task::block_in_place(|| {
             measure_database(db, &objects, &literals, &opts, &redaction, &mut report)
         });
-        columns_out.extend(c);
-        grain_out.extend(g);
-        errors.extend(e);
+        all.columns.extend(m.columns);
+        all.grain.extend(m.grain);
+        all.implications.extend(m.implications);
+        all.history.extend(m.history);
+        all.errors.extend(m.errors);
     }
+    let errors = all.errors;
     let signals = DataSignals {
         rfc: "0252".into(),
         measured_at: measured_at.clone(),
         dead_after_months: opts.dead_after_months,
-        columns: columns_out,
-        grain: grain_out,
+        columns: all.columns,
+        grain: all.grain,
+        implications: all.implications,
+        history: all.history,
     };
     let grain_ids = write_grain(&*ledger, &objects, &signals)?;
+    // §3.2(e): history evidence on the current write behaviour, now rather than at the next commit.
+    let mut behaviour: Vec<KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(k) if k == ekos_semantic::write_behaviour::KIND))
+        .cloned()
+        .collect();
+    if ekos_semantic::data_usage::attach_history(&mut behaviour, &signals) > 0 {
+        for o in behaviour
+            .iter()
+            .filter(|o| o.properties.contains_key("data_history"))
+        {
+            ledger.append_object(o)?;
+        }
+    }
     let path = current_path(config, cwd);
     std::fs::create_dir_all(path.parent().expect("a state directory"))?;
     let mut doc = serde_json::to_value(&signals)?;
@@ -509,6 +619,8 @@ fn summary(
             "none": signals.grain.iter().filter(|g| g.declared.is_none() && g.search.as_ref().is_none_or(|r| r.keys.is_empty())).count(),
         },
         "code_values_measured": folded.map(|s| s.data_values_measured),
+        "implications": signals.implications.len(),
+        "history_patterns": signals.history.len(),
         "dead_codes": dead,
         "never_seen_codes": never,
         "data_only_gaps": data_only,
@@ -546,6 +658,10 @@ fn print_summary(
     println!(
         "Grain: {} declared, {} found by key search, {} without a key.",
         v["grain"]["declared"], v["grain"]["measured"], v["grain"]["none"]
+    );
+    println!(
+        "Implications: {} (a code value that always or never comes with another column set); history patterns: {}.",
+        v["implications"], v["history_patterns"]
     );
     if v["semantics"] == true {
         println!(
@@ -643,59 +759,6 @@ pub fn show(config: &EkosConfig, cwd: &Path, table: Option<&str>, json_out: bool
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn literals_come_from_enum_meanings_and_value_gaps_only() {
-        let mut items = Vec::new();
-        for (kind, gap, value) in [
-            (ENUM_MEANING, "", "1"),
-            (ENUM_MEANING, "", "'A'"),
-            (GAP, "unexplained_value", "9"),
-            (GAP, "undocumented_concept", ""),
-        ] {
-            let mut o = KirObject::new("x", business_semantics::object_kind(kind));
-            o.properties.insert("table".into(), json!("public.Orders"));
-            o.properties.insert("column".into(), json!("Status"));
-            o.properties.insert("value".into(), json!(value));
-            o.properties.insert("gap_type".into(), json!(gap));
-            items.push(o);
-        }
-        let l = code_literals(&items);
-        assert_eq!(
-            l[&("orders".to_string(), "status".to_string())],
-            ["'A'", "1", "9"].iter().map(|s| s.to_string()).collect()
-        );
-    }
-
-    #[test]
-    fn the_grain_evidence_carries_no_count() {
-        let g = GrainSignal {
-            database: "erp".into(),
-            owner: "public".into(),
-            table: "orderline".into(),
-            rows: 1234,
-            declared: None,
-            search: Some(signals::KeySearch {
-                keys: vec![vec!["order_id".into(), "line_no".into()]],
-                tested: 5,
-                ..Default::default()
-            }),
-        };
-        let (o, ev) = grain_object(&g, kid("t"), "2026-11-10T00:00:00Z");
-        assert_eq!(o.properties["source"], "measured");
-        assert_eq!(o.properties["key"], json!(["order_id", "line_no"]));
-        assert!(!ev.fragment.contains("1234"));
-        assert_eq!(
-            o.id,
-            grain_object(&g, kid("t"), "later").0.id,
-            "keyed by table"
-        );
-    }
-}
-
 /// MCP `ekos_profile` (read-only): one table's measured profile — what the catalog and the build
 /// measured (counts and non-personal bounds), its grain, how often each value code names occurs
 /// and what else the column holds (counts), and the inferred references touching it.
@@ -786,4 +849,57 @@ pub fn agent_profile(
         "tables": out,
         "note": if out.is_empty() { "no live table by that name (only tables read from [[databases]] have profiles)" } else { "counts only: no data value is ever stored; the only values shown are ones code names" },
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn literals_come_from_enum_meanings_and_value_gaps_only() {
+        let mut items = Vec::new();
+        for (kind, gap, value) in [
+            (ENUM_MEANING, "", "1"),
+            (ENUM_MEANING, "", "'A'"),
+            (GAP, "unexplained_value", "9"),
+            (GAP, "undocumented_concept", ""),
+        ] {
+            let mut o = KirObject::new("x", business_semantics::object_kind(kind));
+            o.properties.insert("table".into(), json!("public.Orders"));
+            o.properties.insert("column".into(), json!("Status"));
+            o.properties.insert("value".into(), json!(value));
+            o.properties.insert("gap_type".into(), json!(gap));
+            items.push(o);
+        }
+        let l = code_literals(&items);
+        assert_eq!(
+            l[&("orders".to_string(), "status".to_string())],
+            ["'A'", "1", "9"].iter().map(|s| s.to_string()).collect()
+        );
+    }
+
+    #[test]
+    fn the_grain_evidence_carries_no_count() {
+        let g = GrainSignal {
+            database: "erp".into(),
+            owner: "public".into(),
+            table: "orderline".into(),
+            rows: 1234,
+            declared: None,
+            search: Some(signals::KeySearch {
+                keys: vec![vec!["order_id".into(), "line_no".into()]],
+                tested: 5,
+                ..Default::default()
+            }),
+        };
+        let (o, ev) = grain_object(&g, kid("t"), "2026-11-10T00:00:00Z");
+        assert_eq!(o.properties["source"], "measured");
+        assert_eq!(o.properties["key"], json!(["order_id", "line_no"]));
+        assert!(!ev.fragment.contains("1234"));
+        assert_eq!(
+            o.id,
+            grain_object(&g, kid("t"), "later").0.id,
+            "keyed by table"
+        );
+    }
 }

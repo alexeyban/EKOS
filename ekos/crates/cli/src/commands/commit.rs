@@ -333,7 +333,8 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     // whole-ledger read of code, routines, live catalog and dictionary.
     ledger.set_write_context(Some(write_ctx("commit:write-behaviour")));
     let step = phase_note("deriving write behaviour");
-    let (write_behaviour, ticket_links) = commit_write_behaviour(&*ledger)?;
+    let (write_behaviour, ticket_links) =
+        commit_write_behaviour(&*ledger, super::profile::load(config, cwd).as_ref())?;
     step.done();
 
     // RFC 0233: the integrity index — every reference the steps above could not link, with
@@ -554,6 +555,7 @@ fn commit_data_lineage(ledger: &dyn KnowledgeStore) -> Result<usize> {
 /// the same whole-ledger read.
 fn commit_write_behaviour(
     ledger: &dyn KnowledgeStore,
+    signals: Option<&ekos_semantic::data_usage::DataSignals>,
 ) -> Result<(
     ekos_semantic::write_behaviour::WriteBehaviourStats,
     ekos_semantic::tickets::TicketLinkStats,
@@ -587,7 +589,11 @@ fn commit_write_behaviour(
             paths.insert(o.id, e.location.path);
         }
     }
-    let (g, stats) = ekos_semantic::write_behaviour::derive(&objects, &relationships, &paths);
+    let (mut g, stats) = ekos_semantic::write_behaviour::derive(&objects, &relationships, &paths);
+    // RFC 0252 §3.2(e): what `ekos profile run` measured about history, kept across commits.
+    if let Some(sig) = signals {
+        ekos_semantic::data_usage::attach_history(&mut g.objects, sig);
+    }
     for o in &g.objects {
         ledger.append_object(o)?;
     }
