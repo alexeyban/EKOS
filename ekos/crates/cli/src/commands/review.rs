@@ -23,6 +23,7 @@ struct Loaded {
     conflicts: Option<BTreeSet<String>>,
     semantics: Option<BTreeSet<String>>,
     identity: Option<BTreeSet<String>>,
+    references: Option<BTreeSet<String>>,
     rules: ScopeRules,
 }
 
@@ -34,6 +35,7 @@ impl Loaded {
             conflicts: super::conflicts::current_ids(config, cwd),
             semantics: ids_in(&config.ekos_dir(cwd).join("semantics").join("current.json")),
             identity: ids_in(&identity_current_path(config, cwd)),
+            references: super::relationships::current_ids(config, cwd),
             rules: ScopeRules::from_config(&config.review.scope),
         })
     }
@@ -47,6 +49,7 @@ impl Loaded {
                 conflicts_current: self.conflicts.as_ref(),
                 semantics_current: self.semantics.as_ref(),
                 identity_current: self.identity.as_ref(),
+                relationships_current: self.references.as_ref(),
                 rules: &self.rules,
             },
         )
@@ -111,7 +114,7 @@ fn status(s: Subject, items: &[Item], signoff: SignState) -> SubjectStatus {
 }
 
 /// Version of the cache's layout; part of its key.
-const CACHE_VERSION: u32 = 2;
+const CACHE_VERSION: u32 = 4;
 
 /// Every subject's items and status, as computed from one state of the ledger.
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -128,6 +131,9 @@ impl ReviewState {
         let mut items = std::collections::BTreeMap::new();
         for s in Subject::ALL {
             let it = l.items(s);
+            if s.is_optional() && it.is_empty() {
+                continue;
+            }
             statuses.push(status(s, &it, l.state(s, &it)));
             items.insert(s.as_str().to_string(), it);
         }
@@ -154,6 +160,7 @@ fn cache_key(config: &EkosConfig, cwd: &Path, ledger: &dyn KnowledgeReader) -> R
     let conflicts = super::conflicts::current_ids(config, cwd);
     let semantics = ids_in(&config.ekos_dir(cwd).join("semantics").join("current.json"));
     let identity = ids_in(&identity_current_path(config, cwd));
+    let relationships = super::relationships::current_ids(config, cwd);
     Ok(ekos_common::ContentHash::of_str(&review::canonical(&json!([
         CACHE_VERSION,
         review::REVIEW_VERSION,
@@ -163,6 +170,7 @@ fn cache_key(config: &EkosConfig, cwd: &Path, ledger: &dyn KnowledgeReader) -> R
         conflicts,
         semantics,
         identity,
+        relationships,
         serde_json::to_value(&config.review)?,
     ])))
     .0)

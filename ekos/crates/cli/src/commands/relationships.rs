@@ -641,15 +641,23 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
         ids.push(o.id.to_string());
     }
     let overlaps = if opts.cross_database {
-        cross_database(&*ledger, &all_cols, &measured_at, opts.min_containment)?
+        cross_database(
+            &*ledger,
+            &all_cols,
+            &measured_at,
+            opts.min_containment,
+            opts.min_parent_distinct,
+        )?
     } else {
-        0
+        Vec::new()
     };
+    let overlap_count = overlaps.len();
+    ids.extend(overlaps);
     let path = current_path(config, cwd);
     std::fs::create_dir_all(path.parent().expect("a state directory"))?;
     let doc = json!({
         "rfc": "0252", "measured_at": measured_at, "ids": ids, "report": report,
-        "errors": errors, "cross_database_overlaps": overlaps,
+        "errors": errors, "cross_database_overlaps": overlap_count,
     });
     std::fs::write(&path, serde_json::to_vec_pretty(&doc)?)?;
     if opts.json {
@@ -657,7 +665,7 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
             "{}",
             serde_json::to_string_pretty(&json!({
                 "report": report, "candidates": written.iter().map(|(o, _)| brief(o)).collect::<Vec<_>>(),
-                "cross_database_overlaps": overlaps, "errors": errors,
+                "cross_database_overlaps": overlap_count, "errors": errors,
             }))?
         );
         return Ok(());
@@ -680,7 +688,7 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
     }
     print_candidates(written.iter().map(|(o, _)| o));
     if opts.cross_database {
-        println!("{overlaps} cross-database overlap(s) recorded on SameAs candidates.");
+        println!("{overlap_count} cross-database overlap(s) recorded on SameAs candidates.");
     }
     if !errors.is_empty() {
         println!("{} error(s); see {}", errors.len(), path.display());
@@ -724,7 +732,8 @@ fn cross_database(
     cols: &[Col],
     measured_at: &str,
     min_containment: f64,
-) -> Result<usize> {
+    min_distinct: i64,
+) -> Result<Vec<String>> {
     let existing: HashMap<(KirId, KirId), KirRelationship> = ledger
         .all_relationships()?
         .into_iter()
@@ -734,7 +743,15 @@ fn cross_database(
     let mut by_tables: BTreeMap<(Uuid, Uuid), Vec<Value>> = BTreeMap::new();
     for (i, a) in cols.iter().enumerate() {
         for b in &cols[i + 1..] {
-            if a.database == b.database || !(a.unique || b.unique) {
+            if a.database == b.database || !(a.unique || b.unique) || a.numeric != b.numeric {
+                continue;
+            }
+            // Few values, or a dense id sequence, overlap with anything of the same size: only
+            // the same table name makes such a pair worth showing.
+            let same_name = a.table.eq_ignore_ascii_case(&b.table);
+            let weak =
+                a.sig.distinct.min(b.sig.distinct) < min_distinct || a.sig.dense() || b.sig.dense();
+            if weak && !same_name {
                 continue;
             }
             let (ab, ba) = (
@@ -758,7 +775,7 @@ fn cross_database(
             }));
         }
     }
-    let n = by_tables.len();
+    let mut ids = Vec::new();
     for ((a, b), overlaps) in by_tables {
         let (a, b) = (KirId(a), KirId(b));
         let mut rel = existing.get(&(a, b)).cloned().unwrap_or_else(|| {
@@ -778,8 +795,9 @@ fn cross_database(
             rel.evidence.push(ev.id);
         }
         ledger.append_relationship(&rel)?;
+        ids.push(rel.id.to_string());
     }
-    Ok(n)
+    Ok(ids)
 }
 
 /// `ekos relationships list`: the latest discovery's candidates, best first, with any decision.

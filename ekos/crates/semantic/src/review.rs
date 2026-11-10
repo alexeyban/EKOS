@@ -38,17 +38,26 @@ pub enum Subject {
     Identity,
     WriteBehaviour,
     Glossary,
+    /// RFC 0252 §3.6: references inferred from data and code, not declared in the schema.
+    Relationships,
 }
 
 impl Subject {
-    pub const ALL: [Subject; 6] = [
+    pub const ALL: [Subject; 7] = [
         Subject::Scope,
         Subject::Pii,
         Subject::Conflicts,
         Subject::Identity,
         Subject::WriteBehaviour,
         Subject::Glossary,
+        Subject::Relationships,
     ];
+
+    /// A subject that exists only once something produced its items: `relationships` after
+    /// `ekos relationships discover`. Without items it is not listed and not required.
+    pub fn is_optional(self) -> bool {
+        matches!(self, Subject::Relationships)
+    }
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -58,6 +67,7 @@ impl Subject {
             Subject::Identity => "identity",
             Subject::WriteBehaviour => "write-behaviour",
             Subject::Glossary => "glossary",
+            Subject::Relationships => "relationships",
         }
     }
 
@@ -70,7 +80,7 @@ impl Subject {
     pub fn decided_here(self) -> bool {
         matches!(
             self,
-            Subject::Scope | Subject::Pii | Subject::WriteBehaviour
+            Subject::Scope | Subject::Pii | Subject::WriteBehaviour | Subject::Relationships
         )
     }
 }
@@ -212,6 +222,9 @@ pub struct Inputs<'a> {
     /// (`.ekos/identity/current.json`); `None` = all. A compile candidate no longer proposed is
     /// not shown while undecided; a decided one, or a cross-system one (`ekos identity scan`), is.
     pub identity_current: Option<&'a BTreeSet<String>>,
+    /// RFC 0252: the `FkCandidate`s the latest `ekos relationships discover` wrote
+    /// (`<state>/profile/relationships.json`); `None` = all.
+    pub relationships_current: Option<&'a BTreeSet<String>>,
     pub rules: &'a ScopeRules,
 }
 
@@ -543,12 +556,22 @@ fn identity_items(inputs: &Inputs<'_>) -> Vec<Item> {
                 .get("status")
                 .and_then(Value::as_str)
                 .is_none_or(|s| s == "unconfirmed");
-            let from_compile = !r.properties.contains_key("name_pattern");
-            !(undecided
-                && from_compile
+            // `ekos identity scan` writes `name_pattern`; `ekos relationships discover
+            // --cross-database` writes `value_overlap` (RFC 0252 §3.4). Neither is a compile's.
+            let from_compile = !r.properties.contains_key("name_pattern")
+                && !r.properties.contains_key("value_overlap");
+            // An overlap-only candidate the latest discovery no longer made is not shown either.
+            let stale_overlap = r.properties.contains_key("value_overlap")
+                && !r.properties.contains_key("name_pattern")
                 && inputs
-                    .identity_current
-                    .is_some_and(|c| !c.contains(&r.id.to_string())))
+                    .relationships_current
+                    .is_some_and(|c| !c.contains(&r.id.to_string()));
+            !(undecided
+                && (stale_overlap
+                    || (from_compile
+                        && inputs
+                            .identity_current
+                            .is_some_and(|c| !c.contains(&r.id.to_string())))))
         })
         .map(|r| {
             let status = r
@@ -562,6 +585,13 @@ fn identity_items(inputs: &Inputs<'_>) -> Vec<Item> {
                 .fact("from", json!(r.from.to_string()))
                 .fact("to", json!(r.to.to_string()))
                 .fact("status", json!(status))
+                .info(
+                    "value_overlap",
+                    r.properties
+                        .get("value_overlap")
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                )
                 .info(
                     "score",
                     r.properties.get("score").cloned().unwrap_or(Value::Null),
@@ -611,6 +641,50 @@ fn write_behaviour_items(
         .collect()
 }
 
+/// RFC 0252 §3.6: one item per inferred reference. Signed: the pair, its seed and verdict.
+/// Counts are shown only — they change with every discovery and must not stale a sign-off.
+fn relationship_items(inputs: &Inputs<'_>, d: &HashMap<(String, String), &KirObject>) -> Vec<Item> {
+    inputs
+        .objects
+        .iter()
+        .filter(|o| custom_kind(o) == Some("FkCandidate"))
+        .filter(|o| {
+            inputs
+                .relationships_current
+                .is_none_or(|c| c.contains(&o.id.to_string()))
+        })
+        .map(|o| {
+            let get = |k: &str| o.properties.get(k).cloned().unwrap_or(Value::Null);
+            let end = |side: &str| {
+                format!(
+                    "{}:{}.{}.{}",
+                    str_prop(o, "database"),
+                    str_prop(o, &format!("{side}_owner")),
+                    str_prop(o, &format!("{side}_table")),
+                    str_prop(o, &format!("{side}_column"))
+                )
+            };
+            let verdict = str_prop(o, "verdict").to_string();
+            let mut item = Item::new(o.id.to_string(), o.name.clone())
+                .fact("child", json!(end("child")))
+                .fact("parent", json!(end("parent")))
+                .fact("seed", get("seed"))
+                .fact("verdict", json!(verdict))
+                .info("orphans", get("orphans"))
+                .info("population", get("population"))
+                .info("containment_estimate", get("containment_estimate"))
+                .info("code_sources", get("code_sources"));
+            apply_decision(&mut item, Subject::Relationships, d);
+            item.blocking = item.decision.is_none()
+                && matches!(
+                    verdict.as_str(),
+                    "clean_relationship" | "relationship_with_orphans" | "unclear"
+                );
+            item
+        })
+        .collect()
+}
+
 fn glossary_items(inputs: &Inputs<'_>) -> Vec<Item> {
     inputs
         .objects
@@ -650,6 +724,7 @@ pub fn items(subject: Subject, inputs: &Inputs<'_>) -> Vec<Item> {
         Subject::Identity => identity_items(inputs),
         Subject::WriteBehaviour => write_behaviour_items(inputs, &scope(), &d),
         Subject::Glossary => glossary_items(inputs),
+        Subject::Relationships => relationship_items(inputs, &d),
     };
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out
@@ -694,6 +769,14 @@ pub fn check_decision(subject: Subject, decision: &Value) -> Result<Value, Strin
                 Ok(json!({ "behaviour": "override", "fields": fields }))
             }
             _ => Err("a write-behaviour decision is `confirm` or `override`".into()),
+        },
+        Subject::Relationships => match get("relationship") {
+            Some(v @ ("confirm" | "reject" | "confirm-with-orphans")) => {
+                Ok(json!({ "relationship": v }))
+            }
+            _ => Err(
+                "a relationship decision is `confirm`, `reject` or `confirm-with-orphans`".into(),
+            ),
         },
         other => Err(format!(
             "{} items are decided with their own command",
@@ -1031,6 +1114,7 @@ mod tests {
                     conflicts_current: None,
                     semantics_current: None,
                     identity_current: current_ids,
+                    relationships_current: None,
                     rules: &rules,
                 },
             )
@@ -1065,6 +1149,7 @@ mod tests {
                 conflicts_current: None,
                 semantics_current: None,
                 identity_current: None,
+                relationships_current: None,
                 rules: &rules,
             },
         )

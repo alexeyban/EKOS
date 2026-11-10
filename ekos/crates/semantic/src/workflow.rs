@@ -169,6 +169,8 @@ fn block(s: &mut Step, why: &str) {
 pub fn gate(subjects: &[SubjectStatus], required: &[Subject]) -> Result<(), String> {
     let missing: Vec<String> = required
         .iter()
+        // An optional subject with no items is not listed, and not required.
+        .filter(|r| !r.is_optional() || subjects.iter().any(|s| s.subject == r.as_str()))
         .filter_map(|r| {
             let state = subjects
                 .iter()

@@ -1627,6 +1627,24 @@ enum ReviewCommands {
         #[arg(long = "as")]
         by: Option<String>,
     },
+    /// Decide inferred references (RFC 0252): confirm, reject, or confirm a real relationship
+    /// whose orphans the target must tolerate (human-only)
+    Relationships {
+        /// Candidate ids or labels (`child.col → parent.col`)
+        #[arg(required = true)]
+        candidates: Vec<String>,
+        #[arg(long, conflicts_with_all = ["reject", "with_orphans"])]
+        confirm: bool,
+        #[arg(long, conflicts_with = "with_orphans")]
+        reject: bool,
+        /// Confirm, noting that orphans exist and must be tolerated
+        #[arg(long = "confirm-with-orphans")]
+        with_orphans: bool,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -3077,6 +3095,31 @@ fn dispatch_review(
                 json!({ "behaviour": "override", "fields": overrides(&set)? })
             };
             review::decide(config, cwd, Subject::WriteBehaviour, &tables, d, reason, by)
+        }
+        ReviewCommands::Relationships {
+            candidates,
+            confirm,
+            reject,
+            with_orphans,
+            reason,
+            by,
+        } => {
+            let v = match (confirm, reject, with_orphans) {
+                (true, _, _) => "confirm",
+                (_, true, _) => "reject",
+                (_, _, true) => "confirm-with-orphans",
+                _ => anyhow::bail!("pass --confirm, --reject or --confirm-with-orphans"),
+            };
+            let d = json!({ "relationship": v });
+            review::decide(
+                config,
+                cwd,
+                Subject::Relationships,
+                &candidates,
+                d,
+                reason,
+                by,
+            )
         }
     }
 }
