@@ -153,6 +153,16 @@ enum Commands {
         #[command(subcommand)]
         subcommand: DatabaseCommands,
     },
+    /// One aggregates-only probe of a live table, from a closed set of templates (RFC 0254)
+    Probe {
+        /// The probe as JSON: {"database","table","template", …} — templates distribution,
+        /// cooccurrence, null_by, orphans, over_time, count; `where` is [{column, op, value}]
+        #[arg(long)]
+        spec: String,
+        /// Who is asking (audited with the template, never with results)
+        #[arg(long = "as", default_value = "cli")]
+        by: String,
+    },
     /// What the live data says about the code: value usage, dead codes, grain (RFC 0252)
     Profile {
         #[command(subcommand)]
@@ -1231,6 +1241,7 @@ fn dispatch_testimony(
             permalink,
             on_behalf_of,
             attachments,
+            probes,
             json,
         } => testimony::add(
             config,
@@ -1246,6 +1257,7 @@ fn dispatch_testimony(
                 meaning: meaning.as_deref(),
                 on_behalf_of: on_behalf_of.as_deref(),
                 attachments: &attachments,
+                probes: &probes,
             },
             json,
         ),
@@ -1454,6 +1466,9 @@ enum TestimonyCommands {
         /// Inbox items sent with it (repeat)
         #[arg(long = "attach")]
         attachments: Vec<String>,
+        /// A probe the proposal cited (JSON spec, repeat): re-run now, its counts stored as evidence
+        #[arg(long = "probe")]
+        probes: Vec<String>,
         #[arg(long)]
         json: bool,
     },
@@ -3001,6 +3016,7 @@ where
             dispatch_source(subcommand, &config, &cwd, &config_path, &invoked_from)
         }
         Commands::Profile { subcommand } => dispatch_profile(subcommand, &config, &cwd).await,
+        Commands::Probe { spec, by } => crate::commands::probe::cli(&config, &cwd, &spec, &by),
         Commands::Questions { subcommand } => dispatch_questions(subcommand, &config, &cwd),
         Commands::Inbox { subcommand } => dispatch_inbox(subcommand, &config, &cwd).await,
         Commands::Testimony { subcommand } => dispatch_testimony(subcommand, &config, &cwd),

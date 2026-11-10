@@ -51,6 +51,7 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("source list", Class::Read, false),
     ("source remove", Class::Admin, false),
     ("profile run", Class::External, false),
+    ("probe", Class::External, false),
     ("profile show", Class::Read, false),
     ("relationships discover", Class::External, false),
     ("inbox add", Class::Write, false),

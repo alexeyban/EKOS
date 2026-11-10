@@ -29,6 +29,7 @@ SCOPED_TOOLS = frozenset(
         "ekos_relationships",
         "ekos_questions",
         "ekos_testimony",
+        "ekos_probe",
     }
 )
 

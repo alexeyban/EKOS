@@ -14,7 +14,7 @@ use ekos_compiler_core::EkosConfig;
 use ekos_kir::{
     KirEvidence, KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind, SourceLocation,
 };
-use ekos_ledger::{KnowledgeReader, KnowledgeStore};
+use ekos_ledger::KnowledgeReader;
 use ekos_semantic::questions::TESTIMONY;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -54,6 +54,8 @@ pub struct Statement<'a> {
     pub on_behalf_of: Option<&'a str>,
     /// Inbox items sent with it.
     pub attachments: &'a [String],
+    /// Probes the saved proposal cited: re-run at save, their counts stored as evidence.
+    pub probes: &'a [String],
 }
 
 /// The newest version of each testimony.
@@ -255,7 +257,28 @@ pub fn add(config: &EkosConfig, cwd: &Path, st: Statement<'_>, json_out: bool) -
             "--meaning needs --about naming the code value (an EnumMeaning, e.g. \"orders.status = 7\")"
         );
     }
-    let (o, ev, links) = build(&st, &about, answers, &config.redaction_config());
+    let (mut o, ev, links) = build(&st, &about, answers, &config.redaction_config());
+    // RFC 0254 §3.5: a cited probe is re-measured now; only its counts are kept.
+    for (i, spec) in st.probes.iter().enumerate() {
+        let args: Value =
+            serde_json::from_str(spec).map_err(|e| anyhow!("--probe is not JSON: {e}"))?;
+        let r = super::probe::run(config, cwd, &*ledger, &args, st.by)?;
+        let mut pe = KirEvidence::new(
+            SourceLocation {
+                path: format!(
+                    "probe://{}/{}",
+                    r["database"].as_str().unwrap_or(""),
+                    r["table"].as_str().unwrap_or("")
+                ),
+                line: None,
+                column: None,
+            },
+            super::probe::evidence_text(&r),
+        );
+        pe.id = kid(&format!("{}:probe:{i}", o.id));
+        ledger.append_evidence(&pe)?;
+        o.evidence.push(pe.id);
+    }
     ledger.append_evidence(&ev)?;
     ledger.append_object(&o)?;
     for r in &links {
@@ -459,6 +482,7 @@ mod tests {
             meaning: Some("cancelled by the customer"),
             on_behalf_of: None,
             attachments: &[],
+            probes: &[],
         }
     }
 

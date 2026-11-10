@@ -324,6 +324,17 @@ pub fn redact_json(value: &mut serde_json::Value, config: &RedactionConfig) {
     }
 }
 
+/// [`redact_personal_data`] over every string of a JSON value — for material people send
+/// (RFC 0253's inbox), where e-mail addresses and card numbers are never wanted in any format.
+pub fn redact_personal_json(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::String(s) => *s = redact_personal_data(s),
+        serde_json::Value::Array(items) => items.iter_mut().for_each(redact_personal_json),
+        serde_json::Value::Object(map) => map.values_mut().for_each(redact_personal_json),
+        _ => {}
+    }
+}
+
 /// Why [`read_redacted`] returned no text.
 #[derive(Debug, thiserror::Error)]
 pub enum SourceReadError {

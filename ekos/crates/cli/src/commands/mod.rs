@@ -41,6 +41,7 @@ pub mod marketing;
 pub mod mcp;
 pub mod migrate;
 pub mod migrate_logic;
+pub mod probe;
 pub mod profile;
 pub mod project;
 pub mod query;

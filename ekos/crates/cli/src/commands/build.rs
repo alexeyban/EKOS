@@ -865,6 +865,13 @@ pub async fn run_selected(
                 }
             };
 
+            // RFC 0253 §3.3: what people send is scrubbed of personal data in every format, not
+            // only the built-in secret patterns.
+            if ob.source.as_deref() == Some(super::inbox::SOURCE_KEY) {
+                for a in &mut package.artifacts {
+                    ekos_common::redaction::redact_personal_json(&mut a.content.data);
+                }
+            }
             redact_package(&mut package, &redaction_config, &project_key);
             run_log::emit(
                 "observe",

@@ -77,6 +77,9 @@ pub struct EkosConfig {
     /// RFC 0253: `[testimony]` — what a person's statement may decide.
     #[serde(default)]
     pub testimony: TestimonyConfig,
+    /// RFC 0254: `[probe]` — aggregates-only exploration of the live databases for agents.
+    #[serde(default)]
+    pub probe: ProbeConfig,
     /// RFC 0178 Part 2: the project's named inputs (`[[sources]]`). Empty = one unnamed source,
     /// the directories of `[observe] paths`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1196,6 +1199,43 @@ impl Default for CodeVsDataConfig {
     }
 }
 
+/// RFC 0254: `[probe]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct ProbeConfig {
+    /// Offer `ekos_probe` over MCP (default off: it queries the live databases).
+    #[serde(default)]
+    pub mcp: bool,
+    /// Refuse a probe on a table with more rows than this, by the catalog's estimate (5,000,000).
+    #[serde(default = "default_probe_rows")]
+    pub max_rows: i64,
+    /// Probes per day for the project, counted before each runs (default 200).
+    #[serde(default = "default_probe_calls")]
+    pub daily_calls: u32,
+    /// A value held by fewer rows is shown as `<N rows` without the value (default 5).
+    #[serde(default = "default_min_cell")]
+    pub min_cell: i64,
+}
+
+fn default_probe_rows() -> i64 {
+    5_000_000
+}
+
+fn default_probe_calls() -> u32 {
+    200
+}
+
+impl Default for ProbeConfig {
+    fn default() -> Self {
+        Self {
+            mcp: false,
+            max_rows: default_probe_rows(),
+            daily_calls: default_probe_calls(),
+            min_cell: default_min_cell(),
+        }
+    }
+}
+
 /// RFC 0253: `[testimony]`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -1481,6 +1521,7 @@ impl Default for EkosConfig {
             questions: QuestionsConfig::default(),
             code_vs_data: CodeVsDataConfig::default(),
             testimony: TestimonyConfig::default(),
+            probe: ProbeConfig::default(),
             sources: Vec::new(),
             databases: Vec::new(),
             extensions: std::collections::BTreeMap::new(),

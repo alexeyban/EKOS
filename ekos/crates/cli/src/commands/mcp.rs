@@ -140,6 +140,8 @@ pub const SCOPED_TOOLS: &[&str] = &[
     // RFC 0253: `Testimony` objects through the scoped store; no source, so a source-restricted
     // reader sees none.
     "ekos_testimony",
+    // RFC 0254: the probed table is looked up through the scoped store before anything runs.
+    "ekos_probe",
 ];
 
 /// Tools a restricted reader does not get, each with the reason.
@@ -1196,6 +1198,9 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
         tools.push(questions_tool_definition());
     }
     tools.push(testimony_tool_definition());
+    if config.probe.mcp {
+        tools.push(probe_tool_definition());
+    }
     for e in ext.iter() {
         tools.extend(e.mcp_tools(config));
     }
@@ -1233,6 +1238,29 @@ fn questions_tool_definition() -> Value {
                 "addressee": { "type": "string" },
                 "limit": { "type": "integer", "description": "Max questions (default 50, max 200)" }
             }
+        }
+    })
+}
+
+/// RFC 0254 — read-only, opt-in (`[probe] mcp = true`): live aggregates from closed templates.
+fn probe_tool_definition() -> Value {
+    json!({
+        "name": "ekos_probe",
+        "description": "Look at a live table's data while forming a hypothesis — aggregates only, from closed templates, never SQL: `distribution` (top values with counts; optional `where`), `cooccurrence` (x, y pair counts), `null_by` (null rate of `column` per value of `by`), `orphans` (child `column` values with no row in `parent_table`.`parent_column`), `over_time` (counts per value per month/year of `time_column`), `count` (optional `where`). `where` is a list of {column, op (=, !=, <, <=, >, >=, in, is_null, is_not_null), value}. Personal columns give counts only; small cells hide their value; nothing is stored; each call is audited and counts against a daily budget. End an investigation with proposals written for a person, citing the probes you used.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "database": { "type": "string" },
+                "table": { "type": "string", "description": "table or owner.table" },
+                "template": { "type": "string", "enum": ["distribution", "cooccurrence", "null_by", "orphans", "over_time", "count"] },
+                "column": { "type": "string" },
+                "x": { "type": "string" }, "y": { "type": "string" }, "by": { "type": "string" },
+                "parent_table": { "type": "string" }, "parent_column": { "type": "string" },
+                "time_column": { "type": "string" },
+                "grain": { "type": "string", "enum": ["month", "year"] },
+                "where": { "type": "array", "items": { "type": "object" } }
+            },
+            "required": ["table", "template"]
         }
     })
 }
@@ -2112,6 +2140,14 @@ fn call_tool(
     if name == "ekos_profile" {
         let ledger = cache.get(config, workspace)?;
         return super::profile::agent_profile(config, workspace, ledger, args);
+    }
+
+    if name == "ekos_probe" {
+        if !config.probe.mcp {
+            anyhow::bail!("ekos_probe is off — set [probe] mcp = true");
+        }
+        let ledger = cache.get(config, workspace)?;
+        return super::probe::run(config, workspace, ledger, args, "mcp");
     }
 
     if name == "ekos_testimony" {
