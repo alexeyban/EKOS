@@ -145,7 +145,7 @@ async def add_source(
 class DatabaseIn(BaseModel):
     name: str = Field(max_length=63)
     # RFC 0235.
-    kind: Literal["oracle", "postgres", "clickhouse"] = "oracle"
+    kind: Literal["oracle", "postgres", "clickhouse", "sqlserver"] = "oracle"
     connect: str = Field(max_length=300)
     user: str = Field(max_length=128)
     # Sent once; kept in the keychain; never echoed.

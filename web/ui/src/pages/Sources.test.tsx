@@ -157,6 +157,18 @@ describe("Sources page", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("profile")).toBeInTheDocument();
     expect(screen.queryByLabelText("dictionary")).toBeNull();
+    // RFC 0252 §3.5: SQL Server reads schemas, is profiled, has no dictionary.
+    fireEvent.change(screen.getByLabelText("database kind"), {
+      target: { value: "sqlserver" },
+    });
+    expect(
+      screen.getByPlaceholderText("mssql.local:1433/shop"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Schemas to read (comma-separated)"),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("profile")).toBeInTheDocument();
+    expect(screen.queryByLabelText("dictionary")).toBeNull();
     fireEvent.change(screen.getByLabelText("database kind"), {
       target: { value: "clickhouse" },
     });

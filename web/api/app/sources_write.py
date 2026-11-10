@@ -18,7 +18,7 @@ _OWNER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#]{0,127}$")
 _USER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#.-]{0,127}$")
 PROFILES = ("p0", "p1", "p2")
 # RFC 0235: each kind's `connect` form, and what the form calls it.
-KINDS = ("oracle", "postgres", "clickhouse")
+KINDS = ("oracle", "postgres", "clickhouse", "sqlserver")
 _CONNECT = {
     "oracle": (
         re.compile(r"^[A-Za-z0-9._-]+(:[0-9]{1,5})?/[A-Za-z0-9._$#-]+$"),
@@ -31,6 +31,14 @@ _CONNECT = {
     "clickhouse": (
         re.compile(r"^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?/?$"),
         "http[s]://host[:port]",
+    ),
+    # RFC 0252 §3.5: as PostgreSQL's, plus the one option `ekos` accepts for a self-signed
+    # certificate.
+    "sqlserver": (
+        re.compile(
+            r"^[A-Za-z0-9._-]+(:[0-9]{1,5})?/[A-Za-z0-9._$-]+(\?trust-server-certificate=true)?$"
+        ),
+        "host[:port]/database[?trust-server-certificate=true]",
     ),
 }
 
@@ -73,7 +81,7 @@ def database_add_argv(
 ) -> list[str]:
     check_name(name, "database")
     if kind not in KINDS:
-        raise ReviewError("kind is oracle, postgres or clickhouse")
+        raise ReviewError("kind is oracle, postgres, clickhouse or sqlserver")
     pattern, form = _CONNECT[kind]
     if not pattern.match(connect or ""):
         raise ReviewError(f"connect is {form}")
