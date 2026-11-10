@@ -7088,3 +7088,25 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
 - [ ] Before launch: OpenCode Zen terms (third-party use of the owner's key) and `[llm]` endpoint support; data-protection/erasure design (see Ongoing: retention RFC)
 - [ ] Static console tokens are the only sign-in on the deployed console today (IP allow-list is the protection)
 
+
+## RFC 0252 / 0253 / 0254 — Profiling for understanding, people as a source, the analyst loop (2026-11-10, devlog_331)
+
+- [x] RFC 0252 §3.1: profiles (P0/P1/P2) for Oracle, PostgreSQL, ClickHouse through one shared planner
+- [x] RFC 0252 §3.2: literal coverage, first/last seen and dead codes, implications, candidate keys
+      (`GrainCandidate`), history and soft-delete patterns — `ekos profile run|show`
+- [x] RFC 0252 §3.3–3.4: data-seeded references (in-database MinHash, LSH, inclusion), cross-database
+      `value_overlap` on `SameAs` — `ekos relationships discover|list`
+- [x] RFC 0252 §3.5: SQL Server (live-verified) and Informix (live-verified over DRDA) live sources
+- [x] RFC 0252 §3.6–3.7: `relationships` review subject; MCP `ekos_profile`, `ekos_relationships`
+- [ ] RFC 0252: "new codes" (needs per-literal git dates); per-month usage chart; Informix CSDK path
+      run live (needs an IBM account); usage evidence from Query Store / `sysmaster`
+- [ ] RFC 0252 §8: iDempiere precision measurement (confirmed / proposed) and the BIRD re-run with
+      the new signals in the pack
+- [x] RFC 0253 Phase 1: images / sheets / slides parsers, the inbox source (files, links), testimony
+      (meaning source, `testimony_mismatch`), MCP `ekos_testimony`
+- [ ] RFC 0253: `[testimony] decides_for` recording a review decision
+- [x] RFC 0254 §3.1–3.5: open questions (derive, rank, route, status on read, reveal, export, digest),
+      code-vs-data checks, `ekos probe` / `ekos_probe`, `source-explorer` agent
+- [x] RFC 0254 §3.6: the source passport on estate table pages
+- [ ] RFC 0254: `null_not_handled`, `cast_will_fail`; docx/xlsx questionnaire export; RFC 0228
+      expectation hand-off; acceptance on LedgerSMB + iDempiere top-20 judged by an operator
