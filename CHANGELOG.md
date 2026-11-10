@@ -20,6 +20,16 @@
   row total, and only engines that store their own rows are scanned (no `SELECT` from a Kafka,
   RabbitMQ, S3Queue, MySQL, S3 … table). One planner (`ekos_observation_sdk::profile`) renders the
   queries for all three engines. The console's Sources form offers the tier for every kind.
+- **SQL Server as a live database source** (RFC 0252 §3.5, Phase 3). `[[databases]] kind = "sqlserver"`
+  (`connect = "host[:port]/database"`, optional `?trust-server-certificate=true`; `owners` are schemas)
+  reads the `sys.*` catalog through `tiberius` (rustls): tables with keys, unique indexes, checks and
+  foreign keys, `MS_Description` comments, views, procedures, functions and triggers from
+  `sys.sql_modules`, reconciled against `sys.objects`, compiled to the same `origin: live` objects as
+  the other kinds (T-SQL routines at signature fidelity, with read/write footprints). Read-only without
+  a session flag: `ApplicationIntent=ReadOnly`, every statement in an always-rolled-back transaction,
+  lock and command timeouts, and a permission-based write check. Profiles P0 (`sys.partitions`
+  estimates), P1 and P2; `ekos database add|test`, `ekos sql check --database` and the console's
+  Sources form accept it. Testbed: `docker-compose.sqlserver.yml`.
 - RFCs 0252 (profiling for source understanding), 0253 (people as a source) and 0254 (the analyst
   loop) accepted.
 

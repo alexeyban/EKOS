@@ -45,6 +45,7 @@ fn as_text(flavor: Flavor, col: &str) -> String {
     match flavor {
         Flavor::Oracle => format!("TO_CHAR({col})"),
         Flavor::Postgres => format!("{col}::text"),
+        Flavor::SqlServer => format!("CAST({col} AS nvarchar(4000))"),
         Flavor::ClickHouse => format!("toString({col})"),
     }
 }
@@ -54,6 +55,7 @@ fn month(flavor: Flavor, expr: &str) -> String {
     match flavor {
         Flavor::Oracle => format!("TO_CHAR({expr}, 'YYYY-MM')"),
         Flavor::Postgres => format!("to_char({expr}, 'YYYY-MM')"),
+        Flavor::SqlServer => format!("CONVERT(char(7), {expr}, 126)"),
         Flavor::ClickHouse => format!("formatDateTime({expr}, '%Y-%m')"),
     }
 }
@@ -63,6 +65,7 @@ fn count(flavor: Flavor) -> &'static str {
         Flavor::ClickHouse => "count()",
         Flavor::Oracle => "COUNT(*)",
         Flavor::Postgres => "count(*)",
+        Flavor::SqlServer => "COUNT_BIG(*)",
     }
 }
 
@@ -412,7 +415,12 @@ mod tests {
 
     #[test]
     fn coverage_sql_returns_only_literals_or_null_in_every_dialect() {
-        for f in [Flavor::Postgres, Flavor::Oracle, Flavor::ClickHouse] {
+        for f in [
+            Flavor::Postgres,
+            Flavor::Oracle,
+            Flavor::ClickHouse,
+            Flavor::SqlServer,
+        ] {
             let sql = literal_coverage_sql(
                 f,
                 "public",

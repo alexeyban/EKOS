@@ -284,3 +284,53 @@ the safety rules, and it is shared. `catalog()` stays with the existing observer
 commit: 42 tables profiled (PostgreSQL `shop` + `public`: 11; ClickHouse `lsmb_raw`: 31, 303 columns
 measured); row counts, null counts and bounds equal to direct queries on both servers; a text value
 from each source searched for in the ledger and in `.ekos/`: not found.
+
+### 2026-11-10 — §3.5 / Phase 3: SQL Server as a live source
+
+`[[databases]] kind = "sqlserver"` (`connect = "host[:port]/database[?trust-server-certificate=true]"`,
+`owners` = schemas), built as the fourth kind of RFC 0235's live-catalog shape, so the shared catalog
+pass, `ekos database add|test`, `ekos sql check --database` and the console's Sources form needed only
+a new arm each.
+
+| Part | What |
+|---|---|
+| `plugins/sqlserver` (`ekos-plugin-sqlserver`) | `tiberius` 0.13 (`tds80`, `rustls`, `chrono`; no OpenSSL, no Windows auth). `catalog.rs`: ten constant queries over `sys.objects`, `sys.tables`, `sys.columns` + `sys.types`, `sys.indexes`/`sys.index_columns` (PK, UQ and unfiltered unique indexes), `sys.check_constraints`, `sys.foreign_keys`/`sys.foreign_key_columns`, `sys.sql_modules`, `sys.parameters`, `sys.trigger_events`, `sys.extended_properties` (`MS_Description`); a pure `normalize` into `OwnerCatalog`s, redacted; `reconcile` refuses a catalog shorter than `sys.objects`' count of tables, views, procedures, functions and triggers |
+| read-only session (`session.rs`) | see *Decision* below |
+| profile (`profile.rs`) | P0 = `sys.partitions.rows` (approximate, `row_count_exact: false`; readable with metadata visibility, unlike `sys.dm_db_partition_stats`); column statistics are histograms of values and are never read. P1/P2 through `profile_table(Flavor::SqlServer, …)` |
+| `observation-sdk::profile` | `Flavor::SqlServer`: `[bracket]` identifiers (`]` doubled), `COUNT_BIG`, `CONVERT(nvarchar(100), MIN/MAX(c), 126)` bounds, `MAX(LEN(c))`; `text`/`ntext`/`image`, `uniqueidentifier`, `bit`, binary, `xml` counted only. The no-text-value / no-PII-bound test covers it |
+| probe (`probe.rs`) | one `SELECT` (`single_select`, T-SQL grammar); `SET ROWCOUNT n+1` instead of `wrap_rows`' `TOP (n) * FROM (…)`, because T-SQL refuses an `ORDER BY` inside a derived table; a login that can write is refused unless `--allow-writable-role` |
+| recovery | `CatalogDialect::SqlServer` (`SqlServerCatalog` keyed kind, diagnostics `MSLIVE…`); `tsql_routines.rs`: views re-headed from the `sys.sql_modules` text; routines and triggers at **signature** fidelity (no T-SQL procedural front end), footprint from a real `MsSqlDialect` parse — whole statement, else body, else `;` fragments with session options, block keywords, `RETURN`/`SET @v =`/`DECLARE … =` values handled — and `inserted`/`deleted` dropped from a trigger's relations; a trigger is a `Procedure` body plus a `Trigger` binding, Oracle's shape |
+| cli | build observer, `database add|test` (census vs compiled; an Oracle or T-SQL trigger body is counted with the triggers, not the routines — a latent Oracle mismatch too), `sql check` (dialect `mssql`), recover summary; `tiberius=error` in the default log filter (its per-connection warning about a trusted certificate landed on stdout and broke `database test --json`) |
+| console | `sqlserver` in `KINDS` / `DatabaseIn.kind` / the Sources form |
+
+**Decision: read-only without a read-only flag.** SQL Server has no equivalent of PostgreSQL's
+`default_transaction_read_only` or ClickHouse's `readonly=1`. Four locks instead, each sufficient for the
+common case: (1) `ApplicationIntent=ReadOnly` at login — routed to a readable secondary in an
+Availability Group, no effect on a standalone server; (2) every statement inside `BEGIN TRANSACTION` …
+`IF @@TRANCOUNT > 0 ROLLBACK` with `XACT_ABORT ON` — even a statement that wrote leaves nothing (the live
+suite inserts as `sa` and counts the same rows after); (3) only planned text is sent — catalog
+constants, the closed profile vocabulary, the single-`SELECT` guard for probes; (4) the login's rights
+are reported. Plus `SET LOCK_TIMEOUT 10000`, `DEADLOCK_PRIORITY LOW`, a 120 s command timeout (a timed-out
+session is out of step in tiberius, so it is treated as lost and the remaining tables are skipped, then
+reconnected per schema).
+
+**Departures.** (a) The write check reads permissions (`HAS_PERMS_BY_NAME` INSERT/UPDATE/DELETE on any
+listed table, ALTER on any listed schema, `DATABASEPROPERTYEX(…, 'Updateability')`) instead of attempting
+a refused write: an attempted `INSERT … SELECT TOP 0` fails on identity columns for reasons unrelated to
+rights and would read as "refused". The JSON shape is unchanged (`result`), with `method: "permissions"`.
+(b) §3.5's usage evidence (Query Store, `sys.dm_exec_query_stats`) is not built — it feeds signals of
+Phases 1–2 that do not exist yet. (c) T-SQL routines have no `ProcedureStatement` objects, so RFC 0212
+write behaviour and statement-level lineage do not see their writes; routine → table `DependsOn` does.
+(d) A named instance is reached by its port (no SQL Browser).
+
+**Measured** against `docker-compose.sqlserver.yml` (SQL Server 2022 Developer, `shop` fixture: schemas
+`sales` + `hr`, 6 tables, 4 foreign keys, 1 view, 1 procedure, 1 function, 1 trigger), `profile = "p2"`,
+login `ekos_ro` (`db_datareader` + `VIEW DEFINITION`), build → recover → resolve → compile → commit on a
+scratch project: 6 tables, 4 foreign keys (0 unresolved), 1 view (0 unread), 3 routines + 1 trigger;
+`ekos database test`: census = compiled for tables (6), views (1), routines (2), triggers (1); write
+check `refused_by_server`; 28 columns = `sys.columns`; every row count (customers 3, orders 4,
+order_lines 4, order_log 4, products 3, employees 2), null count, `MAX(LEN)` and date/number bound equal
+to direct `sqlcmd` queries; `birth_date` bounds withheld (`date_of_birth`); cross-references 100 %
+resolved (6 routine → table `DependsOn`); `ekos sql check --database` previews a joined, ordered query.
+Six fixture values (an e-mail, a product title, a note, a birth date, a name, the login's password)
+searched in every file under `.ekos/` (zstd decompressed): not found.

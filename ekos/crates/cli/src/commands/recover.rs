@@ -268,6 +268,7 @@ fn print_live_catalog_stats(
         CatalogDialect::Oracle => "Oracle",
         CatalogDialect::Postgres => "PostgreSQL",
         CatalogDialect::ClickHouse => "ClickHouse",
+        CatalogDialect::SqlServer => "SQL Server",
     };
     // A pass served from cache does not run, so it fills no counters; zeros would read as an
     // empty database.
@@ -1618,6 +1619,7 @@ pub async fn run_with(
         CatalogDialect::Oracle,
         CatalogDialect::Postgres,
         CatalogDialect::ClickHouse,
+        CatalogDialect::SqlServer,
     ] {
         let ids = collect_artifact_ids_for_connector(&*artifact_store, dialect.observer());
         if ids.is_empty() {

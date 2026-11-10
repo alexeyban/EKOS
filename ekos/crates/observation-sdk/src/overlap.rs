@@ -49,6 +49,10 @@ impl Signature {
 fn md5_hex(flavor: Flavor, expr: &str) -> String {
     match flavor {
         Flavor::Postgres => format!("md5({expr})"),
+        // varchar, not nvarchar: HASHBYTES over UTF-16 would digest other bytes than the others.
+        Flavor::SqlServer => format!(
+            "LOWER(CONVERT(varchar(32), HASHBYTES('MD5', CAST({expr} AS varchar(8000))), 2))"
+        ),
         Flavor::ClickHouse => format!("lower(hex(MD5({expr})))"),
         Flavor::Oracle => format!("LOWER(RAWTOHEX(STANDARD_HASH({expr}, 'MD5')))"),
     }
@@ -59,12 +63,13 @@ fn substr(flavor: Flavor, expr: &str, from: usize, len: usize) -> String {
         Flavor::ClickHouse => format!("substring({expr}, {from}, {len})"),
         Flavor::Oracle => format!("SUBSTR({expr}, {from}, {len})"),
         Flavor::Postgres => format!("substr({expr}, {from}, {len})"),
+        Flavor::SqlServer => format!("SUBSTRING({expr}, {from}, {len})"),
     }
 }
 
 fn concat(flavor: Flavor, parts: &[String]) -> String {
     match flavor {
-        Flavor::ClickHouse => format!("concat({})", parts.join(", ")),
+        Flavor::ClickHouse | Flavor::SqlServer => format!("CONCAT({})", parts.join(", ")),
         _ => parts.join(" || "),
     }
 }
@@ -73,6 +78,7 @@ fn as_text(flavor: Flavor, col: &str) -> String {
     match flavor {
         Flavor::Oracle => format!("TO_CHAR({col})"),
         Flavor::Postgres => format!("{col}::text"),
+        Flavor::SqlServer => format!("CAST({col} AS nvarchar(4000))"),
         Flavor::ClickHouse => format!("toString({col})"),
     }
 }
@@ -297,7 +303,12 @@ mod tests {
 
     #[test]
     fn signature_sql_never_returns_a_value_in_any_dialect() {
-        for f in [Flavor::Postgres, Flavor::Oracle, Flavor::ClickHouse] {
+        for f in [
+            Flavor::Postgres,
+            Flavor::Oracle,
+            Flavor::ClickHouse,
+            Flavor::SqlServer,
+        ] {
             let sql = signature_sql(f, "s", "t", "c", "Ab12", true).unwrap();
             // The outer SELECT is aggregates only: COUNT, the span and MIN over digest slices.
             let outer = sql.split(" FROM (").next().unwrap();

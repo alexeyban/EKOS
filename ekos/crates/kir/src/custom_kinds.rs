@@ -223,6 +223,11 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(database entry, ClickHouse database) — RFC 0235; one live catalog summary per database read",
     },
     CustomKind {
+        name: "SqlServerCatalog",
+        structurally_keyed: true,
+        note: "(database, schema) — RFC 0252 §3.5; one live catalog summary per schema read",
+    },
+    CustomKind {
         name: "WriteBehaviour",
         structurally_keyed: true,
         note: "the table it describes — RFC 0212; one per table, derived at commit",
@@ -556,6 +561,7 @@ mod tests {
             "OracleCatalog",
             "PostgresCatalog",
             "ClickHouseCatalog",
+            "SqlServerCatalog",
             "WriteBehaviour",
             "Ticket",
             "JsModule",

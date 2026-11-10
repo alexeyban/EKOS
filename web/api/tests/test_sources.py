@@ -126,6 +126,22 @@ def test_argv_builders_take_names_only() -> None:
         "wh", "https://ch.local:8443", "ro", "V", ["wh"], "p0", None, "clickhouse"
     )
     assert ch[3:5] == ["--kind=clickhouse", "--connect=https://ch.local:8443"]
+    # RFC 0252 §3.5: SQL Server, with the explicit self-signed-certificate option.
+    ms = database_add_argv(
+        "erp",
+        "mssql.local:1433/shop?trust-server-certificate=true",
+        "ekos_ro",
+        "V",
+        ["sales", "hr"],
+        "p2",
+        None,
+        "sqlserver",
+    )
+    assert ms[3:5] == [
+        "--kind=sqlserver",
+        "--connect=mssql.local:1433/shop?trust-server-certificate=true",
+    ]
+    assert ms[-2:] == ["--owner=sales", "--owner=hr"]
     # RFC 0252: every kind is profiled.
     pg = database_add_argv("wh", "h/shop", "ro", "V", ["public"], "p2", None, "postgres")
     assert "--profile=p2" in pg
@@ -135,6 +151,9 @@ def test_argv_builders_take_names_only() -> None:
         ("clickhouse", "http://u:p@h:8123", "p0", None),
         ("postgres", "h/shop", "p0", "idempiere"),
         ("mysql", "h/shop", "p0", None),
+        ("sqlserver", "h/shop?encrypt=false", "p0", None),
+        ("sqlserver", "h/shop", "p0", "idempiere"),
+        ("sqlserver", "https://h:1433", "p0", None),
     ):
         with pytest.raises(ReviewError):
             database_add_argv("x", connect, "u", "V", ["s"], profile, dictionary, kind)

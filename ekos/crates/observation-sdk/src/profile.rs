@@ -57,6 +57,8 @@ pub enum Flavor {
     Oracle,
     Postgres,
     ClickHouse,
+    /// RFC 0252 §3.5: T-SQL.
+    SqlServer,
 }
 
 /// What a profile run did, for the summary line and the catalog object.
@@ -125,6 +127,7 @@ pub fn family(flavor: Flavor, data_type: &str) -> Family {
         Flavor::Oracle => oracle_family(data_type),
         Flavor::Postgres => postgres_family(data_type),
         Flavor::ClickHouse => clickhouse_family(data_type),
+        Flavor::SqlServer => sqlserver_family(data_type),
     }
 }
 
@@ -190,6 +193,22 @@ fn clickhouse_family(data_type: &str) -> Family {
     }
 }
 
+/// SQL Server type names as `sys.types` spells them. `text`, `ntext` and `image` are counted
+/// only: `LEN` refuses them and `MIN`/`MAX` cannot compare them. `uniqueidentifier`, `bit`,
+/// binary, `xml`, `sql_variant`, spatial and `hierarchyid` are counted only, as elsewhere.
+fn sqlserver_family(data_type: &str) -> Family {
+    let base = base_type(data_type);
+    match base.as_str() {
+        "tinyint" | "smallint" | "int" | "bigint" | "decimal" | "numeric" | "float" | "real"
+        | "money" | "smallmoney" => Family::Number,
+        "date" | "datetime" | "datetime2" | "smalldatetime" | "datetimeoffset" | "time" => {
+            Family::Date
+        }
+        "char" | "varchar" | "nchar" | "nvarchar" => Family::Text,
+        _ => Family::Other,
+    }
+}
+
 /// Oracle refuses more expressions than this in one select list, PostgreSQL more than 1,664
 /// target entries; one bound for every engine, leaving room for the row count.
 const EXPRESSIONS_PER_QUERY: usize = 900;
@@ -218,6 +237,8 @@ pub fn ident(flavor: Flavor, name: &str) -> Result<String, String> {
             "`{}`",
             name.replace('\\', "\\\\").replace('`', "\\`")
         )),
+        // `QUOTENAME`'s rule: a `]` inside the name is doubled.
+        Flavor::SqlServer => Ok(format!("[{}]", name.replace(']', "]]"))),
     }
 }
 
@@ -268,6 +289,19 @@ impl Aggregate {
             (Flavor::ClickHouse, Self::Min) => format!("toString(min({col}))"),
             (Flavor::ClickHouse, Self::Max) => format!("toString(max({col}))"),
             (Flavor::ClickHouse, Self::MaxLength) => format!("max(length(toString({col})))"),
+            // `COUNT` overflows `int` past 2^31 rows; `COUNT_BIG` is `bigint`. What is not plainly
+            // countable is counted through `IS NOT NULL`, as for Oracle.
+            (Flavor::SqlServer, Self::NonNull) if fam == Family::Other => {
+                format!("COUNT_BIG(CASE WHEN {col} IS NOT NULL THEN 1 END)")
+            }
+            (Flavor::SqlServer, Self::NonNull) => format!("COUNT_BIG({col})"),
+            // Style 126 is ISO 8601 for dates and full precision for `float`; ignored for exact
+            // numbers.
+            (Flavor::SqlServer, Self::Min) => format!("CONVERT(nvarchar(100), MIN({col}), 126)"),
+            (Flavor::SqlServer, Self::Max) => format!("CONVERT(nvarchar(100), MAX({col}), 126)"),
+            // `LEN` counts characters (trailing spaces excluded), `DATALENGTH` bytes; characters
+            // are what a target type needs.
+            (Flavor::SqlServer, Self::MaxLength) => format!("MAX(LEN({col}))"),
         }
     }
 }
@@ -277,6 +311,7 @@ fn row_count(flavor: Flavor) -> &'static str {
         Flavor::Oracle => "COUNT(*)",
         Flavor::Postgres => "count(*)",
         Flavor::ClickHouse => "count()",
+        Flavor::SqlServer => "COUNT_BIG(*)",
     }
 }
 
@@ -554,6 +589,19 @@ mod tests {
         .unwrap()
     }
 
+    fn ms_invoice() -> Vec<Value> {
+        serde_json::from_value(json!([
+            { "name": "id", "data_type": "int" },
+            { "name": "documentno", "data_type": "nvarchar(30)" },
+            { "name": "dateinvoiced", "data_type": "datetime2(7)" },
+            { "name": "email", "data_type": "varchar(max)" },
+            { "name": "phone_number", "data_type": "decimal(12,0)" },
+            { "name": "notes", "data_type": "ntext" },
+            { "name": "row_guid", "data_type": "uniqueidentifier" },
+        ]))
+        .unwrap()
+    }
+
     fn sql(flavor: Flavor, cols: &[Value]) -> Vec<String> {
         measures(flavor, cols)
             .0
@@ -585,6 +633,12 @@ mod tests {
                 ["documentno", "email"],
                 "phone_number",
             ),
+            (
+                Flavor::SqlServer,
+                ms_invoice(),
+                ["documentno", "email"],
+                "phone_number",
+            ),
         ] {
             let sql = sql(flavor, &cols);
             for text in texts {
@@ -594,14 +648,18 @@ mod tests {
                 assert!(
                     mentions.iter().all(|s| {
                         let s = s.to_lowercase();
-                        s.starts_with("count(") || s.contains("(length(")
+                        s.starts_with("count(")
+                            || s.starts_with("count_big(")
+                            || s.contains("(length(")
+                            || s.contains("(len(")
                     }),
                     "{flavor:?} {text}: {mentions:?}"
                 );
             }
             let p: Vec<&String> = sql.iter().filter(|s| s.contains(personal)).collect();
             assert_eq!(p.len(), 1, "{flavor:?}: only a count of {personal}: {p:?}");
-            assert!(p[0].to_lowercase().starts_with("count("), "{p:?}");
+            assert!(p[0].to_lowercase().starts_with("count"), "{p:?}");
+            assert!(!p[0].to_lowercase().contains("min("), "{p:?}");
             assert_eq!(measures(flavor, &cols).1, vec![4], "{flavor:?}");
         }
     }
@@ -658,6 +716,44 @@ mod tests {
     }
 
     #[test]
+    fn sqlserver_sql() {
+        let ms = sql(Flavor::SqlServer, &ms_invoice());
+        assert!(ms.contains(&"CONVERT(nvarchar(100), MIN([dateinvoiced]), 126)".to_string()));
+        assert!(ms.contains(&"CONVERT(nvarchar(100), MAX([id]), 126)".to_string()));
+        assert!(ms.contains(&"MAX(LEN([documentno]))".to_string()));
+        assert!(ms.contains(&"COUNT_BIG([email])".to_string()));
+        // `ntext` and `uniqueidentifier` are counted, through `IS NOT NULL`, and nothing else.
+        for c in ["notes", "row_guid"] {
+            let m: Vec<&String> = ms.iter().filter(|s| s.contains(c)).collect();
+            assert_eq!(
+                m,
+                [&format!(
+                    "COUNT_BIG(CASE WHEN [{c}] IS NOT NULL THEN 1 END)"
+                )]
+            );
+        }
+        let plan = plan_table(
+            Flavor::SqlServer,
+            "dbo",
+            "orders",
+            &ms_invoice(),
+            ProfileTier::P1,
+        )
+        .unwrap();
+        assert_eq!(plan.queries, ["SELECT COUNT_BIG(*) FROM [dbo].[orders]"]);
+        let p2 = plan_table(
+            Flavor::SqlServer,
+            "dbo",
+            "orders",
+            &ms_invoice(),
+            ProfileTier::P2,
+        )
+        .unwrap();
+        assert!(p2.queries[0].starts_with("SELECT COUNT_BIG(*), COUNT_BIG([id]), "));
+        assert!(p2.queries[0].ends_with(" FROM [dbo].[orders]"));
+    }
+
+    #[test]
     fn families_per_engine() {
         assert_eq!(family(Flavor::Postgres, "numeric(14,2)"), Family::Number);
         assert_eq!(
@@ -679,12 +775,19 @@ mod tests {
         );
         assert_eq!(family(Flavor::Oracle, "TIMESTAMP(6)"), Family::Date);
         assert_eq!(family(Flavor::Oracle, "LONG RAW"), Family::Uncountable);
+        assert_eq!(family(Flavor::SqlServer, "decimal(18,4)"), Family::Number);
+        assert_eq!(family(Flavor::SqlServer, "datetimeoffset(7)"), Family::Date);
+        assert_eq!(family(Flavor::SqlServer, "nvarchar(max)"), Family::Text);
+        assert_eq!(family(Flavor::SqlServer, "text"), Family::Other);
+        assert_eq!(family(Flavor::SqlServer, "bit"), Family::Other);
+        assert_eq!(family(Flavor::SqlServer, "varbinary(max)"), Family::Other);
     }
 
     #[test]
     fn identifiers_are_quoted_or_refused() {
         assert_eq!(ident(Flavor::Postgres, "we\"ird").unwrap(), "\"we\"\"ird\"");
         assert_eq!(ident(Flavor::ClickHouse, "a`b").unwrap(), "`a\\`b`");
+        assert_eq!(ident(Flavor::SqlServer, "we]ird").unwrap(), "[we]]ird]");
         assert!(ident(Flavor::Oracle, "A\"B").is_err());
         assert!(ident(Flavor::Oracle, "A B").is_err());
         assert!(ident(Flavor::Postgres, "").is_err());

@@ -218,9 +218,11 @@ source later, and a project compiled without names cannot gain them.
 ### Sources and databases (RFC 0223)
 
 A project's **Sources** tab lists its directories and databases. An operator adds a directory (it
-must lie under the tenant's source roots) or a database. **Kind** chooses Oracle, PostgreSQL or
-ClickHouse (RFC 0235), which sets the connect form: Oracle `host:port/service`, PostgreSQL
-`host[:port]/database`, ClickHouse `http[s]://host[:port]`. Then a read-only user, the password and
+must lie under the tenant's source roots) or a database. **Kind** chooses Oracle, PostgreSQL,
+ClickHouse (RFC 0235) or SQL Server (RFC 0252 §3.5), which sets the connect form: Oracle
+`host:port/service`, PostgreSQL `host[:port]/database`, ClickHouse `http[s]://host[:port]`, SQL Server
+`host[:port]/database` (add `?trust-server-certificate=true` only for a server whose certificate is
+self-signed; the connection is encrypted either way). Then a read-only user, the password and
 the schemas to read (for ClickHouse, the databases) and the profile tier (`p0` statistics, `p1` row
 counts, `p2` one aggregate scan per table, for every kind); for Oracle also, optionally, the iDempiere
 dictionary. The first directory added to a project created from one
@@ -236,7 +238,11 @@ database (admin) deletes the password the console kept for it.
 
 **Test connection** reads the catalog read-only (no profiling), checks that the server refuses a
 write, and puts the database's census next to what was compiled: tables, views, routines,
-triggers. PostgreSQL and ClickHouse need nothing installed on the server. The Oracle driver needs Instant Client: set `LD_LIBRARY_PATH` (and `TNS_ADMIN` if you use
+triggers. PostgreSQL, ClickHouse and SQL Server need nothing installed on the server. SQL Server has
+no read-only session setting, so EKOS asks for read-only routing (`ApplicationIntent=ReadOnly`), runs
+every statement in a transaction it always rolls back, and reports the login's own rights
+(`HAS_PERMS_BY_NAME`) as the write check: give it a login that is only in `db_datareader`, plus
+`VIEW DEFINITION` for routine and view text. The Oracle driver needs Instant Client: set `LD_LIBRARY_PATH` (and `TNS_ADMIN` if you use
 one) in the console's environment; the console passes these to every `ekos` it starts.
 
 ## 5. Limits inside a project

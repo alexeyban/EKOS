@@ -178,6 +178,14 @@ const KINDS = {
     owners: "Databases to read (comma-separated)",
     ownersHint: "analytics",
   },
+  // RFC 0252 §3.5. A self-signed certificate is accepted only when asked for in `connect`.
+  sqlserver: {
+    label: "SQL Server",
+    connect: "Connect (host[:port]/database[?trust-server-certificate=true])",
+    connectHint: "mssql.local:1433/shop",
+    owners: "Schemas to read (comma-separated)",
+    ownersHint: "dbo",
+  },
 } as const;
 type Kind = keyof typeof KINDS;
 

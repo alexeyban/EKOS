@@ -1210,6 +1210,8 @@ pub enum DatabaseKind {
     Postgres,
     /// `connect` is `http[s]://host[:port]`, `owners` are databases.
     Clickhouse,
+    /// RFC 0252 §3.5: `connect` is `host[:port]/database`, `owners` are schemas.
+    Sqlserver,
 }
 
 impl DatabaseKind {
@@ -1218,6 +1220,7 @@ impl DatabaseKind {
             Self::Oracle => "oracle",
             Self::Postgres => "postgres",
             Self::Clickhouse => "clickhouse",
+            Self::Sqlserver => "sqlserver",
         }
     }
 }
@@ -1818,6 +1821,7 @@ path = "/tmp/ekos-containers/b"
         for (kind, connect) in [
             ("postgres", "db.local:5432/shop"),
             ("clickhouse", "https://ch.local:8443"),
+            ("sqlserver", "mssql.local:1433/shop"),
         ] {
             let db = format!(
                 "[[databases]]\nname = \"wh\"\nkind = \"{kind}\"\nconnect = \"{connect}\"\n\
