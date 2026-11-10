@@ -43,6 +43,8 @@ pub enum CatalogDialect {
     Oracle,
     Postgres,
     ClickHouse,
+    /// RFC 0252 §3.5.
+    SqlServer,
 }
 
 impl CatalogDialect {
@@ -52,6 +54,7 @@ impl CatalogDialect {
             Self::Oracle => "oracle",
             Self::Postgres => "postgres",
             Self::ClickHouse => "clickhouse",
+            Self::SqlServer => "sqlserver",
         }
     }
 
@@ -61,6 +64,7 @@ impl CatalogDialect {
             Self::Oracle => "oracle",
             Self::Postgres => "postgres",
             Self::ClickHouse => "clickhouse-live",
+            Self::SqlServer => "sqlserver",
         }
     }
 
@@ -70,6 +74,7 @@ impl CatalogDialect {
             Self::Oracle => "oracle",
             Self::Postgres => "postgres",
             Self::ClickHouse => "clickhouse",
+            Self::SqlServer => "sqlserver",
         }
     }
 
@@ -79,6 +84,7 @@ impl CatalogDialect {
             Self::Oracle => CATALOG_KIND,
             Self::Postgres => "PostgresCatalog",
             Self::ClickHouse => "ClickHouseCatalog",
+            Self::SqlServer => "SqlServerCatalog",
         }
     }
 
@@ -87,6 +93,7 @@ impl CatalogDialect {
             Self::Oracle => "ORACLE",
             Self::Postgres => "PGLIVE",
             Self::ClickHouse => "CHLIVE",
+            Self::SqlServer => "MSLIVE",
         };
         format!("{prefix}{n:03}")
     }
@@ -97,6 +104,7 @@ impl CatalogDialect {
             Self::Oracle => "Oracle",
             Self::Postgres => "PostgreSQL",
             Self::ClickHouse => "ClickHouse",
+            Self::SqlServer => "SQL Server",
         }
     }
 }
@@ -568,6 +576,18 @@ fn add_view(graph: &mut KirGraph, d: CatalogDialect, i: &Item) -> bool {
     }
     let body = i.detail["text"].as_str().unwrap_or_default();
     let (view_graph, _) = match d {
+        // `sys.sql_modules` holds the whole `CREATE VIEW` as written; the query is re-headed
+        // with the catalog's name, as for the other engines.
+        CatalogDialect::SqlServer => {
+            let Some(sql) = crate::tsql_routines::view_sql(&i.name, body) else {
+                return false;
+            };
+            read_views(
+                &ekos_plugin_sql_dialect_mssql::MsSqlDialectParser::new("mssql"),
+                &i.target,
+                &sql,
+            )
+        }
         CatalogDialect::Oracle => {
             let sql = format!("CREATE OR REPLACE VIEW \"{}\" AS {body}\n;\n", i.name);
             read_views(
@@ -636,6 +656,13 @@ fn add_routine(graph: &mut KirGraph, d: CatalogDialect, i: &Item) -> Option<PlSq
                 routines: s,
                 ..Default::default()
             })
+        }
+        // RFC 0252 §3.5: T-SQL at signature fidelity, footprint from a real parse.
+        (CatalogDialect::SqlServer, "function" | "procedure" | "trigger") => {
+            let (routine_graph, stats) =
+                crate::tsql_routines::recover_routine(&i.target, &i.kind, &i.name, &i.detail);
+            merge_stamped(graph, d, routine_graph, i);
+            Some(stats)
         }
         (CatalogDialect::Postgres, "trigger") => {
             let sql = format!("{};\n", text.trim_end().trim_end_matches(';'));
@@ -717,6 +744,9 @@ impl CompilerPass for OracleCatalogPass {
         ids.push(crate::plpgsql_analyzer::LOGIC_VERSION.to_string());
         ids.push(crate::plsql_analyzer::LOGIC_VERSION.to_string());
         ids.push(crate::view_analyzer::LOGIC_VERSION.to_string());
+        if self.dialect == CatalogDialect::SqlServer {
+            ids.push(crate::tsql_routines::LOGIC_VERSION.to_string());
+        }
         ids
     }
 
@@ -1137,5 +1167,125 @@ mod tests {
                 .iter()
                 .any(|o| matches!(&o.kind, ObjectKind::Custom(k) if k == "ClickHouseCatalog"))
         );
+    }
+
+    /// RFC 0252 §3.5: a SQL Server catalog — tables with keys and an FK, a view re-headed from
+    /// its `sys.sql_modules` text, a procedure and a trigger at signature fidelity.
+    #[test]
+    fn a_sqlserver_catalog_compiles_tables_views_routines_and_triggers() {
+        let obj = |kind: &str, name: &str, detail: Value| -> (String, Value) {
+            (
+                format!("sqlserver://erp/sales/{kind}/{name}"),
+                json!({ "kind": "object", "database": "erp", "object": { "kind": kind,
+                        "owner": "sales", "name": name, "status": null, "detail": detail } }),
+            )
+        };
+        let artifacts = vec![
+            (
+                "sqlserver://erp/sales".into(),
+                json!({ "kind": "catalog", "database": "erp", "owner": "sales", "family": "sys",
+                        "census": { "TABLE": { "valid": 2, "invalid": 0 } },
+                        "write_check": { "result": "refused_by_server", "method": "permissions" } }),
+            ),
+            obj(
+                "table",
+                "customers",
+                json!({ "columns": [
+                { "name": "id", "data_type": "int", "nullable": false, "identity": "IDENTITY" }] }),
+            ),
+            obj(
+                "table",
+                "orders",
+                json!({ "comment": "One order", "columns": [
+                { "name": "id", "data_type": "bigint", "nullable": false },
+                { "name": "customer_id", "data_type": "int", "nullable": true },
+                { "name": "total", "data_type": "decimal(12,2)", "nullable": false }],
+                "profile": { "tier": "p0", "row_count": 3, "row_count_exact": false } }),
+            ),
+            obj(
+                "primary_key",
+                "orders.PK_orders",
+                json!({ "table": "orders", "columns": ["id"], "validated": true }),
+            ),
+            obj(
+                "check_constraint",
+                "orders.CK_total",
+                json!({ "table": "orders", "columns": [],
+                "validated": true, "condition": "[total]>=(0)" }),
+            ),
+            obj(
+                "foreign_key",
+                "orders.FK_orders_customers",
+                json!({ "table": "orders",
+                "columns": ["customer_id"], "references_owner": "sales", "references_table": "customers",
+                "references_columns": ["id"], "validated": true, "on_delete": "NO ACTION" }),
+            ),
+            obj(
+                "view",
+                "big_orders",
+                json!({ "language": "tsql",
+                "text": "CREATE VIEW [sales].[big_orders] AS SELECT id, total FROM sales.orders WHERE total > 100" }),
+            ),
+            obj(
+                "procedure",
+                "close_order",
+                json!({ "language": "tsql", "arguments": ["@id bigint"],
+                "text": "CREATE PROCEDURE sales.close_order @id bigint AS\nBEGIN\n  DELETE FROM sales.orders WHERE id = @id;\nEND" }),
+            ),
+            obj(
+                "trigger",
+                "orders_audit",
+                json!({ "language": "tsql", "table": "orders",
+                "timing": "AFTER", "events": ["INSERT"],
+                "text": "CREATE TRIGGER sales.orders_audit ON sales.orders AFTER INSERT AS SELECT id FROM inserted" }),
+            ),
+        ];
+        let (g, stats) = recover_catalog_as(CatalogDialect::SqlServer, &artifacts);
+        assert_eq!(
+            (
+                stats.catalogs,
+                stats.tables,
+                stats.foreign_keys,
+                stats.views,
+                stats.views_unparsed
+            ),
+            (1, 2, 1, 1, 0)
+        );
+        assert_eq!(
+            (stats.routines.routines.routines, stats.routines.triggers),
+            (2, 1)
+        );
+        let orders = g.objects.iter().find(|o| o.name == "orders").unwrap();
+        assert_eq!(orders.properties["dialect"], "sqlserver");
+        assert_eq!(orders.properties["origin"], "live");
+        assert_eq!(orders.properties["owner"], "sales");
+        assert_eq!(orders.properties["description"], "One order");
+        assert_eq!(orders.properties["columns"][0]["primary_key"], true);
+        assert!(orders.properties["check_constraints"][0]["expression"] == "[total]>=(0)");
+        let kinds = |k: &str| {
+            g.objects
+                .iter()
+                .filter(|o| o.kind == ObjectKind::Custom(k.into()))
+                .count()
+        };
+        assert_eq!(
+            (
+                kinds("View"),
+                kinds("Procedure"),
+                kinds("Trigger"),
+                kinds("SqlServerCatalog")
+            ),
+            (1, 2, 1, 1)
+        );
+        let view = g
+            .objects
+            .iter()
+            .find(|o| o.kind == ObjectKind::Custom("View".into()))
+            .unwrap();
+        assert_eq!(view.name, "big_orders");
+        assert!(view.properties["reads"].to_string().contains("orders"));
+        let p = g.objects.iter().find(|o| o.name == "close_order").unwrap();
+        assert!(p.properties["writes"].to_string().contains("orders"));
+        assert_eq!(p.properties["dialect"], "sqlserver");
     }
 }

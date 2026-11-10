@@ -1160,16 +1160,16 @@ enum SourceCommands {
 
 #[derive(Subcommand)]
 enum DatabaseCommands {
-    /// Add a database (Oracle, PostgreSQL or ClickHouse); its password stays in an environment
-    /// variable named here
+    /// Add a database (Oracle, PostgreSQL, ClickHouse or SQL Server); its password stays in an
+    /// environment variable named here
     Add {
         /// Database name: lowercase letters, digits, `-` and `_`
         name: String,
-        /// oracle (default), postgres or clickhouse
+        /// oracle (default), postgres, clickhouse or sqlserver
         #[arg(long)]
         kind: Option<String>,
         /// oracle: host:port/service; postgres: host[:port]/database; clickhouse:
-        /// http[s]://host[:port]
+        /// http[s]://host[:port]; sqlserver: host[:port]/database[?trust-server-certificate=true]
         #[arg(long)]
         connect: String,
         /// A read-only user (EKOS refuses nothing else, but reports a user that can write)

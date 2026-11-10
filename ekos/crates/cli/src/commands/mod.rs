@@ -70,9 +70,13 @@ use ekos_compiler_core::EkosConfig;
 /// lines about index bookkeeping the user did not ask about. Warnings and errors still come
 /// through, and `EKOS_LOG` overrides the whole filter — `EKOS_LOG=info,tantivy=info` restores the
 /// old behaviour for anyone debugging the index itself.
+///
+/// RFC 0252 §3.5: the SQL Server driver (`tiberius`) is quieted to `error` too — it warns on every
+/// connection whose `connect` asked to trust the server's certificate, which the person already
+/// chose explicitly, and the line on stdout would break `ekos database test --json`.
 fn default_filter(level: &str) -> String {
     // RFC 0220: run-log events go to the run log, not the terminal (stdout has its own summary).
-    format!("{level},tantivy=warn,ekos_run_log=off,ekos_model_call=off")
+    format!("{level},tantivy=warn,tiberius=error,ekos_run_log=off,ekos_model_call=off")
 }
 
 pub fn init_logging(config: &EkosConfig) {
@@ -139,7 +143,7 @@ mod tests {
             let f = default_filter(level);
             assert_eq!(
                 f,
-                format!("{level},tantivy=warn,ekos_run_log=off,ekos_model_call=off")
+                format!("{level},tantivy=warn,tiberius=error,ekos_run_log=off,ekos_model_call=off")
             );
             tracing_subscriber::EnvFilter::builder()
                 .parse(&f)

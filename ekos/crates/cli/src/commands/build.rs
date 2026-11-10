@@ -26,6 +26,9 @@ use ekos_plugin_perl::PerlObserver;
 use ekos_plugin_postgres::{LiveReader as PostgresLiveReader, PgConnection, PostgresObserver};
 use ekos_plugin_python::PythonObserver;
 use ekos_plugin_rust::RustObserver;
+use ekos_plugin_sqlserver::{
+    LiveReader as SqlServerLiveReader, SqlServerConnection, SqlServerObserver,
+};
 use ekos_plugin_treasury::{DEFAULT_EXPLORER_URL, RealTreasuryClient, TreasuryObserver};
 use std::collections::HashMap;
 use std::path::Path;
@@ -305,6 +308,22 @@ fn database_observers(config: &EkosConfig) -> Result<Vec<(String, Box<dyn Observ
                     Arc::new(PostgresLiveReader {
                         connection: PgConnection::parse(&d.connect, &d.user, &d.password_env)
                             .map_err(|e| anyhow::anyhow!("database {}: {e}", d.name))?,
+                        schemas: d.owners.clone(),
+                        run_id: format!("build/{}", d.name),
+                        redaction: config.redaction_config(),
+                        profile: profile_tier(d.profile),
+                    }),
+                )),
+                // RFC 0252 §3.5.
+                ekos_compiler_core::DatabaseKind::Sqlserver => Box::new(SqlServerObserver::new(
+                    d.name.clone(),
+                    Arc::new(SqlServerLiveReader {
+                        connection: SqlServerConnection::parse(
+                            &d.connect,
+                            &d.user,
+                            &d.password_env,
+                        )
+                        .map_err(|e| anyhow::anyhow!("database {}: {e}", d.name))?,
                         schemas: d.owners.clone(),
                         run_id: format!("build/{}", d.name),
                         redaction: config.redaction_config(),

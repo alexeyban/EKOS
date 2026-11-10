@@ -1,0 +1,56 @@
+# RFC 0252 §3.5 — the SQL Server EKOS's live SQL Server source is developed and tested against.
+#
+# Separate from the other compose files: nothing else needs SQL Server, and it takes about 2 GB of
+# memory. The `shop-fixture` service loads deploy/fixtures/sqlserver/shop.sql once the server is
+# healthy (two schemas, keys, foreign keys, comments, a view, a procedure, a function, a trigger)
+# and creates the read-only login `ekos_ro`.
+#
+# Usage:
+#   docker compose -f docker-compose.sqlserver.yml up -d          # server + fixture
+#   EKOS_SQLSERVER_LIVE=1 cargo test -p ekos-plugin-sqlserver --test live   (from ekos/)
+#   docker compose -f docker-compose.sqlserver.yml down -v        # -v also drops the data
+#
+# Developer edition is free for development and testing (MSSQL_PID). The passwords are
+# deliberately local-only; the port is bound to loopback.
+services:
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: Ekos-sa-local-only1
+      TZ: UTC
+    ports:
+      - "127.0.0.1:51433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 20s
+
+  shop-fixture:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    depends_on:
+      mssql:
+        condition: service_healthy
+    volumes:
+      - ./deploy/fixtures/sqlserver:/fixture:ro
+    entrypoint:
+      - /opt/mssql-tools18/bin/sqlcmd
+      - -C
+      - -S
+      - mssql
+      - -U
+      - sa
+      - -P
+      - Ekos-sa-local-only1
+      - -b
+      - -i
+      - /fixture/shop.sql
+    restart: "no"
+
+volumes:
+  mssql-data:

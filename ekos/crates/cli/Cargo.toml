@@ -81,6 +81,7 @@ ekos-plugin-confluence.workspace = true
 ekos-plugin-clickhouse.workspace = true
 ekos-plugin-oracle.workspace = true
 ekos-plugin-postgres.workspace = true
+ekos-plugin-sqlserver.workspace = true
 ekos-plugin-localdocs.workspace = true
 ekos-plugin-pentaho.workspace = true
 ekos-plugin-python.workspace = true

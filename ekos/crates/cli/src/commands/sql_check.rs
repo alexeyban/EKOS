@@ -54,6 +54,7 @@ fn kind_dialect(kind: &DatabaseKind) -> &'static str {
         DatabaseKind::Oracle => "oracle",
         DatabaseKind::Postgres => "postgres",
         DatabaseKind::Clickhouse => "clickhouse",
+        DatabaseKind::Sqlserver => "mssql",
     }
 }
 
@@ -270,6 +271,20 @@ fn connect_database(
                 Box::new(ekos_plugin_clickhouse::probe::ChProbe::new(c)?),
                 label,
             )
+        }
+        DatabaseKind::Sqlserver => {
+            let c = ekos_plugin_sqlserver::SqlServerConnection::parse(
+                &d.connect,
+                &d.user,
+                &d.password_env,
+            )?;
+            let p = ekos_plugin_sqlserver::probe::SqlServerProbe::connect(
+                &c,
+                &d.owners,
+                run_id,
+                allow_writable_role,
+            )?;
+            (Box::new(p), c.label())
         }
         DatabaseKind::Oracle => {
             let c = ekos_plugin_oracle::OraConnection {

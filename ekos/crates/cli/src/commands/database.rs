@@ -214,7 +214,8 @@ fn parse_kind(kind: Option<&str>) -> Result<DatabaseKind> {
         "oracle" => DatabaseKind::Oracle,
         "postgres" | "postgresql" => DatabaseKind::Postgres,
         "clickhouse" => DatabaseKind::Clickhouse,
-        other => bail!("--kind is oracle, postgres or clickhouse, not {other:?}"),
+        "sqlserver" | "mssql" => DatabaseKind::Sqlserver,
+        other => bail!("--kind is oracle, postgres, clickhouse or sqlserver, not {other:?}"),
     })
 }
 
@@ -230,6 +231,11 @@ fn check_connect(kind: DatabaseKind, connect: &str) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("--{e}")),
         DatabaseKind::Clickhouse => {
             ekos_plugin_clickhouse::catalog::ChConnection::parse(connect, "", "")
+                .map(|_| ())
+                .map_err(|e| anyhow::anyhow!("--{e}"))
+        }
+        DatabaseKind::Sqlserver => {
+            ekos_plugin_sqlserver::SqlServerConnection::parse(connect, "", "")
                 .map(|_| ())
                 .map_err(|e| anyhow::anyhow!("--{e}"))
         }
@@ -289,23 +295,37 @@ fn compiled_counts(
         properties.get("origin").and_then(Value::as_str) == Some("live")
             && properties.get("database").and_then(Value::as_str) == Some(name)
     };
-    let kind_name = |k: &ObjectKind| match k {
-        ObjectKind::Custom(k) => k.clone(),
-        k => k.to_string(),
+    // An Oracle or SQL Server trigger carries its body inline, which compiles to a `Procedure`
+    // named after the trigger (`returns: trigger`) beside the `Trigger`: counted with the
+    // triggers, not the routines the census counts. A PostgreSQL trigger *function* is a real
+    // routine, in the census as one.
+    let kind_name = |k: &ObjectKind, properties: &std::collections::HashMap<String, Value>| {
+        let text = |key: &str| properties.get(key).and_then(Value::as_str);
+        match k {
+            ObjectKind::Custom(k)
+                if k == "Procedure"
+                    && text("returns") == Some("trigger")
+                    && matches!(text("language"), Some("plsql" | "tsql")) =>
+            {
+                "TriggerBody".to_string()
+            }
+            ObjectKind::Custom(k) => k.clone(),
+            k => k.to_string(),
+        }
     };
     let mut out = BTreeMap::new();
     let model_path = config.ekos_dir(cwd).join("ckm").join("model.json");
     if ekos_common::compress::resolve_auto(&model_path).is_some() {
         let model: ekos_semantic::CkModel = ekos_common::compress::read_json_auto(&model_path)?;
         for o in model.objects.iter().filter(|o| live(&o.properties)) {
-            *out.entry(kind_name(&o.kind)).or_insert(0) += 1;
+            *out.entry(kind_name(&o.kind, &o.properties)).or_insert(0) += 1;
         }
     } else {
         let Ok(ledger) = open_store_read_only(config, cwd) else {
             return Ok(None);
         };
         for o in ledger.all_objects()?.iter().filter(|o| live(&o.properties)) {
-            *out.entry(kind_name(&o.kind)).or_insert(0) += 1;
+            *out.entry(kind_name(&o.kind, &o.properties)).or_insert(0) += 1;
         }
     }
     Ok(if out.is_empty() { None } else { Some(out) })
@@ -356,6 +376,21 @@ pub async fn test(config: &EkosConfig, cwd: &Path, name: &str, json_out: bool) -
             ekos_plugin_clickhouse::catalog::test_connection(&connection, &d.owners, &redaction)
                 .await
                 .map_err(fail)?
+        }
+        DatabaseKind::Sqlserver => {
+            let connection = ekos_plugin_sqlserver::SqlServerConnection::parse(
+                &d.connect,
+                &d.user,
+                &d.password_env,
+            )
+            .map_err(fail)?;
+            let owners = d.owners.clone();
+            // The session runs its own runtime: off this one.
+            tokio::task::spawn_blocking(move || {
+                ekos_plugin_sqlserver::test_connection(&connection, &owners, &run_id, &redaction)
+            })
+            .await?
+            .map_err(fail)?
         }
     };
     let ms = started.elapsed().as_millis() as u64;

@@ -62,6 +62,7 @@ pub mod sql_transform_analyzer;
 mod statement_repair;
 pub mod treasury_analyzer;
 pub mod trigger_analyzer;
+pub mod tsql_routines;
 pub mod usage;
 pub mod view_analyzer;
 

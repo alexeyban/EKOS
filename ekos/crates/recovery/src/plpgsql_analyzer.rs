@@ -649,7 +649,7 @@ fn business_predicates(
         .collect()
 }
 
-fn set_footprint(props: &mut std::collections::HashMap<String, Value>, fp: &Footprint) {
+pub(crate) fn set_footprint(props: &mut std::collections::HashMap<String, Value>, fp: &Footprint) {
     props.insert("reads".into(), json!(fp.reads));
     props.insert("writes".into(), json!(fp.writes));
     props.insert("inserts".into(), json!(fp.inserts));
