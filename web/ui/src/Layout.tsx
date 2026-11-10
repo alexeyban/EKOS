@@ -58,6 +58,11 @@ export function Layout() {
             Settings
           </Link>
         )}
+        {identity && !identity.read_only && (
+          <Link to="/channels" className="hdr-link">
+            Channels
+          </Link>
+        )}
         <span style={{ flex: 1 }} />
         {identity && <Identity me={identity} />}
       </header>

@@ -33,6 +33,10 @@ const router = createBrowserRouter([
         lazy: () => import("./pages/Admin").then((m) => ({ Component: m.Admin })),
       },
       {
+        path: "channels",
+        lazy: () => import("./pages/Channels").then((m) => ({ Component: m.Channels })),
+      },
+      {
         path: "settings",
         lazy: () => import("./pages/Settings").then((m) => ({ Component: m.Settings })),
       },
@@ -74,6 +78,14 @@ const router = createBrowserRouter([
           {
             path: "conflicts",
             lazy: () => import("./pages/Conflicts").then((m) => ({ Component: m.Conflicts })),
+          },
+          {
+            path: "questions",
+            lazy: () => import("./pages/Questions").then((m) => ({ Component: m.Questions })),
+          },
+          {
+            path: "inbox",
+            lazy: () => import("./pages/Inbox").then((m) => ({ Component: m.Inbox })),
           },
           {
             path: "annotations",

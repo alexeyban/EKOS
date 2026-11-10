@@ -1,10 +1,18 @@
 // RFC 0187: ask a project questions; a configured model answers with the project's EKOS tools,
 // each call shown. The server streams Server-Sent Events from a POST, so the stream is read from
 // `fetch` (an `EventSource` cannot POST).
+//
+// RFC 0253 adds two ways to tell EKOS something: attach a file or paste a lone link (it goes to
+// the project's inbox as yours), and Tell mode, where the model only proposes — a card quoting
+// your words, saved by you or not at all.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
-import { useParams } from "react-router-dom";
-import { api, apiDelete } from "../api/client";
+import { useOutletContext, useParams } from "react-router-dom";
+import { api, apiDelete, apiPost } from "../api/client";
+import type { ProposalCard } from "../api/types";
+import type { Me } from "../WorkspaceShell";
+import { fileToBase64 } from "./people-shared";
+import { TellCard } from "./TellCard";
 
 interface ModelInfo {
   configured: boolean;
@@ -26,7 +34,22 @@ export type Item =
   | { kind: "user"; text: string }
   | { kind: "answer"; text: string }
   | { kind: "tool"; id: string; name: string; args: unknown; ok?: boolean; result?: string }
-  | { kind: "error"; text: string };
+  | { kind: "error"; text: string }
+  | { kind: "card"; card: ProposalCard }
+  | { kind: "note"; text: string };
+
+/** A message that is only a link: it goes to the inbox, not to the model. */
+export function isLoneLink(text: string): boolean {
+  return /^https?:\/\/\S{3,2000}$/.test(text.trim());
+}
+
+/** What the inbox said, as a line in the conversation. */
+export function storedNote(r: { name?: string; status?: string }): string {
+  const name = r.name ?? "it";
+  return r.status === "pending"
+    ? `Stored ${name} in the inbox; it waits for a reviewer to accept it.`
+    : `Stored ${name} in the inbox; it is compiled on the next build.`;
+}
 
 /** A stored conversation as the items the page draws. */
 export function itemsOf(messages: Stored[]): Item[] {
@@ -137,6 +160,36 @@ export function Chat() {
   const [busy, setBusy] = useState(false);
   const [usage, setUsage] = useState({ input: 0, output: 0 });
   const abort = useRef<AbortController | null>(null);
+  const me = useOutletContext<Me | undefined>();
+  const [mode, setMode] = useState<"ask" | "tell">("ask");
+  const [name, setName] = useState("");
+  // Token mode has no identity: what is sent or saved is recorded as token:<name>.
+  const reviewer = me?.mode === "token" ? name : null;
+
+  const toInbox = async (body: Record<string, unknown>, shown: string) => {
+    setItems((xs) => [...xs, { kind: "user", text: shown }]);
+    try {
+      const r = await apiPost<{ name?: string; status?: string }>(`/workspaces/${id}/inbox`, { ...body, reviewer });
+      setItems((xs) => [...xs, { kind: "note", text: storedNote(r) }]);
+    } catch (err) {
+      setItems((xs) => [...xs, { kind: "error", text: String((err as Error).message) }]);
+    }
+  };
+
+  const attach = async (file: File | undefined) => {
+    if (!file) return;
+    await toInbox({ name: file.name, content_base64: await fileToBase64(file) }, `Attached ${file.name}`);
+  };
+
+  const tell = async (text: string) => {
+    setItems((xs) => [...xs, { kind: "user", text }]);
+    try {
+      const card = await apiPost<ProposalCard>(`/workspaces/${id}/chat/tell`, { message: text });
+      setItems((xs) => [...xs, { kind: "card", card }]);
+    } catch (err) {
+      setItems((xs) => [...xs, { kind: "error", text: String((err as Error).message) }]);
+    }
+  };
 
   const open = async (cid: string) => {
     const conv = await api<{ messages: Stored[] }>(`/workspaces/${id}/chat/${cid}`);
@@ -149,6 +202,15 @@ export function Chat() {
     const text = input.trim();
     if (!text || busy) return;
     setInput("");
+    if (isLoneLink(text) || mode === "tell") {
+      setBusy(true);
+      try {
+        await (isLoneLink(text) ? toInbox({ url: text }, text) : tell(text));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     setBusy(true);
     setItems((xs) => [...xs, { kind: "user", text }]);
     const ctrl = new AbortController();
@@ -248,12 +310,43 @@ export function Chat() {
                 </summary>
                 {it.result && <pre>{it.result}</pre>}
               </details>
+            ) : it.kind === "card" ? (
+              <TellCard key={i} workspace={id} card={it.card} reviewer={reviewer} />
+            ) : it.kind === "note" ? (
+              <p key={i} className="muted">
+                {it.text}
+              </p>
             ) : (
               <p key={i} className="err">
                 {it.text}
               </p>
             ),
           )}
+        </div>
+        <div className="btnrow chat-tell">
+          <label>
+            <input type="radio" name="chat-mode" checked={mode === "ask"} onChange={() => setMode("ask")} /> Ask
+          </label>
+          <label>
+            <input type="radio" name="chat-mode" checked={mode === "tell"} onChange={() => setMode("tell")} /> Tell EKOS
+            something
+          </label>
+          <label className="linkish">
+            Attach a file
+            <input
+              type="file"
+              aria-label="attach a file"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                void attach(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+          </label>
+          {me?.mode === "token" && (
+            <input aria-label="your name" placeholder="your name" value={name} onChange={(e) => setName(e.target.value)} />
+          )}
+          <span className="muted small">a lone link goes to the project's inbox</span>
         </div>
         <form
           className="chat-input"
@@ -265,7 +358,7 @@ export function Chat() {
           <textarea
             aria-label="message"
             value={input}
-            placeholder="Ask about this project"
+            placeholder={mode === "tell" ? "What do you know? (you save it in your own words)" : "Ask about this project"}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -280,7 +373,7 @@ export function Chat() {
             </button>
           ) : (
             <button type="submit" disabled={!input.trim()}>
-              Send
+              {mode === "tell" ? "Tell" : "Send"}
             </button>
           )}
         </form>
