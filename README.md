@@ -143,7 +143,7 @@ database's own object counts, behind the `oracle` build feature — RFC 0211), p
 proof-of-concept clients for Salesforce, SAP,
 Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
 account). SQL in the PostgreSQL, SQL Server (T-SQL), MySQL, Snowflake, Databricks and ClickHouse dialects is
-parsed from files (RFC 0031); live Oracle, PostgreSQL, ClickHouse and SQL Server catalogs are read through `[[databases]]` (RFC 0211, RFC 0235, RFC 0252 §3.5); a Jira connector remains planned.
+parsed from files (RFC 0031); live Oracle, PostgreSQL, ClickHouse, SQL Server and Informix catalogs are read through `[[databases]]` (RFC 0211, RFC 0235, RFC 0252 §3.5); a Jira connector remains planned.
 
 ## Installation
 
@@ -857,6 +857,7 @@ The application dictionary stays Oracle-only.
 ekos database add shop --kind postgres --connect db.local:5432/shop --user shop_ro --password-env SHOP_PW --owner public
 ekos database add wh --kind clickhouse --connect https://ch.local:8443 --user ro --password-env WH_PW --owner analytics
 ekos database add erp --kind sqlserver --connect mssql.local:1433/erp --user ekos_ro --password-env ERP_PW --owner dbo
+ekos database add stores --kind informix --connect ifx.local:9088/stores@ol_ifx --user ekos_ro --password-env STORES_PW --owner informix
 ```
 
 SQL Server (RFC 0252 §3.5): `kind = "sqlserver"`, `connect = "host[:port]/database"` (port 1433 by
@@ -872,6 +873,24 @@ read); P1/P2 as for the other kinds. T-SQL routines compile at *signature* fidel
 return type, description, and the tables they read and write from a real parse — with no
 per-statement objects yet. `ekos sql check --database <name>` probes it read-only too. The testbed is
 `docker-compose.sqlserver.yml` (`EKOS_SQLSERVER_LIVE=1` for the live suite).
+
+Informix (RFC 0252 §3.5): `kind = "informix"`, read over ODBC — build `ekos` with `--features informix`
+(it links unixODBC) and install an Informix ODBC driver (see the deployment guide). `connect` is
+`host[:port]/database@server` for the IBM Informix Client SDK (SQLI, port 9088 by default; `server` is
+the `INFORMIXSERVER` name) or `drda://host[:port]/database` for the IBM Data Server Driver (DRDA, port
+9089); `?driver=<name or library path>` and `?db-locale=<locale>` are optional. `owners` are table
+owners (`systables.owner`). The catalog comes from `systables`, `syscolumns` (types decoded from
+`coltype`/`collength`), `sysdefaults`, `sysconstraints`/`sysindexes`/`sysreferences`/`syschecks`,
+`sysviews`, `sysprocedures`/`sysprocbody` and `systriggers`/`systrigbody`, reconciled against its own
+counts. Every statement runs in a transaction that starts `SET TRANSACTION READ ONLY` and is always
+rolled back, under `COMMITTED READ LAST COMMITTED`; the write check reports the user's grants
+(`systabauth`, `syscolauth`, roles, `sysusers`). P0 is `systables.nrows` (the optimizer's `colmin`/
+`colmax` and distributions are values and are never read). SPL routines compile as `Procedure`
+objects **without IR** — there is no Informix SPL reader yet — with arguments, return types, the
+`DOCUMENT` text and the tables their SQL statements read and write; the recover summary counts them.
+Informix has no MD5, so its columns get no overlap signature (`ekos relationships`). The testbed is
+`docker-compose.informix.yml` + `deploy/fixtures/informix/load.sh` (`EKOS_INFORMIX_LIVE=1` for the live
+suite).
 ### Write behaviour: how each table is updated and deleted (RFC 0212)
 
 Before copying a table incrementally you need to know whether every change moves its timestamp
