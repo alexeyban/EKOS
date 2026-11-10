@@ -1256,6 +1256,7 @@ name = "ekos-ora-live"
 version = "1.4.6"
 dependencies = [
  "ekos-common",
+ "ekos-observation-sdk",
  "serde",
  "serde_json",
  "thiserror",
