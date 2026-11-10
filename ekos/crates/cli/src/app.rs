@@ -158,6 +158,16 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ProfileCommands,
     },
+    /// What people send: files and links, compiled as the source `inbox` once accepted (RFC 0253)
+    Inbox {
+        #[command(subcommand)]
+        subcommand: InboxCommands,
+    },
+    /// What people told EKOS, recorded with who, where and when (RFC 0253)
+    Testimony {
+        #[command(subcommand)]
+        subcommand: TestimonyCommands,
+    },
     /// What nobody can explain yet, as questions for the people who may know (RFC 0254)
     Questions {
         #[command(subcommand)]
@@ -1173,6 +1183,83 @@ enum SourceCommands {
     Remove { name: String },
 }
 
+/// `ekos inbox …` (RFC 0253 §3.3).
+async fn dispatch_inbox(
+    subcommand: InboxCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    use crate::commands::inbox;
+    match subcommand {
+        InboxCommands::Add {
+            what,
+            by,
+            channel,
+            permalink,
+            pending,
+            json,
+        } => {
+            let sender = inbox::Sender {
+                by: &by,
+                channel: &channel,
+                permalink: permalink.as_deref(),
+            };
+            inbox::add(config, cwd, &what, sender, pending, json).await
+        }
+        InboxCommands::List { status, json } => inbox::list(config, cwd, status.as_deref(), json),
+        InboxCommands::Accept { id, by } => inbox::accept(config, cwd, &id, &by),
+        InboxCommands::Purge { id, by } => inbox::purge(config, cwd, &id, &by),
+    }
+}
+
+/// `ekos testimony …` (RFC 0253 §3.4).
+fn dispatch_testimony(
+    subcommand: TestimonyCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    use crate::commands::testimony;
+    match subcommand {
+        TestimonyCommands::Add {
+            text,
+            by,
+            about,
+            answers,
+            meaning,
+            channel,
+            message_ref,
+            permalink,
+            on_behalf_of,
+            attachments,
+            json,
+        } => testimony::add(
+            config,
+            cwd,
+            testimony::Statement {
+                by: &by,
+                text: &text,
+                channel: &channel,
+                message_ref: message_ref.as_deref(),
+                permalink: permalink.as_deref(),
+                about: &about,
+                answers: answers.as_deref(),
+                meaning: meaning.as_deref(),
+                on_behalf_of: on_behalf_of.as_deref(),
+                attachments: &attachments,
+            },
+            json,
+        ),
+        TestimonyCommands::List {
+            about,
+            author,
+            all,
+            json,
+        } => testimony::list(config, cwd, about.as_deref(), author.as_deref(), all, json),
+        TestimonyCommands::Show { id } => testimony::show(config, cwd, &id),
+        TestimonyCommands::Withdraw { id, by } => testimony::withdraw(config, cwd, &id, &by),
+    }
+}
+
 /// `ekos questions …` (RFC 0254).
 fn dispatch_questions(
     subcommand: QuestionsCommands,
@@ -1292,6 +1379,105 @@ async fn dispatch_profile(
             crate::commands::profile::show(config, cwd, table.as_deref(), json)
         }
     }
+}
+
+#[derive(Subcommand)]
+enum InboxCommands {
+    /// Store a file or fetch a link (an HTML snapshot) for the next build
+    Add {
+        /// A file path, or an http(s) URL
+        what: String,
+        /// Who sent it
+        #[arg(long = "as")]
+        by: String,
+        #[arg(long, default_value = "console")]
+        channel: String,
+        #[arg(long)]
+        permalink: Option<String>,
+        /// Hold it until a writer accepts it
+        #[arg(long)]
+        pending: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// What the inbox holds
+    List {
+        /// pending or accepted
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Accept pending material for compiling (human-only)
+    Accept {
+        id: String,
+        #[arg(long = "as")]
+        by: String,
+    },
+    /// Delete an original; compiled, redacted text stays in the ledger (human-only)
+    Purge {
+        id: String,
+        #[arg(long = "as")]
+        by: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum TestimonyCommands {
+    /// Record what a person said, in their words (human-only)
+    Add {
+        /// The person's own text
+        #[arg(long)]
+        text: String,
+        /// Who said it (the signed-in person)
+        #[arg(long = "as")]
+        by: String,
+        /// What it is about: entity ids or exact names (repeat)
+        #[arg(long)]
+        about: Vec<String>,
+        /// The open question it answers (id or prefix)
+        #[arg(long)]
+        answers: Option<String>,
+        /// A code value's meaning (with --about naming the code value, e.g. "orders.status = 7")
+        #[arg(long)]
+        meaning: Option<String>,
+        #[arg(long, default_value = "console")]
+        channel: String,
+        /// The channel's message id
+        #[arg(long = "message-ref")]
+        message_ref: Option<String>,
+        #[arg(long)]
+        permalink: Option<String>,
+        /// Recorded for someone else (a workshop answer): who said it
+        #[arg(long = "on-behalf-of")]
+        on_behalf_of: Option<String>,
+        /// Inbox items sent with it (repeat)
+        #[arg(long = "attach")]
+        attachments: Vec<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The testimonies, newest first
+    List {
+        #[arg(long)]
+        about: Option<String>,
+        #[arg(long)]
+        author: Option<String>,
+        /// Include withdrawn ones
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    Show {
+        id: String,
+    },
+    /// Withdraw your own testimony (a new version; human-only)
+    Withdraw {
+        id: String,
+        #[arg(long = "as")]
+        by: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2815,6 +3001,8 @@ where
         }
         Commands::Profile { subcommand } => dispatch_profile(subcommand, &config, &cwd).await,
         Commands::Questions { subcommand } => dispatch_questions(subcommand, &config, &cwd),
+        Commands::Inbox { subcommand } => dispatch_inbox(subcommand, &config, &cwd).await,
+        Commands::Testimony { subcommand } => dispatch_testimony(subcommand, &config, &cwd),
         Commands::Relationships { subcommand } => {
             dispatch_relationships(subcommand, &config, &cwd).await
         }

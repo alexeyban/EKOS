@@ -1213,6 +1213,21 @@ pub struct InboxConfig {
     /// The most rows of each spreadsheet sheet (XLSX) or CSV file read as text (default 200).
     #[serde(default = "default_sheet_rows")]
     pub sheet_rows: usize,
+    /// Every intake waits for a writer's `ekos inbox accept`, whoever sent it (default: only
+    /// material from people without the write role waits — the console decides that).
+    #[serde(default)]
+    pub require_accept: bool,
+    /// Hosts a link may be fetched from although they resolve to a private address (an internal
+    /// Confluence). Loopback, private and link-local addresses are refused otherwise.
+    #[serde(default)]
+    pub allow_hosts: Vec<String>,
+    /// Largest file accepted, in megabytes (default 25).
+    #[serde(default = "default_max_mb")]
+    pub max_file_mb: u64,
+}
+
+fn default_max_mb() -> u64 {
+    25
 }
 
 fn default_sheet_rows() -> usize {
@@ -1223,6 +1238,9 @@ impl Default for InboxConfig {
     fn default() -> Self {
         Self {
             sheet_rows: default_sheet_rows(),
+            require_accept: false,
+            allow_hosts: Vec::new(),
+            max_file_mb: default_max_mb(),
         }
     }
 }

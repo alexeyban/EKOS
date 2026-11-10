@@ -233,6 +233,21 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "the table it describes — RFC 0212; one per table, derived at commit",
     },
     CustomKind {
+        name: "FkCandidate",
+        structurally_keyed: true,
+        note: "database + child column + parent column — RFC 0252 §3.3, written by `ekos relationships discover`",
+    },
+    CustomKind {
+        name: "OpenQuestion",
+        structurally_keyed: true,
+        note: "origin kind + origin id + question type — RFC 0254 §3.1, derived at commit",
+    },
+    CustomKind {
+        name: "Testimony",
+        structurally_keyed: true,
+        note: "channel + message ref — RFC 0253 §3.4, written only by `ekos testimony add`",
+    },
+    CustomKind {
         name: "GrainCandidate",
         structurally_keyed: true,
         note: "the table it describes — RFC 0252 §3.2(d); one per live table, written by `ekos profile run`",

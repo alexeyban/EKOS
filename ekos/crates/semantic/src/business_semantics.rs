@@ -1279,6 +1279,7 @@ pub fn synthesize(
         .iter()
         .filter(|o| kind_name(o) == Some(RATIONALE))
         .count();
+    testimony_meanings(&mut b.out, graph);
     if let Some(d) = &cfg.data {
         let subjects: HashMap<KirId, &KirObject> = graph
             .objects
@@ -1297,6 +1298,61 @@ pub fn synthesize(
     sign_items(&mut b.out);
     cite_endpoint_evidence(&mut b.out);
     b.out
+}
+
+/// RFC 0253: a person's stated meaning of a code value is a meaning source (`testimony`) of its
+/// `EnumMeaning`, cited to the testimony. It never replaces a label code gives — a disagreement is
+/// a `testimony_mismatch` conflict, recorded when the testimony was saved.
+fn testimony_meanings(out: &mut SemanticsOutput, graph: &KirGraph) {
+    let mut newest: BTreeMap<String, &KirObject> = BTreeMap::new();
+    for t in graph.objects.iter().filter(|o| is_custom(o, "Testimony")) {
+        let upd = |o: &KirObject| {
+            o.properties
+                .get("updated_at")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        };
+        let k = t.id.to_string();
+        if newest.get(&k).is_none_or(|old| upd(t) >= upd(old)) {
+            newest.insert(k, t);
+        }
+    }
+    for t in newest.values() {
+        let p = |k: &str| t.properties.get(k).and_then(Value::as_str).unwrap_or("");
+        if p("status") != "active" || p("meaning").is_empty() {
+            continue;
+        }
+        let about: BTreeSet<String> = t
+            .properties
+            .get("about")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for o in out
+            .objects
+            .iter_mut()
+            .filter(|o| kind_name(o) == Some(ENUM_MEANING) && about.contains(&o.id.to_string()))
+        {
+            let m = json!({
+                "label": p("meaning"), "source": "testimony", "confidence": 0.9,
+                "path": format!("testimony://{}", t.id), "line": null, "author": p("author"),
+            });
+            if let Some(Value::Array(ms)) = o.properties.get_mut("meanings") {
+                ms.push(m);
+            } else {
+                o.properties.insert("meanings".into(), json!([m]));
+            }
+            if o.properties.get("label").is_none_or(Value::is_null) {
+                o.properties.insert("label".into(), json!(p("meaning")));
+                o.properties.insert("confidence".into(), json!(0.9));
+            }
+        }
+    }
 }
 
 /// Evidence for one usage site: its canonical predicate, carrier and clause.

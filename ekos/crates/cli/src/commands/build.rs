@@ -724,9 +724,20 @@ pub async fn run_selected(
     let artifact_store = PackArtifactStore::open(config.artifact_dir(cwd))
         .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?;
 
-    let observe_paths = config.observe_bases(cwd);
+    let mut observe_paths = config.observe_bases(cwd);
+    // RFC 0253: accepted inbox material is a source of its own.
+    observe_paths.extend(super::inbox::observe_base(config, cwd));
 
     let observers = configured_observers(config, ext);
+    // The inbox holds documents people sent, nothing else: the local-documents connector alone,
+    // and images are always read (locally) — a screenshot is what people send.
+    let inbox_observers: Vec<Box<dyn Observer>> = vec![Box::new(LocalDocsObserver::with_settings(
+        Arc::new(TesseractOcr::with_languages(&config.ocr.languages)),
+        &LocalDocsSettings {
+            images: true,
+            sheet_rows: config.inbox.sheet_rows,
+        },
+    ))];
 
     let fingerprint_path = config.ekos_dir(cwd).join("fingerprints.json");
     let mut fingerprints = load_fingerprints(&fingerprint_path);
@@ -798,6 +809,11 @@ pub async fn run_selected(
         // this exact logic with the *old*, unfixed condition, silently diverging from this
         // function's own real `File`-object ids the moment this fix landed here alone.
         let project_key = ob.key.clone();
+        let observers = if ob.source.as_deref() == Some(super::inbox::SOURCE_KEY) {
+            &inbox_observers
+        } else {
+            &observers
+        };
 
         let ctx =
             ScanContext::new(base).with_ignore_patterns(config.observe.ignore_patterns.clone());
@@ -823,7 +839,7 @@ pub async fn run_selected(
         }
         fingerprints.insert(fp_key, fp.0);
 
-        for observer in &observers {
+        for observer in observers {
             connectors_rescanned += 1;
             let started = std::time::Instant::now();
             let mut package = match observer.scan(&ctx).await {

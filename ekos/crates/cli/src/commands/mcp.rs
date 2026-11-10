@@ -137,6 +137,9 @@ pub const SCOPED_TOOLS: &[&str] = &[
     "ekos_relationships",
     // RFC 0254: `OpenQuestion` objects through the scoped store; they carry no source either.
     "ekos_questions",
+    // RFC 0253: `Testimony` objects through the scoped store; no source, so a source-restricted
+    // reader sees none.
+    "ekos_testimony",
 ];
 
 /// Tools a restricted reader does not get, each with the reason.
@@ -1192,6 +1195,7 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     if config.questions.enabled {
         tools.push(questions_tool_definition());
     }
+    tools.push(testimony_tool_definition());
     for e in ext.iter() {
         tools.extend(e.mcp_tools(config));
     }
@@ -1228,6 +1232,22 @@ fn questions_tool_definition() -> Value {
                 "table": { "type": "string" },
                 "addressee": { "type": "string" },
                 "limit": { "type": "integer", "description": "Max questions (default 50, max 200)" }
+            }
+        }
+    })
+}
+
+/// RFC 0253 — read-only: what people said. There is no MCP tool that records testimony.
+fn testimony_tool_definition() -> Value {
+    json!({
+        "name": "ekos_testimony",
+        "description": "What people told EKOS about the estate, in their own words, with who, where (channel, link) and when: meanings of codes, rules, answers to open questions. Evidence, not a decision — cite it as \"According to <author> (<channel>, <date>): …\". Filter by entity (`about`, an id or exact name), `author` or the `question` it answers. Read-only: only a person records or withdraws testimony; never answer for someone.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "about": { "type": "string" },
+                "author": { "type": "string" },
+                "question": { "type": "string", "description": "An open question id (or prefix)" }
             }
         }
     })
@@ -2092,6 +2112,11 @@ fn call_tool(
     if name == "ekos_profile" {
         let ledger = cache.get(config, workspace)?;
         return super::profile::agent_profile(config, workspace, ledger, args);
+    }
+
+    if name == "ekos_testimony" {
+        let ledger = cache.get(config, workspace)?;
+        return super::testimony::agent_list(ledger, args);
     }
 
     if name == "ekos_questions" {
@@ -3768,7 +3793,9 @@ mod tests {
                 "ekos_profile",
                 "ekos_relationships",
                 // RFC 0254 — read-only.
-                "ekos_questions"
+                "ekos_questions",
+                // RFC 0253 — read-only.
+                "ekos_testimony"
             ]
         );
         for tool in tools {

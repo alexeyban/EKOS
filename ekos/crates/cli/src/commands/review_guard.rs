@@ -30,6 +30,30 @@ struct HumanOnly {
 
 const HUMAN_ONLY: &[HumanOnly] = &[
     HumanOnly {
+        path: &["testimony", "add"],
+        defined_in: include_str!("testimony.rs"),
+        definition: "pub fn add(",
+        why: "RFC 0253: a model must never put words in a person's mouth",
+    },
+    HumanOnly {
+        path: &["testimony", "withdraw"],
+        defined_in: include_str!("testimony.rs"),
+        definition: "pub fn withdraw(",
+        why: "RFC 0253: only the author withdraws their testimony",
+    },
+    HumanOnly {
+        path: &["inbox", "accept"],
+        defined_in: include_str!("inbox.rs"),
+        definition: "pub fn accept(",
+        why: "RFC 0253: accepting material for compiling is a writer's act",
+    },
+    HumanOnly {
+        path: &["inbox", "purge"],
+        defined_in: include_str!("inbox.rs"),
+        definition: "pub fn purge(",
+        why: "RFC 0253: deleting an original is a person's act",
+    },
+    HumanOnly {
         path: &["annotate", "add"],
         defined_in: include_str!("annotate.rs"),
         definition: "pub fn add(",

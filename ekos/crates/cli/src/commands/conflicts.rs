@@ -165,6 +165,21 @@ pub fn commit_step(
     Ok(stats)
 }
 
+/// RFC 0253: adds conflicts written outside a commit (a testimony that disagrees with code) to the
+/// current set.
+pub fn add_current(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeStore,
+    new: impl Iterator<Item = String>,
+) -> Result<()> {
+    let mut ids = commit_ids(config, cwd).unwrap_or_default();
+    ids.extend(new);
+    write_manifest(config, cwd, &ids, ConflictStats::default())?;
+    let stats = count(&items_in(config, cwd, ledger)?);
+    write_manifest(config, cwd, &ids, stats)
+}
+
 /// RFC 0254 §3.4: replaces the current `code_vs_data` findings with `g` (decisions carried
 /// forward) and rewrites the manifest. Returns how many findings `g` holds.
 pub fn replace_code_vs_data(
