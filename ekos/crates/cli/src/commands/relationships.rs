@@ -827,3 +827,52 @@ pub fn list(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
     }
     Ok(())
 }
+
+/// MCP `ekos_relationships` (read-only): the latest discovery's inferred references through the
+/// caller's store, best first, each with its seed, verdict, counts and any review decision.
+pub fn agent_list(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn ekos_ledger::KnowledgeReader,
+    args: &Value,
+) -> Result<Value> {
+    let table = args
+        .get("table")
+        .and_then(Value::as_str)
+        .map(str::to_lowercase);
+    let seed = args.get("seed").and_then(Value::as_str);
+    let verdict = args.get("verdict").and_then(Value::as_str);
+    let current = current_ids(config, cwd);
+    let objects = ledger.all_objects()?;
+    let decisions = ekos_semantic::review::decisions(&objects);
+    let mut items: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(k) if k == KIND))
+        .filter(|o| {
+            current
+                .as_ref()
+                .is_none_or(|c| c.contains(&o.id.to_string()))
+        })
+        .filter(|o| {
+            table.as_deref().is_none_or(|t| {
+                s(o, "child_table").to_lowercase() == t || s(o, "parent_table").to_lowercase() == t
+            })
+        })
+        .filter(|o| seed.is_none_or(|x| s(o, "seed") == x))
+        .filter(|o| verdict.is_none_or(|x| s(o, "verdict") == x))
+        .collect();
+    items.sort_by(|a, b| rank(a).cmp(&rank(b)).then(a.name.cmp(&b.name)));
+    let out: Vec<Value> = items
+        .into_iter()
+        .take(200)
+        .map(|o| {
+            let mut v = brief(o);
+            v["decision"] = decisions
+                .get(&("relationships".to_string(), o.id.to_string()))
+                .and_then(|d| d.properties.get("decision").cloned())
+                .unwrap_or(json!("undecided — a hypothesis until a person reviews it"));
+            v
+        })
+        .collect();
+    Ok(json!({ "references": out }))
+}

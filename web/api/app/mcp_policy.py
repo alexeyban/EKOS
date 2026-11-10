@@ -25,6 +25,8 @@ SCOPED_TOOLS = frozenset(
         "ekos_sql_check",
         "ekos_ossie_export",
         "ekos_annotations",
+        "ekos_profile",
+        "ekos_relationships",
     }
 )
 

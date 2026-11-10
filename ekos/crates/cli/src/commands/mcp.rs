@@ -129,6 +129,12 @@ pub const SCOPED_TOOLS: &[&str] = &[
     // RFC 0247: reads annotation objects through the scoped store; they carry no source, so a
     // source-restricted reader sees none of them.
     "ekos_annotations",
+    // RFC 0252: the table is looked up through the scoped store; the measurement file's entries
+    // are returned only for tables that store returned.
+    "ekos_profile",
+    // RFC 0252: `FkCandidate` objects through the scoped store; they carry no source, so a
+    // source-restricted reader sees none of them.
+    "ekos_relationships",
 ];
 
 /// Tools a restricted reader does not get, each with the reason.
@@ -1179,10 +1185,45 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     }
     tools.push(ossie_export_tool_definition());
     tools.push(annotations_tool_definition());
+    tools.push(profile_tool_definition());
+    tools.push(relationships_tool_definition());
     for e in ext.iter() {
         tools.extend(e.mcp_tools(config));
     }
     tools
+}
+
+/// RFC 0252 — read-only: what the live data says about a table.
+fn profile_tool_definition() -> Value {
+    json!({
+        "name": "ekos_profile",
+        "description": "What the live data says about one table (RFC 0252): row count, per-column null counts and non-personal bounds, the table's grain (declared key or one found by measuring), how many rows hold each value the code names and when each was first and last seen (`dead` codes), how many rows hold values NO code names (counts only — the values are never stored), and inferred references touching the table with their verdicts. Use it before writing SQL that filters on a code column or joins tables without a declared foreign key. Measured by `ekos profile run` / `ekos relationships discover`; everything inferred is a hypothesis until a person reviews it. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "table": { "type": "string", "description": "Table name (case-insensitive; `schema.table` accepted)" },
+                "column": { "type": "string", "description": "Only this column" },
+                "database": { "type": "string", "description": "Only this [[databases]] name" }
+            },
+            "required": ["table"]
+        }
+    })
+}
+
+/// RFC 0252 — read-only: inferred references, never a decision.
+fn relationships_tool_definition() -> Value {
+    json!({
+        "name": "ekos_relationships",
+        "description": "References between columns that the schema does not declare, inferred from code joins (`seed: code`), from value overlap in the data (`seed: data`) or both (strongest), each checked by an exact inclusion query: `verdict` clean_relationship / relationship_with_orphans / unclear / not_a_relationship, with orphan and population counts. `decision` is a person's review (confirm / reject / confirm-with-orphans) or undecided — an undecided one is a hypothesis, say so. Read-only: only a person decides, with `ekos review relationships`.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "table": { "type": "string", "description": "Only references with this child or parent table" },
+                "seed": { "type": "string", "enum": ["code", "data", "both"] },
+                "verdict": { "type": "string", "enum": ["clean_relationship", "relationship_with_orphans", "unclear", "not_a_relationship", "no_data"] }
+            }
+        }
+    })
 }
 
 /// RFC 0247 — read-only. A model reads what people wrote about an entity; it can never write one.
@@ -2023,6 +2064,16 @@ fn call_tool(
 
     if name == "ekos_ossie_export" {
         return ossie_export(config, workspace, cache, args);
+    }
+
+    if name == "ekos_profile" {
+        let ledger = cache.get(config, workspace)?;
+        return super::profile::agent_profile(config, workspace, ledger, args);
+    }
+
+    if name == "ekos_relationships" {
+        let ledger = cache.get(config, workspace)?;
+        return super::relationships::agent_list(config, workspace, ledger, args);
     }
 
     if name == "ekos_sql_check" {
@@ -3684,7 +3735,10 @@ mod tests {
                 // RFC 0245 — read-only.
                 "ekos_ossie_export",
                 // RFC 0247 — read-only.
-                "ekos_annotations"
+                "ekos_annotations",
+                // RFC 0252 — read-only.
+                "ekos_profile",
+                "ekos_relationships"
             ]
         );
         for tool in tools {

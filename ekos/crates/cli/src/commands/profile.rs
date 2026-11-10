@@ -695,3 +695,95 @@ mod tests {
         );
     }
 }
+
+/// MCP `ekos_profile` (read-only): one table's measured profile — what the catalog and the build
+/// measured (counts and non-personal bounds), its grain, how often each value code names occurs
+/// and what else the column holds (counts), and the inferred references touching it.
+///
+/// Scope: the table is looked up through `ledger`, which is the caller's scoped store; the
+/// latest run's file entries are returned only for tables that store returned.
+pub fn agent_profile(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn ekos_ledger::KnowledgeReader,
+    args: &Value,
+) -> Result<Value> {
+    let table = args
+        .get("table")
+        .and_then(Value::as_str)
+        .filter(|t| !t.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("`table` is required"))?;
+    let column = args
+        .get("column")
+        .and_then(Value::as_str)
+        .map(str::to_lowercase);
+    let database = args.get("database").and_then(Value::as_str);
+    let want = tail(table);
+    let objects = ledger.all_objects()?;
+    let tables: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| o.kind == ObjectKind::Table && s(o, "origin") == "live")
+        .filter(|o| o.name.to_lowercase() == want)
+        .filter(|o| database.is_none_or(|d| s(o, "database") == d))
+        .collect();
+    let signals = load(config, cwd);
+    let rel_current = super::relationships::current_ids(config, cwd);
+    let mut out = Vec::new();
+    for t in tables {
+        let (db, owner) = (s(t, "database"), s(t, "owner"));
+        let cols: Vec<Value> = columns(t)
+            .iter()
+            .filter(|c| {
+                column
+                    .as_deref()
+                    .is_none_or(|w| c["name"].as_str().is_some_and(|n| n.to_lowercase() == w))
+            })
+            .map(|c| json!({"name": c["name"], "data_type": c["data_type"], "profile": c["profile"]}))
+            .collect();
+        let on_table = |d: &str, o: &str, n: &str| d == db && o == owner && n == t.name;
+        let coverage: Vec<&ColumnSignal> = signals
+            .iter()
+            .flat_map(|sg| sg.columns.iter())
+            .filter(|c| on_table(&c.database, &c.owner, &c.table))
+            .filter(|c| {
+                column
+                    .as_deref()
+                    .is_none_or(|w| c.column.to_lowercase() == w)
+            })
+            .collect();
+        let grain: Option<&GrainSignal> = signals
+            .iter()
+            .flat_map(|sg| sg.grain.iter())
+            .find(|g| on_table(&g.database, &g.owner, &g.table));
+        let references: Vec<Value> = objects
+            .iter()
+            .filter(|o| matches!(&o.kind, ObjectKind::Custom(k) if k == super::relationships::KIND))
+            .filter(|o| rel_current.as_ref().is_none_or(|c| c.contains(&o.id.to_string())))
+            .filter(|o| s(o, "database") == db)
+            .filter(|o| {
+                (s(o, "child_owner") == owner && s(o, "child_table") == t.name)
+                    || (s(o, "parent_owner") == owner && s(o, "parent_table") == t.name)
+            })
+            .map(|o| json!({
+                "reference": o.name, "seed": o.properties.get("seed"), "verdict": o.properties.get("verdict"),
+                "orphans": o.properties.get("orphans"), "population": o.properties.get("population"),
+                "status": "hypothesis — a person decides it with `ekos review relationships`",
+            }))
+            .collect();
+        out.push(json!({
+            "database": db, "owner": owner, "table": t.name,
+            "rows": known_rows(t),
+            "table_profile": t.properties.get("profile"),
+            "columns": cols,
+            "grain": grain,
+            "code_values": coverage,
+            "references": references,
+        }));
+    }
+    Ok(json!({
+        "measured_at": signals.as_ref().map(|s| s.measured_at.clone()),
+        "dead_after_months": signals.as_ref().map(|s| s.dead_after_months),
+        "tables": out,
+        "note": if out.is_empty() { "no live table by that name (only tables read from [[databases]] have profiles)" } else { "counts only: no data value is ever stored; the only values shown are ones code names" },
+    }))
+}
