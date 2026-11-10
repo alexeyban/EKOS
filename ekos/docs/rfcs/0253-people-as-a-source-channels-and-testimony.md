@@ -289,3 +289,52 @@ configured; local mode works with Telegram and Slack without any public endpoint
 3. Should a testimony be able to target a person (an owner) as "ask X" — i.e. forwarding — or is that RFC 0254's
    routing alone?
 4. Rate limits per channel for proposals: one card per statement, or batch within a thread?
+
+## 9. Implementation log
+
+### 2026-11-10 — Phase 1: `ImageParser`, `SheetParser`, `SlidesParser`
+
+**What.** Three new parsers in `ekos/plugins/localdocs` (§3.3), registered by
+`LocalDocsObserver::with_settings`, which `ekos build` now uses:
+
+| Parser | Files | Sections |
+|---|---|---|
+| `ImageParser` (`image.rs`) | `.png`, `.jpg`/`.jpeg`, `.tif`/`.tiff`, `.webp` | one per paragraph Tesseract recognises (TSV output grouped by page/block/paragraph), each with `ocr_confidence` = the mean word confidence (0–100, one decimal); the document carries the mean of its sections |
+| `SheetParser` (`sheet.rs`, `calamine` 0.38 + `csv` 1.4) | `.xlsx`, `.csv` | each sheet (a CSV is one, unnamed) as a pipe table — header plus up to `[inbox] sheet-rows` rows — split at ~2,500 characters with the header repeated; also one `tables` entry per sheet |
+| `SlidesParser` (`slides.rs`, `ooxml.rs`) | `.pptx` | each slide, in `p:sldIdLst` order: title (section heading), body text, then `Notes:` and the speaker notes; slide-number/date/footer placeholders dropped; raster pictures (PNG/JPEG/TIFF/WebP) go to the observer's existing OCR path, vector pictures (EMF/WMF) do not |
+
+`OcrEngine` gained `recognize_blocks` (default: `recognize` split on blank lines, no confidence);
+`TesseractOcr` overrides it with `tesseract … tsv`. `TesseractOcr::with_languages` checks
+`[ocr] languages` (default `eng+rus+srp`) once against `tesseract --list-langs`, drops missing packs
+with one warning and falls back to `eng`, then to any installed pack. No Tesseract: an image is
+`ParseError::Skipped` — a warning, not counted as an error (the scanned-PDF path keeps its existing
+soft-skip). Config: `[ocr] languages`, `[ocr] images` (default `true`), `[inbox] sheet-rows`
+(default 200), all three in the build fingerprint key only when changed. `PIPELINE_LOGIC_VERSION`
+5 → 6; `LocalDocAnalyzerPass` `v4` → `v5` (`ocr_confidence` on `Document` and `Section`).
+
+**Redaction.** Every string the three parsers extract goes through
+`ekos_common::redaction::redact` (built-in RFC 0043 patterns) and the new
+`redact_personal_data` — e-mail addresses and Luhn-valid 13–19-digit card numbers (spaces and dashes
+allowed) → `[REDACTED:email]` / `[REDACTED:payment-card]` — before it is held; OCR text of images
+embedded in PDF/DOCX/PPTX gets the same. `ekos build` still redacts every artifact again with the
+workspace's `[security]` patterns.
+
+**Measured.** Fixture `plugins/localdocs/tests/fixtures/order-status-scan.png` (900×360, DejaVu Sans
+28 px, rendered with PIL; two paragraphs: "Order status codes / Status 7 means cancelled by the
+customer." and "Contact: jane.doe@example.com / Card: 4111 1111 1111 1111"), Tesseract 4.1.1 with `eng`
+only (this machine has no `rus`/`srp`): block confidences **95.5** and **84.8**. Tesseract read the
+card number as `4111 1111 11111111` (two groups run together) — still 16 Luhn-valid digits, still
+redacted; both the address and the number are absent from the parser's output.
+
+**Departures.**
+- The RFC names the setting `[inbox] sheet_rows`; config is kebab-case throughout, so it is
+  `sheet-rows`.
+- E-mail/card redaction is a separate function, not part of `redact`: adding it to the build-wide
+  baseline would rewrite commit authors and code everywhere. It is applied to what the new parsers
+  extract and to OCR text only. PDF/DOCX/HTML/e-mail prose is unchanged.
+- `[ocr] images` was added (not in the RFC) so a repository full of icons is not OCR'd on every
+  build; it does not affect images embedded in documents.
+- A slide's pictures are OCR'd into the document's `ocr_text` (the existing embedded-image path),
+  not into the slide's own section.
+- Not done here: the inbox source itself, URL snapshots, the intake reply (pages/sheets/confidence
+  counts) — other Phase 1 items.

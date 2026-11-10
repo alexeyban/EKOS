@@ -179,7 +179,7 @@ fn looks_like_email(s: &str) -> bool {
     }
 }
 
-fn looks_like_card(s: &str) -> bool {
+pub(crate) fn looks_like_card(s: &str) -> bool {
     let digits: Vec<u32> = s.chars().filter_map(|c| c.to_digit(10)).collect();
     if !(13..=19).contains(&digits.len()) {
         return false;

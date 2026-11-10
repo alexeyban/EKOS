@@ -98,7 +98,7 @@ async fn ingest_sources_async(
     // a real, silently-corrupting bug found before writing this, not after.
     // The explicit `world.sources` allowlist is instead recovered by
     // filtering the scan's results down to exactly the requested paths.
-    let observer = LocalDocsObserver::with_defaults(Arc::new(TesseractOcr));
+    let observer = LocalDocsObserver::with_defaults(Arc::new(TesseractOcr::new()));
     let scan_ctx = ScanContext::new(scenario_dir);
     let mut package = observer
         .scan(&scan_ctx)

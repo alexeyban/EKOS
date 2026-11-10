@@ -3,6 +3,15 @@
 ## Unreleased
 
 **Features**
+- **Images, spreadsheets and slides as documents** (RFC 0253 Phase 1). The local-documents connector
+  reads PNG, JPEG, TIFF and WebP through local Tesseract OCR (one section per recognised block, each
+  with its `ocr_confidence`), XLSX and CSV (each sheet a section: header plus up to `[inbox] sheet-rows`
+  rows, default 200) and PPTX (per slide: title, text and speaker notes; pictures through OCR).
+  `[ocr] languages` (default `eng+rus+srp`) falls back to the packs actually installed with a warning;
+  without Tesseract, images are skipped with a warning. E-mail addresses and payment card numbers in
+  recognised text, cells and slides are redacted before anything is held
+  (`ekos_common::redaction::redact_personal_data`). Pipeline logic version 6: the next `ekos build`
+  re-reads every source once.
 - **Profiles for every live database** (RFC 0252 §3.1). `[[databases]] profile = "p1" | "p2"` now works
   for PostgreSQL and ClickHouse as well as Oracle: P1 counts each table's rows, P2 scans each table once
   for exact null counts, number and date bounds and the longest text — never a text value, never a

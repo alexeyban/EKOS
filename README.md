@@ -118,7 +118,8 @@ builds plug extra connectors and MCP tools into.
 
 **Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs (live-verified against a real
 repo, 1,600 real issues/PRs — RFC 0062), Confluence, local documents
-(PDF/DOCX/text/Markdown/HTML/email — text, tables, image OCR), Pentaho Kettle (`.ktr`/`.kjb` —
+(PDF/DOCX/text/Markdown/HTML/email, XLSX/CSV sheets, PPTX slides and notes, PNG/JPEG/TIFF/WebP
+images through local Tesseract OCR — text, tables, image OCR; RFC 0253), Pentaho Kettle (`.ktr`/`.kjb` —
 RFC 0027), Python/PySpark source (real AST parsing, DataFrame chains recovered into the
 Transformation IR — RFC 0038/0040), Rust source (real AST parsing, real function-call graph —
 RFC 0041), Elixir and JavaScript/TypeScript source (real AST + `Calls` recovery — RFC 0081/0082),
@@ -1555,6 +1556,28 @@ surface — this is exactly the point: AI tools get real memory through the Runt
 talk to. `ekos ask` honors `[llm] provider = "ollama"` the same way `ekos recover` does — both
 commands select the LLM provider through one shared function, so a workspace configured for local
 Ollama works identically for recovery and for querying.
+
+**Images, spreadsheets and slides (RFC 0253).** The local-documents connector also reads:
+
+| Format | What becomes a section |
+|---|---|
+| PNG, JPEG, TIFF, WebP | one per block of text Tesseract recognises, with its `ocr_confidence` (0–100); the document carries the mean |
+| XLSX, CSV | each sheet (a CSV file is one), header plus up to `[inbox] sheet-rows` rows (default 200) as a pipe table, split into sections that each repeat the header |
+| PPTX | each slide: its title (the section heading), its text and its speaker notes; pictures go through OCR like a PDF's |
+
+Recognition is local only — an image is never sent to a model. E-mail addresses and payment card
+numbers (Luhn-checked) in recognised text, cells and slides are replaced with `[REDACTED:email]` /
+`[REDACTED:payment-card]` before anything is held, on top of the RFC 0043 secret patterns. Without
+`tesseract` on `PATH`, standalone images are skipped with a warning; the build never fails over it.
+
+```toml
+[ocr]
+languages = "eng+rus+srp"   # packs that are not installed are dropped with a warning
+images = true               # false: skip standalone image files (images inside documents are still read)
+
+[inbox]
+sheet-rows = 200
+```
 
 **Markdown is split by heading (RFC 0144).** Each heading becomes its own searchable `Section` named by
 its heading path (`docs/rfcs/0013-mcp-server.md § RFC 0013 — MCP Server › Motivation`) with a real

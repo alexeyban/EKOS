@@ -18,17 +18,24 @@ mod docx;
 mod email;
 mod front_matter;
 mod html;
+mod image;
 mod ocr;
+mod ooxml;
 mod pdf;
 mod sanitize;
+mod sheet;
+mod slides;
 mod text;
 
 pub use docx::DocxParser;
 pub use email::EmailParser;
 pub use html::HtmlParser;
-pub use ocr::{MockOcr, TesseractOcr};
+pub use image::ImageParser;
+pub use ocr::{DEFAULT_OCR_LANGUAGES, MockOcr, TesseractOcr};
 pub use pdf::PdfParser;
 pub use sanitize::sanitize_text;
+pub use sheet::{DEFAULT_SHEET_ROWS, SheetParser};
+pub use slides::SlidesParser;
 pub use text::TextParser;
 
 // ── Parsing types ───────────────────────────────────────────────────────
@@ -37,6 +44,51 @@ pub use text::TextParser;
 pub enum ImageFormat {
     Png,
     Jpeg,
+    /// RFC 0253.
+    Tiff,
+    /// RFC 0253.
+    Webp,
+}
+
+impl ImageFormat {
+    /// The format a file name's extension names; `None` for anything else.
+    pub fn from_name(name: &str) -> Option<Self> {
+        let ext = name.rsplit('.').next()?.to_ascii_lowercase();
+        match ext.as_str() {
+            "png" => Some(Self::Png),
+            "jpg" | "jpeg" => Some(Self::Jpeg),
+            "tif" | "tiff" => Some(Self::Tiff),
+            "webp" => Some(Self::Webp),
+            _ => None,
+        }
+    }
+
+    /// The file extension an OCR engine is given the image under.
+    pub fn extension(self) -> &'static str {
+        match self {
+            Self::Png => "png",
+            Self::Jpeg => "jpg",
+            Self::Tiff => "tif",
+            Self::Webp => "webp",
+        }
+    }
+}
+
+/// RFC 0253: one block of text recognised in an image, with the engine's confidence (0–100)
+/// when it gives one.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OcrBlock {
+    pub text: String,
+    pub confidence: Option<f32>,
+}
+
+/// RFC 0043 + RFC 0253: the redaction every parser of material people send applies to each
+/// extracted string before it is held — the secret shapes of [`ekos_common::redaction::redact`]
+/// and the personal data of [`ekos_common::redaction::redact_personal_data`]. `ekos build`
+/// redacts every artifact again with the workspace's own `[security]` patterns.
+pub(crate) fn scrub(text: &str) -> String {
+    use ekos_common::redaction::{RedactionConfig, redact, redact_personal_data};
+    redact_personal_data(&redact(text, &RedactionConfig::default()))
 }
 
 #[derive(Debug, Clone)]
@@ -73,6 +125,9 @@ pub struct DocumentSection {
     /// Markdown records it today.
     pub line_start: Option<u32>,
     pub line_end: Option<u32>,
+    /// RFC 0253: the OCR engine's confidence (0–100) for text recognised in an image. `None` for
+    /// text read from the file itself.
+    pub ocr_confidence: Option<f32>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -91,6 +146,10 @@ pub struct ParsedDocument {
 pub enum ParseError {
     #[error("parse error: {0}")]
     Malformed(String),
+    /// RFC 0253: the file is fine but cannot be read on this machine (an image with no OCR
+    /// engine installed). Skipped with a warning; not counted as an error.
+    #[error("skipped: {0}")]
+    Skipped(String),
 }
 
 /// Format-specific document parser. Constructor-injected into
@@ -125,6 +184,22 @@ pub enum OcrError {
 /// mock client plays the same role for.
 pub trait OcrEngine: Send + Sync {
     fn recognize(&self, image: &EmbeddedImage) -> Result<String, OcrError>;
+
+    /// RFC 0253: the recognised text as blocks (paragraphs), each with a confidence when the
+    /// engine reports one. Defaults to [`OcrEngine::recognize`]'s text split on blank lines,
+    /// without confidence.
+    fn recognize_blocks(&self, image: &EmbeddedImage) -> Result<Vec<OcrBlock>, OcrError> {
+        let text = self.recognize(image)?;
+        Ok(text
+            .split("\n\n")
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(|t| OcrBlock {
+                text: t.to_string(),
+                confidence: None,
+            })
+            .collect())
+    }
 }
 
 /// Cap on the excerpt captured from a document's extracted text, same
@@ -152,6 +227,24 @@ const DOCX_CHUNK_CHAR_BUDGET: usize = 2500;
 /// structure to chunk on — plain text, Markdown, HTML, email (RFC 0025).
 const TEXT_CHUNK_CHAR_BUDGET: usize = 2500;
 
+/// RFC 0253: what `[ocr]` and `[inbox]` change about how documents are read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalDocsSettings {
+    /// Read standalone image files through OCR (`[ocr] images`).
+    pub images: bool,
+    /// The most rows of a sheet or CSV file read as text (`[inbox] sheet-rows`).
+    pub sheet_rows: usize,
+}
+
+impl Default for LocalDocsSettings {
+    fn default() -> Self {
+        Self {
+            images: true,
+            sheet_rows: DEFAULT_SHEET_ROWS,
+        }
+    }
+}
+
 /// Observer emitting one `ObservationArtifact` per supported document file.
 pub struct LocalDocsObserver {
     parsers: Vec<Arc<dyn DocumentParser>>,
@@ -163,20 +256,31 @@ impl LocalDocsObserver {
         Self { parsers, ocr }
     }
 
-    /// Convenience constructor wiring every real parser this plugin ships.
+    /// Convenience constructor wiring every real parser this plugin ships, with default settings.
     pub fn with_defaults(ocr: Arc<dyn OcrEngine>) -> Self {
-        Self::new(
-            vec![
-                Arc::new(PdfParser),
-                Arc::new(DocxParser),
-                Arc::new(TextParser::new("txt")),
-                Arc::new(TextParser::new("md")),
-                Arc::new(HtmlParser::new("html")),
-                Arc::new(HtmlParser::new("htm")),
-                Arc::new(EmailParser),
-            ],
-            ocr,
-        )
+        Self::with_settings(ocr, &LocalDocsSettings::default())
+    }
+
+    /// Every real parser this plugin ships, configured by `settings` (RFC 0253).
+    pub fn with_settings(ocr: Arc<dyn OcrEngine>, settings: &LocalDocsSettings) -> Self {
+        let mut parsers: Vec<Arc<dyn DocumentParser>> = vec![
+            Arc::new(PdfParser),
+            Arc::new(DocxParser),
+            Arc::new(TextParser::new("txt")),
+            Arc::new(TextParser::new("md")),
+            Arc::new(HtmlParser::new("html")),
+            Arc::new(HtmlParser::new("htm")),
+            Arc::new(EmailParser),
+            Arc::new(SheetParser::new("xlsx", settings.sheet_rows)),
+            Arc::new(SheetParser::new("csv", settings.sheet_rows)),
+            Arc::new(SlidesParser),
+        ];
+        if settings.images {
+            for ext in image::IMAGE_EXTENSIONS {
+                parsers.push(Arc::new(ImageParser::new(ext, ocr.clone())));
+            }
+        }
+        Self::new(parsers, ocr)
     }
 
     fn parser_for(&self, ext: &str) -> Option<&Arc<dyn DocumentParser>> {
@@ -200,7 +304,8 @@ impl LocalDocsObserver {
         for image in images {
             match self.ocr.recognize(image) {
                 Ok(text) if !text.trim().is_empty() => {
-                    let clean = sanitize_text(text.trim());
+                    // RFC 0253: a scan or screenshot carries personal data as often as prose.
+                    let clean = sanitize_text(&scrub(text.trim()));
                     *sanitized_count += clean.removed;
                     if !ocr_text.is_empty() {
                         ocr_text.push('\n');
@@ -349,7 +454,21 @@ fn section_json(s: &DocumentSection, sanitized_count: &mut usize) -> serde_json:
         section["line_start"] = serde_json::json!(start);
         section["line_end"] = serde_json::json!(end);
     }
+    // RFC 0253: only on text recognised in an image.
+    if let Some(confidence) = s.ocr_confidence {
+        section["ocr_confidence"] = serde_json::json!(confidence);
+    }
     section
+}
+
+/// RFC 0253: the mean OCR confidence over the sections that have one, one decimal.
+fn mean_ocr_confidence(sections: &[DocumentSection]) -> Option<f32> {
+    let values: Vec<f32> = sections.iter().filter_map(|s| s.ocr_confidence).collect();
+    if values.is_empty() {
+        return None;
+    }
+    let mean = values.iter().sum::<f32>() / values.len() as f32;
+    Some((mean * 10.0).round() / 10.0)
 }
 
 #[async_trait]
@@ -409,6 +528,10 @@ impl Observer for LocalDocsObserver {
 
             let parsed = match parser.parse(&content) {
                 Ok(p) => p,
+                Err(ParseError::Skipped(why)) => {
+                    tracing::warn!("localdocs observer: skipping {}: {why}", abs_path.display());
+                    continue;
+                }
                 Err(err) => {
                     tracing::warn!(
                         "localdocs observer: cannot parse {}: {err}",
@@ -463,6 +586,9 @@ impl Observer for LocalDocsObserver {
             });
             if !ocr_text.is_empty() {
                 data["ocr_text"] = serde_json::Value::String(ocr_text);
+            }
+            if let Some(confidence) = mean_ocr_confidence(&parsed.sections) {
+                data["ocr_confidence"] = serde_json::json!(confidence);
             }
             // RFC 0221: only when present, so other documents' artifacts stay byte-identical.
             if !parsed.front_matter.is_empty() {
@@ -993,7 +1119,131 @@ mod tests {
                 "no parser registered for .{ext}"
             );
         }
-        assert!(observer.parser_for("xlsx").is_none());
+        assert!(observer.parser_for("odt").is_none());
+    }
+
+    // ── RFC 0253: images, sheets, slides ────────────────────────────────
+
+    #[test]
+    fn with_defaults_registers_the_rfc_0253_formats() {
+        let observer = LocalDocsObserver::with_defaults(silent_ocr());
+        for ext in [
+            "png", "jpg", "jpeg", "tif", "tiff", "webp", "xlsx", "csv", "pptx",
+        ] {
+            assert!(observer.parser_for(ext).is_some(), "no parser for .{ext}");
+        }
+        let no_images = LocalDocsObserver::with_settings(
+            silent_ocr(),
+            &LocalDocsSettings {
+                images: false,
+                ..Default::default()
+            },
+        );
+        assert!(no_images.parser_for("png").is_none());
+        assert!(no_images.parser_for("xlsx").is_some());
+    }
+
+    struct BlockOcr;
+    impl OcrEngine for BlockOcr {
+        fn recognize(&self, _: &EmbeddedImage) -> Result<String, OcrError> {
+            Ok("embedded picture text".into())
+        }
+        fn recognize_blocks(&self, _: &EmbeddedImage) -> Result<Vec<OcrBlock>, OcrError> {
+            Ok(vec![
+                OcrBlock {
+                    text: "Status 7 means cancelled".into(),
+                    confidence: Some(95.0),
+                },
+                OcrBlock {
+                    text: "Contact: jane.doe@example.com".into(),
+                    confidence: Some(84.0),
+                },
+            ])
+        }
+    }
+
+    #[tokio::test]
+    async fn an_image_becomes_a_document_with_confidence_per_section_and_overall() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("screen.png"),
+            include_bytes!("../tests/fixtures/order-status-scan.png"),
+        )
+        .unwrap();
+        let pkg = LocalDocsObserver::with_defaults(Arc::new(BlockOcr))
+            .scan(&ScanContext::new(dir.path()))
+            .await
+            .unwrap();
+        let data = &pkg.artifacts[0].content.data;
+        assert_eq!(data["doc_format"], "png");
+        assert_eq!(data["sections"][0]["ocr_confidence"], 95.0);
+        assert_eq!(data["sections"][1]["ocr_confidence"], 84.0);
+        assert_eq!(data["ocr_confidence"], 89.5);
+        let raw = data.to_string();
+        assert!(!raw.contains("jane.doe"), "{raw}");
+        assert!(raw.contains("[REDACTED:email]"));
+    }
+
+    #[tokio::test]
+    async fn without_an_ocr_engine_an_image_is_skipped_not_counted_as_an_error() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("screen.png"), b"png").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), b"plain notes").unwrap();
+        let pkg = LocalDocsObserver::with_defaults(Arc::new(UnavailableOcr))
+            .scan(&ScanContext::new(dir.path()))
+            .await
+            .unwrap();
+        assert_eq!(pkg.len(), 1);
+        assert_eq!(pkg.meta.error_count, 0);
+    }
+
+    #[tokio::test]
+    async fn a_workbook_and_a_deck_ride_through_the_observer() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("codes.xlsx"),
+            sheet::tests::workbook(&[(
+                "Orders",
+                vec![vec!["status", "meaning"], vec!["7", "cancelled"]],
+            )]),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("handover.pptx"),
+            slides::tests::deck(b"picture"),
+        )
+        .unwrap();
+        let pkg = LocalDocsObserver::with_defaults(Arc::new(BlockOcr))
+            .scan(&ScanContext::new(dir.path()))
+            .await
+            .unwrap();
+        assert_eq!(pkg.meta.error_count, 0);
+        let by_format = |f: &str| {
+            pkg.artifacts
+                .iter()
+                .find(|a| a.content.data["doc_format"] == f)
+                .unwrap()
+                .content
+                .data
+                .clone()
+        };
+        let xlsx = by_format("xlsx");
+        assert_eq!(xlsx["sections"][0]["heading"], "Orders");
+        assert_eq!(
+            xlsx["sections"][0]["text"],
+            "| status | meaning |\n| 7 | cancelled |"
+        );
+        let pptx = by_format("pptx");
+        assert_eq!(pptx["page_count"], 2);
+        assert!(
+            pptx["sections"][1]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Notes:")
+        );
+        // The deck's picture went through OCR.
+        assert_eq!(pptx["ocr_text"], "embedded picture text");
+        assert_eq!(pptx["ocr_image_count"], 1);
     }
 
     #[test]

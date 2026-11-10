@@ -39,7 +39,10 @@ use sha2::{Digest, Sha256};
 ///   text of XML password elements, which `.ktr`/`.kjb` artifacts used to carry.
 /// - **v5** (RFC 0221, 2026-10-24): `ekos-plugin-localdocs` lifts Markdown front matter out of the
 ///   text into a `front_matter` field.
-pub const PIPELINE_LOGIC_VERSION: u32 = 5;
+/// - **v6** (RFC 0253, 2026-11-10): `ekos-plugin-localdocs` reads images (OCR, per-block
+///   `ocr_confidence`), XLSX/CSV sheets and PPTX slides, and redacts e-mail addresses and payment
+///   card numbers from text recognised in images.
+pub const PIPELINE_LOGIC_VERSION: u32 = 6;
 
 /// SHA-256 content hash used to address artifacts and ledger entries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
