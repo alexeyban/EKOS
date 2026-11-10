@@ -125,8 +125,8 @@ fn observer_settings_key(config: &EkosConfig) -> String {
     if config.ocr.languages != defaults.0.languages {
         key.push_str(&format!("+ocr{}", config.ocr.languages));
     }
-    if !config.ocr.images {
-        key.push_str("+noimages");
+    if config.ocr.images {
+        key.push_str("+images");
     }
     if config.inbox.sheet_rows != defaults.1.sheet_rows {
         key.push_str(&format!("+rows{}", config.inbox.sheet_rows));
@@ -1123,9 +1123,9 @@ mod tests {
         let mut config = EkosConfig::default();
         config.ocr.languages = "eng".into();
         assert_eq!(observer_settings_key(&config), "+ocreng");
-        config.ocr.images = false;
+        config.ocr.images = true;
         config.inbox.sheet_rows = 50;
-        assert_eq!(observer_settings_key(&config), "+ocreng+noimages+rows50");
+        assert_eq!(observer_settings_key(&config), "+ocreng+images+rows50");
     }
 
     #[test]

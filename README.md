@@ -1573,7 +1573,8 @@ numbers (Luhn-checked) in recognised text, cells and slides are replaced with `[
 ```toml
 [ocr]
 languages = "eng+rus+srp"   # packs that are not installed are dropped with a warning
-images = true               # false: skip standalone image files (images inside documents are still read)
+images = false              # default; true: also OCR standalone image files in the observed tree
+                            # (images inside documents and everything in the inbox are read either way)
 
 [inbox]
 sheet-rows = 200

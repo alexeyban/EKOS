@@ -1087,9 +1087,11 @@ pub struct OcrConfig {
     /// are dropped with a warning; the build never fails over a missing pack.
     #[serde(default = "default_ocr_languages")]
     pub languages: String,
-    /// Read standalone image files (PNG, JPEG, TIFF, WebP) as documents. Default on; turn off for
-    /// a repository full of icons. Images embedded in PDF/DOCX/PPTX are read either way.
-    #[serde(default = "default_true")]
+    /// Read standalone image files (PNG, JPEG, TIFF, WebP) in the observed tree as documents.
+    /// Default off: a repository's images are mostly icons and screenshots, and OCR on every build
+    /// is slow. The inbox (RFC 0253) reads images whatever this says. Images embedded in
+    /// PDF/DOCX/PPTX are read either way.
+    #[serde(default)]
     pub images: bool,
 }
 
@@ -1101,7 +1103,7 @@ impl Default for OcrConfig {
     fn default() -> Self {
         Self {
             languages: default_ocr_languages(),
-            images: true,
+            images: false,
         }
     }
 }
