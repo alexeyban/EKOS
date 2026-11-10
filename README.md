@@ -977,6 +977,60 @@ scripts/wiki-snapshot.py --xml export.xml --out ~/wiki-snapshot --licence "CC BY
 ekos source add wiki --path ~/wiki-snapshot
 ```
 
+### What the data says about the code (RFC 0252)
+
+After `ekos commit`, `ekos profile run` measures every `[[databases]]` entry with `profile = "p1"` or
+`"p2"` — counts only; the only values it ever handles are the literals code already names:
+
+```bash
+ekos profile run                       # code-value usage, first/last seen, implied nulls, keys, history
+ekos profile show account              # what was measured for one table
+ekos relationships discover --cross-database   # references the data shows, verified by inclusion
+ekos review relationships "invoice.parts_id → partstax.parts_id" --confirm --as ana
+```
+
+- Each `EnumMeaning` gains `data_usage` (rows, share, first/last month, `dead` after 24 months without
+  a row, `never_seen`) and `implies` (`status = 7 ⇒ cancelled_at IS NOT NULL`); a column holding values
+  no code names gets a `data_only_values` gap (counts, never the values); each table a `GrainCandidate`
+  (declared key or a levelwise key search); `WriteBehaviour` gains `data_history` (open validity
+  periods, set soft-delete flags). Re-profiling never stales a review.
+- `relationships discover` signs every comparable column with a salted MinHash **computed inside the
+  database**, proposes references to unique columns, adds every code join, and checks each with an
+  exact inclusion query: `FkCandidate`s with `seed: code | data | both` and a verdict, reviewed under
+  the optional subject `relationships`. Across databases, overlapping keys become `value_overlap` on a
+  `SameAs` candidate — never a merge.
+- MCP: `ekos_profile`, `ekos_relationships` (read-only). Works for Oracle, PostgreSQL, ClickHouse,
+  SQL Server and Informix (no signatures on Informix: no MD5 there).
+
+### Open questions, the inbox and testimony (RFC 0253 / 0254)
+
+What nobody can explain becomes a question for the person likely to know; what people answer is
+recorded as testimony — evidence with who, where and when, never a decision:
+
+```bash
+ekos questions list                     # derived at every commit; status computed on read
+ekos questions show e595d49f --reveal   # the unexplained values, live, for you only (never stored)
+ekos questions export --format md --out questionnaire.md
+ekos check code-vs-data                 # CASE without ELSE that misses values, dead branches, …
+ekos inbox add spec.pdf --as ivana      # files and links people send → the source `inbox`
+ekos testimony add --as ivana --text "Q is owner capital" \
+    --about "account.category = 'Q'" --meaning "owner capital" --answers e595d49f
+ekos probe --spec '{"database":"erp","table":"orders","template":"null_by","column":"cancelled_at","by":"status"}'
+```
+
+- Questions: `[[questions.owners]]` (`pattern`, `people`), `[questions] reviewers`,
+  `per-person-per-day`, `min-cell`; `reassign` / `decline` ("not me") / `mute`.
+- Inbox: originals stay outside the ledger (`<state>/inbox/`), pending until `ekos inbox accept`
+  when sent with `--pending` or under `[inbox] require-accept`; links are fetched once, never from a
+  private or loopback address unless in `[inbox] allow-hosts`; every text is scrubbed of secrets,
+  e-mail addresses and card numbers before it is compiled.
+- Testimony: a stated meaning is a meaning source `testimony`; one that disagrees with code is a
+  `testimony_mismatch` conflict. `testimony add`/`withdraw`, `inbox accept`/`purge` are human-only.
+- Probes (`[probe] mcp = true` to offer `ekos_probe` to agents): closed aggregate templates, personal
+  columns counted only, small cells hidden, budgeted, audited without results. The
+  `.claude/agents/source-explorer.md` agent works hypothesis → probe → proposals for a person.
+- MCP: `ekos_questions`, `ekos_testimony`, `ekos_probe` (opt-in) — all read-only.
+
 ### Review and sign-off (RFC 0213)
 
 Before a lakehouse is built from a source estate, a person agrees to its source model. `ekos review list` shows six

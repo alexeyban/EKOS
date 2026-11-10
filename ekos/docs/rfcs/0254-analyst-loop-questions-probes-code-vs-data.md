@@ -313,3 +313,28 @@ passport section; a meaning from an unlicensed source is left out; output indepe
 
 Not built here: `ekos questions export` as the workshop questionnaire is §3.6's second half (shipped with the
 questions commands); growth over time in *What a row is* (no measurement records it yet); a per-month usage chart.
+
+### 2026-11-10 — §3.1 questions, §3.2 reveal, §3.3 routing, §3.4 code vs data, §3.5 probe
+
+| Part | What |
+|---|---|
+| `semantic::questions` | keyed `OpenQuestion` (origin kind + id + type) from current origins: unexplained values (`meaning_of_value`), data-only values (`unexplained_values`), dead codes, open conflicts (`which_is_right`; `code_vs_data` ones `logic_vs_data` with a text per check), unclear references, keyless non-empty tables, stale annotations (`still_true`). Priority: blocking, then dependents, then row share; out-of-scope tables ask nothing; the same text for two copies of a table is asked once (`also_origins`). Status computed on read: `closed` (origin decided), `answered` (active testimony), `obsolete` (not raised by the latest derivation), else `open` |
+| routing | `[[questions.owners]]` (table / `table.column` globs → people), then git-blame authors of the origin (RFC 0170 `RationaleLink`), then `[questions] reviewers`. `reassign`, `decline` ("not me"), `mute` keep their state in `<state>/questions/routing.json` — operational, not knowledge |
+| CLI | `ekos questions list \| show [--reveal] \| export md\|csv\|json \| digest \| reassign \| decline \| mute`; derived at every `ekos commit` and after `profile run` / `relationships discover` |
+| reveal | one live `GROUP BY` of the values no code names, for the reader only: never for a personal column (by name or a confirmed PII decision), cells under `[questions] min-cell` shown as `<N`, never stored or logged |
+| `semantic::code_vs_data` | `predicate_misses_values` (a `CASE` **without `ELSE`**, or a Pentaho step's `IN` list, against the rows holding other values), `dead_branch` (no row, or `dead`), `range_assumption` (a constant outside a P2 profile's bounds), `lookup_not_unique` (a code-seeded reference to a non-unique column) as RFC 0172 conflicts with a `check` and `measured`; claims carry no counts. `ekos check code-vs-data` recomputes |
+| `ekos probe` / `ekos_probe` | closed templates (`distribution`, `cooccurrence`, `null_by`, `orphans`, `over_time`, `count`), `where` type-checked against the column; scoped lookup; `[probe] max-rows` and a daily call budget counted before running; personal columns counts only; small cells hidden; audit without results; MCP opt-in (`[probe] mcp`). `.claude/agents/source-explorer.md` (no write tool — tested) |
+
+**Departures.** (a) Predicate sites now record whether a `CASE` has an `ELSE` (`case_else`,
+`predicates/4`): measured live, every LedgerSMB `CASE` that enumerates `account.category` has an
+`ELSE` (sign flips), so the first version's 15 `predicate_misses_values` findings were all false.
+(b) `null_not_handled` and `cast_will_fail` are not built: predicate sites carry no join-column or cast
+facts yet. (c) The probe's cost guard is the row estimate, not `EXPLAIN`. (d) `export` writes md/csv/
+json; docx/xlsx are not built. (e) Digest delivery through channels is the console's.
+
+**Measured** on the LedgerSMB scratch project: 36 open questions after a commit (19 `logic_vs_data`, 13
+`meaning_of_value`, 2 `unexplained_values`, 2 `which_is_right`); 31 code-vs-data findings (30
+`dead_branch` — e.g. `order__combine` handles `oe_class_id` 2, 3, 4, which no row of the fixture data
+holds — and 1 `lookup_not_unique`: code joins `entity.id → entity_credit_account.entity_id`). Probes:
+`account_link.description` distribution (12 rows `AP_amount`; smaller cells hidden), `null_by` equal
+to the data, an injected `"1 OR 1=1"` refused by type, the writable role refused.

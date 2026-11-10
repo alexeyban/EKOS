@@ -234,6 +234,30 @@ dependency-scan block in `recover.rs` are a second, separate raw-content entry p
 one) independently run RFC 0043's redaction pass before any content is persisted — see `common`'s
 crate-map entry.
 
+### The analyst loop (RFC 0252–0254)
+
+- **Data signals** (RFC 0252): `observation-sdk::{signals,overlap,probe}` are pure SQL builders per
+  `Flavor` (Oracle, PostgreSQL, ClickHouse, SQL Server, Informix) — a new flavor needs an arm in all
+  three plus `profile.rs`. **No data value may leave the database except a code literal**: coverage
+  queries return a literal or `NULL`; signatures are MD5 minimums computed in SQL with the project salt
+  (`<state>/profile/salt`). `ekos profile run` (`commands/profile.rs`) and `ekos relationships discover`
+  (`commands/relationships.rs`) run through `sql_check::ProbeWorker` (the read-only probe session) and
+  write `<state>/profile/{current,relationships}.json`; readers filter `GrainCandidate`/`FkCandidate`
+  by those ids. `semantic::data_usage::fold` runs inside `business_semantics::synthesize`
+  (`SemanticsConfig::data`); `data_usage`/`implies` are not signed fields and a gap's evidence carries
+  no counts — keep it that way or every re-profile stales reviews. Review subject `relationships` is
+  **optional** (`Subject::is_optional`): listed and gate-required only when it has items.
+- **Questions** (RFC 0254): `semantic::questions::derive` (pure; status computed on read by `status`)
+  and `semantic::code_vs_data::detect` run in `commands/questions.rs::commit_step` at the end of
+  `ekos commit` and after profile/discover; `code_vs_data` conflicts replace their predecessors in the
+  conflicts manifest (`conflicts::replace_code_vs_data`). Routing state is a file, not the ledger.
+- **People** (RFC 0253): `commands/inbox.rs` (originals under `<state>/inbox`, accepted material is
+  the source `inbox`, observed by the documents connector alone and scrubbed with
+  `redact_personal_json` in `build.rs`) and `commands/testimony.rs` (the only writer of `Testimony`;
+  human-only with `inbox accept/purge`). New MCP tools `ekos_profile`, `ekos_relationships`,
+  `ekos_questions`, `ekos_testimony`, `ekos_probe` (opt-in) are all read-only and in `SCOPED_TOOLS`
+  (keep `web/api/app/mcp_policy.py` in step).
+
 ### Key invariants (enforced by review, not just convention)
 
 - The ledger is **append-only** — knowledge is never modified in place.

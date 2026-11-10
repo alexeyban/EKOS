@@ -213,56 +213,50 @@ fn mismatch(
     ))
 }
 
-/// `ekos testimony add` — human-only.
-pub fn add(config: &EkosConfig, cwd: &Path, st: Statement<'_>, json_out: bool) -> Result<()> {
-    if st.text.trim().is_empty() {
-        bail!("a testimony needs the person's text");
-    }
-    let ledger = super::store::open_store(config, cwd)?;
-    let objects = ledger.all_objects()?;
-    let about: Vec<&KirObject> = st
-        .about
+/// The full id of the question `q` (an id or prefix) names.
+fn resolve_answer(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeReader,
+    q: Option<&str>,
+) -> Result<Option<String>> {
+    let Some(q) = q else { return Ok(None) };
+    let all = super::questions::read(
+        config,
+        cwd,
+        ledger,
+        &super::questions::Filter {
+            status: Some("all"),
+            ..Default::default()
+        },
+    )?;
+    let m: Vec<&Value> = all
         .iter()
-        .map(|a| resolve(&objects, a))
-        .collect::<Result<_>>()?;
-    let answers = match st.answers {
-        Some(q) => {
-            let all = super::questions::read(
-                config,
-                cwd,
-                &*ledger,
-                &super::questions::Filter {
-                    status: Some("all"),
-                    ..Default::default()
-                },
-            )?;
-            let m: Vec<&Value> = all
-                .iter()
-                .filter(|x| x["id"].as_str().is_some_and(|i| i.starts_with(q)))
-                .collect();
-            match m.as_slice() {
-                [one] => Some(one["id"].as_str().unwrap_or("").to_string()),
-                [] => bail!("no question {q}"),
-                _ => bail!("{q} names several questions"),
-            }
-        }
-        None => None,
-    };
-    if st.meaning.is_some()
-        && !about
-            .iter()
-            .any(|a| matches!(&a.kind, ObjectKind::Custom(k) if k == "EnumMeaning"))
-    {
-        bail!(
-            "--meaning needs --about naming the code value (an EnumMeaning, e.g. \"orders.status = 7\")"
-        );
+        .filter(|x| x["id"].as_str().is_some_and(|i| i.starts_with(q)))
+        .collect();
+    match m.as_slice() {
+        [one] => Ok(Some(one["id"].as_str().unwrap_or("").to_string())),
+        [] => bail!("no question {q}"),
+        _ => bail!("{q} names several questions"),
     }
-    let (mut o, ev, links) = build(&st, &about, answers, &config.redaction_config());
-    // RFC 0254 §3.5: a cited probe is re-measured now; only its counts are kept.
+}
+
+fn is_enum_meaning(o: &KirObject) -> bool {
+    matches!(&o.kind, ObjectKind::Custom(k) if k == "EnumMeaning")
+}
+
+/// RFC 0254 §3.5: each cited probe is re-measured now; only its counts are kept, as evidence.
+fn attach_probes(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn ekos_ledger::KnowledgeStore,
+    o: &mut KirObject,
+    st: &Statement<'_>,
+) -> Result<()> {
     for (i, spec) in st.probes.iter().enumerate() {
         let args: Value =
             serde_json::from_str(spec).map_err(|e| anyhow!("--probe is not JSON: {e}"))?;
-        let r = super::probe::run(config, cwd, &*ledger, &args, st.by)?;
+        let r = super::probe::run(config, cwd, ledger, &args, st.by)?;
         let mut pe = KirEvidence::new(
             SourceLocation {
                 path: format!(
@@ -279,37 +273,70 @@ pub fn add(config: &EkosConfig, cwd: &Path, st: Statement<'_>, json_out: bool) -
         ledger.append_evidence(&pe)?;
         o.evidence.push(pe.id);
     }
+    Ok(())
+}
+
+/// `testimony_mismatch` conflicts for a stated meaning; returns how many.
+fn record_mismatches(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn ekos_ledger::KnowledgeStore,
+    about: &[&KirObject],
+    o: &KirObject,
+    meaning: Option<&str>,
+) -> Result<usize> {
+    let Some(meaning) = meaning else { return Ok(0) };
+    let mut n = 0;
+    for e in about.iter().filter(|a| is_enum_meaning(a)) {
+        let Some(g) = mismatch(e, o, meaning) else {
+            continue;
+        };
+        for ev in &g.evidence {
+            ledger.append_evidence(ev)?;
+        }
+        for c in &g.objects {
+            ledger.append_object(c)?;
+        }
+        for r in &g.relationships {
+            ledger.append_relationship(r)?;
+        }
+        super::conflicts::add_current(
+            config,
+            cwd,
+            ledger,
+            g.objects.iter().map(|c| c.id.to_string()),
+        )?;
+        n += g.objects.len();
+    }
+    Ok(n)
+}
+
+/// `ekos testimony add` — human-only.
+pub fn add(config: &EkosConfig, cwd: &Path, st: Statement<'_>, json_out: bool) -> Result<()> {
+    if st.text.trim().is_empty() {
+        bail!("a testimony needs the person's text");
+    }
+    let ledger = super::store::open_store(config, cwd)?;
+    let objects = ledger.all_objects()?;
+    let about: Vec<&KirObject> = st
+        .about
+        .iter()
+        .map(|a| resolve(&objects, a))
+        .collect::<Result<_>>()?;
+    let answers = resolve_answer(config, cwd, &*ledger, st.answers)?;
+    if st.meaning.is_some() && !about.iter().any(|a| is_enum_meaning(a)) {
+        bail!(
+            "--meaning needs --about naming the code value (an EnumMeaning, e.g. \"orders.status = 7\")"
+        );
+    }
+    let (mut o, ev, links) = build(&st, &about, answers, &config.redaction_config());
+    attach_probes(config, cwd, &*ledger, &mut o, &st)?;
     ledger.append_evidence(&ev)?;
     ledger.append_object(&o)?;
     for r in &links {
         ledger.append_relationship(r)?;
     }
-    let mut conflicts = 0;
-    if let Some(meaning) = st.meaning {
-        for e in about
-            .iter()
-            .filter(|a| matches!(&a.kind, ObjectKind::Custom(k) if k == "EnumMeaning"))
-        {
-            if let Some(g) = mismatch(e, &o, meaning) {
-                for ev in &g.evidence {
-                    ledger.append_evidence(ev)?;
-                }
-                for c in &g.objects {
-                    ledger.append_object(c)?;
-                }
-                for r in &g.relationships {
-                    ledger.append_relationship(r)?;
-                }
-                super::conflicts::add_current(
-                    config,
-                    cwd,
-                    ledger.as_ref(),
-                    g.objects.iter().map(|c| c.id.to_string()),
-                )?;
-                conflicts += g.objects.len();
-            }
-        }
-    }
+    let conflicts = record_mismatches(config, cwd, &*ledger, &about, &o, st.meaning)?;
     let out = json!({
         "id": o.id.to_string(), "author": st.by, "answers": o.properties.get("answers"),
         "about": o.properties.get("about"), "conflicts": conflicts,
@@ -317,22 +344,22 @@ pub fn add(config: &EkosConfig, cwd: &Path, st: Statement<'_>, json_out: bool) -
     });
     if json_out {
         println!("{}", serde_json::to_string_pretty(&out)?);
-    } else {
+        return Ok(());
+    }
+    println!(
+        "Recorded testimony {} by {}.",
+        &out["id"].as_str().unwrap_or("")[..8],
+        st.by
+    );
+    if conflicts > 0 {
         println!(
-            "Recorded testimony {} by {}.",
-            &out["id"].as_str().unwrap_or("")[..8],
-            st.by
+            "  It disagrees with what code says: {conflicts} conflict(s) to review (`ekos conflicts list`)."
         );
-        if conflicts > 0 {
-            println!(
-                "  It disagrees with what code says: {conflicts} conflict(s) to review (`ekos conflicts list`)."
-            );
-        }
-        if st.meaning.is_some() {
-            println!(
-                "  The meaning reaches the code value at the next `ekos commit` (meaning source: testimony)."
-            );
-        }
+    }
+    if st.meaning.is_some() {
+        println!(
+            "  The meaning reaches the code value at the next `ekos commit` (meaning source: testimony)."
+        );
     }
     Ok(())
 }

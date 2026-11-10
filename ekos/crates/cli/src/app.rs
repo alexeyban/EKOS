@@ -1434,6 +1434,8 @@ enum InboxCommands {
     },
 }
 
+// Parsed once per process; boxing a clap variant buys nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum TestimonyCommands {
     /// Record what a person said, in their words (human-only)

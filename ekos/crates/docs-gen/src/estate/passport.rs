@@ -573,14 +573,13 @@ fn code_row(m: &Model, o: &KirObject, t: &KirObject) -> Vec<String> {
         in_data.push_str(&format!("<br>implies {} {}", code(col), cell(&then)));
     }
     let mut ev = Vec::new();
-    if let Some(b) = best {
-        if let Some(p) = b
+    if let Some(b) = best
+        && let Some(p) = b
             .get("path")
             .and_then(Value::as_str)
             .filter(|p| !p.is_empty())
-        {
-            ev.push(location(p, b.get("line").and_then(Value::as_u64)));
-        }
+    {
+        ev.push(location(p, b.get("line").and_then(Value::as_u64)));
     }
     if !usage.is_empty() {
         ev.push(match prop(o, "data_measured_at") {

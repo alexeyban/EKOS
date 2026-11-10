@@ -338,3 +338,26 @@ redacted; both the address and the number are absent from the parser's output.
   not into the slide's own section.
 - Not done here: the inbox source itself, URL snapshots, the intake reply (pages/sheets/confidence
   counts) — other Phase 1 items.
+
+### 2026-11-10 — §3.3 inbox, §3.4–3.7 testimony (CLI and ledger)
+
+| Part | What |
+|---|---|
+| `ekos inbox add <file\|url> --as <person>` | originals under `<state>/inbox/<pending\|accepted>/<yyyy-mm>/<sha256[..16]>/` with `meta.json` (senders, channel, permalink, source URL); identical content stored once, gaining a sender; a closed extension list; `[inbox] max-file-mb`; `--pending` or `[inbox] require-accept` holds it |
+| links | fetched once as an HTML snapshot: http(s) only, ≤ 3 redirects each re-checked, refused when the host resolves to a loopback, private, link-local, CGNAT or ULA address unless listed in `[inbox] allow-hosts` |
+| compile | `ekos build` observes `<state>/inbox/accepted` as the source `inbox` with the local-documents connector alone (images always through local OCR) and scrubs every string of every artifact with `redact_personal_data` before the usual redaction — **found live**: a Markdown note's e-mail address reached the ledger, because only the new image/sheet/slide parsers scrubbed personal data |
+| `ekos inbox list \| accept \| purge` | accept and purge are human-only; purge deletes the original, logs it in `purged.jsonl`, and says plainly that compiled, redacted text stays |
+| `ekos testimony add` | keyed `Testimony` (channel + message ref), text redacted, `about` (`Describes` links), `answers` (an RFC 0254 question), `meaning` (a code value's meaning), `on_behalf_of` (an operator recording a workshop answer), `--probe` (RFC 0254: re-run, counts stored as evidence); evidence `testimony://<id>` reading "According to <who> (<channel>, <date>): …". Human-only |
+| meaning | a stated meaning is an `EnumMeaning` meaning source `testimony` at the next semantics step; when it differs from the label code gives, a `testimony_mismatch` conflict is recorded at once — the label is never overwritten |
+| `ekos testimony list \| show \| withdraw` | withdrawal (author only) is a new version; the newest wins |
+| MCP | `ekos_testimony`, read-only, scoped. No MCP tool records testimony |
+
+**Measured** on the LedgerSMB scratch project: a Markdown note and the OCR fixture image went through
+`inbox add` (the image pending until `accept`), `build` → `commit`: both searchable, the note's e-mail
+address `[REDACTED:email]`. A link to `127.0.0.1` refused. A testimony from Slack answering an
+`unexplained_values` question turned it `answered`; its meaning "owner capital" for `account.category
+= 'Q'` (code says "Equity") became one `testimony_mismatch` conflict.
+
+**Not built here**: `[testimony] decides_for` is recorded (`decides` in the output) but does not yet
+record a review decision; the conversation core, proposals, Save from a channel and the Telegram /
+Slack / Teams adapters are the console's (a separate entry).

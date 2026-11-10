@@ -402,3 +402,41 @@ profile, signal and inclusion query was also run as `ekos_ro` through `dbaccess`
 Eleven fixture values (two e-mails, a product title, two notes, a birth date, three names, a product
 code, the user's password) searched in every file under `.ekos/` (149 files, zstd decompressed): not
 found.
+
+### 2026-11-10 — §3.2 signals, §3.3–3.4 discovery, §3.6 review subject, §3.7 surfaces
+
+| Part | What |
+|---|---|
+| `observation-sdk::signals` | (a) literal coverage: one `GROUP BY` per coded column whose value cell is `CASE WHEN text(col) IN (<code literals>) THEN text(col) END` — a data value never leaves the database, only a code literal or `NULL` ("everything else"); unexplained distinct count. (b) first/last month per literal on a time column chosen by name (creation before update; birth dates excluded). (c) `column = v ⇒ other IS [NOT] NULL` per code value, support ≥ 5, only where the other column is mixed. (d) levelwise key search (≤ 3 columns, ≤ 24 queries per table, a superset of a key never tested). (e) validity periods (`valid_from`/`valid_to` and kin, by name) and soft-delete flags (counted against EKOS's own literal set `Y/1/true/…`). Rendered for Oracle, PostgreSQL, ClickHouse, SQL Server, Informix |
+| `ekos profile run` | per `[[databases]]` entry with p1/p2, through `ekos sql check`'s read-only probe session (a writable role refused unless `--allow-writable-role`); `<state>/profile/current.json`; keyed `GrainCandidate` per table; history onto `WriteBehaviour.data_history`; then the semantics step and the RFC 0254 questions step. `ekos profile show [TABLE]` |
+| `semantic::data_usage` | `EnumMeaning.data_usage` (rows, share, first/last seen, `dead`, `never_seen` per database) and `implies`; one `data_only_values` gap per column holding unexplained values (counts only). Neither is a signed field and the gap's evidence names the measurement, not its counts: a re-profile never stales a review (tested) |
+| `observation-sdk::overlap` + `ekos relationships discover` | MinHash computed **by the database**: 4 salted MD5 digests per distinct value, 16 32-bit-slice minimums (plus the distinct count and, for whole numbers, the span) are all that leave it; the salt is `<state>/profile/salt` (0600, never in the ledger). LSH bands (2 rows) propose; containment ≥ 0.9 in a unique parent keeps; every code join (RFC 0158's harvester) is added; each pair checked exactly by an inclusion `LEFT JOIN` on text. Keyed `FkCandidate` with `seed: code | data | both` and the RFC 0158 verdict. `--cross-database`: key overlap both ways becomes `value_overlap` on a `SameAs` candidate (never a merge) |
+| review | optional subject `relationships` (listed and required only once a discovery produced items): signed child/parent/seed/verdict, counts shown only; `ekos review relationships --confirm \| --reject \| --confirm-with-orphans` (human-only) |
+| MCP | `ekos_profile`, `ekos_relationships` — read-only, in `SCOPED_TOOLS` (the table is found through the scoped store; file entries only for tables it returned) |
+
+**Departures.** (a) Signatures come from the database, not from values read into the process: no
+value crosses the wire, and MD5 is defined identically on every engine but Informix, so cross-database
+comparison works (Informix has none; its columns are not signed). (b) Names are still a tie-breaker
+for data seeds — but required in two cases measured live: a column that is itself a key, and any
+parent that is a *dense id sequence* (distinct ≥ 0.8 × span), because every small whole number is
+"contained" in one. Without that rule LedgerSMB produced ~260 candidates such as `oe.id → payment.id`;
+with it, 9 per run. Generic names (`id`, `code`, `name`, …) never count as a match. Cross-database
+overlaps between few-value or dense columns need the same table name. (c) "new codes" (first seen after
+the code's last change) is not built: it needs per-literal git dates. (d) The sample/`estimated`
+labels are unused: every signal here is measured exactly on the table; `--max-rows` (default 10 M,
+by the catalog's estimate) is the cost guard instead of EXPLAIN. (e) Phase 1's `LiveProfiler` trait
+stays a departure (see the §3.1 entry).
+
+**Measured** on LedgerSMB (`sql/` of the source repo, `[semantics]` on) against the repo's test
+servers: PostgreSQL `ledgersmb` and its ClickHouse copy `lsmb_raw`, profile p1. `ekos profile run`
+(80 s): 70 coded columns, 199 tables (158 declared keys, 32 found by search, 9 without), 228 code
+values measured — 167 never seen in this data, 0 dead — and 3 columns holding values no code names
+(`account_link.description`: 28 of 36 rows, 13 values; `defaults.value`); every count equal to a
+direct query (e.g. `account.category` A 9, E 30, I 4, L 21, Q 2). Implications: 4, e.g.
+`entity_credit_account.entity_class = 1 ⇒ business_id IS NULL` (25 rows) and `= 2 ⇒ IS NOT NULL` (60),
+equal to the data. History: 19 patterns (`entity_credit_account.startdate/enddate`: 85 of 85 open).
+`ekos relationships discover --cross-database` (73 s): 338 columns signed, 9 candidates (e.g.
+`invoice.parts_id → partstax.parts_id` clean over 11,130 rows; `acc_trans.trans_id → gl.id` from a code
+join, `not_a_relationship`, 43,200 orphans — the join is to the transactions table), and 30 cross-
+database `SameAs` overlaps, 28 of them the same table on both engines, plus `ar = invoice`
+(`trans_id`) and `ar = open_item` (`invnumber` = `item_number`).

@@ -3723,6 +3723,7 @@ mod tests {
         config.session_memory.enabled = true;
         config.conflicts.enabled = true;
         config.sql_generate.mcp = true; // RFC 0250: off by default, decided all the same
+        config.probe.mcp = true; // RFC 0254: likewise
         let tmp = tempfile::tempdir().unwrap();
         let resp = parse(
             &handle_message(

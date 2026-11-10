@@ -161,6 +161,43 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     run_with(config, cwd, &Extensions::none()).await
 }
 
+fn is_inbox(ob: &ekos_compiler_core::ObserveBase) -> bool {
+    ob.source.as_deref() == Some(super::inbox::SOURCE_KEY)
+}
+
+/// RFC 0253: the inbox holds documents people sent, nothing else — the local-documents connector
+/// alone, and images are always read (locally): a screenshot is what people send.
+fn inbox_observers(config: &EkosConfig) -> Vec<Box<dyn Observer>> {
+    vec![Box::new(LocalDocsObserver::with_settings(
+        Arc::new(TesseractOcr::with_languages(&config.ocr.languages)),
+        &LocalDocsSettings {
+            images: true,
+            sheet_rows: config.inbox.sheet_rows,
+        },
+    ))]
+}
+
+fn observers_for<'a>(
+    ob: &ekos_compiler_core::ObserveBase,
+    all: &'a [Box<dyn Observer>],
+    inbox: &'a [Box<dyn Observer>],
+) -> &'a [Box<dyn Observer>] {
+    if is_inbox(ob) { inbox } else { all }
+}
+
+/// RFC 0253 §3.3: what people send is scrubbed of personal data in every format, not only the
+/// built-in secret patterns.
+fn scrub_inbox(
+    ob: &ekos_compiler_core::ObserveBase,
+    package: &mut ekos_observation_sdk::ObservationPackage,
+) {
+    if is_inbox(ob) {
+        for a in &mut package.artifacts {
+            ekos_common::redaction::redact_personal_json(&mut a.content.data);
+        }
+    }
+}
+
 /// The observers this build runs: the local ones always, an extension's after them, and each
 /// remote connector whose environment variables are set.
 fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Observer>> {
@@ -744,15 +781,7 @@ pub async fn run_selected(
     observe_paths.extend(super::inbox::observe_base(config, cwd));
 
     let observers = configured_observers(config, ext);
-    // The inbox holds documents people sent, nothing else: the local-documents connector alone,
-    // and images are always read (locally) — a screenshot is what people send.
-    let inbox_observers: Vec<Box<dyn Observer>> = vec![Box::new(LocalDocsObserver::with_settings(
-        Arc::new(TesseractOcr::with_languages(&config.ocr.languages)),
-        &LocalDocsSettings {
-            images: true,
-            sheet_rows: config.inbox.sheet_rows,
-        },
-    ))];
+    let inbox_observers = inbox_observers(config);
 
     let fingerprint_path = config.ekos_dir(cwd).join("fingerprints.json");
     let mut fingerprints = load_fingerprints(&fingerprint_path);
@@ -824,11 +853,7 @@ pub async fn run_selected(
         // this exact logic with the *old*, unfixed condition, silently diverging from this
         // function's own real `File`-object ids the moment this fix landed here alone.
         let project_key = ob.key.clone();
-        let observers = if ob.source.as_deref() == Some(super::inbox::SOURCE_KEY) {
-            &inbox_observers
-        } else {
-            &observers
-        };
+        let observers = observers_for(ob, &observers, &inbox_observers);
 
         let ctx =
             ScanContext::new(base).with_ignore_patterns(config.observe.ignore_patterns.clone());
@@ -865,13 +890,7 @@ pub async fn run_selected(
                 }
             };
 
-            // RFC 0253 §3.3: what people send is scrubbed of personal data in every format, not
-            // only the built-in secret patterns.
-            if ob.source.as_deref() == Some(super::inbox::SOURCE_KEY) {
-                for a in &mut package.artifacts {
-                    ekos_common::redaction::redact_personal_json(&mut a.content.data);
-                }
-            }
+            scrub_inbox(ob, &mut package);
             redact_package(&mut package, &redaction_config, &project_key);
             run_log::emit(
                 "observe",
