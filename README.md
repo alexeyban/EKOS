@@ -1024,6 +1024,25 @@ a source's `LICENSE` file, or set in `[docs-estate] licences`; a database has no
 1,060 pages in 26 s — published with a walkthrough of the first three workflow steps at
 [alexeyban/ekos-lakehouse-oracle](https://github.com/alexeyban/ekos-lakehouse-oracle).
 
+Each table page is also the table's **source passport** (RFC 0254 §3.6, estate page format v2): what an analyst
+needs before building on it, each fact with its status (hypothesis, confirmed, …) and the evidence it rests on.
+Sections appear only when there is something to say:
+
+1. **What a row is** — the grain (`ekos profile run`'s `GrainCandidate`: declared key or a measured unique key) and
+   the row count.
+2. **Keys and references** — the declared foreign keys, then references inferred from code and data (`ekos
+   relationships discover`) with seed, verdict, how many values the target holds and the `relationships` review
+   decision.
+3. **Codes** — per coded column, every value code names with its meaning, where the meaning is stated, share of rows,
+   first and last seen, dead or never seen, and one counted row for values no code names. Never a data value.
+4. **How it changes** — write behaviour with its review status and the measured validity periods and soft-delete
+   flags.
+5. **What the code assumes** — `code_vs_data` findings (`ekos check code-vs-data`) and how they were decided; a
+   finding's measured minimum and maximum are never shown.
+6. **What people said** — testimony cited as "According to *author* (*channel*, *date*)" (withdrawn testimony left
+   out), and notes from people (RFC 0247).
+7. **Open questions** — the table's questions with their computed status and who they are with now.
+
 ### Oracle as a lakehouse source (RFC 0216)
 
 [EKOS Lakehouse](https://github.com/alexeyban/ekos-lakehouse) reads Oracle as well as PostgreSQL. In

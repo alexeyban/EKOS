@@ -12,13 +12,20 @@
 //! * **Licences.** Text (descriptions, business names, check expressions, statement conditions)
 //!   is shown only when every source it came from has a known licence; otherwise it is dropped
 //!   and counted, and the home page says so.
+//!
+//! RFC 0254 §3.6 adds the analyst's sections to each table page (the *source passport*,
+//! [`passport`]).
+
+mod passport;
+
+pub use passport::{PassportInput, QuestionState, decision_words};
 
 use ekos_kir::{KirId, KirObject, KirRelationship, ObjectKind, RelationshipKind};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Bump when the output of [`build`] changes for the same input.
-pub const ESTATE_VERSION: u32 = 1;
+pub const ESTATE_VERSION: u32 = 2;
 
 /// Where a table stands in the RFC 0213 scope review.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +71,8 @@ pub struct EstateInput<'a> {
     pub max_er_tables: usize,
     /// RFC 0233: the last commit's integrity index, as the CLI translated it; `None` = no index.
     pub integrity: Option<&'a IntegritySummary>,
+    /// RFC 0254 §3.6: what the passport sections read beside the ledger.
+    pub passport: &'a PassportInput,
 }
 
 /// RFC 0233 — the integrity index's headline numbers and its error and warning findings. A small
@@ -288,6 +297,7 @@ struct Model<'a> {
     statements: HashMap<KirId, Vec<&'a KirObject>>,
     callers: HashMap<KirId, BTreeSet<(String, String)>>,
     dropped: std::cell::RefCell<BTreeMap<String, usize>>,
+    passport: passport::Index<'a>,
 }
 
 /// Which table object documents a name: live first, then a DDL table with a dialect (never a
@@ -336,6 +346,7 @@ impl<'a> Model<'a> {
             statements: HashMap::new(),
             callers: HashMap::new(),
             dropped: Default::default(),
+            passport: passport::Index::new(input.objects, input.current_conflicts, input.passport),
         };
         let mut tables: HashMap<String, &KirObject> = HashMap::new();
         for o in input.objects {
@@ -709,6 +720,7 @@ fn table_page(m: &Model, name: &str, t: &KirObject, order: usize) -> EstatePage 
                 .unwrap_or_default()
         ));
     }
+    b.push_str(&passport::row_section(m, name, t));
 
     // Columns: counts only, never values.
     let model_cols = mt
@@ -785,7 +797,7 @@ fn table_page(m: &Model, name: &str, t: &KirObject, order: usize) -> EstatePage 
         ],
         &rows,
     ));
-    b.push_str("\n*references (code)* is the table the application model's code says a column points to; *Foreign keys* below are the constraints the database declares. Counts come from the profile; no value is ever shown.\n\n");
+    b.push_str("\n*references (code)* is the table the application model's code says a column points to; *Keys and references* below lists the constraints the database declares, then the references inferred from code and data. Counts come from the profile; no value is ever shown.\n\n");
 
     let checks: Vec<Vec<String>> = t
         .properties
@@ -829,12 +841,13 @@ fn table_page(m: &Model, name: &str, t: &KirObject, order: usize) -> EstatePage 
             ),
         ]
     };
-    b.push_str("## Foreign keys\n\n**References**\n\n");
+    b.push_str("## Keys and references\n\n**Declared — references**\n\n");
     let rows: Vec<Vec<String>> = out.iter().map(|f| fk_row(f, &f.to)).collect();
     b.push_str(&table(&["table", "columns", "on delete"], &rows));
-    b.push_str("\n**Referenced by**\n\n");
+    b.push_str("\n**Declared — referenced by**\n\n");
     let rows: Vec<Vec<String>> = inc.iter().map(|f| fk_row(f, &f.from)).collect();
     b.push_str(&table(&["table", "columns", "on delete"], &rows));
+    b.push_str(&passport::inferred_references(m, name, &path));
     let mut hood: BTreeSet<String> = out.iter().map(|f| f.to.clone()).collect();
     hood.extend(inc.iter().map(|f| f.from.clone()));
     if !hood.is_empty() {
@@ -847,12 +860,13 @@ fn table_page(m: &Model, name: &str, t: &KirObject, order: usize) -> EstatePage 
         }
     }
     b.push('\n');
+    b.push_str(&passport::codes_section(m, name, t));
 
     // How rows change.
     if let Some(w) = m.write_behaviour.get(name) {
-        b.push_str("## Write behaviour\n\n");
+        b.push_str("## How it changes\n\n");
         b.push_str(&format!(
-            "- updates: **{}**\n- deletes: **{}**\n- change log: **{}**\n- evidence: {} citation(s)\n\n",
+            "- updates: **{}**\n- deletes: **{}**\n- change log: **{}**\n- evidence: {} citation(s)\n",
             prop(w, "update_class").unwrap_or("unknown"),
             strings(w, "delete_classes").join(", "),
             prop(w, "change_log").unwrap_or("unknown"),
@@ -861,6 +875,8 @@ fn table_page(m: &Model, name: &str, t: &KirObject, order: usize) -> EstatePage 
                 .and_then(Value::as_u64)
                 .unwrap_or(0)
         ));
+        b.push_str(&passport::change_lines(m, name, w));
+        b.push('\n');
     }
     for (title, map) in [("Read by", &m.readers), ("Written by", &m.writers)] {
         if let Some(who) = map.get(name) {
@@ -911,7 +927,16 @@ fn table_page(m: &Model, name: &str, t: &KirObject, order: usize) -> EstatePage 
         ));
         b.push('\n');
     }
-    if let Some(cs) = m.conflicts.get(name) {
+    b.push_str(&passport::assumptions_section(m, name));
+    // Code-vs-data findings are in "What the code assumes" above.
+    let cs: Vec<&&KirObject> = m
+        .conflicts
+        .get(name)
+        .into_iter()
+        .flatten()
+        .filter(|c| prop(c, "conflict_type") != Some("code_vs_data"))
+        .collect();
+    if !cs.is_empty() {
         b.push_str("## Open conflicts\n\n");
         let rows: Vec<Vec<String>> = cs
             .iter()
@@ -926,6 +951,8 @@ fn table_page(m: &Model, name: &str, t: &KirObject, order: usize) -> EstatePage 
         b.push_str(&table(&["type", "attribute", "explanation"], &rows));
         b.push('\n');
     }
+    b.push_str(&passport::people_section(m, name));
+    b.push_str(&passport::questions_section(m, name));
     b.push_str("## Notes\n\n");
     b.push_str(&manual(
         &format!("table.{}.notes", slug(name)),
@@ -1848,6 +1875,7 @@ mod tests {
             current_conflicts: None,
             max_er_tables: 30,
             integrity: None,
+            passport: &PassportInput::default(),
         })
     }
 
@@ -1996,6 +2024,7 @@ mod tests {
                 current_conflicts: None,
                 max_er_tables: 3,
                 integrity: None,
+                passport: &PassportInput::default(),
             })
         };
         let area = body(&m_input_pages, "data-model/c/index.md");
@@ -2083,6 +2112,7 @@ mod tests {
             current_conflicts: None,
             max_er_tables: 30,
             integrity: Some(&summary),
+            passport: &PassportInput::default(),
         });
         let f = body(&pages, "findings/index.md");
         assert!(f.contains("## Reference integrity"), "{f}");
@@ -2093,5 +2123,388 @@ mod tests {
             "an out-of-scope table's finding is left out"
         );
         assert!(f.contains("95.7% dynamic"));
+    }
+
+    // ── RFC 0254 §3.6: the source passport ─────────────────────────────────────────────────
+
+    fn custom_obj(kind: &str, name: &str, props: Value) -> KirObject {
+        obj(ObjectKind::Custom(kind.into()), name, props)
+    }
+
+    /// The fixture plus one of everything the passport reads about `C_ORDER`, and the items it
+    /// must leave out (not current, withdrawn, obsolete).
+    fn passport_fixture() -> (Vec<KirObject>, Vec<KirRelationship>, PassportInput) {
+        let (mut o, r) = fixture();
+        let order = o[0].clone();
+        let grain = custom_obj(
+            "GrainCandidate",
+            "grain of ADEMPIERE.C_ORDER",
+            json!({"status": "declared", "source": "declared", "database": "db",
+                   "owner": "ADEMPIERE", "table": "C_ORDER", "key": ["C_ORDER_ID"],
+                   "rows": 8, "measured_at": "2026-11-01T10:00:00Z"}),
+        );
+        let stale_grain = custom_obj(
+            "GrainCandidate",
+            "old grain",
+            json!({"status": "hypothesis", "source": "measured", "table": "C_ORDER",
+                   "key": ["STALE_KEY"]}),
+        );
+        let fk = custom_obj(
+            "FkCandidate",
+            "C_ORDER.SALESREP_ID → C_BPARTNER.C_BPARTNER_ID",
+            json!({"status": "hypothesis", "database": "db", "child_owner": "ADEMPIERE",
+                   "child_table": "C_ORDER", "child_column": "SALESREP_ID",
+                   "parent_owner": "ADEMPIERE", "parent_table": "C_BPARTNER",
+                   "parent_column": "C_BPARTNER_ID", "seed": "both",
+                   "verdict": "relationship_with_orphans", "orphans": 1, "population": 8,
+                   "inclusion_rate": 0.875, "code_sources": ["MOrder.java#40"],
+                   "measured_at": "2026-11-01T10:00:00Z"}),
+        );
+        let stale_fk = custom_obj(
+            "FkCandidate",
+            "stale",
+            json!({"child_table": "C_ORDER", "child_column": "OLD_FK_COLUMN",
+                   "parent_table": "C_BPARTNER", "parent_column": "X", "seed": "data"}),
+        );
+        let completed = custom_obj(
+            "EnumMeaning",
+            "C_ORDER.DOCSTATUS = CO",
+            json!({"status": "confirmed", "table": "C_ORDER", "column": "DOCSTATUS",
+                   "value": "CO", "label": "Completed", "sources": ["code"],
+                   "meanings": [{"label": "Completed", "source": "constant",
+                                 "path": "X_C_Order.java", "line": 12}],
+                   "data_usage": [{"database": "db", "rows": 6, "share": 0.75,
+                                   "first_seen": "2019-01", "last_seen": "2026-10",
+                                   "dead": false, "never_seen": false}],
+                   "implies": [{"database": "db", "column": "DATEPROMISED", "then": "not_null",
+                                "support": 6}],
+                   "data_measured_at": "2026-11-01T10:00:00Z"}),
+        );
+        let dead = custom_obj(
+            "EnumMeaning",
+            "C_ORDER.DOCSTATUS = XX",
+            json!({"status": "hypothesis", "table": "C_ORDER", "column": "DOCSTATUS",
+                   "value": "XX", "label": null, "meanings": [],
+                   "data_usage": [{"database": "db", "rows": 0, "share": 0.0,
+                                   "dead": false, "never_seen": true}]}),
+        );
+        let gap = custom_obj(
+            "SemanticGap",
+            "C_ORDER.DOCSTATUS: data holds values no code names",
+            json!({"status": "hypothesis", "gap_type": "data_only_values", "table": "C_ORDER",
+                   "column": "DOCSTATUS", "database": "db", "owner": "ADEMPIERE", "rows": 2,
+                   "share": 0.25, "distinct": 1, "first_seen": "2020-02",
+                   "last_seen": "2026-09"}),
+        );
+        let assumption = custom_obj(
+            "ConflictingEvidence",
+            "C_ORDER.code_vs_data:predicate_misses_values",
+            json!({"conflict_type": "code_vs_data", "check": "predicate_misses_values",
+                   "subject_name": "C_ORDER", "status": "resolved", "resolution": "picked",
+                   "picked_claim": {"source": "profile"}, "reviewed_by": "ana",
+                   "claims": [
+                       {"value": "v_orders handles DOCSTATUS = CO, XX", "path": "sql/v.sql",
+                        "line": 4, "source": "View"},
+                       {"value": "C_ORDER.DOCSTATUS also holds values none of these branches handles",
+                        "path": "profile://db/ADEMPIERE.C_ORDER.DOCSTATUS", "source": "profile"}],
+                   "measured": {"rows_unhandled": 2, "share": 0.25, "column_rows": 8}}),
+        );
+        let range = custom_obj(
+            "ConflictingEvidence",
+            "C_ORDER.code_vs_data:range_assumption",
+            json!({"conflict_type": "code_vs_data", "check": "range_assumption",
+                   "subject_name": "C_ORDER", "status": "open", "claims": [],
+                   "measured": {"constant": "9", "op": ">",
+                                "min": "SECRET-RANGE-MIN", "max": "SECRET-RANGE-MAX"}}),
+        );
+        let said = custom_obj(
+            "Testimony",
+            "ana: CO",
+            json!({"author": "ana", "channel": "telegram", "sent_at": "2026-11-02T08:00:00Z",
+                   "updated_at": "2026-11-02T08:00:00Z", "status": "active",
+                   "text": "CO means the order is <b>complete</b>",
+                   "about": [completed.id.to_string()], "answers": "",
+                   "permalink": "https://t.me/c/1/2"}),
+        );
+        let withdrawn = {
+            let mut w = custom_obj(
+                "Testimony",
+                "bob: wrong",
+                json!({"author": "bob", "channel": "slack", "sent_at": "2026-11-03T08:00:00Z",
+                       "updated_at": "2026-11-04T08:00:00Z", "status": "withdrawn",
+                       "text": "WITHDRAWN-TEXT", "about": [order.id.to_string()]}),
+            );
+            w.name = "bob: wrong".into();
+            w
+        };
+        let question = custom_obj(
+            "OpenQuestion",
+            "What does DOCSTATUS = XX mean?",
+            json!({"question_type": "dead_code", "table": "c_order", "column": "docstatus",
+                   "text": "`DOCSTATUS = XX` has not appeared, but 1 code path handles it. Can it be dropped?",
+                   "priority": 12.0, "blocking": true, "addressees": ["carol", "bob"]}),
+        );
+        let obsolete = custom_obj(
+            "OpenQuestion",
+            "obsolete",
+            json!({"question_type": "what_is_a_row", "table": "c_order",
+                   "text": "OBSOLETE-QUESTION", "priority": 99.0}),
+        );
+        let note =
+            ekos_kir::annotations::annotation_object(&ekos_kir::annotations::NewAnnotation {
+                target: order.id.to_string(),
+                kind: ekos_kir::annotations::AnnotationKind::Comment,
+                text: "Orders before 2019 were migrated".into(),
+                rule: None,
+                author: "dave".into(),
+                scope: ekos_kir::annotations::Scope::Shared,
+                term: None,
+                target_digest: ekos_kir::annotations::digest_of_object(&order),
+                at: "2026-11-05T10:00:00Z".into(),
+            });
+        if let Some(wb) = o
+            .iter_mut()
+            .find(|x| x.name == "C_ORDER" && x.kind != ObjectKind::Table)
+        {
+            wb.properties.insert(
+                "data_history".into(),
+                json!([{"database": "db", "owner": "ADEMPIERE", "kind": "flag",
+                        "columns": ["ISACTIVE"], "rows": 8, "measured": 2,
+                        "meaning": "rows whose flag is set"}]),
+            );
+        }
+        let passport = PassportInput {
+            current_grain: Some([grain.id.to_string()].into()),
+            current_references: Some([fk.id.to_string()].into()),
+            current_semantics: None,
+            reviewed: [
+                (
+                    format!("relationships:{}", fk.id),
+                    decision_words(
+                        Some(&json!({"relationship": "confirm-with-orphans"})),
+                        false,
+                    )
+                    .unwrap(),
+                ),
+                (
+                    "write-behaviour:table:c_order".to_string(),
+                    decision_words(Some(&json!({"behaviour": "confirm"})), false).unwrap(),
+                ),
+            ]
+            .into(),
+            questions: [
+                (
+                    question.id.to_string(),
+                    QuestionState {
+                        status: "answered".into(),
+                        addressee: Some("bob".into()),
+                    },
+                ),
+                (
+                    obsolete.id.to_string(),
+                    QuestionState {
+                        status: "obsolete".into(),
+                        addressee: None,
+                    },
+                ),
+            ]
+            .into(),
+        };
+        o.extend([
+            grain,
+            stale_grain,
+            fk,
+            stale_fk,
+            completed,
+            dead,
+            gap,
+            assumption,
+            range,
+            said,
+            withdrawn,
+            question,
+            obsolete,
+            note,
+        ]);
+        (o, r, passport)
+    }
+
+    fn render_passport(
+        objects: &[KirObject],
+        rels: &[KirRelationship],
+        passport: &PassportInput,
+    ) -> Vec<EstatePage> {
+        let licences: BTreeMap<String, String> = [
+            ("code".to_string(), "GPL-2.0".to_string()),
+            ("db".to_string(), "unknown".to_string()),
+        ]
+        .into();
+        let prov = Provenance::default();
+        build(&EstateInput {
+            objects,
+            relationships: rels,
+            scope: &BTreeMap::new(),
+            subjects: &[],
+            licences: &licences,
+            provenance: &prov,
+            current_conflicts: None,
+            max_er_tables: 30,
+            integrity: None,
+            passport,
+        })
+    }
+
+    #[test]
+    fn the_passport_sections_appear_in_order_with_status_and_evidence() {
+        let (o, r, p) = passport_fixture();
+        let pages = render_passport(&o, &r, &p);
+        let page = body(&pages, "data-model/c/c_order.md");
+        let at = |h: &str| page.find(h).unwrap_or_else(|| panic!("no {h}:\n{page}"));
+        let order = [
+            "## What a row is",
+            "## Columns",
+            "## Keys and references",
+            "## Codes",
+            "## How it changes",
+            "## What the code assumes",
+            "## What people said",
+            "## Open questions",
+            "## Notes",
+        ];
+        for w in order.windows(2) {
+            assert!(at(w[0]) < at(w[1]), "{} before {}", w[0], w[1]);
+        }
+        // 1. The grain, with its status and the measurement it rests on.
+        assert!(
+            page.contains("| `C_ORDER_ID` | primary key declared in the catalog | `db` | confirmed (declared) | `profile://db/ADEMPIERE.C_ORDER` (2026-11-01) |"),
+            "{page}"
+        );
+        assert!(page.contains("8 row(s) when profiled."), "{page}");
+        // 2. A data- and code-seeded reference with its verdict and the reviewer's decision.
+        assert!(
+            page.contains("`both` | `relationship_with_orphans` | 87.5% (1 orphan(s) of 8) | confirmed (with orphans) |"),
+            "{page}"
+        );
+        assert!(page.contains("`MOrder.java#40`"), "{page}");
+        // 3. Codes: a confirmed value with its meaning from licensed code, a never-seen one, and
+        // the values no code names, counted.
+        assert!(
+            page.contains("| `DOCSTATUS` | `CO` | Completed | constant | 75.0% | 2019-01 | 2026-10 | in use<br>implies `DATEPROMISED` not null | confirmed | `X_C_Order.java:12`<br>profile (2026-11-01) |"),
+            "{page}"
+        );
+        assert!(page.contains("| `XX` | _unknown_ |"), "{page}");
+        assert!(page.contains("never seen | hypothesis"), "{page}");
+        assert!(
+            page.contains("| _other values_ | _named by no code (1 distinct)_ | data | 25.0% | 2020-02 | 2026-09 | unexplained | hypothesis |"),
+            "{page}"
+        );
+        // 4. Write behaviour: the review and the measured history.
+        assert!(page.contains("- status: **confirmed**"), "{page}");
+        assert!(
+            page.contains("soft-delete flag on `ISACTIVE` — rows whose flag is set: 2 of 8 row(s)"),
+            "{page}"
+        );
+        // 5. Code vs data, decided; counts only.
+        assert!(
+            page.contains("`predicate_misses_values` | v_orders handles DOCSTATUS = CO, XX |"),
+            "{page}"
+        );
+        assert!(page.contains("2 row(s) unhandled, 25.0%"), "{page}");
+        assert!(
+            page.contains("confirmed: the data is right by ana"),
+            "{page}"
+        );
+        assert!(page.contains("`range_assumption`"), "{page}");
+        // 6. Testimony, cited; HTML is inert; notes from people.
+        assert!(
+            page.contains("- According to ana (telegram, 2026-11-02): CO means the order is &lt;b&gt;complete&lt;/b&gt; — [message](https://t.me/c/1/2)"),
+            "{page}"
+        );
+        assert!(
+            page.contains("- **comment by dave, not approved** — Orders before 2019 were migrated"),
+            "{page}"
+        );
+        // 7. Questions with their computed status and addressee.
+        assert!(
+            page.contains("| `dead_code` | answered | bob | yes |"),
+            "{page}"
+        );
+        // Code-vs-data findings are not repeated as plain open conflicts.
+        assert!(!page.contains("## Open conflicts"), "{page}");
+    }
+
+    #[test]
+    fn the_passport_leaves_out_stale_withdrawn_obsolete_and_values() {
+        let (o, r, p) = passport_fixture();
+        let pages = render_passport(&o, &r, &p);
+        for p in &pages {
+            for banned in [
+                "STALE_KEY",
+                "OLD_FK_COLUMN",
+                "WITHDRAWN-TEXT",
+                "OBSOLETE-QUESTION",
+                "SECRET-",
+            ] {
+                assert!(!p.body.contains(banned), "{} shows {banned}", p.path);
+            }
+        }
+        // A table with nothing to say gets no passport section.
+        let bp = body(&pages, "data-model/c/c_bpartner.md");
+        for h in [
+            "## What a row is",
+            "## Codes",
+            "## What the code assumes",
+            "## What people said",
+            "## Open questions",
+        ] {
+            assert!(!bp.contains(h), "{h} on an empty page:\n{bp}");
+        }
+        // But a reference into it is listed from its side too.
+        assert!(bp.contains("SALESREP_ID"), "{bp}");
+    }
+
+    #[test]
+    fn a_meaning_from_an_unlicensed_source_is_left_out() {
+        let (mut o, r, p) = passport_fixture();
+        for x in &mut o {
+            if x.name == "C_ORDER.DOCSTATUS = CO" {
+                x.properties.insert("sources".into(), json!(["db"]));
+            }
+        }
+        let pages = render_passport(&o, &r, &p);
+        let page = body(&pages, "data-model/c/c_order.md");
+        assert!(page.contains("| `CO` | _unknown_ |"), "{page}");
+        assert!(!page.contains("Completed"), "{page}");
+    }
+
+    #[test]
+    fn the_passport_does_not_depend_on_input_order() {
+        let (mut o, mut r, p) = passport_fixture();
+        let a = render_passport(&o, &r, &p);
+        o.reverse();
+        r.reverse();
+        assert_eq!(a, render_passport(&o, &r, &p));
+    }
+
+    #[test]
+    fn decisions_read_as_words() {
+        let w = |v: Value| decision_words(Some(&v), false);
+        assert_eq!(
+            w(json!({"relationship": "confirm"})).as_deref(),
+            Some("confirmed")
+        );
+        assert_eq!(
+            w(json!({"relationship": "reject"})).as_deref(),
+            Some("rejected")
+        );
+        assert_eq!(
+            w(json!({"behaviour": "override", "fields": {}})).as_deref(),
+            Some("confirmed (overridden)")
+        );
+        assert_eq!(decision_words(None, false), None);
+        assert_eq!(
+            decision_words(Some(&json!({"relationship": "confirm"})), true).as_deref(),
+            Some("hypothesis (decision outdated)")
+        );
     }
 }
