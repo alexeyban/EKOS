@@ -55,6 +55,8 @@ fn kind_dialect(kind: &DatabaseKind) -> &'static str {
         DatabaseKind::Postgres => "postgres",
         DatabaseKind::Clickhouse => "clickhouse",
         DatabaseKind::Sqlserver => "mssql",
+        // No Informix grammar: the generic one, as the probe's guard uses.
+        DatabaseKind::Informix => "generic",
     }
 }
 
@@ -279,6 +281,20 @@ fn connect_database(
                 &d.password_env,
             )?;
             let p = ekos_plugin_sqlserver::probe::SqlServerProbe::connect(
+                &c,
+                &d.owners,
+                run_id,
+                allow_writable_role,
+            )?;
+            (Box::new(p), c.label())
+        }
+        DatabaseKind::Informix => {
+            let c = ekos_plugin_informix::InformixConnection::parse(
+                &d.connect,
+                &d.user,
+                &d.password_env,
+            )?;
+            let p = ekos_plugin_informix::probe::InformixProbe::connect(
                 &c,
                 &d.owners,
                 run_id,

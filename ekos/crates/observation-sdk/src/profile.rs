@@ -59,6 +59,9 @@ pub enum Flavor {
     ClickHouse,
     /// RFC 0252 §3.5: T-SQL.
     SqlServer,
+    /// RFC 0252 §3.5: Informix SQL. Identifiers are quoted with `"…"`, which the session makes
+    /// delimited identifiers (`DELIMIDENT=y`; always so over DRDA).
+    Informix,
 }
 
 /// What a profile run did, for the summary line and the catalog object.
@@ -128,6 +131,7 @@ pub fn family(flavor: Flavor, data_type: &str) -> Family {
         Flavor::Postgres => postgres_family(data_type),
         Flavor::ClickHouse => clickhouse_family(data_type),
         Flavor::SqlServer => sqlserver_family(data_type),
+        Flavor::Informix => informix_family(data_type),
     }
 }
 
@@ -209,6 +213,24 @@ fn sqlserver_family(data_type: &str) -> Family {
     }
 }
 
+/// Informix type names as the plugin decodes `syscolumns.coltype` (`decimal(12,2)`,
+/// `datetime year to second`, `lvarchar(2048)`). Only a `datetime` that starts at `year` is a date:
+/// `datetime hour to minute` has no day to compare. `text`, `byte`, `blob`, `clob`, `boolean`,
+/// `interval`, collections and opaque types are counted only.
+fn informix_family(data_type: &str) -> Family {
+    let t = data_type.trim().to_ascii_lowercase();
+    let base = base_type(&t);
+    match base.as_str() {
+        "smallint" | "integer" | "int" | "int8" | "bigint" | "serial" | "serial8" | "bigserial"
+        | "decimal" | "dec" | "numeric" | "money" | "float" | "smallfloat" | "real"
+        | "double precision" => Family::Number,
+        "date" => Family::Date,
+        _ if t.starts_with("datetime year") => Family::Date,
+        "char" | "character" | "varchar" | "nchar" | "nvarchar" | "lvarchar" => Family::Text,
+        _ => Family::Other,
+    }
+}
+
 /// Oracle refuses more expressions than this in one select list, PostgreSQL more than 1,664
 /// target entries; one bound for every engine, leaving room for the row count.
 const EXPRESSIONS_PER_QUERY: usize = 900;
@@ -239,6 +261,8 @@ pub fn ident(flavor: Flavor, name: &str) -> Result<String, String> {
         )),
         // `QUOTENAME`'s rule: a `]` inside the name is doubled.
         Flavor::SqlServer => Ok(format!("[{}]", name.replace(']', "]]"))),
+        // A delimited identifier (the session sets `DELIMIDENT`); `"` inside is doubled.
+        Flavor::Informix => Ok(format!("\"{}\"", name.replace('"', "\"\""))),
     }
 }
 
@@ -302,6 +326,22 @@ impl Aggregate {
             // `LEN` counts characters (trailing spaces excluded), `DATALENGTH` bytes; characters
             // are what a target type needs.
             (Flavor::SqlServer, Self::MaxLength) => format!("MAX(LEN({col}))"),
+            // `COUNT(text_or_byte)` is refused; `IS NOT NULL` is accepted by every type.
+            (Flavor::Informix, Self::NonNull) if fam == Family::Other => {
+                format!("COUNT(CASE WHEN {col} IS NOT NULL THEN 1 END)")
+            }
+            (Flavor::Informix, Self::NonNull) => format!("COUNT({col})"),
+            // A `DATE` renders in the client's `DBDATE` order (`01/31/2024` by default); `EXTEND`
+            // makes it a `DATETIME YEAR TO FRACTION`, which renders as ISO 8601 whatever the
+            // client's settings.
+            (Flavor::Informix, a @ (Self::Min | Self::Max)) if fam == Family::Date => {
+                let f = if a == Self::Min { "MIN" } else { "MAX" };
+                format!("CAST(EXTEND({f}({col}), YEAR TO FRACTION(5)) AS LVARCHAR(100))")
+            }
+            (Flavor::Informix, Self::Min) => format!("CAST(MIN({col}) AS LVARCHAR(100))"),
+            (Flavor::Informix, Self::Max) => format!("CAST(MAX({col}) AS LVARCHAR(100))"),
+            // `LENGTH` ignores a `CHAR`'s trailing blanks.
+            (Flavor::Informix, Self::MaxLength) => format!("MAX(LENGTH({col}))"),
         }
     }
 }
@@ -312,6 +352,7 @@ fn row_count(flavor: Flavor) -> &'static str {
         Flavor::Postgres => "count(*)",
         Flavor::ClickHouse => "count()",
         Flavor::SqlServer => "COUNT_BIG(*)",
+        Flavor::Informix => "COUNT(*)",
     }
 }
 
@@ -602,6 +643,19 @@ mod tests {
         .unwrap()
     }
 
+    fn ifx_invoice() -> Vec<Value> {
+        serde_json::from_value(json!([
+            { "name": "id", "data_type": "serial" },
+            { "name": "documentno", "data_type": "varchar(30)" },
+            { "name": "dateinvoiced", "data_type": "datetime year to second" },
+            { "name": "email", "data_type": "lvarchar(200)" },
+            { "name": "phone_number", "data_type": "decimal(12,0)" },
+            { "name": "notes", "data_type": "text" },
+            { "name": "shipped", "data_type": "date" },
+        ]))
+        .unwrap()
+    }
+
     fn sql(flavor: Flavor, cols: &[Value]) -> Vec<String> {
         measures(flavor, cols)
             .0
@@ -636,6 +690,12 @@ mod tests {
             (
                 Flavor::SqlServer,
                 ms_invoice(),
+                ["documentno", "email"],
+                "phone_number",
+            ),
+            (
+                Flavor::Informix,
+                ifx_invoice(),
                 ["documentno", "email"],
                 "phone_number",
             ),
@@ -754,6 +814,41 @@ mod tests {
     }
 
     #[test]
+    fn informix_sql() {
+        let ifx = sql(Flavor::Informix, &ifx_invoice());
+        assert!(ifx.contains(&"CAST(MIN(\"id\") AS LVARCHAR(100))".to_string()));
+        // A date bound renders as ISO 8601 whatever the client's DBDATE says.
+        assert!(ifx.contains(
+            &"CAST(EXTEND(MAX(\"shipped\"), YEAR TO FRACTION(5)) AS LVARCHAR(100))".to_string()
+        ));
+        assert!(
+            ifx.contains(
+                &"CAST(EXTEND(MIN(\"dateinvoiced\"), YEAR TO FRACTION(5)) AS LVARCHAR(100))"
+                    .to_string()
+            )
+        );
+        assert!(ifx.contains(&"MAX(LENGTH(\"documentno\"))".to_string()));
+        // A legacy `TEXT` blob is counted through `IS NOT NULL`, and nothing else.
+        let notes: Vec<&String> = ifx.iter().filter(|s| s.contains("notes")).collect();
+        assert_eq!(
+            notes,
+            [&"COUNT(CASE WHEN \"notes\" IS NOT NULL THEN 1 END)".to_string()]
+        );
+        let plan = plan_table(
+            Flavor::Informix,
+            "informix",
+            "orders",
+            &ifx_invoice(),
+            ProfileTier::P1,
+        )
+        .unwrap();
+        assert_eq!(
+            plan.queries,
+            ["SELECT COUNT(*) FROM \"informix\".\"orders\""]
+        );
+    }
+
+    #[test]
     fn families_per_engine() {
         assert_eq!(family(Flavor::Postgres, "numeric(14,2)"), Family::Number);
         assert_eq!(
@@ -781,6 +876,23 @@ mod tests {
         assert_eq!(family(Flavor::SqlServer, "text"), Family::Other);
         assert_eq!(family(Flavor::SqlServer, "bit"), Family::Other);
         assert_eq!(family(Flavor::SqlServer, "varbinary(max)"), Family::Other);
+        assert_eq!(family(Flavor::Informix, "money(16,2)"), Family::Number);
+        assert_eq!(family(Flavor::Informix, "bigserial"), Family::Number);
+        assert_eq!(
+            family(Flavor::Informix, "datetime year to fraction(3)"),
+            Family::Date
+        );
+        assert_eq!(
+            family(Flavor::Informix, "datetime hour to minute"),
+            Family::Other
+        );
+        assert_eq!(family(Flavor::Informix, "nchar(10)"), Family::Text);
+        assert_eq!(family(Flavor::Informix, "byte"), Family::Other);
+        assert_eq!(family(Flavor::Informix, "boolean"), Family::Other);
+        assert_eq!(
+            family(Flavor::Informix, "interval day(3) to second"),
+            Family::Other
+        );
     }
 
     #[test]
@@ -788,6 +900,7 @@ mod tests {
         assert_eq!(ident(Flavor::Postgres, "we\"ird").unwrap(), "\"we\"\"ird\"");
         assert_eq!(ident(Flavor::ClickHouse, "a`b").unwrap(), "`a\\`b`");
         assert_eq!(ident(Flavor::SqlServer, "we]ird").unwrap(), "[we]]ird]");
+        assert_eq!(ident(Flavor::Informix, "we\"ird").unwrap(), "\"we\"\"ird\"");
         assert!(ident(Flavor::Oracle, "A\"B").is_err());
         assert!(ident(Flavor::Oracle, "A B").is_err());
         assert!(ident(Flavor::Postgres, "").is_err());

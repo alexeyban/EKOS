@@ -7,7 +7,9 @@
 //! minimums leave the database; the salt is the project's own (never in the ledger), so a
 //! signature cannot be matched against a dictionary of known values by anyone without the salt.
 //! MD5 is used because every engine has it under the same definition, so signatures from two
-//! databases of one project compare (§3.4).
+//! databases of one project compare (§3.4). Informix has no MD5 built-in, so an Informix column has
+//! no signature ([`signature_sql`] refuses it); its references are still verified exactly by
+//! [`inclusion_sql`] when another seed proposes them.
 //!
 //! Two signatures give an estimated Jaccard similarity and, with the distinct counts, an estimated
 //! containment of the child's values in the parent's. LSH banding ([`bands`]) proposes pairs so
@@ -46,8 +48,13 @@ impl Signature {
     }
 }
 
-fn md5_hex(flavor: Flavor, expr: &str) -> String {
-    match flavor {
+/// Why an Informix column has no signature.
+pub const NO_MD5_ON_INFORMIX: &str = "not supported on Informix: it has no built-in MD5, and a \
+     signature must hash a value the same way on every engine to compare across databases";
+
+/// `expr`'s MD5 as 32 lowercase hex digits; `None` where the engine has no MD5.
+fn md5_hex(flavor: Flavor, expr: &str) -> Option<String> {
+    Some(match flavor {
         Flavor::Postgres => format!("md5({expr})"),
         // varchar, not nvarchar: HASHBYTES over UTF-16 would digest other bytes than the others.
         Flavor::SqlServer => format!(
@@ -55,7 +62,9 @@ fn md5_hex(flavor: Flavor, expr: &str) -> String {
         ),
         Flavor::ClickHouse => format!("lower(hex(MD5({expr})))"),
         Flavor::Oracle => format!("LOWER(RAWTOHEX(STANDARD_HASH({expr}, 'MD5')))"),
-    }
+        // Informix has no MD5 (its `ifx_checksum` is a CRC no other engine computes).
+        Flavor::Informix => return None,
+    })
 }
 
 fn substr(flavor: Flavor, expr: &str, from: usize, len: usize) -> String {
@@ -64,6 +73,7 @@ fn substr(flavor: Flavor, expr: &str, from: usize, len: usize) -> String {
         Flavor::Oracle => format!("SUBSTR({expr}, {from}, {len})"),
         Flavor::Postgres => format!("substr({expr}, {from}, {len})"),
         Flavor::SqlServer => format!("SUBSTRING({expr}, {from}, {len})"),
+        Flavor::Informix => format!("SUBSTR({expr}, {from}, {len})"),
     }
 }
 
@@ -80,6 +90,7 @@ fn as_text(flavor: Flavor, col: &str) -> String {
         Flavor::Postgres => format!("{col}::text"),
         Flavor::SqlServer => format!("CAST({col} AS nvarchar(4000))"),
         Flavor::ClickHouse => format!("toString({col})"),
+        Flavor::Informix => format!("CAST({col} AS LVARCHAR(4000))"),
     }
 }
 
@@ -120,15 +131,14 @@ pub fn signature_sql(
     let txt = as_text(flavor, &col);
     let digests: Vec<String> = (0..SEEDS)
         .map(|s| {
-            format!(
-                "{} AS h{s}",
-                md5_hex(
-                    flavor,
-                    &concat(flavor, &[format!("'{salt}:{s}:'"), "v".into()])
-                )
+            md5_hex(
+                flavor,
+                &concat(flavor, &[format!("'{salt}:{s}:'"), "v".into()]),
             )
+            .map(|h| format!("{h} AS h{s}"))
+            .ok_or_else(|| NO_MD5_ON_INFORMIX.to_string())
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
     let mins: Vec<String> = (0..SEEDS)
         .flat_map(|s| (0..4).map(move |q| (s, q)))
         .map(|(s, q)| format!("MIN({})", substr(flavor, &format!("h{s}"), 1 + q * 8, 8)))
@@ -322,6 +332,21 @@ mod tests {
                 "no column in the outer select: {outer}"
             );
         }
+    }
+
+    #[test]
+    fn informix_has_no_signature_but_an_inclusion_check() {
+        let e = signature_sql(Flavor::Informix, "s", "t", "c", "Ab12", true).unwrap_err();
+        assert!(e.starts_with("not supported on Informix"), "{e}");
+        let sql = inclusion_sql(Flavor::Informix, ("s", "c", "k"), ("s", "p", "id")).unwrap();
+        assert!(
+            sql.contains("CAST(c.\"k\" AS LVARCHAR(4000)) = p.k"),
+            "{sql}"
+        );
+        assert!(
+            sql.starts_with("SELECT COUNT(*), SUM(CASE WHEN p.k IS NULL"),
+            "{sql}"
+        );
     }
 
     #[test]

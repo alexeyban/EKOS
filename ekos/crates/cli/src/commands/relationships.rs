@@ -78,6 +78,7 @@ fn flavor(kind: DatabaseKind) -> Flavor {
         DatabaseKind::Postgres => Flavor::Postgres,
         DatabaseKind::Clickhouse => Flavor::ClickHouse,
         DatabaseKind::Sqlserver => Flavor::SqlServer,
+        DatabaseKind::Informix => Flavor::Informix,
     }
 }
 

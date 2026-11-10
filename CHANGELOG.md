@@ -48,6 +48,21 @@
   lock and command timeouts, and a permission-based write check. Profiles P0 (`sys.partitions`
   estimates), P1 and P2; `ekos database add|test`, `ekos sql check --database` and the console's
   Sources form accept it. Testbed: `docker-compose.sqlserver.yml`.
+- **Informix as a live database source** (RFC 0252 §3.5, Phase 4). `[[databases]] kind = "informix"`
+  (`connect = "host[:port]/database@server"` for the IBM Informix Client SDK over SQLI, or
+  `drda://host[:port]/database` for the IBM Data Server Driver over DRDA; `owners` are table owners)
+  reads the system catalog over ODBC (`odbc-api`, behind the `ekos` build feature `informix`, off by
+  default): tables with columns decoded from `coltype`/`collength`, defaults, primary and unique keys,
+  unique indexes, checks, foreign keys, view text from `sysviews`, SPL routine text and `DOCUMENT`
+  clauses from `sysprocbody`, trigger text from `systrigbody`, reconciled against the catalog's own
+  counts. SPL routines compile as `Procedure` objects **without IR** (no Informix SPL reader yet;
+  warning `IFXLIVE003` and the recover summary say how many) with read/write/call footprints from
+  their SQL statements. Read-only: autocommit off and every statement rolled back, `SET TRANSACTION
+  READ ONLY`, `COMMITTED READ LAST COMMITTED`, a lock wait and a query timeout, and a rights-based write
+  check (`systabauth`, `syscolauth`, roles, `sysusers`). Profiles P0 (`systables.nrows`), P1 and P2;
+  `ekos database add|test`, `ekos sql check --database`, `ekos profile run` and the console's Sources
+  form accept it. Informix has no MD5, so its columns get no overlap signature (RFC 0252 §3.4).
+  Testbed: `docker-compose.informix.yml` + `deploy/fixtures/informix/load.sh`.
 - RFCs 0252 (profiling for source understanding), 0253 (people as a source) and 0254 (the analyst
   loop) accepted.
 

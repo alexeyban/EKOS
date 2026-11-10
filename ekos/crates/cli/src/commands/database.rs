@@ -215,7 +215,10 @@ fn parse_kind(kind: Option<&str>) -> Result<DatabaseKind> {
         "postgres" | "postgresql" => DatabaseKind::Postgres,
         "clickhouse" => DatabaseKind::Clickhouse,
         "sqlserver" | "mssql" => DatabaseKind::Sqlserver,
-        other => bail!("--kind is oracle, postgres, clickhouse or sqlserver, not {other:?}"),
+        "informix" => DatabaseKind::Informix,
+        other => {
+            bail!("--kind is oracle, postgres, clickhouse, sqlserver or informix, not {other:?}")
+        }
     })
 }
 
@@ -239,6 +242,9 @@ fn check_connect(kind: DatabaseKind, connect: &str) -> Result<()> {
                 .map(|_| ())
                 .map_err(|e| anyhow::anyhow!("--{e}"))
         }
+        DatabaseKind::Informix => ekos_plugin_informix::InformixConnection::parse(connect, "", "")
+            .map(|_| ())
+            .map_err(|e| anyhow::anyhow!("--{e}")),
     }
 }
 
@@ -305,7 +311,7 @@ fn compiled_counts(
             ObjectKind::Custom(k)
                 if k == "Procedure"
                     && text("returns") == Some("trigger")
-                    && matches!(text("language"), Some("plsql" | "tsql")) =>
+                    && matches!(text("language"), Some("plsql" | "tsql" | "informix")) =>
             {
                 "TriggerBody".to_string()
             }
@@ -388,6 +394,21 @@ pub async fn test(config: &EkosConfig, cwd: &Path, name: &str, json_out: bool) -
             // The session runs its own runtime: off this one.
             tokio::task::spawn_blocking(move || {
                 ekos_plugin_sqlserver::test_connection(&connection, &owners, &run_id, &redaction)
+            })
+            .await?
+            .map_err(fail)?
+        }
+        // RFC 0252 §3.5.
+        DatabaseKind::Informix => {
+            let connection = ekos_plugin_informix::InformixConnection::parse(
+                &d.connect,
+                &d.user,
+                &d.password_env,
+            )
+            .map_err(fail)?;
+            let owners = d.owners.clone();
+            tokio::task::spawn_blocking(move || {
+                ekos_plugin_informix::test_connection(&connection, &owners, &run_id, &redaction)
             })
             .await?
             .map_err(fail)?

@@ -219,11 +219,12 @@ source later, and a project compiled without names cannot gain them.
 
 A project's **Sources** tab lists its directories and databases. An operator adds a directory (it
 must lie under the tenant's source roots) or a database. **Kind** chooses Oracle, PostgreSQL,
-ClickHouse (RFC 0235) or SQL Server (RFC 0252 §3.5), which sets the connect form: Oracle
+ClickHouse (RFC 0235), SQL Server or Informix (RFC 0252 §3.5), which sets the connect form: Oracle
 `host:port/service`, PostgreSQL `host[:port]/database`, ClickHouse `http[s]://host[:port]`, SQL Server
 `host[:port]/database` (add `?trust-server-certificate=true` only for a server whose certificate is
-self-signed; the connection is encrypted either way). Then a read-only user, the password and
-the schemas to read (for ClickHouse, the databases) and the profile tier (`p0` statistics, `p1` row
+self-signed; the connection is encrypted either way), Informix `host[:port]/database@server` (Client
+SDK) or `drda://host[:port]/database` (Data Server Driver). Then a read-only user, the password and
+the schemas to read (for ClickHouse, the databases; for Informix, the table owners) and the profile tier (`p0` statistics, `p1` row
 counts, `p2` one aggregate scan per table, for every kind); for Oracle also, optionally, the iDempiere
 dictionary. The first directory added to a project created from one
 directory names that directory as a source too, so it keeps being read.
@@ -244,6 +245,26 @@ every statement in a transaction it always rolls back, and reports the login's o
 (`HAS_PERMS_BY_NAME`) as the write check: give it a login that is only in `db_datareader`, plus
 `VIEW DEFINITION` for routine and view text. The Oracle driver needs Instant Client: set `LD_LIBRARY_PATH` (and `TNS_ADMIN` if you use
 one) in the console's environment; the console passes these to every `ekos` it starts.
+
+**Informix** needs an `ekos` built with `--features informix` (the release packages and the image are
+not; it links unixODBC — `apt install unixodbc`, or `unixodbc-dev` to build) and an ODBC driver that
+speaks to Informix:
+
+- the **IBM Informix Client SDK** (CSDK, from IBM; needs an IBM account): install it, set
+  `INFORMIXDIR` in the console's environment, and EKOS loads `$INFORMIXDIR/lib/cli/iclit09b.so`
+  (or name the driver with `?driver=` in `ekos.toml`). Connect as `host:9088/database@server`, where
+  `server` is the instance's `INFORMIXSERVER` name; add `?db-locale=en_US.utf8` for a UTF-8 database;
+- or the **IBM Data Server Driver for ODBC and CLI** (a free download, no account:
+  `linuxx64_odbc_cli.tar.gz` from IBM's public driver site), over DRDA: connect as
+  `drda://host:9089/database?driver=<clidriver>/lib/libdb2.so`. The server must listen for DRDA
+  (`drsoctcp` in `sqlhosts`). This driver's `libdb2.so` uses a 32-bit `SQLLEN` under unixODBC; EKOS
+  reads it one row at a time so that it still reads correctly.
+
+The `?driver=` option names a shared library to load, so the console's form does not accept it:
+add such a database with `ekos database add` on the server. Informix signs users in through the
+operating system: give EKOS an OS user with `CONNECT` on the database and `SELECT` on the tables to
+read — and revoke the rights a database without ANSI mode grants `PUBLIC` on every new table, or the
+write check reports the user as able to write.
 
 ## 5. Limits inside a project
 

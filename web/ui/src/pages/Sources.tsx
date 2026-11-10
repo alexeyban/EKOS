@@ -186,6 +186,15 @@ const KINDS = {
     owners: "Schemas to read (comma-separated)",
     ownersHint: "dbo",
   },
+  // RFC 0252 §3.5. The Informix Client SDK names the server; DRDA (drda://…) does not.
+  informix: {
+    label: "Informix",
+    connect:
+      "Connect (host[:port]/database@server or drda://host[:port]/database)",
+    connectHint: "ifx.local:9088/stores@ol_ifx",
+    owners: "Table owners to read (comma-separated)",
+    ownersHint: "informix",
+  },
 } as const;
 type Kind = keyof typeof KINDS;
 

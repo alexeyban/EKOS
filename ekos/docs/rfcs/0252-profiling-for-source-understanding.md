@@ -334,3 +334,71 @@ to direct `sqlcmd` queries; `birth_date` bounds withheld (`date_of_birth`); cros
 resolved (6 routine → table `DependsOn`); `ekos sql check --database` previews a joined, ordered query.
 Six fixture values (an e-mail, a product title, a note, a birth date, a name, the login's password)
 searched in every file under `.ekos/` (zstd decompressed): not found.
+
+### 2026-11-10 — §3.5 / Phase 4 (Informix): Informix as a live source
+
+`[[databases]] kind = "informix"` (`connect = "host[:port]/database@server"` — the IBM Informix Client
+SDK over SQLI — or `drda://host[:port]/database` — the IBM Data Server Driver over DRDA; optional
+`?driver=` and `?db-locale=`; `owners` = table owners), the fifth kind of RFC 0235's live-catalog shape.
+
+| Part | What |
+|---|---|
+| `plugins/informix` (`ekos-plugin-informix`) | `odbc-api` 30 (no `prompt`/winit) behind the crate feature `informix`, passed through by `ekos`'s feature `informix` (off by default, like `oracle`). `catalog.rs`: 19 constant queries over `systables`, `syscolumns` (+ `sysxtdtypes`, `sysdefaults`), `sysconstraints`/`sysindexes` (PK, UQ and unique indexes no constraint stands on, columns from `part1`…`part16`), `syschecks`, `sysreferences` (+ the referenced tables' columns, whatever their owner), `sysviews`, `sysprocedures`/`sysprocbody` (`T` text, `D` = `DOCUMENT` → comment; SPL only, `internal = 'f'`), `systriggers`/`systrigbody`; types decoded from `coltype`/`collength` (decimal/money precision, varchar max/min, `datetime`/`interval` qualifiers, serials, extended types by name); text pieces joined at their **declared** width, read from `syscolumns` (`sysviews.viewtext` is 64 in older servers, 256 in 15.0), so a blank at a boundary survives a driver that trims `CHAR`; overloaded routines named `name#procid`; a pure `normalize`, redacted; `reconcile` refuses a catalog shorter than the census |
+| read-only session (`session.rs`) | see *Decision* |
+| profile (`profile.rs`) | P0 = `systables.nrows` (`row_count_exact: false`); `colmin`/`colmax`/`sysdistrib` are values and never read (a test scans every query). P1/P2 through `profile_table(Flavor::Informix, …)` |
+| `observation-sdk` | `Flavor::Informix`: `"…"` identifiers (doubled), `COUNT`, number bounds `CAST(MIN(c) AS LVARCHAR(100))`, date bounds `CAST(EXTEND(MIN(c), YEAR TO FRACTION(5)) AS LVARCHAR(100))` (a `DATE` would otherwise render in the client's `DBDATE` order), `MAX(LENGTH(c))`; only a `datetime year to …` is a date; `text`/`byte`/`blob`/`clob`/`boolean`/`interval` counted only. `signals`: `CAST(c AS LVARCHAR(4000))`, `TO_CHAR(x, '%Y-%m')`, `GROUP BY 1`, a typed `CAST(NULL AS CHAR(7))`. `overlap`: `signature_sql` returns `Err("not supported on Informix …")` — no MD5 built-in (`ifx_checksum` is a CRC no other engine has); `inclusion_sql` works |
+| probe (`probe.rs`) | one `SELECT` (`single_select`, generic dialect — there is no Informix grammar, so Informix-only syntax is refused, not sent unchecked); no row-limit wrapper (Informix refuses `ORDER BY` in a derived table): the session stops fetching at `max_rows + 1`; a user that can write is refused unless `--allow-writable-role` |
+| recovery | `CatalogDialect::Informix` (`InformixCatalog` keyed kind, diagnostics `IFXLIVE…`); `spl_routines.rs`: views re-headed from the `sysviews` text and read in the generic dialect; SPL routines as `Procedure` **without IR** (`ir: false`, `fidelity: signature`, `coverage_gap`), arguments and `RETURNING` types from the header, footprint from each `;` statement with SPL's words taken off (`IF … THEN`, `FOREACH [c FOR]`, a cursor `SELECT` running into the loop's first statement, `LET v =`, `RETURN`, `SELECT … INTO vars`, `EXECUTE PROCEDURE` → `calls`); a trigger is a `Procedure` (its action list, split at commas that start a statement) plus a `Trigger` binding. `IFXLIVE003` and the recover summary count the routines kept without IR (RFC 0154 completeness) |
+| cli | build observer, `database add|test` (an Informix trigger body is counted with the triggers), `sql check` (dialect `generic`), `profile`/`relationships` (`Flavor::Informix`), recover summary |
+| console | `informix` in `KINDS` / `DatabaseIn.kind` / the Sources form; the form refuses `?driver=` (a shared library to load) — `ekos.toml` only |
+| testbed | `docker-compose.informix.yml` (developer edition 15.0, SQLI 59088 / DRDA 59089 on loopback) + `deploy/fixtures/informix/{shop.sql,load.sh}`; live suite `EKOS_INFORMIX_LIVE=1` |
+
+**Decision: read-only without a read-only login.** (1) Autocommit off and a rollback after every
+statement; (2) every transaction opens with `SET TRANSACTION READ ONLY` — the server refuses a write
+with -878, measured: the live suite's `INSERT` as the DBA is refused and the row count is unchanged;
+(3) only planned text is sent; (4) the write check reads the user's rights — owner of a listed table,
+`U`/`I`/`D`/`A` in `systabauth.tabauth` or `U` in `syscolauth`, directly, as `public` or through a role,
+or `RESOURCE`/`DBA` in `sysusers` — with `method: "permissions"` and the session's locks
+(`transactions_rolled_back`, `read_only_transactions`, `isolation`, `delimited_identifiers`). A
+database created without logging has no transactions: the check then carries a `note` saying the
+rollback lock is absent. `COMMITTED READ LAST COMMITTED` (else `DIRTY READ`) so a reader never waits on
+a writer; `SET LOCK MODE TO WAIT 10`; a 120 s query timeout (a timed-out session is lost and the rest of
+its owner's tables are skipped, then reconnected per owner). `SET ENVIRONMENT DELIMIDENT 'on'` (the
+value `'y'` is refused by the server) makes `"name"` an identifier over DRDA too, where the CSDK's
+`DELIMIDENT=y` connection keyword does not reach.
+
+**Departures.** (a) Two drivers, not one: §3.5 names the CSDK, which needs an IBM account to download,
+so it was not used here; the IBM Data Server Driver (public download, no account) reaches the same
+server over DRDA and runs the same Informix SQL, so it is supported and is what the live suite ran
+through. The CSDK path (`host:port/db@server`, `DELIMIDENT=y`, `CLIENT_LOCALE`) is unit-tested for its
+connection string only — **not run live**. (b) That driver's `libdb2.so` uses a 32-bit `SQLLEN` under
+unixODBC (IBM's 64-bit `libdb2o.so` is not in the free package), which `odbc-api`'s own buffers read as
+a negative length and panic on. The session therefore fetches one row at a time into buffers whose
+indicators start at 0 and rebinds before each fetch; a 32-bit `-1`/`-4` then reads as `u32::MAX` /
+`u32::MAX - 3` (`session::reported`), and a 64-bit driver reads as before. Slower per row, correct for
+both. (c) §3.5's usage evidence (`sysmaster:syssessions`, `syssqlstat`) is not built, as for SQL
+Server. (d) No `sql-dialect-informix`: routine bodies have no IR, as the RFC foresaw, and the generic
+dialect reads views and statements; Informix-only syntax in them (`OUTER t`, `MATCHES`, `FIRST n`) is
+counted as unparsed, not guessed. (e) No overlap signature for Informix columns (no MD5); references
+into Informix are still verified exactly by `inclusion_sql` when another seed proposes them.
+
+**Measured** against `docker-compose.informix.yml` (Informix 15.0.1.0.3 Developer Edition, `shop`
+fixture: owners `sales` + `hr`, 6 tables, 4 foreign keys (one cascading, one self-reference), 2 checks,
+a unique index, 1 view, 1 SPL procedure with `DOCUMENT`, 1 SPL function, 1 trigger), through the IBM
+Data Server Driver (v12.1 `clidriver`) over DRDA, user `ekos_ro` (OS user; `CONNECT` + `SELECT`, the
+`PUBLIC` grants revoked), `profile = "p2"`, build → recover → resolve → compile → commit on a scratch
+project: 6 tables, 4 foreign keys (0 unresolved), 1 view (0 unread), 3 routines (2 SPL + the trigger's
+action) + 1 trigger, all without IR (`IFXLIVE003`); CKM 13 objects; 9 routine/view → table `DependsOn`;
+cross-references 100 % resolved. `ekos database test`: census = compiled for tables (6), views (1),
+routines (2), triggers (1); 28 columns; write check `refused_by_server` for `ekos_ro`, `user_can_write`
+(`dba: true`) for `informix`. Live suite (3 tests): every row count (customers 3, orders 4, order_lines
+4, products 3), the `note` null count and `MAX(LENGTH)`, the `placed_at` and `hired_on` bounds equal to
+direct queries; `birth_date` bounds withheld; an `INSERT` in the read-only session refused (-878),
+count unchanged; the probe previews a joined, ordered query (1 row, truncated) and refuses a `DELETE`
+and a DBA user. `ekos profile run`: 6 tables, grain 5 declared + 1 found by key search; the coded
+column `orders.status` (`CHECK (status IN (1, 2, 9))`) measured 1 → 3 rows, 2 → 1, 9 → 0 (never seen),
+equal to the data. `ekos sql check --database` previews a joined query read-only. Every catalog,
+profile, signal and inclusion query was also run as `ekos_ro` through `dbaccess` (SQLI) without error.
+Eleven fixture values (two e-mails, a product title, two notes, a birth date, three names, a product
+code, the user's password) searched in every file under `.ekos/` (149 files, zstd decompressed): not
+found.

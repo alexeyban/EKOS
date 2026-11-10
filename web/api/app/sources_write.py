@@ -18,7 +18,7 @@ _OWNER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#]{0,127}$")
 _USER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#.-]{0,127}$")
 PROFILES = ("p0", "p1", "p2")
 # RFC 0235: each kind's `connect` form, and what the form calls it.
-KINDS = ("oracle", "postgres", "clickhouse", "sqlserver")
+KINDS = ("oracle", "postgres", "clickhouse", "sqlserver", "informix")
 _CONNECT = {
     "oracle": (
         re.compile(r"^[A-Za-z0-9._-]+(:[0-9]{1,5})?/[A-Za-z0-9._$#-]+$"),
@@ -39,6 +39,16 @@ _CONNECT = {
             r"^[A-Za-z0-9._-]+(:[0-9]{1,5})?/[A-Za-z0-9._$-]+(\?trust-server-certificate=true)?$"
         ),
         "host[:port]/database[?trust-server-certificate=true]",
+    ),
+    # RFC 0252 §3.5: the Informix Client SDK (`…@server`) or the Data Server Driver over DRDA.
+    # `?driver=` (a shared library to load) is for `ekos.toml` only, never the web form.
+    "informix": (
+        re.compile(
+            r"^(?:[A-Za-z0-9._-]+(:[0-9]{1,5})?/[A-Za-z0-9._$-]+@[A-Za-z0-9._$-]+"
+            r"|drda://[A-Za-z0-9._-]+(:[0-9]{1,5})?/[A-Za-z0-9._$-]+)"
+            r"(\?db-locale=[A-Za-z0-9._-]+)?$"
+        ),
+        "host[:port]/database@server or drda://host[:port]/database",
     ),
 }
 
@@ -81,13 +91,13 @@ def database_add_argv(
 ) -> list[str]:
     check_name(name, "database")
     if kind not in KINDS:
-        raise ReviewError("kind is oracle, postgres, clickhouse or sqlserver")
+        raise ReviewError("kind is oracle, postgres, clickhouse, sqlserver or informix")
     pattern, form = _CONNECT[kind]
     if not pattern.match(connect or ""):
         raise ReviewError(f"connect is {form}")
     if not _USER.match(user or ""):
         raise ReviewError("user: a database user name")
-    what = "database names" if kind == "clickhouse" else "schema names"
+    what = {"clickhouse": "database names", "informix": "table owners"}.get(kind, "schema names")
     if not owners or any(not _OWNER.match(o) for o in owners) or len(owners) > 50:
         raise ReviewError(f"owners: one or more {what}")
     if profile not in PROFILES:

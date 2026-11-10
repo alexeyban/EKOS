@@ -48,6 +48,7 @@ members = [
     "plugins/snowflake",
     "plugins/clickhouse",
     "plugins/sqlserver",
+    "plugins/informix",
     "plugins/crypto",
     "plugins/github",
     "plugins/treasury",
@@ -120,6 +121,7 @@ ekos-plugin-clickhouse             = { path = "plugins/clickhouse", version = "1
 ekos-plugin-oracle                 = { path = "plugins/oracle", version = "1.4.3" }
 ekos-plugin-postgres               = { path = "plugins/postgres", version = "1.4.3" }
 ekos-plugin-sqlserver              = { path = "plugins/sqlserver", version = "1.4.3" }
+ekos-plugin-informix               = { path = "plugins/informix", version = "1.4.3" }
 ekos-plugin-confluence             = { path = "plugins/confluence", version = "1.4.3" }
 ekos-plugin-crypto                 = { path = "plugins/crypto", version = "1.4.3" }
 ekos-plugin-elixir                 = { path = "plugins/elixir", version = "1.4.3" }
@@ -200,6 +202,9 @@ chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
 postgres = "0.19"
 oracle = "0.6.3"
+# RFC 0252 §3.5: Informix over ODBC (unixODBC plus the IBM Informix Client SDK or IBM Data Server
+# driver at run time). No GUI prompt (`prompt` pulls in winit), narrow strings.
+odbc-api = { version = "30.1", default-features = false, features = ["odbc_version_3_80"] }
 # RFC 0252 §3.5: SQL Server over TDS, TLS through rustls (no OpenSSL, no Windows auth).
 tiberius = { version = "0.13", default-features = false, features = ["tds80", "rustls", "chrono"] }
 tokio-util = { version = "0.7", features = ["compat"] }

@@ -45,6 +45,8 @@ pub enum CatalogDialect {
     ClickHouse,
     /// RFC 0252 §3.5.
     SqlServer,
+    /// RFC 0252 §3.5.
+    Informix,
 }
 
 impl CatalogDialect {
@@ -55,6 +57,7 @@ impl CatalogDialect {
             Self::Postgres => "postgres",
             Self::ClickHouse => "clickhouse",
             Self::SqlServer => "sqlserver",
+            Self::Informix => "informix",
         }
     }
 
@@ -65,6 +68,7 @@ impl CatalogDialect {
             Self::Postgres => "postgres",
             Self::ClickHouse => "clickhouse-live",
             Self::SqlServer => "sqlserver",
+            Self::Informix => "informix",
         }
     }
 
@@ -75,6 +79,7 @@ impl CatalogDialect {
             Self::Postgres => "postgres",
             Self::ClickHouse => "clickhouse",
             Self::SqlServer => "sqlserver",
+            Self::Informix => "informix",
         }
     }
 
@@ -85,6 +90,7 @@ impl CatalogDialect {
             Self::Postgres => "PostgresCatalog",
             Self::ClickHouse => "ClickHouseCatalog",
             Self::SqlServer => "SqlServerCatalog",
+            Self::Informix => "InformixCatalog",
         }
     }
 
@@ -94,6 +100,7 @@ impl CatalogDialect {
             Self::Postgres => "PGLIVE",
             Self::ClickHouse => "CHLIVE",
             Self::SqlServer => "MSLIVE",
+            Self::Informix => "IFXLIVE",
         };
         format!("{prefix}{n:03}")
     }
@@ -105,6 +112,7 @@ impl CatalogDialect {
             Self::Postgres => "PostgreSQL",
             Self::ClickHouse => "ClickHouse",
             Self::SqlServer => "SQL Server",
+            Self::Informix => "Informix",
         }
     }
 }
@@ -588,6 +596,18 @@ fn add_view(graph: &mut KirGraph, d: CatalogDialect, i: &Item) -> bool {
                 &sql,
             )
         }
+        // `sysviews` holds the whole `CREATE VIEW` as Informix normalised it; re-headed with the
+        // catalog's name and read in the generic dialect (there is no Informix grammar).
+        CatalogDialect::Informix => {
+            let Some(sql) = crate::spl_routines::view_sql(&i.name, body) else {
+                return false;
+            };
+            read_views(
+                &crate::sql_dialect_registry::GenericDialectParser,
+                &i.target,
+                &sql,
+            )
+        }
         CatalogDialect::Oracle => {
             let sql = format!("CREATE OR REPLACE VIEW \"{}\" AS {body}\n;\n", i.name);
             read_views(
@@ -661,6 +681,13 @@ fn add_routine(graph: &mut KirGraph, d: CatalogDialect, i: &Item) -> Option<PlSq
         (CatalogDialect::SqlServer, "function" | "procedure" | "trigger") => {
             let (routine_graph, stats) =
                 crate::tsql_routines::recover_routine(&i.target, &i.kind, &i.name, &i.detail);
+            merge_stamped(graph, d, routine_graph, i);
+            Some(stats)
+        }
+        // RFC 0252 §3.5: SPL without IR (no Informix SPL reader), footprint from its statements.
+        (CatalogDialect::Informix, "function" | "procedure" | "trigger") => {
+            let (routine_graph, stats) =
+                crate::spl_routines::recover_routine(&i.target, &i.kind, &i.name, &i.detail);
             merge_stamped(graph, d, routine_graph, i);
             Some(stats)
         }
@@ -747,6 +774,9 @@ impl CompilerPass for OracleCatalogPass {
         if self.dialect == CatalogDialect::SqlServer {
             ids.push(crate::tsql_routines::LOGIC_VERSION.to_string());
         }
+        if self.dialect == CatalogDialect::Informix {
+            ids.push(crate::spl_routines::LOGIC_VERSION.to_string());
+        }
         ids
     }
 
@@ -774,6 +804,19 @@ impl CompilerPass for OracleCatalogPass {
                      the catalog census but have no View object",
                     stats.views_unparsed,
                     self.dialect.display()
+                ),
+            );
+        }
+        // RFC 0252 §3.5 / RFC 0154 completeness: every Informix routine is kept without IR.
+        let spl = stats.routines.routines.routines;
+        if self.dialect == CatalogDialect::Informix && spl > 0 {
+            ctx.diagnostics.lock().unwrap().warning(
+                self.dialect.diagnostic(3),
+                format!(
+                    "{spl} Informix routine(s) and trigger action(s) are kept at signature \
+                     fidelity without IR: there is no Informix SPL reader yet \
+                     (sql-dialect-informix); their footprint comes from the SQL statements \
+                     inside them"
                 ),
             );
         }
@@ -1287,5 +1330,118 @@ mod tests {
         let p = g.objects.iter().find(|o| o.name == "close_order").unwrap();
         assert!(p.properties["writes"].to_string().contains("orders"));
         assert_eq!(p.properties["dialect"], "sqlserver");
+    }
+
+    /// RFC 0252 §3.5: an Informix catalog — tables with keys and an FK, a view re-headed from its
+    /// `sysviews` text, an SPL procedure without IR and a trigger.
+    #[test]
+    fn an_informix_catalog_compiles_tables_views_routines_and_triggers() {
+        let obj = |kind: &str, name: &str, detail: Value| -> (String, Value) {
+            (
+                format!("informix://shop/sales/{kind}/{name}"),
+                json!({ "kind": "object", "database": "shop", "object": { "kind": kind,
+                        "owner": "sales", "name": name, "status": null, "detail": detail } }),
+            )
+        };
+        let artifacts = vec![
+            (
+                "informix://shop/sales".into(),
+                json!({ "kind": "catalog", "database": "shop", "owner": "sales",
+                        "family": "systables",
+                        "census": { "TABLE": { "valid": 2, "invalid": 0 } },
+                        "write_check": { "result": "refused_by_server", "method": "permissions" } }),
+            ),
+            obj(
+                "table",
+                "customers",
+                json!({ "columns": [
+                { "name": "id", "data_type": "serial", "nullable": false, "identity": "SERIAL" }] }),
+            ),
+            obj(
+                "table",
+                "orders",
+                json!({ "columns": [
+                { "name": "id", "data_type": "serial8", "nullable": false },
+                { "name": "customer_id", "data_type": "integer", "nullable": true }],
+                "num_rows": 4,
+                "profile": { "tier": "p0", "row_count": 4, "row_count_exact": false } }),
+            ),
+            obj(
+                "primary_key",
+                "orders.pk_orders",
+                json!({ "table": "orders", "columns": ["id"], "validated": true }),
+            ),
+            obj(
+                "foreign_key",
+                "orders.fk_orders_customers",
+                json!({ "table": "orders",
+                "columns": ["customer_id"], "references_owner": "sales", "references_table": "customers",
+                "references_columns": ["id"], "validated": true, "on_delete": "NO ACTION" }),
+            ),
+            obj(
+                "view",
+                "big_orders",
+                json!({ "language": "informix",
+                "text": "create view \"sales\".big_orders (id,customer_id) as select x0.id ,x0.customer_id from \"sales\".orders x0 where (x0.id > 100 ) ;" }),
+            ),
+            obj(
+                "procedure",
+                "close_order",
+                json!({ "language": "spl", "comment": "Closes one order",
+                "text": "CREATE PROCEDURE \"sales\".close_order(p_id INT8)\n  DELETE FROM \"sales\".orders WHERE id = p_id;\nEND PROCEDURE" }),
+            ),
+            obj(
+                "trigger",
+                "orders_audit",
+                json!({ "language": "informix", "table": "orders", "timing": "AFTER",
+                "events": ["INSERT"],
+                "text": "create trigger \"sales\".orders_audit insert on \"sales\".orders referencing new as n\nfor each row (insert into \"sales\".order_log (order_id) values (n.id))",
+                "action": "for each row (insert into \"sales\".order_log (order_id) values (n.id))" }),
+            ),
+        ];
+        let (g, stats) = recover_catalog_as(CatalogDialect::Informix, &artifacts);
+        assert_eq!(
+            (
+                stats.catalogs,
+                stats.tables,
+                stats.foreign_keys,
+                stats.views,
+                stats.views_unparsed
+            ),
+            (1, 2, 1, 1, 0)
+        );
+        assert_eq!(
+            (stats.routines.routines.routines, stats.routines.triggers),
+            (2, 1)
+        );
+        let orders = g.objects.iter().find(|o| o.name == "orders").unwrap();
+        assert_eq!(orders.properties["dialect"], "informix");
+        assert_eq!(orders.properties["origin"], "live");
+        assert_eq!(orders.properties["columns"][0]["primary_key"], true);
+        let kinds = |k: &str| {
+            g.objects
+                .iter()
+                .filter(|o| o.kind == ObjectKind::Custom(k.into()))
+                .count()
+        };
+        assert_eq!(
+            (
+                kinds("View"),
+                kinds("Procedure"),
+                kinds("Trigger"),
+                kinds("InformixCatalog")
+            ),
+            (1, 2, 1, 1)
+        );
+        let view = g
+            .objects
+            .iter()
+            .find(|o| o.kind == ObjectKind::Custom("View".into()))
+            .unwrap();
+        assert!(view.properties["reads"].to_string().contains("orders"));
+        let p = g.objects.iter().find(|o| o.name == "close_order").unwrap();
+        assert!(p.properties["writes"].to_string().contains("orders"));
+        assert_eq!(p.properties["ir"], false);
+        assert_eq!(p.properties["description"], "Closes one order");
     }
 }
