@@ -173,7 +173,7 @@ pub fn summary_line(s: &QuestionStats) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     format!(
-        "{} open question(s){}; {} code-vs-data finding(s) — `ekos questions list`",
+        "{} question(s) raised{}; {} code-vs-data finding(s) — `ekos questions list`",
         s.derived,
         if types.is_empty() {
             String::new()
@@ -438,7 +438,11 @@ pub fn show(config: &EkosConfig, cwd: &Path, id: &str, reveal: bool, json_out: b
         q["status"].as_str().unwrap_or("")
     );
     println!("  id: {}", q["id"].as_str().unwrap_or(""));
-    println!("  ask: {}", q["addressees"]);
+    println!(
+        "  with: {} (candidates {})",
+        q["addressee"].as_str().unwrap_or("nobody"),
+        q["addressees"]
+    );
     println!("  context: {}", q["context"]);
     for a in q["answers"].as_array().into_iter().flatten() {
         println!(
@@ -685,6 +689,18 @@ pub fn reassign(config: &EkosConfig, cwd: &Path, id: &str, to: &str) -> Result<(
 pub fn decline(config: &EkosConfig, cwd: &Path, id: &str, by: &str) -> Result<()> {
     let full = resolve_id(config, cwd, id)?;
     let mut r = load_routing(config, cwd);
+    // Only the person a question is with can say "not me".
+    let ledger = super::store::open_store_read_only(config, cwd)?;
+    let objects = ledger.all_objects()?;
+    let q = objects
+        .iter()
+        .find(|o| o.id.to_string() == full)
+        .ok_or_else(|| anyhow!("no question {id}"))?;
+    match current_addressee(q, &r) {
+        Some(who) if who.eq_ignore_ascii_case(by) => {}
+        Some(who) => bail!("{} is with {who}, not {by}", &full[..8]),
+        None => bail!("{} is with nobody", &full[..8]),
+    }
     if r.assigned
         .get(&full)
         .is_some_and(|p| p.eq_ignore_ascii_case(by))

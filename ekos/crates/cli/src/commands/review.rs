@@ -393,15 +393,28 @@ fn state_line(state: &SignState) -> String {
 /// The item a target names: its id, its label, or its id without the `table:`/`column:` prefix,
 /// case-insensitive.
 fn find<'a>(items: &'a [Item], target: &str) -> Result<&'a Item> {
-    let t = target.to_ascii_lowercase();
-    items
+    // `->` is accepted for `→` (labels of inferred references use the arrow).
+    let t = target.to_ascii_lowercase().replace("->", "→");
+    let m: Vec<&Item> = items
         .iter()
-        .find(|i| {
+        .filter(|i| {
             i.id.to_ascii_lowercase() == t
                 || i.label.to_ascii_lowercase() == t
                 || i.id.split_once(':').is_some_and(|(_, rest)| rest == t)
         })
-        .ok_or_else(|| anyhow!("no item `{target}` in this review"))
+        .collect();
+    match m.as_slice() {
+        [one] => Ok(one),
+        [] => Err(anyhow!("no item `{target}` in this review")),
+        many => Err(anyhow!(
+            "`{target}` names {} items; give one of their ids: {}",
+            many.len(),
+            many.iter()
+                .map(|i| i.id.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
+    }
 }
 
 /// `ekos review scope|pii|write-behaviour …` — human-only. One new decision per target.

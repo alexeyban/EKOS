@@ -224,9 +224,17 @@ fn conflict_draft(o: &KirObject) -> Option<Draft<'_>> {
     } else {
         let a = claims.first().map(claim_text).unwrap_or_default();
         let b = claims.get(1).map(claim_text).unwrap_or_default();
+        let what = match s(o, "attribute") {
+            "" => s(o, "subject_name").to_string(),
+            attr => format!(
+                "{} — {}",
+                s(o, "subject_name"),
+                attr.replace("columns.", "").replace(".meaning", " meaning")
+            ),
+        };
         (
             "which_is_right",
-            format!("{a} says one thing; {b} says another. Which is right?"),
+            format!("{what}: {a} says one thing; {b} says another. Which is right?"),
             0.0,
         )
     };
@@ -235,7 +243,7 @@ fn conflict_draft(o: &KirObject) -> Option<Draft<'_>> {
         qtype,
         subject: Some(subject),
         table,
-        column: String::new(),
+        column: s(o, "column").to_lowercase(),
         text,
         context: json!({"conflict_type": s(o, "conflict_type"), "check": o.properties.get("check"),
                         "attribute": s(o, "attribute"), "claims": claims, "measured": o.properties.get("measured")}),

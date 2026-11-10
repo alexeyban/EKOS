@@ -65,10 +65,13 @@ pub fn signature(o: &KirObject, evidence: &[&KirEvidence]) -> String {
         if let Some(v) = o.properties.get(*f) {
             // `meanings` carry lines too; keep only what they say and where.
             let v = if *f == "meanings" {
+                // A person's testimony is evidence added after review; it must not stale the review
+                // it may well agree with (RFC 0253 §3.7).
                 json!(
                     v.as_array()
                         .map(|a| a
                             .iter()
+                            .filter(|m| m["source"] != "testimony")
                             .map(|m| json!([m["label"], m["source"], m["path"]]))
                             .collect::<Vec<_>>())
                         .unwrap_or_default()

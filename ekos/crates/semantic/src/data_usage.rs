@@ -122,6 +122,10 @@ pub struct ColumnSignal {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_column: Option<String>,
     pub coverage: Coverage,
+    /// A declared foreign key the column follows (`table.column`): its values are the parent's
+    /// rows, explained there — no `data_only_values` gap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub references: Option<String>,
 }
 
 /// One table's grain: its declared key, or what a key search measured.
@@ -279,7 +283,7 @@ pub fn fold(
     for ((_, column), (sid, table)) in columns {
         let subject = subjects.get(&sid).copied();
         for c in signals_for(signals, &table, &column, subject) {
-            if c.coverage.unexplained.rows > 0 {
+            if c.coverage.unexplained.rows > 0 && c.references.is_none() {
                 data_only_gap(out, sid, &table, &column, c);
                 stats.data_only_gaps += 1;
             }
@@ -399,6 +403,7 @@ mod tests {
                 tier: "p1".into(),
                 time_column: Some("created_at".into()),
                 coverage: cov,
+                references: None,
             }],
             grain: vec![],
             ..Default::default()

@@ -438,7 +438,11 @@ pub fn label_mismatches(enums: &[KirObject]) -> KirGraph {
         };
         // label → (sources, first path/line)
         let mut labels: BTreeMap<String, LabelSources> = BTreeMap::new();
-        for m in meanings {
+        // A person's stated meaning is compared with code once, as `testimony_mismatch` (RFC 0253).
+        for m in meanings
+            .iter()
+            .filter(|m| m.get("source").and_then(Value::as_str) != Some("testimony"))
+        {
             let Some(label) = m.get("label").and_then(Value::as_str).map(str::trim) else {
                 continue;
             };

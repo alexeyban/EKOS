@@ -157,6 +157,9 @@ pub fn commit_step(
     let files = crate::commands::export::current_ossie_files(config, cwd);
     let g = ekos_semantic::ossie_links::conflicts(&objects, files.as_ref(), &lookup);
     written += append_conflicts(ledger, &g, &mut ids)?;
+    // RFC 0253: a person's meaning that disagrees with code stays a current conflict.
+    let g = super::testimony::commit_mismatches(&objects);
+    written += append_conflicts(ledger, &g, &mut ids)?;
     write_manifest(config, cwd, &ids, ConflictStats::default())?;
     let mut stats = count(&items_in(config, cwd, ledger)?);
     write_manifest(config, cwd, &ids, stats.clone())?;

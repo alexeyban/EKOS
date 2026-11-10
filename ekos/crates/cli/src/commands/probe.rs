@@ -163,6 +163,12 @@ pub fn run(
             config.probe.max_rows
         );
     }
+    if let Some(c) = probe::filter_columns(&p)
+        .into_iter()
+        .find(|c| personal(&objects, &t.name, c))
+    {
+        bail!("{c} holds personal data: it cannot be filtered on (counts only, unfiltered)");
+    }
     let parent = match &p {
         Probe::Orphans { parent_table, .. } => Some(find_table(&objects, &database, parent_table)?),
         _ => None,
@@ -183,7 +189,15 @@ pub fn run(
     .map_err(|e| anyhow!(e))?;
     let used = spend(config, cwd)?;
     let spec = serde_json::to_value(&p)?;
-    audit(config, cwd, who, &database, &t.name, &spec)?;
+    // The audit keeps the template and columns, never a literal: a filter value can be personal.
+    audit(
+        config,
+        cwd,
+        who,
+        &database,
+        &t.name,
+        &serde_json::to_value(probe::audit_form(&p))?,
+    )?;
     let redaction = config.redaction_config();
     let rows = tokio::task::block_in_place(|| {
         let (worker, status) = ProbeWorker::start(&Target::Database(db.clone()), false);

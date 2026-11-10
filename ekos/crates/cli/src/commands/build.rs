@@ -177,6 +177,17 @@ fn inbox_observers(config: &EkosConfig) -> Vec<Box<dyn Observer>> {
     ))]
 }
 
+/// The inbox lives in the state directory: it is not a source tree freshness can check.
+fn freshness_stamps(
+    ob: &ekos_compiler_core::ObserveBase,
+    stamps: Vec<ekos_observation_sdk::FileStamp>,
+) -> Option<(
+    ekos_compiler_core::ObserveBase,
+    Vec<ekos_observation_sdk::FileStamp>,
+)> {
+    (!is_inbox(ob)).then(|| (ob.clone(), stamps))
+}
+
 fn observers_for<'a>(
     ob: &ekos_compiler_core::ObserveBase,
     all: &'a [Box<dyn Observer>],
@@ -862,7 +873,7 @@ pub async fn run_selected(
         // manifest the freshness check compares against later.
         let stamps = source_manifest(&ctx);
         let fp = fingerprint_of(&stamps);
-        built_stamps.push((ob.clone(), stamps));
+        built_stamps.extend(freshness_stamps(ob, stamps));
         let fp_key = format!(
             "{}{}",
             fingerprint_cache_key(base, logic_version, &redaction_config),

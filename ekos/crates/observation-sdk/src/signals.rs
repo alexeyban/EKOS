@@ -614,6 +614,24 @@ pub fn key_candidates(flavor: Flavor, columns: &[Value], limit: usize) -> Vec<St
             if fam == Family::Text && p["max_length"].as_i64().is_some_and(|l| l > 100) {
                 return None;
             }
+            // Free text that happens to be unique is not what a row is.
+            let l = name.to_ascii_lowercase();
+            if fam == Family::Text
+                && [
+                    "description",
+                    "name",
+                    "note",
+                    "comment",
+                    "title",
+                    "remark",
+                    "memo",
+                    "text",
+                ]
+                .iter()
+                .any(|w| l == *w || l.ends_with(&format!("_{w}")))
+            {
+                return None;
+            }
             Some((p["distinct"].as_i64().unwrap_or(-1), name.to_string()))
         })
         .collect();

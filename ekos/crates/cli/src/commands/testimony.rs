@@ -175,7 +175,11 @@ fn mismatch(
         .properties
         .get("label")
         .and_then(Value::as_str)?;
-    let norm = |x: &str| x.trim().trim_matches('\'').to_lowercase();
+    // Case, quotes and a plural `s` are not a disagreement ("Assets" = "asset").
+    let norm = |x: &str| {
+        let l = x.trim().trim_matches('\'').to_lowercase();
+        l.strip_suffix('s').map(str::to_string).unwrap_or(l)
+    };
     if norm(code_label) == norm(meaning) {
         return None;
     }
@@ -351,6 +355,40 @@ fn decide_from_testimony(
     Ok(n)
 }
 
+/// RFC 0253 §3.7 at commit: the `testimony_mismatch` conflicts of every active testimony that
+/// states a meaning, so they stay current (the commit rewrites the conflicts manifest).
+pub fn commit_mismatches(objects: &[KirObject]) -> ekos_kir::KirGraph {
+    let by_id: std::collections::HashMap<String, &KirObject> =
+        objects.iter().map(|o| (o.id.to_string(), o)).collect();
+    let mut g = ekos_kir::KirGraph::new();
+    for t in current(objects)
+        .into_iter()
+        .filter(|t| s(t, "status") == "active")
+    {
+        let Some(meaning) = t.properties.get("meaning").and_then(Value::as_str) else {
+            continue;
+        };
+        let about = t
+            .properties
+            .get("about")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for e in about
+            .iter()
+            .filter_map(|a| a.as_str().and_then(|a| by_id.get(a)))
+            .filter(|e| is_enum_meaning(e))
+        {
+            if let Some(m) = mismatch(e, t, meaning) {
+                g.objects.extend(m.objects);
+                g.relationships.extend(m.relationships);
+                g.evidence.extend(m.evidence);
+            }
+        }
+    }
+    g
+}
+
 /// `ekos testimony add` — human-only.
 pub fn add(config: &EkosConfig, cwd: &Path, st: Statement<'_>, json_out: bool) -> Result<()> {
     if st.text.trim().is_empty() {
@@ -423,8 +461,12 @@ pub fn withdraw(config: &EkosConfig, cwd: &Path, id: &str, by: &str) -> Result<(
         [] => bail!("no testimony {id}"),
         _ => bail!("{id} names several testimonies"),
     };
-    if !s(t, "author").eq_ignore_ascii_case(by) {
+    if s(t, "author") != by {
         bail!("only {} can withdraw this testimony", s(t, "author"));
+    }
+    if s(t, "status") == "withdrawn" {
+        println!("Already withdrawn.");
+        return Ok(());
     }
     let mut w = t.clone();
     w.properties.insert("status".into(), json!("withdrawn"));

@@ -53,7 +53,27 @@ struct Col {
     unique: bool,
     /// Whole number (as opposed to text): only the same kind is compared.
     numeric: bool,
+    /// The table's row count, when the catalog or a profile knows it.
+    rows: Option<i64>,
     sig: Signature,
+}
+
+impl Col {
+    /// Every row has its own value: declared unique, or measured (distinct = rows).
+    fn measured_unique(&self) -> bool {
+        self.unique || self.rows.is_some_and(|r| r > 0 && self.sig.distinct == r)
+    }
+}
+
+/// The table a column's name points at (`parts_id` → `parts`), when that table is in `tables`.
+fn named_table<'a>(column: &str, tables: &'a BTreeSet<String>) -> Option<&'a String> {
+    let c = column.to_ascii_lowercase();
+    let stem = ["_id", "_no", "_ref", "_code", "_key"]
+        .iter()
+        .find_map(|suf| c.strip_suffix(suf))?;
+    tables
+        .iter()
+        .find(|t| *t == stem || **t == format!("{stem}s") || t.trim_end_matches('s') == stem)
 }
 
 impl Col {
@@ -200,7 +220,7 @@ fn measured_keys(
 
 /// Declared foreign keys as (child table, child column, parent table, parent column), lowercase,
 /// from each `ForeignKey`'s `fk_desc` (`from.a, b → to.x, y`).
-fn declared(
+pub(crate) fn declared(
     objects: &[KirObject],
     relationships: &[KirRelationship],
 ) -> BTreeSet<(String, String, String, String)> {
@@ -327,6 +347,7 @@ impl Ctx<'_> {
                         column: name,
                         table_id: t.id,
                         numeric,
+                        rows: known_rows(t),
                         sig,
                     });
                 }
@@ -353,16 +374,25 @@ impl Ctx<'_> {
         overlap::containment(&child.sig, &parent.sig) >= self.opts.min_containment
     }
 
-    /// Data-seeded pairs: LSH bands propose, containment decides.
+    /// Data-seeded pairs: LSH bands propose, containment decides. A parent whose own name points
+    /// at another table (`partstax.parts_id`) is itself a reference, not a parent; and when a child
+    /// has a parent its name points at, the others are dropped.
     fn data_pairs(&self, cols: &[Col], pairs: &mut BTreeMap<(usize, usize), Pair>) {
+        let tables: BTreeSet<String> = cols.iter().map(|c| c.table.to_lowercase()).collect();
         let mut by_band: HashMap<String, Vec<usize>> = HashMap::new();
         for (i, c) in cols.iter().enumerate() {
             for b in overlap::bands(&c.sig) {
                 by_band.entry(b).or_default().push(i);
             }
         }
+        let mut found: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for (p, parent) in cols.iter().enumerate() {
             if !parent.unique || parent.sig.distinct < self.opts.min_parent_distinct {
+                continue;
+            }
+            if named_table(&parent.column, &tables)
+                .is_some_and(|t| *t != parent.table.to_lowercase())
+            {
                 continue;
             }
             let near: BTreeSet<usize> = overlap::bands(&parent.sig)
@@ -375,6 +405,19 @@ impl Ctx<'_> {
                 .into_iter()
                 .filter(|&c| self.plausible(&cols[c], parent))
             {
+                found.entry(c).or_default().push(p);
+            }
+        }
+        for (c, parents) in found {
+            let affine: Vec<usize> = parents
+                .iter()
+                .copied()
+                .filter(|&p| {
+                    overlap::name_affinity(&cols[c].column, &cols[p].table, &cols[p].column)
+                })
+                .collect();
+            let keep = if affine.is_empty() { parents } else { affine };
+            for p in keep {
                 pairs.insert(
                     (c, p),
                     Pair {
@@ -382,7 +425,7 @@ impl Ctx<'_> {
                         parent: p,
                         data: true,
                         code_sources: vec![],
-                        containment: Some(overlap::containment(&cols[c].sig, &parent.sig)),
+                        containment: Some(overlap::containment(&cols[c].sig, &cols[p].sig)),
                     },
                 );
             }
@@ -403,11 +446,7 @@ impl Ctx<'_> {
                 continue;
             };
             for (&l, &r) in ls.iter().flat_map(|l| rs.iter().map(move |r| (l, r))) {
-                let (c, p) = if cols[r].unique || !cols[l].unique {
-                    (l, r)
-                } else {
-                    (r, l)
-                };
+                let (c, p) = code_direction(cols, l, r);
                 if cols[c].table_id == cols[p].table_id || self.is_declared(&cols[c], &cols[p]) {
                     continue;
                 }
@@ -505,6 +544,20 @@ impl Ctx<'_> {
     }
 }
 
+/// Which side of a code join is the parent: the one whose table the other's name points at
+/// (`entity_credit_account.entity_id` → `entity.id`), else the unique side.
+fn code_direction(cols: &[Col], l: usize, r: usize) -> (usize, usize) {
+    let points_at = |a: usize, b: usize| {
+        overlap::name_affinity(&cols[a].column, &cols[b].table, &cols[b].column)
+    };
+    match (points_at(l, r), points_at(r, l)) {
+        (true, false) => (l, r),
+        (false, true) => (r, l),
+        _ if cols[r].measured_unique() || !cols[l].measured_unique() => (l, r),
+        _ => (r, l),
+    }
+}
+
 /// The live tables of one database, sorted.
 fn database_tables<'a>(objects: &'a [KirObject], db: &str) -> Vec<&'a KirObject> {
     let mut v: Vec<&KirObject> = objects
@@ -536,7 +589,10 @@ fn candidate_object(
         .map(|r| r.verdict().as_str())
         .unwrap_or("not_measured");
     let mut o = KirObject::new(
-        format!("{}.{} → {}.{}", c.table, c.column, p.table, p.column),
+        format!(
+            "{}: {}.{} → {}.{}",
+            c.database, c.table, c.column, p.table, p.column
+        ),
         ObjectKind::Custom(KIND.into()),
     );
     o.id = kid(&key);
@@ -561,7 +617,8 @@ fn candidate_object(
             "containment_estimate",
             json!(pair.containment.map(|x| (x * 1000.0).round() / 1000.0)),
         ),
-        ("parent_unique", json!(p.unique)),
+        ("parent_unique", json!(p.measured_unique())),
+        ("parent_distinct", json!(p.sig.distinct)),
         (
             "name_affinity",
             json!(overlap::name_affinity(&c.column, &p.table, &p.column)),
@@ -673,6 +730,8 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
     }
     written.sort_by(|a, b| rank(&a.0).cmp(&rank(&b.0)).then(a.0.name.cmp(&b.0.name)));
     let mut ids = write_candidates(&*ledger, &objects, &written)?;
+    let skipped = skipped_databases(&report);
+    ids.extend(kept_for(config, cwd, &objects, &skipped, &ids));
     let overlaps = if opts.cross_database {
         cross_database(
             &*ledger,
@@ -716,7 +775,49 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
     if !errors.is_empty() {
         println!("{} error(s); see {}", errors.len(), path.display());
     }
+    if !skipped.is_empty() {
+        bail!(
+            "not read: {} — their last candidates were kept",
+            skipped.join(", ")
+        );
+    }
     Ok(())
+}
+
+fn skipped_databases(report: &[Value]) -> Vec<String> {
+    report
+        .iter()
+        .filter(|r| r.get("skipped").is_some())
+        .filter_map(|r| r["database"].as_str().map(str::to_string))
+        .collect()
+}
+
+/// The previous discovery's ids that a database which could not be read keeps: its candidates,
+/// and the cross-database overlaps (which may involve it).
+fn kept_for(
+    config: &EkosConfig,
+    cwd: &Path,
+    objects: &[KirObject],
+    skipped: &[String],
+    fresh: &[String],
+) -> Vec<String> {
+    if skipped.is_empty() {
+        return Vec::new();
+    }
+    let candidates: HashMap<String, &KirObject> = objects
+        .iter()
+        .filter(|o| matches!(&o.kind, ObjectKind::Custom(k) if k == KIND))
+        .map(|o| (o.id.to_string(), o))
+        .collect();
+    current_ids(config, cwd)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|id| !fresh.contains(id))
+        .filter(|id| match candidates.get(id) {
+            Some(o) => skipped.iter().any(|d| d == s(o, "database")),
+            None => true,
+        })
+        .collect()
 }
 
 /// Appends the candidates and links each to its two tables; returns their ids.

@@ -7110,3 +7110,12 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
 - [x] RFC 0254 §3.6: the source passport on estate table pages
 - [ ] RFC 0254: `null_not_handled`, `cast_will_fail`; docx/xlsx questionnaire export; RFC 0228
       expectation hand-off; acceptance on LedgerSMB + iDempiere top-20 judged by an operator
+- [ ] Pre-existing, found by the RFC 0252–0254 QA session: after any recover pass re-runs with a new
+      cache key (a version bump, some config edits) `ekos resolve` loads every knowledge artifact
+      ever written (510 artifacts instead of 248), doubling objects and proposing ~190 same-name
+      auto-merges. Resolve should read only the current pass outputs (the pass manifests).
+- [ ] RFC 0252–0254 QA leftovers: testimony evidence from a probe keeps counts without their code
+      labels; `--about` ambiguity lists no ids; `questions show | head` broken pipe; passport shows
+      "_unknown_" where the licence gate withheld a meaning; `[questions] owners` take effect only at
+      the next derivation; estate pages for a table in two databases show the ClickHouse copy's
+      (empty) foreign keys.

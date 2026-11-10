@@ -116,6 +116,13 @@ fn condition(flavor: Flavor, columns: &[Value], c: &Cond) -> Result<String, Stri
     if !matches!(fam, Family::Number | Family::Text | Family::Date) {
         return Err(format!("{} cannot be compared", c.column));
     }
+    // A range over text lets a caller bisect a value prefix by prefix: equality only.
+    if fam == Family::Text && matches!(c.op.as_str(), "<" | "<=" | ">" | ">=") {
+        return Err(format!(
+            "{} is text: only =, !=, in, is_null and is_not_null",
+            c.column
+        ));
+    }
     let id = profile::ident(flavor, &real_name(col))?;
     match c.op.as_str() {
         "is_null" => Ok(format!("{id} IS NULL")),
@@ -192,6 +199,29 @@ fn bucket(flavor: Flavor, col: &str, grain: &str) -> Result<String, String> {
         (Flavor::Informix, "month") => format!("TO_CHAR({col}, '%Y-%m')"),
         (Flavor::Informix, _) => format!("TO_CHAR({col}, '%Y')"),
     })
+}
+
+/// Every column a probe filters on (a personal one is refused: filtering on it reveals values).
+pub fn filter_columns(p: &Probe) -> Vec<&str> {
+    match p {
+        Probe::Distribution { r#where, .. } | Probe::Count { r#where } => {
+            r#where.iter().map(|c| c.column.as_str()).collect()
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// The probe with every `where` literal replaced by a placeholder: what the audit keeps.
+pub fn audit_form(p: &Probe) -> Probe {
+    let mut q = p.clone();
+    if let Probe::Distribution { r#where, .. } | Probe::Count { r#where } = &mut q {
+        for c in r#where.iter_mut() {
+            if c.value.is_some() {
+                c.value = Some(json!("<literal>"));
+            }
+        }
+    }
+    q
 }
 
 /// The columns whose values a probe would return (for the PII rule).
@@ -311,7 +341,15 @@ pub fn shape(
                 .map(|c| {
                     c.as_deref()
                         .and_then(|v| v.trim().parse::<f64>().ok())
-                        .map_or(Value::Null, |f| json!(f as i64))
+                        .map_or(Value::Null, |f| {
+                            // With a filter, an exact small count says whether a row exists.
+                            let n = f as i64;
+                            if n > 0 && n < min_cell {
+                                json!(format!("<{min_cell}"))
+                            } else {
+                                json!(n)
+                            }
+                        })
                 })
                 .collect();
             json!({"values": values, "counts": counts})
@@ -402,5 +440,10 @@ mod tests {
         assert_eq!(v[1]["values"][0], "<5 rows");
         let v = shape(&rows, 1, &[false], 5, &Default::default());
         assert_eq!(v[0]["values"][0], "a@x.org");
+        let one = shape(&[vec![Some("1".into())]], 0, &[], 5, &Default::default());
+        assert_eq!(
+            one[0]["counts"][0], "<5",
+            "a filtered count of one row is hidden"
+        );
     }
 }

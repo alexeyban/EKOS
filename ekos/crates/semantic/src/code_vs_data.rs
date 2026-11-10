@@ -164,6 +164,7 @@ fn data_claim(c: &ColumnSignal, what: String) -> Claim {
 /// One finding as a graph to append.
 fn finding(
     subject: &KirObject,
+    column: &str,
     attribute: &str,
     check: &str,
     claims: Vec<Claim>,
@@ -172,6 +173,7 @@ fn finding(
     let mut g = conflicts::conflict(subject, attribute, CODE_VS_DATA, claims, None);
     if let Some(o) = g.objects.first_mut() {
         o.properties.insert("check".into(), json!(check));
+        o.properties.insert("column".into(), json!(column));
         o.properties.insert("measured".into(), measured);
     }
     g
@@ -236,10 +238,11 @@ fn enumerations(objects: &[KirObject], hits: &[Hit<'_>], cfg: Settings, out: &mu
         let handled_list = values.iter().cloned().collect::<Vec<_>>().join(", ");
         out.push(finding(
             subject,
-            &format!("code_vs_data:predicate_misses_values:{}:{}", h.carrier.name, c.column),
+            &c.column,
+            &format!("code_vs_data:predicate_misses_values:{}:{}", short(h.carrier), c.column),
             "predicate_misses_values",
             vec![
-                code_claim(h.carrier, h.site.line, format!("{} handles {} = {handled_list}", h.carrier.name, c.column)),
+                code_claim(h.carrier, h.site.line, format!("{} handles {} = {handled_list}", short(h.carrier), c.column)),
                 data_claim(c, format!("{}.{} also holds values none of these branches handles", c.table, c.column)),
             ],
             json!({"rows_unhandled": other, "share": sh, "column_rows": c.coverage.non_null, "handled": values}),
@@ -247,21 +250,30 @@ fn enumerations(objects: &[KirObject], hits: &[Hit<'_>], cfg: Settings, out: &mu
     }
 }
 
-/// `dead_branch`: a branch value no row holds, or one not seen for `dead_after` months.
+/// A carrier's name without its schema: a routine read from a file and the same routine read
+/// from the live catalog (`public.f`) are one piece of logic.
+fn short(carrier: &KirObject) -> &str {
+    carrier.name.rsplit('.').next().unwrap_or(&carrier.name)
+}
+
+/// (routine, database, table, column).
+type DeadKey = (String, String, String, String);
+
+/// `dead_branch`: per routine and column, the branch values no row holds, or not for `dead_after`
+/// months — one finding listing them, not one per value.
 fn dead_branches(
     objects: &[KirObject],
     hits: &[Hit<'_>],
     dead_after: i64,
     out: &mut Vec<KirGraph>,
 ) {
-    let mut seen: BTreeSet<(String, String, String)> = BTreeSet::new();
+    // (routine, database, table, column) → (first hit, dead values)
+    let mut groups: BTreeMap<DeadKey, (&Hit<'_>, BTreeSet<String>)> = BTreeMap::new();
     for h in hits
         .iter()
         .filter(|h| matches!(h.site.clause, Clause::Case | Clause::Condition))
+        .filter(|h| h.site.op == "in")
     {
-        if h.site.op != "in" {
-            continue;
-        }
         let c = h.signal;
         for v in &h.site.values {
             let Some(u) = c.coverage.literals.get(v) else {
@@ -272,32 +284,45 @@ fn dead_branches(
             if u.rows > 0 && !dead {
                 continue;
             }
-            if !seen.insert((
-                h.carrier.id.to_string(),
+            let key = (
+                short(h.carrier).to_string(),
                 c.database.clone(),
-                format!("{}={v}", c.column),
-            )) {
-                continue;
-            }
-            let Some(subject) = table_of(objects, c) else {
-                continue;
-            };
-            let why = if u.rows == 0 {
-                "no row holds it".to_string()
-            } else {
-                format!("no row since {}", u.last_seen.clone().unwrap_or_default())
-            };
-            out.push(finding(
-                subject,
-                &format!("code_vs_data:dead_branch:{}:{}={v}", h.carrier.name, c.column),
-                "dead_branch",
-                vec![
-                    code_claim(h.carrier, h.site.line, format!("{} has a branch for {} = {v}", h.carrier.name, c.column)),
-                    data_claim(c, format!("{}.{} = {}: {}", c.table, c.column, literal_text(v), if u.rows == 0 { "never in the data" } else { "not seen recently" })),
-                ],
-                json!({"rows": u.rows, "last_seen": u.last_seen, "latest_in_column": c.coverage.latest, "why": why}),
-            ));
+                c.table.clone(),
+                c.column.clone(),
+            );
+            groups
+                .entry(key)
+                .or_insert((h, BTreeSet::new()))
+                .1
+                .insert(v.clone());
         }
+    }
+    for ((routine, _, _, _), (h, values)) in groups {
+        let c = h.signal;
+        let Some(subject) = table_of(objects, c) else {
+            continue;
+        };
+        let list = values.iter().cloned().collect::<Vec<_>>().join(", ");
+        let detail: Vec<Value> = values
+            .iter()
+            .map(|v| {
+                let u = &c.coverage.literals[v];
+                json!({"value": v, "rows": u.rows, "last_seen": u.last_seen})
+            })
+            .collect();
+        let none_at_all = values.iter().all(|v| c.coverage.literals[v].rows == 0);
+        out.push(finding(
+            subject,
+            &c.column,
+            &format!("code_vs_data:dead_branch:{routine}:{}", c.column),
+            "dead_branch",
+            vec![
+                code_claim(h.carrier, h.site.line, format!("{routine} has branches for {} = {list}", c.column)),
+                data_claim(c, format!("{}.{} = {list}: {}", c.table, c.column, if none_at_all { "never in the data" } else { "not seen recently" })),
+            ],
+            json!({"values": detail, "latest_in_column": c.coverage.latest,
+                   "why": if none_at_all { format!("no row holds {list}") } else { format!("no recent row holds {list}") }}),
+        ));
     }
 }
 
@@ -375,16 +400,24 @@ fn ranges(objects: &[KirObject], hits: &[Hit<'_>], out: &mut Vec<KirGraph>) {
         }
         out.push(finding(
             t,
+            &c.column,
             &format!(
                 "code_vs_data:range_assumption:{}:{}{}{v}",
-                h.carrier.name, c.column, h.site.op
+                short(h.carrier),
+                c.column,
+                h.site.op
             ),
             "range_assumption",
             vec![
                 code_claim(
                     h.carrier,
                     h.site.line,
-                    format!("{} compares {} {} {v}", h.carrier.name, c.column, h.site.op),
+                    format!(
+                        "{} compares {} {} {v}",
+                        short(h.carrier),
+                        c.column,
+                        h.site.op
+                    ),
                 ),
                 data_claim(
                     c,
@@ -437,6 +470,7 @@ fn lookups(
             .unwrap_or_else(|| (sources.first().cloned().unwrap_or_default(), None));
         out.push(finding(
             subject,
+            s(o, "parent_column"),
             &format!("code_vs_data:lookup_not_unique:{}", o.name),
             "lookup_not_unique",
             vec![
@@ -560,6 +594,7 @@ mod tests {
                 tier: "p1".into(),
                 time_column: None,
                 coverage: cov,
+                references: None,
             }],
             dead_after_months: 24,
             ..Default::default()
@@ -617,7 +652,16 @@ mod tests {
             ]),
         ];
         let g = detect(&objects, &signals(), None, Settings { min_share: 0.5 });
-        assert_eq!(checks(&g), ["dead_branch", "dead_branch"]);
+        // One finding per routine and column, listing both values.
+        assert_eq!(checks(&g), ["dead_branch"]);
+        assert_eq!(
+            g.objects[0].properties["measured"]["values"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(g.objects[0].properties["column"], "status");
     }
 
     #[test]

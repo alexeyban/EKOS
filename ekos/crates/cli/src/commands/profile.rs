@@ -223,6 +223,7 @@ impl Measure<'_> {
             tier: self.tier.into(),
             time_column: time,
             coverage: cov,
+            references: None,
         })
     }
 
@@ -532,7 +533,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
     let measured_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     // Probes are synchronous and may block: one database at a time, off the async runtime.
     let mut all = Measured::default();
-    let mut report = Vec::new();
+    let mut report: Vec<Value> = Vec::new();
     for db in dbs {
         let m = tokio::task::block_in_place(|| {
             measure_database(db, &objects, &literals, &opts, &redaction, &mut report)
@@ -543,7 +544,52 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
         all.history.extend(m.history);
         all.errors.extend(m.errors);
     }
+    // M5 (QA): a column following a declared foreign key (in any database: a copy keeps the
+    // source's columns) takes its values from the parent table — not "values no code names".
+    let fks = super::relationships::declared(&objects, &ledger.all_relationships()?);
+    for c in &mut all.columns {
+        let (t, col) = (tail(&c.table), c.column.to_lowercase());
+        c.references = fks
+            .iter()
+            .find(|(ct, cc, _, _)| *ct == t && *cc == col)
+            .map(|(_, _, pt, pc)| format!("{pt}.{pc}"));
+    }
     let errors = all.errors;
+    // A database that could not be read keeps its last good measurement: a connection failure must
+    // not make its questions obsolete or its counts vanish.
+    let skipped: Vec<String> = report
+        .iter()
+        .filter(|r| {
+            r.get("skipped").is_some()
+                && r["skipped"]
+                    .as_str()
+                    .is_some_and(|w| !w.starts_with("profile = p0"))
+        })
+        .filter_map(|r| r["database"].as_str().map(str::to_string))
+        .collect();
+    let previous = load(config, cwd);
+    let mut kept_ids = Vec::new();
+    if let Some(prev) = previous.as_ref().filter(|_| !skipped.is_empty()) {
+        let keep = |db: &String| skipped.contains(db);
+        all.columns
+            .extend(prev.columns.iter().filter(|c| keep(&c.database)).cloned());
+        all.grain
+            .extend(prev.grain.iter().filter(|g| keep(&g.database)).cloned());
+        all.implications.extend(
+            prev.implications
+                .iter()
+                .filter(|i| keep(&i.database))
+                .cloned(),
+        );
+        all.history
+            .extend(prev.history.iter().filter(|h| keep(&h.database)).cloned());
+        let prev_ids = grain_ids(config, cwd).unwrap_or_default();
+        kept_ids = objects
+            .iter()
+            .filter(|o| prev_ids.contains(&o.id.to_string()) && keep(&s(o, "database").to_string()))
+            .map(|o| o.id.to_string())
+            .collect();
+    }
     let signals = DataSignals {
         rfc: "0252".into(),
         measured_at: measured_at.clone(),
@@ -553,7 +599,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
         implications: all.implications,
         history: all.history,
     };
-    let grain_ids = write_grain(&*ledger, &objects, &signals)?;
+    let mut grain_ids = write_grain(&*ledger, &objects, &signals)?;
+    for id in kept_ids {
+        if !grain_ids.contains(&id) {
+            grain_ids.push(id);
+        }
+    }
     // §3.2(e): history evidence on the current write behaviour, now rather than at the next commit.
     let mut behaviour: Vec<KirObject> = objects
         .iter()
@@ -598,6 +649,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
         if let Some(q) = &questions {
             println!("{}", super::questions::summary_line(q));
         }
+    }
+    if !skipped.is_empty() {
+        bail!(
+            "not measured: {} — their last measurement was kept",
+            skipped.join(", ")
+        );
     }
     Ok(())
 }
@@ -726,6 +783,9 @@ pub fn show(config: &EkosConfig, cwd: &Path, table: Option<&str>, json_out: bool
         |t: &str| table.is_none_or(|w| t.eq_ignore_ascii_case(w) || tail(w) == t.to_lowercase());
     let cols: Vec<&ColumnSignal> = sig.columns.iter().filter(|c| want(&c.table)).collect();
     let grain: Vec<&GrainSignal> = sig.grain.iter().filter(|g| want(&g.table)).collect();
+    if let (Some(t), true, true) = (table, cols.is_empty(), grain.is_empty()) {
+        bail!("nothing measured for {t} (ekos profile show lists every table)");
+    }
     if json_out {
         println!(
             "{}",
