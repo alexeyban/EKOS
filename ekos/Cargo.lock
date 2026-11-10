@@ -2051,6 +2051,7 @@ dependencies = [
  "ekos-identity",
  "ekos-kir",
  "ekos-ledger",
+ "ekos-observation-sdk",
  "ekos-ossie",
  "serde",
  "serde_json",

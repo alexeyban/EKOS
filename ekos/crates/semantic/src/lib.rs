@@ -9,6 +9,7 @@ pub mod bulk_resolve;
 pub mod business_semantics;
 pub mod conflicts;
 pub mod data_lineage;
+pub mod data_usage;
 pub mod doc_links;
 pub mod live_conflicts;
 pub mod ontology;

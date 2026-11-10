@@ -355,14 +355,14 @@ type Request = (
 );
 
 /// A database session on its own thread, queried over a channel.
-struct ProbeWorker {
+pub(crate) struct ProbeWorker {
     tx: mpsc::Sender<Request>,
 }
 
 impl ProbeWorker {
     /// Connects on a new thread. The probe is `None` without a target or when the database will
     /// not be queried; the second value says which, for the report.
-    fn start(
+    pub(crate) fn start(
         target: &Target,
         allow_writable_role: bool,
     ) -> (Option<ProbeWorker>, Option<Result<String, String>>) {

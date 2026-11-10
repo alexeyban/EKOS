@@ -153,6 +153,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: DatabaseCommands,
     },
+    /// What the live data says about the code: value usage, dead codes, grain (RFC 0252)
+    Profile {
+        #[command(subcommand)]
+        subcommand: ProfileCommands,
+    },
     /// Run observation passes and write knowledge to the ledger
     Build {
         /// Re-observe one named source only; the others keep what the last build recorded
@@ -1158,7 +1163,74 @@ enum SourceCommands {
     Remove { name: String },
 }
 
+/// `ekos profile …` (RFC 0252).
+async fn dispatch_profile(
+    subcommand: ProfileCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    match subcommand {
+        ProfileCommands::Run {
+            database,
+            signals,
+            max_rows,
+            dead_after,
+            allow_writable_role,
+            json,
+        } => {
+            crate::commands::profile::run(
+                config,
+                cwd,
+                crate::commands::profile::RunOpts {
+                    database: database.as_deref(),
+                    signals,
+                    max_rows,
+                    dead_after_months: dead_after,
+                    allow_writable_role,
+                    json,
+                },
+            )
+            .await
+        }
+        ProfileCommands::Show { table, json } => {
+            crate::commands::profile::show(config, cwd, table.as_deref(), json)
+        }
+    }
+}
+
 #[derive(Subcommand)]
+enum ProfileCommands {
+    /// Measure, on every `[[databases]]` entry with profile p1/p2, how often each value code names
+    /// occurs and since when, what else the data holds (counts only), and each table's key; then
+    /// fold it into the business-semantics items
+    Run {
+        /// Only this database
+        #[arg(long)]
+        database: Option<String>,
+        /// literal, temporal, keys (comma-separated; default all)
+        #[arg(long, value_delimiter = ',')]
+        signals: Vec<String>,
+        /// Skip tables with more rows than this, by the catalog's estimate (0: no limit)
+        #[arg(long, default_value_t = 10_000_000)]
+        max_rows: i64,
+        /// A code not seen for longer than this many months (before the column's latest row) is dead
+        #[arg(long, default_value_t = 24)]
+        dead_after: i64,
+        /// Query with a user that could write (refused by default, as for `ekos sql check`)
+        #[arg(long)]
+        allow_writable_role: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// What the latest run measured, for every table or one
+    Show {
+        table: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum DatabaseCommands {
     /// Add a database (Oracle, PostgreSQL or ClickHouse); its password stays in an environment
     /// variable named here
@@ -2517,6 +2589,7 @@ where
         Commands::Source { subcommand } => {
             dispatch_source(subcommand, &config, &cwd, &config_path, &invoked_from)
         }
+        Commands::Profile { subcommand } => dispatch_profile(subcommand, &config, &cwd).await,
         Commands::Database { subcommand } => {
             use crate::commands::database;
             match subcommand {

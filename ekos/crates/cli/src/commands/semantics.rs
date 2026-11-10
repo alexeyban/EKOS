@@ -58,6 +58,8 @@ pub async fn commit_step(
         min_sites: config.semantics.min_sites.max(1),
         max_enum_values: config.semantics.max_enum_values,
         ontology: load_vocabulary(config, cwd)?,
+        // RFC 0252: what the latest `ekos profile run` measured.
+        data: super::profile::load(config, cwd),
     };
     let blame = (config.semantics.rationale)
         .then(|| GitBlame::new(cwd, config.redaction_config()))
@@ -264,6 +266,8 @@ fn stats_json(s: &SemanticsStats) -> Value {
         "conflicts": s.conflicts,
         "mapping_suggestions": s.mapping_suggestions,
         "rationale_links": s.rationale_links,
+        "data_values_measured": s.data_values_measured, "dead_codes": s.dead_codes,
+        "never_seen_codes": s.never_seen_codes, "data_only_gaps": s.data_only_gaps,
     })
 }
 

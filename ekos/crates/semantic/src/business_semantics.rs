@@ -64,6 +64,8 @@ pub struct SemanticsConfig {
     pub max_enum_values: usize,
     /// RFC 0170 Phase 4: the user's vocabulary for mapping suggestions (empty: none made).
     pub ontology: crate::ontology::Vocabulary,
+    /// RFC 0252: what `ekos profile run` measured (`<state>/profile/current.json`); `None`: nothing.
+    pub data: Option<crate::data_usage::DataSignals>,
 }
 
 impl Default for SemanticsConfig {
@@ -72,6 +74,7 @@ impl Default for SemanticsConfig {
             min_sites: 2,
             max_enum_values: 12,
             ontology: Default::default(),
+            data: None,
         }
     }
 }
@@ -113,6 +116,11 @@ pub struct SemanticsStats {
     pub conflicts: usize,
     pub rationale_links: usize,
     pub mapping_suggestions: usize,
+    /// RFC 0252: code values with a measured row count, dead codes, code values no row holds.
+    pub data_values_measured: usize,
+    pub dead_codes: usize,
+    pub never_seen_codes: usize,
+    pub data_only_gaps: usize,
 }
 
 /// Everything synthesized, ready to append.
@@ -1271,6 +1279,20 @@ pub fn synthesize(
         .iter()
         .filter(|o| kind_name(o) == Some(RATIONALE))
         .count();
+    if let Some(d) = &cfg.data {
+        let subjects: HashMap<KirId, &KirObject> = graph
+            .objects
+            .iter()
+            .filter(|o| o.kind == ObjectKind::Table)
+            .map(|o| (o.id, o))
+            .collect();
+        let fs = crate::data_usage::fold(&mut b.out, &subjects, d);
+        b.out.stats.data_values_measured = fs.values_measured;
+        b.out.stats.dead_codes = fs.dead;
+        b.out.stats.never_seen_codes = fs.never_seen;
+        b.out.stats.data_only_gaps = fs.data_only_gaps;
+        b.out.stats.gaps += fs.data_only_gaps;
+    }
     suggest_mappings(&mut b.out, cfg);
     sign_items(&mut b.out);
     cite_endpoint_evidence(&mut b.out);

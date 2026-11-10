@@ -11,6 +11,7 @@ rust-version.workspace = true
 [dependencies]
 ekos-common.workspace = true
 ekos-kir.workspace = true
+ekos-observation-sdk.workspace = true
 ekos-ossie.workspace = true
 ekos-artifact.workspace = true
 ekos-compiler-core.workspace = true

@@ -228,6 +228,11 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "the table it describes — RFC 0212; one per table, derived at commit",
     },
     CustomKind {
+        name: "GrainCandidate",
+        structurally_keyed: true,
+        note: "the table it describes — RFC 0252 §3.2(d); one per live table, written by `ekos profile run`",
+    },
+    CustomKind {
         name: "ReviewDecision",
         structurally_keyed: true,
         note: "(subject, item) — RFC 0213; a person's decision on one review item, last wins",
