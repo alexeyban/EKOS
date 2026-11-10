@@ -142,7 +142,7 @@ database's own object counts, behind the `oracle` build feature — RFC 0211), p
 proof-of-concept clients for Salesforce, SAP,
 Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
 account). SQL in the PostgreSQL, SQL Server (T-SQL), MySQL, Snowflake, Databricks and ClickHouse dialects is
-parsed from files (RFC 0031); live Oracle, PostgreSQL and ClickHouse catalogs are read through `[[databases]]` (RFC 0211, RFC 0235); a live SQL Server connector and a Jira connector remain planned.
+parsed from files (RFC 0031); live Oracle, PostgreSQL, ClickHouse and SQL Server catalogs are read through `[[databases]]` (RFC 0211, RFC 0235, RFC 0252 §3.5); a Jira connector remains planned.
 
 ## Installation
 
@@ -855,7 +855,22 @@ The application dictionary stays Oracle-only.
 ```bash
 ekos database add shop --kind postgres --connect db.local:5432/shop --user shop_ro --password-env SHOP_PW --owner public
 ekos database add wh --kind clickhouse --connect https://ch.local:8443 --user ro --password-env WH_PW --owner analytics
+ekos database add erp --kind sqlserver --connect mssql.local:1433/erp --user ekos_ro --password-env ERP_PW --owner dbo
 ```
+
+SQL Server (RFC 0252 §3.5): `kind = "sqlserver"`, `connect = "host[:port]/database"` (port 1433 by
+default; append `?trust-server-certificate=true` only for a self-signed certificate — the connection
+is encrypted either way), `owners` the schemas. The catalog comes from the `sys.*` views — tables,
+columns, keys and unique indexes, checks, foreign keys, `MS_Description` comments, and view, routine
+and trigger text from `sys.sql_modules` — reconciled against `sys.objects`. SQL Server has no
+read-only session setting, so the session asks for read-only routing (`ApplicationIntent=ReadOnly`),
+runs every statement in a transaction that is always rolled back, with lock and command timeouts, and
+the write check reports the login's rights (`HAS_PERMS_BY_NAME`) rather than attempting a write. P0 is
+`sys.partitions`' approximate row counts (column statistics are histograms of values and are never
+read); P1/P2 as for the other kinds. T-SQL routines compile at *signature* fidelity — arguments,
+return type, description, and the tables they read and write from a real parse — with no
+per-statement objects yet. `ekos sql check --database <name>` probes it read-only too. The testbed is
+`docker-compose.sqlserver.yml` (`EKOS_SQLSERVER_LIVE=1` for the live suite).
 ### Write behaviour: how each table is updated and deleted (RFC 0212)
 
 Before copying a table incrementally you need to know whether every change moves its timestamp
