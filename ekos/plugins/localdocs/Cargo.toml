@@ -1,6 +1,6 @@
 [package]
 name = "ekos-plugin-localdocs"
-description = "Local document observer plugin — PDF/DOCX text, tables, and image OCR (RFC 0023)"
+description = "Local document observer plugin — PDF/DOCX/XLSX/CSV/PPTX text, tables, and image OCR (RFC 0023, RFC 0253)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -28,6 +28,9 @@ roxmltree.workspace = true
 tempfile = "3"
 html2text = "0.17"
 mail-parser = "0.11"
+# RFC 0253: XLSX reader (pure Rust, read-only, zip 9 like the DOCX reader) and CSV.
+calamine = { version = "0.38", default-features = false }
+csv = "1.4"
 
 [dev-dependencies]
 tempfile = "3"

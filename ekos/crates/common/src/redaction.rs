@@ -358,6 +358,35 @@ pub fn read_redacted(
     Ok(redact(&raw, config))
 }
 
+/// RFC 0253: personal data in free text a person sent — the text recognised in an image, a
+/// spreadsheet cell, a slide. [`redact`] looks for secret *shapes*; this looks for the personal data
+/// RFC 0043 also keeps out of the ledger: e-mail addresses and payment card numbers (13–19 digits,
+/// single spaces or dashes allowed between them, Luhn-valid — the checksum keeps order numbers out).
+/// Each match becomes `[REDACTED:email]` / `[REDACTED:payment-card]`.
+///
+/// Not part of [`redact`]: commit authors and code are full of addresses that are identities, not
+/// data, and the build-wide baseline must not change what every connector records.
+pub fn redact_personal_data(content: &str) -> String {
+    static EMAIL: OnceLock<Regex> = OnceLock::new();
+    static CARD: OnceLock<Regex> = OnceLock::new();
+    let email = EMAIL.get_or_init(|| {
+        Regex::new(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}")
+            .expect("valid e-mail pattern")
+    });
+    let card =
+        CARD.get_or_init(|| Regex::new(r"\b\d(?:[ -]?\d){12,18}\b").expect("valid card pattern"));
+    let out = email.replace_all(content, "[REDACTED:email]");
+    card.replace_all(&out, |caps: &regex::Captures| {
+        let found = &caps[0];
+        if crate::pii::looks_like_card(found) {
+            "[REDACTED:payment-card]".to_string()
+        } else {
+            found.to_string()
+        }
+    })
+    .into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -621,5 +650,23 @@ mod tests {
                 .contains("[REDACTED:aws-access-key-id]")
         );
         assert_eq!(value["count"], serde_json::json!(3));
+    }
+
+    #[test]
+    fn personal_data_email_and_luhn_valid_card_are_redacted() {
+        let text = "Contact: jane.doe@example.com\nCard: 4111 1111 11111111";
+        let out = redact_personal_data(text);
+        assert_eq!(
+            out,
+            "Contact: [REDACTED:email]\nCard: [REDACTED:payment-card]"
+        );
+    }
+
+    #[test]
+    fn personal_data_keeps_numbers_that_fail_the_checksum() {
+        // 16 digits, not Luhn-valid: an order number, not a card.
+        let text = "order 1234 5678 9012 3456 shipped";
+        assert_eq!(redact_personal_data(text), text);
+        assert_eq!(redact_personal_data("status 7"), "status 7");
     }
 }

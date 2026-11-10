@@ -17,7 +17,7 @@ use ekos_plugin_github::{GitHubApiClient, GitHubObserver};
 use ekos_plugin_governance::{DEFAULT_HUB_URL, SnapshotClient, SnapshotObserver};
 use ekos_plugin_java::JavaObserver;
 use ekos_plugin_javascript::JavaScriptObserver;
-use ekos_plugin_localdocs::{LocalDocsObserver, TesseractOcr};
+use ekos_plugin_localdocs::{LocalDocsObserver, LocalDocsSettings, TesseractOcr};
 use ekos_plugin_oracle::{
     DictionaryKind, LiveReader as OracleLiveReader, OracleObserver, ProfileTier,
 };
@@ -113,10 +113,25 @@ fn fingerprint_cache_key(
 /// Observer settings that change what a scan produces from the same files, appended to the
 /// fingerprint key — empty at their defaults, so existing keys (and caches) stay as they were.
 fn observer_settings_key(config: &EkosConfig) -> String {
-    match config.observe.git_max_commits {
+    let mut key = match config.observe.git_max_commits {
         500 => String::new(),
         n => format!("+git{n}"),
+    };
+    // RFC 0253: what the document observer reads from images and sheets.
+    let defaults = (
+        ekos_compiler_core::OcrConfig::default(),
+        ekos_compiler_core::InboxConfig::default(),
+    );
+    if config.ocr.languages != defaults.0.languages {
+        key.push_str(&format!("+ocr{}", config.ocr.languages));
     }
+    if !config.ocr.images {
+        key.push_str("+noimages");
+    }
+    if config.inbox.sheet_rows != defaults.1.sheet_rows {
+        key.push_str(&format!("+rows{}", config.inbox.sheet_rows));
+    }
+    key
 }
 
 /// Load the `.ekos/fingerprints.json` map of observe-path cache key → last-seen source
@@ -148,7 +163,14 @@ fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Ob
         Box::new(GitObserver::new().with_max_commits(config.observe.git_max_commits)),
         // RFC 0023: local files, no credential to gate on — runs
         // unconditionally, same as FileObserver/GitObserver.
-        Box::new(LocalDocsObserver::with_defaults(Arc::new(TesseractOcr))),
+        // RFC 0253: `[ocr]` languages and standalone images, `[inbox] sheet-rows`.
+        Box::new(LocalDocsObserver::with_settings(
+            Arc::new(TesseractOcr::with_languages(&config.ocr.languages)),
+            &LocalDocsSettings {
+                images: config.ocr.images,
+                sheet_rows: config.inbox.sheet_rows,
+            },
+        )),
         // RFC 0027 Phase 3: local .ktr/.kjb files, no credential to gate on —
         // runs unconditionally, same as LocalDocsObserver.
         Box::new(PentahoObserver::new()),
@@ -1092,6 +1114,18 @@ mod tests {
         assert_eq!(observer_settings_key(&config), "");
         config.observe.git_max_commits = 20_000;
         assert_eq!(observer_settings_key(&config), "+git20000");
+    }
+
+    /// RFC 0253: OCR languages, standalone images and the sheet row cap change what documents
+    /// read; each is in the key only when it differs from its default.
+    #[test]
+    fn document_reading_settings_are_part_of_the_cache_key_only_when_changed() {
+        let mut config = EkosConfig::default();
+        config.ocr.languages = "eng".into();
+        assert_eq!(observer_settings_key(&config), "+ocreng");
+        config.ocr.images = false;
+        config.inbox.sheet_rows = 50;
+        assert_eq!(observer_settings_key(&config), "+ocreng+noimages+rows50");
     }
 
     #[test]

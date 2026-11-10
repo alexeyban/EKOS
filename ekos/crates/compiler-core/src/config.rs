@@ -61,6 +61,13 @@ pub struct EkosConfig {
     /// RFC 0214: `[docs-estate]` — source-estate documentation (`ekos docs generate --layout estate`).
     #[serde(default)]
     pub docs_estate: DocsEstateConfig,
+    /// RFC 0253: `[ocr]` — local text recognition of images (standalone files and images embedded
+    /// in documents).
+    #[serde(default)]
+    pub ocr: OcrConfig,
+    /// RFC 0253: `[inbox]` — how material people send is read.
+    #[serde(default)]
+    pub inbox: InboxConfig,
     /// RFC 0178 Part 2: the project's named inputs (`[[sources]]`). Empty = one unnamed source,
     /// the directories of `[observe] paths`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1072,6 +1079,54 @@ pub struct DocsEstateConfig {
     pub max_er_tables: Option<usize>,
 }
 
+/// RFC 0253: `[ocr]` — local OCR (Tesseract). Never a remote model: images stay on the machine.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct OcrConfig {
+    /// Tesseract language packs, `+`-joined (default `eng+rus+srp`). Packs that are not installed
+    /// are dropped with a warning; the build never fails over a missing pack.
+    #[serde(default = "default_ocr_languages")]
+    pub languages: String,
+    /// Read standalone image files (PNG, JPEG, TIFF, WebP) as documents. Default on; turn off for
+    /// a repository full of icons. Images embedded in PDF/DOCX/PPTX are read either way.
+    #[serde(default = "default_true")]
+    pub images: bool,
+}
+
+fn default_ocr_languages() -> String {
+    "eng+rus+srp".into()
+}
+
+impl Default for OcrConfig {
+    fn default() -> Self {
+        Self {
+            languages: default_ocr_languages(),
+            images: true,
+        }
+    }
+}
+
+/// RFC 0253: `[inbox]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct InboxConfig {
+    /// The most rows of each spreadsheet sheet (XLSX) or CSV file read as text (default 200).
+    #[serde(default = "default_sheet_rows")]
+    pub sheet_rows: usize,
+}
+
+fn default_sheet_rows() -> usize {
+    200
+}
+
+impl Default for InboxConfig {
+    fn default() -> Self {
+        Self {
+            sheet_rows: default_sheet_rows(),
+        }
+    }
+}
+
 /// RFC 0213: `[review]`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -1296,6 +1351,8 @@ impl Default for EkosConfig {
             tickets: TicketsConfig::default(),
             review: ReviewConfig::default(),
             docs_estate: DocsEstateConfig::default(),
+            ocr: OcrConfig::default(),
+            inbox: InboxConfig::default(),
             sources: Vec::new(),
             databases: Vec::new(),
             extensions: std::collections::BTreeMap::new(),

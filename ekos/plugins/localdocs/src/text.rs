@@ -210,6 +210,7 @@ fn flush_markdown_block(
                 heading_path: heading_path.clone(),
                 line_start: Some(start),
                 line_end: Some(end),
+                ocr_confidence: None,
             });
         }
         current.clear();

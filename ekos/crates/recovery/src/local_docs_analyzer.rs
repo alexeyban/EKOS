@@ -55,6 +55,9 @@ struct SectionData {
     line_start: Option<u32>,
     #[serde(default)]
     line_end: Option<u32>,
+    /// RFC 0253 — text recognised in an image: the OCR engine's confidence (0–100).
+    #[serde(default)]
+    ocr_confidence: Option<f64>,
 }
 
 /// RFC 0144: coarse document classification from the path alone — lets retrieval and EKL tell an
@@ -140,6 +143,9 @@ struct DocumentData {
     sections: Vec<SectionData>,
     #[serde(default)]
     ocr_text: Option<String>,
+    /// RFC 0253: mean OCR confidence of a standalone image's sections.
+    #[serde(default)]
+    ocr_confidence: Option<f64>,
     artifact_id: Option<String>,
     /// RFC 0221: Markdown front matter; absent from every older artifact and other format.
     #[serde(default)]
@@ -288,6 +294,10 @@ fn add_document(data: &DocumentData, ticket_keys: &[String], graph: &mut KirGrap
         obj.properties
             .insert("ocr_text".into(), serde_json::json!(ocr_text));
     }
+    if let Some(confidence) = data.ocr_confidence {
+        obj.properties
+            .insert("ocr_confidence".into(), serde_json::json!(confidence));
+    }
 
     let doc_ev = KirEvidence::new(
         SourceLocation::file(data.path.clone()),
@@ -415,6 +425,11 @@ fn add_sections(
                 serde_json::json!(section.heading_path),
             );
         }
+        if let Some(confidence) = section.ocr_confidence {
+            sec_obj
+                .properties
+                .insert("ocr_confidence".into(), serde_json::json!(confidence));
+        }
         let line_range = section.line_start.zip(section.line_end);
         if let Some((start, end)) = line_range {
             sec_obj
@@ -502,8 +517,9 @@ impl CompilerPass for LocalDocAnalyzerPass {
     /// `v2` = RFC 0170: glossary sections/pages carry their entries (`glossary`).
     /// `v3` = RFC 0172: sections carry the sentences that name one column (`column_mentions`).
     /// `v4` = RFC 0221: front matter on documents and sections; section `tickets`.
+    /// `v5` = RFC 0253: `ocr_confidence` on documents and sections read from images.
     fn version(&self) -> &str {
-        "v4"
+        "v5"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -653,6 +669,36 @@ mod tests {
         assert_eq!(graph.objects.len(), 1);
         assert_eq!(graph.objects[0].kind, ObjectKind::Custom("Document".into()));
         assert_eq!(graph.objects[0].properties["excerpt"], "hello world");
+    }
+
+    /// RFC 0253: text recognised in an image keeps its OCR confidence on the section.
+    #[tokio::test]
+    async fn ocr_confidence_rides_onto_image_sections() {
+        let (c, _dir) = ctx();
+        let id = seed_doc_with_sections(
+            &c,
+            "screen.png",
+            "png",
+            "Status 7 means cancelled",
+            serde_json::json!([]),
+            serde_json::json!([
+                { "index": 0, "page": null, "text": "Status 7 means cancelled", "ocr_confidence": 95.5 },
+                { "index": 1, "page": null, "text": "plain" }
+            ]),
+        );
+        let graph = run_pass(vec![id], c).await;
+        let first = graph
+            .objects
+            .iter()
+            .find(|o| o.id == section_kir_id("screen.png", 0))
+            .unwrap();
+        assert_eq!(first.properties["ocr_confidence"], 95.5);
+        let second = graph
+            .objects
+            .iter()
+            .find(|o| o.id == section_kir_id("screen.png", 1))
+            .unwrap();
+        assert!(!second.properties.contains_key("ocr_confidence"));
     }
 
     #[tokio::test]
