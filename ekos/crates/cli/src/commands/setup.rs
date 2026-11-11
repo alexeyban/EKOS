@@ -706,6 +706,13 @@ impl Effects for RealEffects {
         env: &[(String, String)],
         stdin: Option<&str>,
     ) -> Result<String> {
+        use std::io::{Read, Seek, Write};
+        // Output goes to files, not pipes, and we wait for the process, not for end of output:
+        // `console start` leaves the console running, and on Windows a child inherits every
+        // inheritable handle its parent holds, so the console would keep a pipe open and setup
+        // would wait for it forever.
+        let mut out_file = tempfile::tempfile().context("a file for the command's output")?;
+        let mut err_file = tempfile::tempfile().context("a file for the command's output")?;
         let mut child = Command::new(program)
             .args(args)
             .envs(env.iter().map(|(k, v)| (k, v)))
@@ -714,18 +721,22 @@ impl Effects for RealEffects {
             } else {
                 Stdio::null()
             })
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(out_file.try_clone()?)
+            .stderr(err_file.try_clone()?)
             .spawn()
             .with_context(|| format!("running {}", program.display()))?;
         if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
-            use std::io::Write;
             pipe.write_all(text.as_bytes())?;
         }
-        let out = child.wait_with_output()?;
-        let text = String::from_utf8_lossy(&out.stdout).into_owned()
-            + &String::from_utf8_lossy(&out.stderr);
-        if !out.status.success() {
+        let status = child.wait()?;
+        let mut text = String::new();
+        for file in [&mut out_file, &mut err_file] {
+            let mut bytes = Vec::new();
+            file.rewind()?;
+            file.read_to_end(&mut bytes)?;
+            text.push_str(&String::from_utf8_lossy(&bytes));
+        }
+        if !status.success() {
             bail!("{} failed: {}", program.display(), text.trim());
         }
         Ok(text)

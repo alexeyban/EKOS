@@ -237,6 +237,8 @@ jobs:
     name: Install the full package on Windows
     needs: package
     runs-on: windows-latest
+    # A hang here once ran for an hour before anyone looked; the whole check takes minutes.
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
@@ -291,8 +293,14 @@ jobs:
           open = false
           "@ -replace '(?m)^\s+', '' | Set-Content $answers
 
-          & "$($pkg.FullName)\bin\ekos.exe" setup --answers $answers | Tee-Object "$env:RUNNER_TEMP\setup.txt"
-          if ($LASTEXITCODE -ne 0) { throw "ekos setup failed ($LASTEXITCODE)" }
+          # Output to files, and wait for setup itself: the console it leaves running inherits
+          # setup's handles, so a pipe (`| Tee-Object`) would stay open as long as the console runs.
+          $p = Start-Process "$($pkg.FullName)\bin\ekos.exe" -ArgumentList @('setup', '--answers', "`"$answers`"") `
+            -NoNewWindow -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\setup.txt" -RedirectStandardError "$env:RUNNER_TEMP\setup-err.txt"
+          $null = $p.Handle  # keeps the exit code readable after the process ends
+          if (-not $p.WaitForExit(600000)) { throw "ekos setup did not finish within 10 minutes" }
+          Get-Content "$env:RUNNER_TEMP\setup.txt", "$env:RUNNER_TEMP\setup-err.txt"
+          if ($p.ExitCode -ne 0) { throw "ekos setup failed ($($p.ExitCode))" }
           Check "setup reports every step ok" { -not (Select-String -Path "$env:RUNNER_TEMP\setup.txt" -Pattern '^FAIL' -Quiet) }
           $ekos = Get-ChildItem $prog -Recurse -Filter ekos.exe | Select-Object -First 1
           Check "the program is installed" { $null -ne $ekos }

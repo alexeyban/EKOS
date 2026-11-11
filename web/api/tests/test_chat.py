@@ -122,6 +122,21 @@ def test_ollama_shapes() -> None:
     assert reply.usage == {"input": 7, "output": 2}
 
 
+def test_ollama_context_holds_the_whole_request() -> None:
+    # Ollama's default window cut ~29 EKOS tool definitions from the prompt, so a local model
+    # never saw them and answered without a tool call.
+    p = providers.Ollama(model="qwen2.5:1.5b", base_url="", key="", max_tokens=1024)
+    _, _, small = p.request("sys", CONVERSATION, SPEC)
+    assert small["options"]["num_ctx"] == providers.OLLAMA_MIN_CONTEXT
+    many = [
+        {"name": f"ekos_tool_{i}", "description": "d" * 600, "input_schema": {"type": "object"}}
+        for i in range(40)
+    ]
+    _, _, big = p.request("sys", CONVERSATION, many)
+    assert big["options"]["num_ctx"] >= len(json.dumps(big)) // 3 + 1024
+    assert big["options"]["num_ctx"] <= providers.OLLAMA_MAX_CONTEXT
+
+
 @pytest.mark.parametrize(
     ("provider", "base", "metered"),
     [

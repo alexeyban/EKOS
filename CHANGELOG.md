@@ -10,6 +10,11 @@
   bundled Python with its own `vcruntime140.dll`, and `setup.cmd`, the installer with its setup
   wizard) brings every library it uses: every `.pyd`/`.dll` in it was checked for imports neither
   Windows nor the package provides.
+- **`ekos setup` no longer hangs on Windows after starting the console.** It read `ekos console
+  start`'s output through pipes until they closed, and on Windows the console it left running
+  inherited them, so setup never finished. A child's output now goes to files, and setup waits for
+  the child itself. The Release workflow installs the full package on Windows from setup answers,
+  checks the console answers, and uninstalls.
 - **Microsoft Store package** (MSIX, `store-msix-x64` artifact of the Release workflow, not a release
   asset): the same `ekos.exe`, with an `ekos` command alias. The workflow installs it on Windows and
   runs the pipeline, a query, an SQL check and the MCP server through the alias before uploading.
@@ -119,6 +124,10 @@
   read such as `git diff` or `git blame` could otherwise rewrite `.git/index` when a file was
   "racily clean".
 - SQL transformation recovery keeps `JOIN … ON (a = b)` key pairs and a view's output columns.
+- **The console chat with a local Ollama model uses the EKOS tools again.** The tool definitions
+  (about 5,300 tokens) no longer fit Ollama's default 4,096-token window, which cuts a longer
+  prompt without saying so: the model never saw the tools. The chat now asks for a window that
+  holds the whole request (8,192 tokens or more).
 
 **Security**
 - **`rusqlite` 0.32 → 0.41** (bundled SQLite via `libsqlite3-sys` 0.30 → 0.39) for

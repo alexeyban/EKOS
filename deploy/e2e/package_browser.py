@@ -52,7 +52,7 @@ with sync_playwright() as p:
     page.click("button:has-text('Validate')")
     page.wait_for_selector("text=valid ✓", timeout=30_000)
     page.click("button.save")
-    page.wait_for_selector("text=saved", timeout=30_000)
+    page.wait_for_selector("p.ok-line:has-text('saved')", timeout=30_000)
     check(True, "and is validated and saved")
 
     # RFC 0187: the Chat page with the local model.
@@ -65,6 +65,11 @@ with sync_playwright() as p:
     if ollama_up:
         page.goto(f"{BASE}/w/{WID}/chat")
         page.wait_for_selector("textarea[aria-label=message]")
+        # The model line arrives with its own request, after the message box.
+        try:
+            page.wait_for_selector("section.chat-main :text('not paid per call')", timeout=15_000)
+        except Exception:
+            pass
         check("not paid per call" in page.inner_text("section.chat-main"), "the page says the model is local")
         page.fill("textarea[aria-label=message]", "Use the search tool to find PACKAGEMARKER.")
         page.click("button:has-text('Send')")

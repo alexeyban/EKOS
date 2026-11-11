@@ -122,9 +122,10 @@ hex.workspace = true
 rand.workspace = true
 schemars.workspace = true
 reqwest.workspace = true
+# `setup` collects a child's output in files: a pipe stays open while the console it started runs.
+tempfile = "3"
 
 [dev-dependencies]
-tempfile = "3"
 # RFC 0245: `tests/ossie_e2e.rs` validates exports against the official Ossie JSON Schema.
 jsonschema = { workspace = true }
 # Issue #14: `commands/review_guard.rs` parses `mcp.rs` to resolve imports.

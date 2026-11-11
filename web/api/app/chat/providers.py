@@ -260,6 +260,23 @@ class OpenAI(_Base):
 OLLAMA_DEFAULT = "http://127.0.0.1:11434"  # NOSONAR(python:S5332) loopback only
 
 
+OLLAMA_MIN_CONTEXT = 8192
+OLLAMA_MAX_CONTEXT = 131072
+
+
+def ollama_context(body: dict, max_tokens: int) -> int:
+    """The context window to ask Ollama for: room for the whole request and the reply.
+
+    Ollama's default window (4096 tokens) is smaller than the EKOS tool definitions alone, and it
+    cuts a longer prompt from the front without saying so — the model then never sees the tools.
+    A token is counted as three characters of the request's JSON, which overestimates."""
+    need = len(json.dumps(body)) // 3 + max_tokens
+    ctx = OLLAMA_MIN_CONTEXT
+    while ctx < need and ctx < OLLAMA_MAX_CONTEXT:
+        ctx *= 2
+    return ctx
+
+
 class Ollama(_Base):
     name = "ollama"
 
@@ -273,7 +290,10 @@ class Ollama(_Base):
             "stream": False,
             "messages": _openai_messages(system, messages, args_as_text=False),
             "tools": _openai_tools(tools),
-            "options": {"num_predict": self.max_tokens},
+        }
+        body["options"] = {
+            "num_predict": self.max_tokens,
+            "num_ctx": ollama_context(body, self.max_tokens),
         }
         return url.rstrip("/") + "/api/chat", {}, body
 
