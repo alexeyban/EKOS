@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  MSIX manifest for the Microsoft Store build of the `ekos` command.
+
+  Identity/@Name, Identity/@Publisher and PublisherDisplayName MUST match
+  Partner Center → EKOS → Product management → Product identity, character for character.
+  __VERSION__ is filled in by the `msix` job in .github/workflows/release.yml (X.Y.Z.0 —
+  the Store requires the fourth part to be 0).
+
+  The package carries only the self-contained `ekos.exe` (built with a static CRT, so no
+  VCLibs dependency). The execution alias puts `ekos` on PATH for every terminal and for MCP
+  clients that launch it by name.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap5 desktop4 rescap">
+
+  <Identity
+    Name="REPLACE_WITH_PACKAGE_IDENTITY_NAME"
+    Publisher="CN=REPLACE-WITH-PUBLISHER-ID"
+    Version="__VERSION__"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>EKOS</DisplayName>
+    <PublisherDisplayName>REPLACE_WITH_PUBLISHER_DISPLAY_NAME</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Applications>
+    <Application Id="EKOS" Executable="ekos.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="EKOS"
+        Description="A compiler for enterprise knowledge: an evidence-backed ledger served to AI agents over MCP."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <uap5:Extension
+          Category="windows.appExecutionAlias"
+          Executable="ekos.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias desktop4:Subsystem="console">
+            <uap5:ExecutionAlias Alias="ekos.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- LLM APIs, remote databases, GitHub/Confluence plugins. -->
+    <Capability Name="internetClient" />
+    <!-- Local MCP over TCP and connections to databases on the LAN. -->
+    <Capability Name="privateNetworkClientServer" />
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

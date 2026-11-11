@@ -106,10 +106,17 @@ jobs:
       # installs `musl-gcc` under that name and no other, so without this the musl row fails at
       # the C stage with `ToolNotFound` even once its std is present. Harmless on every other row:
       # the variable is target-scoped and nothing else reads it.
+      #
+      # `CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS`: link the C runtime statically on Windows,
+      # so `ekos.exe` needs no `vcruntime140.dll` on the user's machine. That matters for the zip
+      # and is required for the Microsoft Store package (the `msix` job below), which would
+      # otherwise need a VCLibs framework dependency. cc-rs reads the same target feature and
+      # compiles the bundled C (SQLite, zstd) with /MT to match. Target-scoped like the line above.
       - name: Build
         working-directory: ekos
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
         run: cargo build --release --locked -p ekos --target ${{ matrix.target }}
 
       - name: Package (unix)
@@ -221,6 +228,83 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+  # Microsoft Store package. MSIX, unsigned: Partner Center signs it during certification, so no
+  # certificate lives in this repo or its secrets. Built from the same `ekos.exe` the `build` job
+  # put in the zip — one binary, two channels. Uploaded as a workflow artifact for a manual
+  # Partner Center submission; deliberately NOT attached to the GitHub Release (see `release`).
+  msix:
+    name: Microsoft Store package (MSIX)
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the Windows binary
+        uses: actions/download-artifact@v7
+        with:
+          name: ekos-x86_64-pc-windows-msvc
+          path: bare
+
+      - name: Pack
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Store versions are X.Y.Z.0. A tag gives X.Y.Z (anything after '-' dropped, so
+          # v1.5.0-rc1 packs as 1.5.0.0); a manual run uses the workspace version.
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $semver = ($env:GITHUB_REF_NAME -replace '^v','') -replace '-.*$',''
+            $zipver = $env:GITHUB_REF_NAME -replace '^v',''
+          } else {
+            $m = Select-String -Path ekos/Cargo.toml -Pattern '^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)' | Select-Object -First 1
+            $semver = $m.Matches[0].Groups[1].Value
+            $zipver = 'dev'
+          }
+          if ($semver -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "cannot derive a Store version from '$semver'" }
+          $msixver = "$semver.0"
+          Write-Host "MSIX version: $msixver"
+
+          $zip = "bare/ekos-$zipver-x86_64-pc-windows-msvc.zip"
+          Expand-Archive $zip -DestinationPath bare/x
+          $exe = Get-ChildItem bare/x -Recurse -Filter ekos.exe | Select-Object -First 1
+
+          New-Item -ItemType Directory -Force -Path pkg/Assets | Out-Null
+          Copy-Item $exe.FullName pkg/
+          Copy-Item packaging/msix/Assets/* pkg/Assets/
+          (Get-Content packaging/msix/AppxManifest.xml -Raw) -replace '__VERSION__', $msixver |
+            Set-Content -Encoding utf8 pkg/AppxManifest.xml
+
+          # A manifest still holding the placeholders would fail Store upload with an opaque
+          # identity error. A manual run fails here with the reason; a tag only warns and packs
+          # nothing, so a release is never held up by the Store package.
+          if (Select-String -Path pkg/AppxManifest.xml -Pattern 'REPLACE_WITH|REPLACE-WITH' -Quiet) {
+            $why = 'packaging/msix/AppxManifest.xml still has placeholder identity values — copy them from Partner Center → Product identity'
+            if ($env:GITHUB_REF_TYPE -eq 'tag') {
+              Write-Host "::warning::$why; no MSIX built"
+              exit 0
+            }
+            throw $why
+          }
+
+          $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\makeappx.exe" |
+                      Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $makeappx) { throw 'makeappx.exe not found in the Windows SDK' }
+
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          & $makeappx.FullName pack /d pkg /p "dist/ekos-$msixver-x64.msix" /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx failed ($LASTEXITCODE)" }
+
+      - name: Upload
+        if: hashFiles('dist/*.msix') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: store-msix-x64
+          path: dist/*.msix
+          if-no-files-found: error
+
   release:
     name: Publish release
     needs: [build, package]
@@ -237,10 +321,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # `pattern`: only the `ekos-*` archives belong in the release. The `msix` job's unsigned
+      # Store package (artifact `store-msix-*`) runs in parallel and must not be swept in — it
+      # cannot be installed outside the Store, and it carries no checksum file.
       - name: Download every target's artifacts
         uses: actions/download-artifact@v7
         with:
           path: dist
+          pattern: ekos-*
           merge-multiple: true
 
       - name: Build one SHA256SUMS
