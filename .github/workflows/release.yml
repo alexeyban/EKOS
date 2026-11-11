@@ -297,6 +297,74 @@ jobs:
           & $makeappx.FullName pack /d pkg /p "dist/ekos-$msixver-x64.msix" /o
           if ($LASTEXITCODE -ne 0) { throw "makeappx failed ($LASTEXITCODE)" }
 
+      # Smoke test: install the package as a user would get it, then run the `ekos` alias. Signed
+      # here with a throwaway self-signed certificate only so Windows will install it; the Store
+      # re-signs the unsigned .msix we upload (the one in dist/ is never touched).
+      # PowerShell does not stop on a failing program, so every `ekos` call goes through `Ekos`,
+      # which throws on a non-zero exit. `sql check` exits 0 with findings, so its output is read.
+      - name: Install and smoke-test the MSIX
+        if: hashFiles('dist/*.msix') != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Ekos {
+            & ekos @args
+            if ($LASTEXITCODE -ne 0) { throw "ekos $($args -join ' ') failed ($LASTEXITCODE)" }
+          }
+
+          $msix = Get-ChildItem dist/*.msix | Select-Object -First 1
+          $test = "$env:RUNNER_TEMP\ekos-test.msix"
+          Copy-Item $msix.FullName $test
+
+          [xml]$m = Get-Content packaging/msix/AppxManifest.xml
+          $publisher = $m.Package.Identity.Publisher
+          $cert = New-SelfSignedCertificate -Type Custom -Subject $publisher `
+                    -KeyUsage DigitalSignature -CertStoreLocation Cert:\CurrentUser\My `
+                    -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3","2.5.29.19={text}")
+          Export-Certificate -Cert $cert -FilePath "$env:RUNNER_TEMP\t.cer" | Out-Null
+          Import-Certificate -FilePath "$env:RUNNER_TEMP\t.cer" -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\signtool.exe" |
+                      Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found in the Windows SDK' }
+          & $signtool.FullName sign /fd SHA256 /sha1 $cert.Thumbprint $test
+          if ($LASTEXITCODE -ne 0) { throw 'signtool failed' }
+
+          Add-AppxPackage -Path $test
+          $installed = Get-AppxPackage -Name $m.Package.Identity.Name
+          if (-not $installed) { throw "the package $($m.Package.Identity.Name) is not installed" }
+          $installed | Format-List Name, Version, InstallLocation
+
+          # The alias lives in WindowsApps; make sure this shell sees it.
+          $env:PATH = "$env:LOCALAPPDATA\Microsoft\WindowsApps;$env:PATH"
+          $alias = Get-Command ekos -ErrorAction SilentlyContinue
+          if (-not $alias -or $alias.Source -notlike '*WindowsApps*') { throw "the ekos alias is not on PATH (found: $($alias.Source))" }
+
+          Ekos --version
+
+          # A tiny project: one SQL file, the full pipeline, then a query, an SQL check and MCP.
+          $p = "$env:RUNNER_TEMP\proj"; New-Item -ItemType Directory $p | Out-Null; Set-Location $p
+          "CREATE TABLE customers (id INT PRIMARY KEY, name TEXT);`nCREATE TABLE orders (id INT PRIMARY KEY, customer_id INT REFERENCES customers(id), total NUMERIC);" |
+            Set-Content schema.sql
+          Ekos init
+          foreach ($step in 'build','recover','resolve','compile','commit','status','coverage','doctor') {
+            Write-Host "::group::ekos $step"; Ekos $step; Write-Host '::endgroup::'
+          }
+          $found = Ekos query find orders | Out-String
+          Write-Host $found
+          if ($found -notmatch '\borders\b') { throw 'query find did not return the orders table' }
+          $check = 'SELECT o.total_amount FROM orders o' | Ekos sql check --dialect postgres | Out-String
+          Write-Host $check
+          if ($check -notmatch 'L001') { throw 'sql check did not report the unknown column (L001)' }
+
+          # MCP over stdio: send initialize, expect a JSON-RPC result back.
+          $init = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
+          $out = $init | ekos mcp serve 2>$null | Select-Object -First 1
+          Write-Host $out
+          if ($out -notmatch '"result"') { throw 'MCP initialize got no result' }
+          # The pipeline above stops `ekos mcp serve` after its first line; that exit code is not ours.
+          exit 0
+
       - name: Upload
         if: hashFiles('dist/*.msix') != ''
         uses: actions/upload-artifact@v7
