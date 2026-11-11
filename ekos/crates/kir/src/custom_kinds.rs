@@ -253,6 +253,26 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "channel + message ref — RFC 0253 §3.4, written only by `ekos testimony add`",
     },
     CustomKind {
+        name: "DbRole",
+        structurally_keyed: true,
+        note: "database + role name (or its salted hash) — RFC 0256 §3.1, written by `ekos interaction observe`",
+    },
+    CustomKind {
+        name: "ObservedAccess",
+        structurally_keyed: true,
+        note: "database + role + table + operation — RFC 0256 §3.2, aggregated statement statistics, no statement text",
+    },
+    CustomKind {
+        name: "ObservationWindow",
+        structurally_keyed: true,
+        note: "the database — RFC 0256 §3.2; the window, truncation and per-table write counters of one observation",
+    },
+    CustomKind {
+        name: "InteractionFinding",
+        structurally_keyed: true,
+        note: "finding type + table + actor — RFC 0256 §3.4, derived at commit",
+    },
+    CustomKind {
         name: "GrainCandidate",
         structurally_keyed: true,
         note: "the table it describes — RFC 0252 §3.2(d); one per live table, written by `ekos profile run`",

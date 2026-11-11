@@ -19,8 +19,9 @@
 //! `min`/`max` are never read), and a meaning's text only from licensed sources — except a
 //! meaning a person stated, which is shown like the rest of what people said.
 
-use super::{Model, cell, code, custom, prop, strings, table, table_key};
+use super::{Model, cell, code, custom, link, prop, strings, table, table_key};
 use ekos_kir::annotations::{self, Annotation, Effective};
+use ekos_kir::interaction::{Cell, Matrix};
 use ekos_kir::{KirObject, ObjectKind};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -41,6 +42,11 @@ pub struct PassportInput {
     /// `OpenQuestion` id → its state, computed on read by the CLI. A question missing here, or
     /// `obsolete`, is not shown.
     pub questions: BTreeMap<String, QuestionState>,
+    /// RFC 0256: who reads and writes each table, declared and observed. `None`: the old "Read
+    /// by" / "Written by" lists from routines are shown instead.
+    pub interaction: Option<Matrix>,
+    /// RFC 0256: how many `ObservedAccess` facts the matrix holds (0: the source provided none).
+    pub observed_facts: usize,
 }
 
 /// An open question's state as `ekos questions` computes it.
@@ -897,4 +903,72 @@ pub(super) fn questions_section(m: &Model, name: &str) -> String {
     ));
     b.push('\n');
     b
+}
+
+/// A routine with its own page is a link to it, as the "Read by" / "Written by" lists were.
+fn actor_name(m: &Model, page: &str, a: &ekos_kir::interaction::Actor) -> String {
+    if a.kind == ekos_kir::interaction::ActorKind::Routine
+        && m.routines.contains_key(&table_key(&a.name))
+    {
+        link(page, &Model::routine_path(&a.name), &a.name)
+    } else {
+        code(&a.name)
+    }
+}
+
+fn declared_words(c: &Cell) -> String {
+    let ops: Vec<&str> = c.declared.iter().map(|o| o.as_str()).collect();
+    ops.join(", ")
+}
+
+fn observed_words(c: &Cell) -> String {
+    let ops: Vec<String> = c
+        .observed
+        .iter()
+        .map(|(op, o)| format!("{} ×{}", op.as_str(), o.calls))
+        .collect();
+    ops.join(", ")
+}
+
+fn window_words(c: &Cell) -> String {
+    let Some(o) = c.observed.values().next() else {
+        return String::new();
+    };
+    let from = o.window_start.as_deref().map(day).unwrap_or("unknown");
+    let cut = if o.truncated { " (truncated)" } else { "" };
+    format!("{from} – {}{cut}", day(&o.window_end))
+}
+
+/// RFC 0256 §3.5: "Writers and readers" — every actor's operations on the table, declared by code
+/// and observed in the database, writers first. `None` when the matrix was not given.
+pub(super) fn interaction_section(m: &Model, name: &str, page: &str) -> Option<String> {
+    let matrix = m.input.passport.interaction.as_ref()?;
+    let Some(row) = matrix.row(name) else {
+        return Some(String::new());
+    };
+    let mut cells: Vec<_> = row.iter().collect();
+    cells.sort_by_key(|(a, c)| (!c.writes(), a.kind, a.name.clone()));
+    let rows: Vec<Vec<String>> = cells
+        .iter()
+        .map(|(a, c)| {
+            vec![
+                a.kind.as_str().to_string(),
+                actor_name(m, page, a),
+                declared_words(c),
+                observed_words(c),
+                window_words(c),
+            ]
+        })
+        .collect();
+    let note = if m.input.passport.observed_facts == 0 {
+        "_Declared by code only: no usage statistics were read for this source, so a writer outside the code would not show here._"
+    } else {
+        "_Observed counts come from the engine's statement statistics over the window shown; \"not observed\" is not \"never happens\"._"
+    };
+    let mut b = format!(
+        "## Writers and readers\n\n{note}\n\n{}",
+        table(&["actor", "name", "declared", "observed", "window"], &rows)
+    );
+    b.push('\n');
+    Some(b)
 }

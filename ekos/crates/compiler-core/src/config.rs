@@ -80,6 +80,9 @@ pub struct EkosConfig {
     /// RFC 0254: `[probe]` — aggregates-only exploration of the live databases for agents.
     #[serde(default)]
     pub probe: ProbeConfig,
+    /// RFC 0256: `[interaction]` — who reads and writes each table, declared and observed.
+    #[serde(default)]
+    pub interaction: InteractionConfig,
     /// RFC 0178 Part 2: the project's named inputs (`[[sources]]`). Empty = one unnamed source,
     /// the directories of `[observe] paths`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1236,6 +1239,54 @@ impl Default for ProbeConfig {
     }
 }
 
+/// RFC 0256: `[interaction]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub struct InteractionConfig {
+    /// How many leading directories of a source file make one application component (default 1:
+    /// `org.adempiere.base/src/…` → `org.adempiere.base`).
+    #[serde(default = "default_component_depth")]
+    pub component_depth: usize,
+    /// How database role names are kept: `names` (default), `hashed` (salted with the project
+    /// salt; two roles stay distinct) or `off` (no observed access is read).
+    #[serde(default)]
+    pub roles: RoleNames,
+    /// A declared write never observed is reported only when the observation window is longer
+    /// than this many days (default 30) and the view was not truncated.
+    #[serde(default = "default_quiet_after")]
+    pub quiet_after_days: u32,
+}
+
+fn default_component_depth() -> usize {
+    1
+}
+
+fn default_quiet_after() -> u32 {
+    30
+}
+
+impl Default for InteractionConfig {
+    fn default() -> Self {
+        Self {
+            component_depth: default_component_depth(),
+            roles: RoleNames::default(),
+            quiet_after_days: default_quiet_after(),
+        }
+    }
+}
+
+/// RFC 0256 §3.2: how a database role's name is kept.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum RoleNames {
+    #[default]
+    Names,
+    Hashed,
+    Off,
+}
+
 /// RFC 0253: `[testimony]`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -1522,6 +1573,7 @@ impl Default for EkosConfig {
             code_vs_data: CodeVsDataConfig::default(),
             testimony: TestimonyConfig::default(),
             probe: ProbeConfig::default(),
+            interaction: InteractionConfig::default(),
             sources: Vec::new(),
             databases: Vec::new(),
             extensions: std::collections::BTreeMap::new(),

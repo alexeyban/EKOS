@@ -878,7 +878,14 @@ fn table_page(m: &Model, name: &str, t: &KirObject, order: usize) -> EstatePage 
         b.push_str(&passport::change_lines(m, name, w));
         b.push('\n');
     }
-    for (title, map) in [("Read by", &m.readers), ("Written by", &m.writers)] {
+    let interaction = passport::interaction_section(m, name, &path);
+    if let Some(section) = &interaction {
+        b.push_str(section);
+    }
+    for (title, map) in [("Read by", &m.readers), ("Written by", &m.writers)]
+        .into_iter()
+        .filter(|_| interaction.is_none())
+    {
         if let Some(who) = map.get(name) {
             b.push_str(&format!("## {title}\n\n"));
             let rows: Vec<Vec<String>> = who
@@ -2277,6 +2284,8 @@ mod tests {
             current_grain: Some([grain.id.to_string()].into()),
             current_references: Some([fk.id.to_string()].into()),
             current_semantics: None,
+            interaction: None,
+            observed_facts: 0,
             reviewed: [
                 (
                     format!("relationships:{}", fk.id),

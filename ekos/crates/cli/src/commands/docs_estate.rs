@@ -305,6 +305,7 @@ fn passport_input(
             .into_iter()
             .map(|(id, (status, addressee))| (id, estate::QuestionState { status, addressee }))
             .collect(),
+        ..Default::default()
     }
 }
 
@@ -357,7 +358,11 @@ pub fn generate(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()> {
     let licences = licences(config, cwd);
     let conflicts = super::conflicts::current_ids(config, cwd);
     let integrity = super::check::read_index(config, cwd).map(|i| integrity_summary(&i));
-    let passport = passport_input(config, cwd, &review, &objects);
+    let mut passport = passport_input(config, cwd, &review, &objects);
+    let (matrix, observed) =
+        super::interaction::build_from(config, cwd, &*ledger, &objects, &relationships)?;
+    passport.interaction = Some(matrix);
+    passport.observed_facts = observed;
     let pages = estate::build(&EstateInput {
         objects: &objects,
         relationships: &relationships,

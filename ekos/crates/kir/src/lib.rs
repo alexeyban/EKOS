@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 pub mod annotations;
 pub mod custom_kinds;
+pub mod interaction;
 pub mod predicates;
 
 /// Unique identifier for any KIR node.

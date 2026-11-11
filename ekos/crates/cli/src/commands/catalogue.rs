@@ -71,6 +71,8 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("questions mute", Class::Write, false),
     ("check code-vs-data", Class::Read, false),
     ("relationships list", Class::Read, false),
+    ("interaction matrix", Class::Read, false),
+    ("interaction observe", Class::External, false),
     ("database add", Class::Write, false),
     ("database list", Class::Read, false),
     // Connects to the live database.

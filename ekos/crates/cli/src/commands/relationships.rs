@@ -130,7 +130,7 @@ pub fn current_ids(config: &EkosConfig, cwd: &Path) -> Option<BTreeSet<String>> 
 }
 
 /// The project's salt: 32 letters and digits, created on first use, readable by the owner only.
-fn salt(config: &EkosConfig, cwd: &Path) -> Result<String> {
+pub(crate) fn salt(config: &EkosConfig, cwd: &Path) -> Result<String> {
     let path = config.ekos_dir(cwd).join("profile").join("salt");
     if let Ok(s) = std::fs::read_to_string(&path) {
         let s = s.trim().to_string();

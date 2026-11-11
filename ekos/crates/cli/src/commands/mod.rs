@@ -35,6 +35,7 @@ pub mod identity;
 pub mod import;
 pub mod inbox;
 pub mod init;
+pub mod interaction;
 pub mod ledger;
 pub mod llm;
 pub mod marketing;

@@ -188,6 +188,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: RelationshipsCommands,
     },
+    /// Who reads and writes each table, declared and observed: matrix, findings (RFC 0256)
+    Interaction {
+        #[command(subcommand)]
+        subcommand: InteractionCommands,
+    },
     /// Run observation passes and write knowledge to the ledger
     Build {
         /// Re-observe one named source only; the others keep what the last build recorded
@@ -1322,6 +1327,25 @@ fn dispatch_questions(
     }
 }
 
+/// `ekos interaction …` (RFC 0256).
+fn dispatch_interaction(
+    subcommand: InteractionCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    use crate::commands::interaction;
+    match subcommand {
+        InteractionCommands::Matrix { table, actor, json } => {
+            interaction::matrix(config, cwd, table.as_deref(), actor.as_deref(), json)
+        }
+        InteractionCommands::Observe {
+            database,
+            allow_writable_role,
+            json,
+        } => interaction::observe(config, cwd, database.as_deref(), allow_writable_role, json),
+    }
+}
+
 /// `ekos relationships …` (RFC 0252 §3.3).
 async fn dispatch_relationships(
     subcommand: RelationshipsCommands,
@@ -1562,6 +1586,33 @@ enum QuestionsCommands {
         pattern: String,
         #[arg(long = "as")]
         by: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum InteractionCommands {
+    /// Tables × actors (routines, application components, ETL jobs, database roles) with the
+    /// operations each performs, declared by code and observed in the database
+    Matrix {
+        /// Only this table
+        #[arg(long)]
+        table: Option<String>,
+        /// Only this actor (`kind:name`, or a name)
+        #[arg(long)]
+        actor: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read the database's statement statistics (PostgreSQL `pg_stat_statements`) and record,
+    /// per role, table and operation, how many calls ran — aggregates only, no statement text
+    Observe {
+        /// Only this database
+        #[arg(long)]
+        database: Option<String>,
+        #[arg(long)]
+        allow_writable_role: bool,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -3025,6 +3076,7 @@ where
         Commands::Relationships { subcommand } => {
             dispatch_relationships(subcommand, &config, &cwd).await
         }
+        Commands::Interaction { subcommand } => dispatch_interaction(subcommand, &config, &cwd),
         Commands::Database { subcommand } => {
             use crate::commands::database;
             match subcommand {

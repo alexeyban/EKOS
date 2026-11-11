@@ -187,3 +187,60 @@ table).
    a point-in-time sample of sessions, including client addresses. Worth it only if roles prove too coarse.
 4. iDempiere's application dictionary names scheduled processes. RFC 0212's opt-in dictionary reader reads only
    `AD_Table`; extending it to processes would give a fifth actor kind for dictionary-driven ERPs.
+
+## 9. Implementation log
+
+### Phases 1–2 (2026-11-11)
+
+**Built.**
+- `ekos_kir::interaction` (pure): `Actor` (`component`, `routine`, `etl_job`, `db_role`), `Op`, `Cell`
+  (declared operations, observed counts with their window, `via` citations), `Matrix`, `declared`.
+  - Routines, views and triggers come from their footprints (`reads`/`writes`/`inserts`/`updates`/
+    `deletes`; a trigger also writes its own table).
+  - Components come from `JavaMethod.sql[]`, grouped by the leading directories of the method's file
+    (`[interaction] component-depth`, default 1).
+  - ETL jobs come from Kettle `TransformNode` `ReadsFrom`/`WritesTo` edges, grouped by `.ktr`/`.kjb`.
+- `ekos interaction matrix [--table] [--actor] [--json]` (class *read*).
+- `ekos interaction observe [--database] [--allow-writable-role] [--json]` (class *external*), PostgreSQL:
+  - reads `pg_stat_statements` (+ `_info`, `pg_stat_user_tables`) in the read-only probe session;
+  - redacts each statement and takes its footprint (`statement_footprint_in`, PostgreSQL dialect);
+  - aggregates in process and drops the text;
+  - writes keyed `ObservedAccess`, `DbRole` and `ObservationWindow` facts, listed in
+    `<state>/interaction/current.json`. Readers count only the listed facts.
+- `[interaction]`: `component-depth`, `roles = names | hashed | off`, `quiet-after-days`. A role a
+  redaction rule matches is always hashed (salted with the project salt, `<state>/profile/salt`).
+- The estate table page's "Read by" / "Written by" lists are replaced by **"Writers and readers"** from
+  the same matrix (declared, observed, window), with a note when no usage statistics were read.
+
+**Decisions.**
+- Observed access is read by its own command, not at `ekos build`. This mirrors `ekos profile run`: a
+  live read stays opt-in and outside the build fingerprint.
+- A routine read from a live catalog is an actor only when no file defines one of the same name
+  (RFC 0211's rule). On LedgerSMB this halved `acc_trans`'s actor list (103 → 55): every routine was
+  there twice, once from `sql/` and once from the live catalog.
+- Java test code (`java_po::is_test_path`, RFC 0212's rule) is no actor. iDempiere's
+  `org.idempiere.test` showed up as a deleting writer of `c_order` before this rule.
+- Footprint names of relations the ledger does not know (temporary tables, CTEs, record variables)
+  are dropped.
+- The window and the per-table counters (the cross-check of §3.4) are one `ObservationWindow` per
+  database. `unparsed_calls` is per role on that fact, since an unparsed statement names no table.
+  Calls whose text the session may not read (`<insufficient privilege>`, no `pg_read_all_stats`) are
+  counted as `hidden_calls`.
+
+**Measured.**
+- LedgerSMB (sql/ + live PostgreSQL): 148 tables, 476 actors, 1,085 cells.
+- iDempiere (home project `idempiere`): 621 tables, 2,180 cells (1,165 routine, 1,015 component),
+  303 writing (251 component, 52 routine). Oracle and PostgreSQL scripts of the same view are two
+  actors (`C_ORDER_HEADER_V`, `c_order_header_v`): two databases' code, as elsewhere.
+- Phase 2 exit, on a throwaway PostgreSQL 16 with `pg_stat_statements` and a known workload from three
+  roles. The facts equal the workload:
+  - `app_writer` inserts 20 / updates 5 on `orders`;
+  - `etl_nightly` updates 3 on `customers`;
+  - `reporter` reads both 7 times;
+  - the reading role's 38 calls are left out;
+  - the superuser's 20 DDL calls are `unparsed_calls`.
+- A scan of every file under `.ekos/` (zstd-decompressed) for text unique to the observed statements
+  found none.
+
+**Not yet.** Phase 3 (role–actor links, findings, questions), phase 4 (console page, MCP
+`ekos_interaction`, the lakehouse plan warning). Oracle observed access.
