@@ -20,14 +20,14 @@
   IgnorableNamespaces="uap uap5 desktop4 rescap">
 
   <Identity
-    Name="REPLACE_WITH_PACKAGE_IDENTITY_NAME"
-    Publisher="CN=REPLACE-WITH-PUBLISHER-ID"
+    Name="AlexeyBanaev.EKOS.DEV"
+    Publisher="CN=77359C36-EF40-49A6-8F61-6727869C79BA"
     Version="__VERSION__"
     ProcessorArchitecture="x64" />
 
   <Properties>
     <DisplayName>EKOS</DisplayName>
-    <PublisherDisplayName>REPLACE_WITH_PUBLISHER_DISPLAY_NAME</PublisherDisplayName>
+    <PublisherDisplayName>Alexey Banaev</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 

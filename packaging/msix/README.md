@@ -6,19 +6,16 @@ Windows zip (built with a static C runtime, so it needs no `vcruntime140.dll`) i
 workflow artifact `store-msix-x64` and is **not** attached to the GitHub Release: an unsigned
 MSIX cannot be installed outside the Store.
 
-## Before the first submission
+## Identity
 
-Replace the three placeholders in `AppxManifest.xml` with the values from Partner Center →
-EKOS → Product management → Product identity, character for character:
+The manifest carries the identity from Partner Center → EKOS → Product identity
+(`AlexeyBanaev.EKOS.DEV`, publisher `CN=77359C36-EF40-49A6-8F61-6727869C79BA`, display name
+`Alexey Banaev`); they must stay equal character for character. Package family name
+`AlexeyBanaev.EKOS.DEV_hbn1emg27zd0m`, Store ID `9NX411QFSW9C`,
+<https://apps.microsoft.com/detail/9NX411QFSW9C>.
 
-| Manifest | Partner Center |
-|---|---|
-| `Identity/@Name` (`REPLACE_WITH_PACKAGE_IDENTITY_NAME`) | Package/Identity/Name |
-| `Identity/@Publisher` (`CN=REPLACE-WITH-PUBLISHER-ID`) | Package/Identity/Publisher |
-| `PublisherDisplayName` | Package/Properties/PublisherDisplayName |
-
-While they are placeholders, a manual run of the Release workflow fails with that message and a
-tag run only warns and builds no MSIX.
+If a value is ever reset to a `REPLACE_WITH…` placeholder, a manual run of the Release workflow
+fails with that message and a tag run only warns and builds no MSIX.
 
 ## Each submission
 
