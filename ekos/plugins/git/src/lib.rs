@@ -42,7 +42,11 @@ impl Default for GitObserver {
 // ────────────────────────────────────────────────────────────────────────────
 
 async fn git_output(cwd: &std::path::Path, args: &[&str]) -> Result<String, ObserveError> {
+    // Observation only: `GIT_OPTIONAL_LOCKS=0` stops git from refreshing the repository's index
+    // (a "racily clean" file makes even a read rewrite `.git/index`), so a source tree is never
+    // written — RFC 0178, and the flake it caused in `tests/project_home.rs`.
     let output = Command::new("git")
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .args(args)
         .current_dir(cwd)
         .output()

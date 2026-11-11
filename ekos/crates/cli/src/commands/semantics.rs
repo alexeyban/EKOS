@@ -307,6 +307,7 @@ impl GitBlame {
     /// `None` when `git` is unavailable or `cwd` is not inside a repository.
     pub fn new(cwd: &Path, redaction: RedactionConfig) -> Option<Self> {
         let ok = Command::new("git")
+            .env("GIT_OPTIONAL_LOCKS", "0")
             .arg("-C")
             .arg(cwd)
             .args(["rev-parse", "--is-inside-work-tree"])
@@ -332,6 +333,9 @@ impl RationaleSource for GitBlame {
             return Vec::new();
         }
         let mut cmd = Command::new("git");
+        // Read-only: git must not refresh the source tree's index (RFC 0178 — a project run
+        // leaves the sources byte-identical).
+        cmd.env("GIT_OPTIONAL_LOCKS", "0");
         // `-w`: a whitespace-only commit ("remove trailing spaces") explains nothing.
         cmd.arg("-C").arg(dir).args(["blame", "--porcelain", "-w"]);
         for l in lines {

@@ -52,6 +52,33 @@ fn snapshot(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
     out
 }
 
+type Snapshots = (
+    BTreeMap<PathBuf, Vec<u8>>,
+    BTreeMap<PathBuf, Vec<u8>>,
+    BTreeMap<PathBuf, Vec<u8>>,
+);
+
+/// The source trees are byte-identical; on failure, names the files that changed (a whole-map
+/// `assert_eq!` prints only "left != right" for maps this size).
+fn assert_unchanged(before: &Snapshots, after: Snapshots) {
+    let mut changed = Vec::new();
+    for (b, a) in [
+        (&before.0, &after.0),
+        (&before.1, &after.1),
+        (&before.2, &after.2),
+    ] {
+        for p in b.keys().chain(a.keys()) {
+            if b.get(p) != a.get(p) && !changed.contains(p) {
+                changed.push(p.clone());
+            }
+        }
+    }
+    assert!(
+        changed.is_empty(),
+        "the project run wrote to its sources: {changed:?}"
+    );
+}
+
 fn sources(dir: &Path, marker: &str) {
     std::fs::create_dir_all(dir.join("src")).unwrap();
     std::fs::write(
@@ -301,7 +328,7 @@ fn a_project_of_several_named_sources_keeps_them_apart_and_says_where_each_objec
     );
 
     pipeline(&home, &cwd, &["--project", "shop"]);
-    assert_eq!((snapshot(&api), snapshot(&web), snapshot(&docs)), before);
+    assert_unchanged(&before, (snapshot(&api), snapshot(&web), snapshot(&docs)));
 
     // Both repositories hold `src/lib.rs`; they are two objects, one per source.
     let files = ekl(

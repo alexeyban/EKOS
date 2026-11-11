@@ -37,9 +37,13 @@ has() {
 
 if has '^ekos/.*\.rs$'; then
   echo "── Rust: clippy (changed lines)"
-  (cd ekos && cargo clippy --workspace --all-targets --message-format=json -- \
-      -W clippy::redundant_closure_for_method_calls -W clippy::wildcard_imports 2>/dev/null) \
-    | python3 -c '
+  clippy_json="$(mktemp)"
+  if ! (cd ekos && cargo clippy --workspace --all-targets --message-format=json -- \
+      -W clippy::redundant_closure_for_method_calls -W clippy::wildcard_imports 2>/dev/null) > "$clippy_json"; then
+    # A build error is not a lint finding: say so, or the run fails with nothing listed.
+    echo "cargo clippy did not build — run it in ekos/ to see why"; found=1
+  fi
+  python3 -c '
 import json, sys
 for raw in sys.stdin:
     try: m = json.loads(raw)
@@ -50,7 +54,8 @@ for raw in sys.stdin:
         if s.get("is_primary"):
             print(json.dumps({"file": "ekos/" + s["file_name"], "line": s["line_start"],
                               "rule": (msg.get("code") or {}).get("code", "rustc"), "message": msg["message"]}))
-' | filter || found=1
+' < "$clippy_json" | filter || found=1
+  rm -f "$clippy_json"
   echo "── Rust: closures that only call a method on their argument (S1612, changed lines; advisory)"
   # Clippy's redundant_closure_for_method_calls misses `|row| row.values()` when the argument
   # is a reference; Sonar's S1612 does not. Same shape, by pattern — but a pattern cannot see

@@ -241,6 +241,7 @@ pub fn recall(
 
 fn git_scope(cwd: &Path) -> Vec<String> {
     std::process::Command::new("git")
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .args(["diff", "--name-only", "HEAD"])
         .current_dir(cwd)
         .output()

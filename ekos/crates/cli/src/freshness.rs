@@ -248,6 +248,7 @@ pub fn scan(config: &EkosConfig, cwd: &Path) -> SourceManifest {
 /// `git rev-parse HEAD` in the workspace, when it is a repository with a commit.
 pub fn git_head(cwd: &Path) -> Option<String> {
     let out = std::process::Command::new("git")
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .args(["rev-parse", "HEAD"])
         .current_dir(cwd)
         .stderr(std::process::Stdio::null())
