@@ -30,6 +30,8 @@ cargo test -p ekos-ledger some_test_name     # one test
 cargo clippy --workspace -- -D warnings      # CI fails on any warning
 cargo fmt --check                            # CI checks formatting, doesn't fix it
 ../scripts/cognitive-complexity.sh           # functions over Sonar's complexity limit (S3776), no scan needed
+../scripts/sonar-local.sh                    # BEFORE every push: Sonar's rules on the changed lines (Rust,
+                                             # TS/TSX, Python); fix all it reports, then push
 ../scripts/test-install.sh                   # install.sh against a local fake release (RFC 0179)
 ../deploy/e2e/package.sh                      # full package on Linux end to end: setup --answers, the console
                                              # (local sign-in, settings + restart, pipeline), the wizard in a
@@ -329,6 +331,16 @@ Every PR must satisfy: tests passing, documentation, benchmarks (performance-rel
 only), no public API break, compiler diagnostics, logging, examples.
 
 ## SonarCloud after every push to main
+
+**Before pushing, run `scripts/sonar-local.sh` and fix everything it reports.**
+- **What it covers:** local stand-ins for the rules that have turned the gate red, on the lines the
+  change touched (Sonar's new code):
+  - Rust: clippy plus Sonar's extra rules, and cognitive complexity;
+  - TS/TSX: `eslint-plugin-sonarjs`, `jsx-a11y` and `react`, in `scripts/sonar-local/`;
+  - Python: ruff `ASYNC`/`RUF029`, and `pycogc.py`, which counts complexity as Sonar does — it
+    matched Sonar's numbers where `complexipy` scored up to half.
+- **What it doesn't cover:** coverage, duplication and Python regex backtracking. SonarCloud still
+  decides those.
 
 `.github/workflows/sonar.yml` analyses `main` after every push: coverage, then the scan, then the
 quality gate. **After each commit you push to `main`, finish the job:**

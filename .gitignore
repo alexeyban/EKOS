@@ -26,6 +26,7 @@
 # Web console (RFC 0128) — Python + Node build artifacts, not source
 web/api/.venv/
 web/ui/node_modules/
+scripts/sonar-local/node_modules/
 web/ui/dist/
 web/ui/*.tsbuildinfo
 web/ui/coverage/
