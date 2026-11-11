@@ -23,6 +23,7 @@ pub mod schema_history;
 pub mod semantics_review;
 pub mod sources;
 pub mod tickets;
+pub mod transform_chain;
 pub mod transform_ir;
 pub mod triggers;
 pub mod workflow;

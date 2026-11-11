@@ -65,6 +65,11 @@ _ALLOWED: dict[tuple[str, ...], frozenset[str]] = {
     # RFC 0256: who reads and writes each table, and the findings.
     ("interaction", "matrix", "--json"): frozenset({"--table", "--actor"}),
     ("interaction", "findings", "--json"): frozenset(),
+    # RFC 0257 transformations as a chain of steps — reads only. The route checks `--object`
+    # (an id) and `--expand` (`all` or statement numbers). The longer `list` shape comes first.
+    ("transformation", "list", "--json", "--all"): frozenset({"--filter", "--limit"}),
+    ("transformation", "list", "--json"): frozenset({"--filter", "--limit"}),
+    ("transformation", "graph", "--json"): frozenset({"--object", "--expand"}),
 }
 
 # RFC 0213: `review show <subject> --json [--undecided] [--limit <n>]` — the subject is one of a

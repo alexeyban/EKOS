@@ -146,6 +146,9 @@ pub const SCOPED_TOOLS: &[&str] = &[
     "ekos_testimony",
     // RFC 0254: the probed table is looked up through the scoped store before anything runs.
     "ekos_probe",
+    // RFC 0257: nodes, edges, evidence and annotations through the scoped store; the definition's
+    // text is read only for an owning View/Procedure that store returned.
+    "ekos_transformation_graph",
 ];
 
 /// Tools a restricted reader does not get, each with the reason.
@@ -1203,6 +1206,7 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
         tools.push(questions_tool_definition());
     }
     tools.push(testimony_tool_definition());
+    tools.push(transformation_graph_tool_definition());
     if config.probe.mcp {
         tools.push(probe_tool_definition());
     }
@@ -1266,6 +1270,22 @@ fn probe_tool_definition() -> Value {
                 "where": { "type": "array", "items": { "type": "object" } }
             },
             "required": ["table", "template"]
+        }
+    })
+}
+
+/// RFC 0257 — read-only: a recovered transformation as a chain of steps.
+fn transformation_graph_tool_definition() -> Value {
+    json!({
+        "name": "ekos_transformation_graph",
+        "description": "One recovered transformation (a view, a routine, a query, a Kettle job) as a left-to-right chain of steps from its Transformation IR graph: per step its type (Source, Filter, Join, Aggregate, Calculate, Sink, Unmapped), a sentence saying what it does, columns in/out/used, the source text it was recovered from with its span in the definition, evidence and people's annotations. `status: unmapped` marks a step recovery did not understand — say so, never fill it in. A large routine comes collapsed by statement; pass `expand` (`all`, or 1-based statement numbers) to see its steps. Row counts are not available for a recovered transformation. Read-only.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "description": "A TransformNode, View or Procedure id, from ekos_search or ekos_ekl" },
+                "expand": { "type": "string", "description": "`all`, or statement numbers like `1,3`" }
+            },
+            "required": ["id"]
         }
     })
 }
@@ -2255,6 +2275,10 @@ fn call_tool(
         "ekos_architecture_diff" => tool_architecture_diff(ledger, args),
         "ekos_transformation_explain" => tool_transformation_explain(ledger, &runtime, args),
         "ekos_transformation_diff" => tool_transformation_diff(&runtime, args),
+        // RFC 0257: reads through `ledger`, the call's scoped store.
+        "ekos_transformation_graph" => {
+            super::transformation::chain_json(config, workspace, ledger, args)
+        }
         "ekos_clickhouse_query" => tool_clickhouse_query(config, workspace, args),
         other => ext
             .call_mcp_tool(other, args, ledger)
@@ -3862,7 +3886,9 @@ mod tests {
                 // RFC 0254 — read-only.
                 "ekos_questions",
                 // RFC 0253 — read-only.
-                "ekos_testimony"
+                "ekos_testimony",
+                // RFC 0257 — read-only.
+                "ekos_transformation_graph"
             ]
         );
         for tool in tools {

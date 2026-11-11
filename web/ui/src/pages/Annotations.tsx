@@ -98,9 +98,21 @@ export function Annotations() {
   );
 }
 
-function AddForm({ workspace, me }: { workspace: string; me: Me }) {
+/** The add form. RFC 0257: a step panel passes `fixedTarget` (the step's node id) and `title`. */
+export function AddForm({
+  workspace,
+  me,
+  fixedTarget,
+  title = "Add",
+}: {
+  workspace: string;
+  me: Me;
+  fixedTarget?: string;
+  title?: string;
+}) {
   const qc = useQueryClient();
-  const [target, setTarget] = useState("");
+  const [typedTarget, setTarget] = useState("");
+  const target = fixedTarget ?? typedTarget;
   const [kind, setKind] = useState<AnnotationKind>("comment");
   const [text, setText] = useState("");
   const [term, setTerm] = useState("");
@@ -144,11 +156,13 @@ function AddForm({ workspace, me }: { workspace: string; me: Me }) {
         if (ready) add.mutate();
       }}
     >
-      <strong className="sem-sub">Add</strong>
-      <label className="sem-field">
-        <span>Entity id, or “project”</span>
-        <input aria-label="target" value={target} onChange={(e) => setTarget(e.target.value)} />
-      </label>
+      <strong className="sem-sub">{title}</strong>
+      {fixedTarget === undefined && (
+        <label className="sem-field">
+          <span>Entity id, or “project”</span>
+          <input aria-label="target" value={target} onChange={(e) => setTarget(e.target.value)} />
+        </label>
+      )}
       <label className="sem-field">
         <span>Kind</span>
         <select

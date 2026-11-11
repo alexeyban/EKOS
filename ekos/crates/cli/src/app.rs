@@ -345,6 +345,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: ConflictsCommands,
     },
+    /// A recovered transformation as a chain of steps (RFC 0257)
+    Transformation {
+        #[command(subcommand)]
+        subcommand: TransformationCommands,
+    },
     /// Comments, instructions and synonyms on any entity; stale when the entity changes (RFC 0247)
     Annotate {
         #[command(subcommand)]
@@ -1868,6 +1873,37 @@ enum ClickHouseCommands {
 }
 
 #[derive(Subcommand)]
+enum TransformationCommands {
+    /// One transformation's Transformation IR graph: steps, data-flow edges, the template
+    /// sentence per step, columns, evidence, annotations and the step ↔ source-text map.
+    /// Read-only, no model.
+    Graph {
+        /// A TransformNode, View or Procedure id
+        #[arg(long)]
+        object: String,
+        /// A large routine is drawn collapsed by statement: `all`, or statement numbers to
+        /// draw in full (1-based, comma-separated)
+        #[arg(long)]
+        expand: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The transformations in the ledger: views, routines and queries with a recovered graph
+    List {
+        /// Only names containing this text (case-insensitive)
+        #[arg(long)]
+        filter: Option<String>,
+        #[arg(long, default_value_t = 200)]
+        limit: usize,
+        /// Also list standalone statements recovery understood nothing of
+        #[arg(long)]
+        all: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum AnnotateCommands {
     /// Write an annotation (human-only; a model never writes one)
     Add {
@@ -2733,6 +2769,10 @@ fn emits_machine_output(command: &Commands) -> bool {
         | Commands::Ekl { json, .. }
         | Commands::Coverage { json, .. }
         | Commands::Freshness { json, .. } => *json,
+        Commands::Transformation {
+            subcommand:
+                TransformationCommands::Graph { json, .. } | TransformationCommands::List { json, .. },
+        } => *json,
         Commands::Check {
             subcommand: CheckCommands::Refs { format, .. },
         } => *format != crate::commands::check::Format::Table,
@@ -3137,6 +3177,9 @@ where
         Commands::Resolve { force } => crate::commands::resolve::run(&config, &cwd, force),
         Commands::Conflicts { subcommand } => dispatch_conflicts(subcommand, &config, &cwd),
         Commands::Annotate { subcommand } => dispatch_annotate(subcommand, &config, &cwd),
+        Commands::Transformation { subcommand } => {
+            dispatch_transformation(subcommand, &config, &cwd)
+        }
         Commands::Review { subcommand } => dispatch_review(subcommand, &config, &cwd),
         Commands::Signoff { subcommand } => dispatch_signoff(subcommand, &config, &cwd),
         Commands::Workflow {
@@ -3608,6 +3651,36 @@ fn dispatch_signoff(
             reason,
             by,
         } => review::revoke(config, cwd, &subject, &reason, by),
+    }
+}
+
+fn dispatch_transformation(
+    subcommand: TransformationCommands,
+    config: &ekos_compiler_core::EkosConfig,
+    cwd: &std::path::Path,
+) -> Result<()> {
+    use crate::commands::transformation;
+    match subcommand {
+        TransformationCommands::Graph {
+            object,
+            expand,
+            json,
+        } => transformation::graph(config, cwd, &object, expand.as_deref(), json),
+        TransformationCommands::List {
+            filter,
+            limit,
+            all,
+            json,
+        } => transformation::list(
+            config,
+            cwd,
+            transformation::ListArgs {
+                filter: filter.as_deref(),
+                limit,
+                all,
+                json,
+            },
+        ),
     }
 }
 

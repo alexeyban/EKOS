@@ -119,6 +119,8 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("semantics gaps", Class::Read, false),
     ("semantics gold-template", Class::Read, false),
     ("semantics eval", Class::Read, false),
+    ("transformation graph", Class::Read, false),
+    ("transformation list", Class::Read, false),
     ("annotate list", Class::Read, false),
     ("annotate show", Class::Read, false),
     ("annotate add", Class::Write, false),

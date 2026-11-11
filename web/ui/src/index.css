@@ -1262,6 +1262,10 @@ details.cfg-sub {
 .ext-markdown table { margin: 0.5rem 0; }
 .ext-markdown code { font-size: 0.85em; }
 .ext-lane { fill: var(--ink-soft, currentColor); font-size: 0.7rem; }
+/* RFC 0257: the transformation chain — the selected step, and its span in the source text. */
+.ext-node.chain-selected rect { stroke: var(--accent-a); }
+mark.chain-span { background: rgba(127, 127, 127, 0.14); color: inherit; cursor: pointer; border-radius: 2px; }
+mark.chain-span.selected { background: rgba(214, 158, 46, 0.45); }
 
 /* RFC 0213 — workflow step bar and the Review page */
 .step-bar {

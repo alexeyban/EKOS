@@ -123,9 +123,10 @@ impl CompilerPass for SqlTransformAnalyzerPass {
 
     /// `v2` = RFC 0170 Phase 3: a top-level `SELECT`'s graph carries its `predicates`.
     /// `v3` = RFC 0175: a `Source` node carries the alias it was read under.
+    /// `v4` = RFC 0257: nodes of a view/routine record their `owner` and body `statement`.
     fn version(&self) -> &str {
         // Includes `PREDICATES_VERSION`: a top-level SELECT's graph carries `predicates`.
-        "v3+predicates/4"
+        "v4+predicates/4"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -137,7 +138,7 @@ impl CompilerPass for SqlTransformAnalyzerPass {
     }
 
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
-        let graphs = parse_sql_to_transform_graphs(
+        let graphs = parse_sql_to_statement_graphs(
             &self.sql,
             &self.source_path,
             &self.dialect_name,
@@ -155,7 +156,10 @@ impl CompilerPass for SqlTransformAnalyzerPass {
         // and counting them twice would inflate how widely a filter recurs.
         let query_predicates = top_level_query_predicates(&self.sql, self.dialect.as_ref());
 
-        for graph in &graphs {
+        let mut owners_seen: std::collections::HashMap<(&str, String), u32> =
+            std::collections::HashMap::new();
+        for statement in &graphs {
+            let graph = &statement.graph;
             stats.statements_processed += 1;
             stats.nodes_total += graph.nodes.len();
             stats.nodes_mapped += graph
@@ -164,6 +168,7 @@ impl CompilerPass for SqlTransformAnalyzerPass {
                 .filter(|n| !matches!(n, TransformNode::Unmapped { .. }))
                 .count();
             let mut lowered = lower_to_kir(graph);
+            stamp_owner(&mut lowered, statement, &mut owners_seen);
             let index = graph
                 .origin
                 .source_path
@@ -212,6 +217,38 @@ impl CompilerPass for SqlTransformAnalyzerPass {
             "sql-transform-analyzer complete"
         );
         Ok(())
+    }
+}
+
+/// RFC 0257: every node of a statement that defines a view or a routine records what it defines
+/// (`owner`, `owner_kind`), which same-named definition in the file it is (`owner_ordinal`: an
+/// overloaded routine is defined more than once), and, in a routine, the body statement it came
+/// from (`statement`). `ekos transformation graph` joins `View`/`Procedure` objects to the graph
+/// through these, and collapses a large routine by statement.
+fn stamp_owner(
+    lowered: &mut KirGraph,
+    statement: &StatementGraph,
+    seen: &mut std::collections::HashMap<(&'static str, String), u32>,
+) {
+    let Some(owner) = &statement.owner else {
+        return;
+    };
+    let counter = seen
+        .entry((owner.kind, owner.name.to_ascii_lowercase()))
+        .or_insert(0);
+    let ordinal = *counter;
+    *counter += 1;
+    for (i, obj) in lowered.objects.iter_mut().enumerate() {
+        obj.properties
+            .insert("owner".into(), serde_json::json!(owner.name));
+        obj.properties
+            .insert("owner_kind".into(), serde_json::json!(owner.kind));
+        obj.properties
+            .insert("owner_ordinal".into(), serde_json::json!(ordinal));
+        if let Some(k) = statement.statement_of.get(i) {
+            obj.properties
+                .insert("statement".into(), serde_json::json!(k));
+        }
     }
 }
 
@@ -269,6 +306,51 @@ pub fn parse_sql_to_transform_graphs(
     dialect_name: &str,
     dialect: &dyn Dialect,
 ) -> Vec<TransformGraph> {
+    parse_sql_to_statement_graphs(sql, source_path, dialect_name, dialect)
+        .into_iter()
+        .map(|g| g.graph)
+        .collect()
+}
+
+/// What a statement defines, when it defines something (RFC 0257): a view, or a routine
+/// (`CREATE FUNCTION` / `CREATE PROCEDURE`). It is how a `View` or `Procedure` object is
+/// joined to the Transformation IR graph recovered from the same statement.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatementOwner {
+    /// `"view"` or `"routine"`.
+    pub kind: &'static str,
+    /// The name as written, e.g. `public.invoice_summary`.
+    pub name: String,
+}
+
+/// One statement's graph, with what it defines and, per node, which statement of a routine body
+/// the node came from (RFC 0257: a large routine is drawn collapsed by statement).
+#[derive(Debug, Clone)]
+pub struct StatementGraph {
+    pub graph: TransformGraph,
+    pub owner: Option<StatementOwner>,
+    /// `statement_of[i]` is the body statement node `i` was parsed from; empty unless the
+    /// statement is a routine.
+    pub statement_of: Vec<u32>,
+}
+
+impl StatementGraph {
+    fn plain(graph: TransformGraph) -> Self {
+        Self {
+            graph,
+            owner: None,
+            statement_of: Vec::new(),
+        }
+    }
+}
+
+/// [`parse_sql_to_transform_graphs`], keeping what each statement defines (RFC 0257).
+pub fn parse_sql_to_statement_graphs(
+    sql: &str,
+    source_path: &str,
+    dialect_name: &str,
+    dialect: &dyn Dialect,
+) -> Vec<StatementGraph> {
     let source_kind = source_kind_for(dialect_name);
 
     let stmts = match Parser::parse_sql(dialect, sql) {
@@ -328,9 +410,9 @@ fn dispatch_one_statement(
     stmt: &Statement,
     origin: TransformOrigin,
     dialect: &dyn Dialect,
-) -> Option<TransformGraph> {
+) -> Option<StatementGraph> {
     match stmt {
-        Statement::Query(query) => Some(query_to_graph(query, origin)),
+        Statement::Query(query) => Some(StatementGraph::plain(query_to_graph(query, origin))),
         Statement::CreateView { name, query, .. } => {
             let mut graph = query_to_graph(query, origin);
             let last = graph.nodes.len().checked_sub(1).map(|i| NodeId(i as u32));
@@ -338,24 +420,70 @@ fn dispatch_one_statement(
                 &mut graph.nodes,
                 TransformNode::Sink {
                     object_name: name.to_string(),
-                    columns: Vec::new(),
+                    columns: output_columns(query),
                 },
             );
             if let Some(prev) = last {
                 graph.edges.push((prev, sink_id));
             }
-            Some(graph)
+            Some(StatementGraph {
+                graph,
+                owner: Some(StatementOwner {
+                    kind: "view",
+                    name: name.to_string(),
+                }),
+                statement_of: Vec::new(),
+            })
         }
         Statement::CreateProcedure { name, body, .. } => {
-            Some(procedure_body_to_graph(name.to_string(), body, &origin))
+            let (graph, statement_of) = procedure_body_to_graph(name.to_string(), body, &origin);
+            Some(routine(graph, name.to_string(), statement_of))
         }
-        Statement::CreateFunction(cf) => Some(function_to_graph(
-            cf.name.to_string(),
-            cf.function_body.as_ref(),
-            dialect,
-            &origin,
-        )),
+        Statement::CreateFunction(cf) => {
+            let (graph, statement_of) = function_to_graph(
+                cf.name.to_string(),
+                cf.function_body.as_ref(),
+                dialect,
+                &origin,
+            );
+            Some(routine(graph, cf.name.to_string(), statement_of))
+        }
         _ => None,
+    }
+}
+
+/// The column names a view's query outputs, as written (RFC 0257: the view's `Sink` says what it
+/// writes). An alias names its column; a bare column its last part; any other expression its text.
+/// Empty for a query that is not one `SELECT` (a CTE, a set operation).
+fn output_columns(query: &Query) -> Vec<String> {
+    let SetExpr::Select(select) = query.body.as_ref() else {
+        return Vec::new();
+    };
+    if query.with.is_some() {
+        return Vec::new();
+    }
+    select
+        .projection
+        .iter()
+        .map(|item| match item {
+            SelectItem::ExprWithAlias { alias, .. } => alias.value.clone(),
+            SelectItem::UnnamedExpr(Expr::Identifier(i)) => i.value.clone(),
+            SelectItem::UnnamedExpr(Expr::CompoundIdentifier(parts)) => {
+                parts.last().map(|p| p.value.clone()).unwrap_or_default()
+            }
+            other => other.to_string(),
+        })
+        .collect()
+}
+
+fn routine(graph: TransformGraph, name: String, statement_of: Vec<u32>) -> StatementGraph {
+    StatementGraph {
+        graph,
+        owner: Some(StatementOwner {
+            kind: "routine",
+            name,
+        }),
+        statement_of,
     }
 }
 
@@ -446,7 +574,7 @@ fn parse_sql_statement_by_statement(
     source_path: &str,
     source_kind: &str,
     dialect: &dyn Dialect,
-) -> Vec<TransformGraph> {
+) -> Vec<StatementGraph> {
     let mut graphs = Vec::new();
     for (index, fragment) in split_sql_statements(sql).into_iter().enumerate() {
         let fragment = fragment.trim();
@@ -461,17 +589,17 @@ fn parse_sql_statement_by_statement(
         let graph = match Parser::parse_sql(dialect, fragment) {
             Ok(stmts) if stmts.len() == 1 => {
                 dispatch_one_statement(&stmts[0], origin.clone(), dialect).unwrap_or_else(|| {
-                    TransformGraph {
+                    StatementGraph::plain(TransformGraph {
                         nodes: vec![TransformNode::Unmapped {
                             raw: fragment.to_string(),
                             reason: "statement type not modeled".to_string(),
                         }],
                         edges: Vec::new(),
                         origin,
-                    }
+                    })
                 })
             }
-            _ => TransformGraph {
+            _ => StatementGraph::plain(TransformGraph {
                 nodes: vec![TransformNode::Unmapped {
                     raw: fragment.to_string(),
                     reason: "statement-level parse failure (likely control flow), not modeled"
@@ -479,7 +607,7 @@ fn parse_sql_statement_by_statement(
                 }],
                 edges: Vec::new(),
                 origin,
-            },
+            }),
         };
         graphs.push(graph);
     }
@@ -658,6 +786,11 @@ fn extract_equi_keys(constraint: &JoinConstraint) -> Vec<(String, String)> {
 /// function calls) is simply not collected as a key, not treated as an
 /// error — the join node itself is still emitted and mapped.
 fn collect_equi_keys(expr: &Expr, out: &mut Vec<(String, String)>) {
+    // `JOIN t ON (a = b)`: the parentheses hide the pair (RFC 0257, found on LedgerSMB, where
+    // every join of `order__search` is written that way and none had keys).
+    if let Expr::Nested(inner) = expr {
+        return collect_equi_keys(inner, out);
+    }
     if let Expr::BinaryOp { left, op, right } = expr {
         match op {
             BinaryOperator::And => {
@@ -743,11 +876,12 @@ fn procedure_body_to_graph(
     proc_name: String,
     body: &[Statement],
     origin: &TransformOrigin,
-) -> TransformGraph {
+) -> (TransformGraph, Vec<u32>) {
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
+    let mut statement_of = Vec::new();
 
-    for stmt in body {
+    for (k, stmt) in body.iter().enumerate() {
         match stmt {
             Statement::Query(query) => {
                 let fragment = query_to_graph(query, origin.clone());
@@ -763,6 +897,7 @@ fn procedure_body_to_graph(
                 );
             }
         }
+        statement_of.resize(nodes.len(), k as u32);
     }
 
     if nodes.is_empty() {
@@ -770,13 +905,15 @@ fn procedure_body_to_graph(
             raw: format!("CREATE PROCEDURE {proc_name} (empty body)"),
             reason: "control flow present, not modeled".to_string(),
         });
+        statement_of.push(0);
     }
 
-    TransformGraph {
+    let graph = TransformGraph {
         nodes,
         edges,
         origin: origin.clone(),
-    }
+    };
+    (graph, statement_of)
 }
 
 /// `CREATE FUNCTION ... AS $$ ... $$` (Postgres) / `AS '...'`: the body is a
@@ -793,7 +930,7 @@ fn function_to_graph(
     body: Option<&CreateFunctionBody>,
     dialect: &dyn Dialect,
     origin: &TransformOrigin,
-) -> TransformGraph {
+) -> (TransformGraph, Vec<u32>) {
     let body_text = body.and_then(|b| {
         let expr = match b {
             CreateFunctionBody::AsBeforeOptions(e)
@@ -804,7 +941,7 @@ fn function_to_graph(
     });
 
     let Some(body_text) = body_text else {
-        return TransformGraph {
+        let graph = TransformGraph {
             nodes: vec![TransformNode::Unmapped {
                 raw: format!("CREATE FUNCTION {func_name}"),
                 reason: "function body not in string-literal form, not modeled".to_string(),
@@ -812,10 +949,13 @@ fn function_to_graph(
             edges: Vec::new(),
             origin: origin.clone(),
         };
+        return (graph, vec![0]);
     };
 
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
+    let mut statement_of = Vec::new();
+    let mut k: u32 = 0;
 
     for fragment_sql in split_sql_statements(&body_text) {
         let fragment_sql = fragment_sql.trim();
@@ -847,6 +987,8 @@ fn function_to_graph(
                 );
             }
         }
+        statement_of.resize(nodes.len(), k);
+        k += 1;
     }
 
     if nodes.is_empty() {
@@ -854,13 +996,15 @@ fn function_to_graph(
             raw: format!("CREATE FUNCTION {func_name}"),
             reason: "control flow present, not modeled".to_string(),
         });
+        statement_of.push(0);
     }
 
-    TransformGraph {
+    let graph = TransformGraph {
         nodes,
         edges,
         origin: origin.clone(),
-    }
+    };
+    (graph, statement_of)
 }
 
 fn function_body_text(expr: &Expr) -> Option<String> {
@@ -999,6 +1143,70 @@ SELECT id, status FROM customers
         assert!(graph.edges.contains(&(NodeId(1), NodeId(2))));
     }
 
+    /// RFC 0257: a parenthesised `ON (a = b)` still yields its key pair.
+    #[test]
+    fn parenthesised_join_condition_keeps_its_keys() {
+        let g = graphs(
+            "SELECT 1 FROM oe o JOIN entity c ON (c.id = o.entity_id AND (o.x = c.y))",
+            "postgres",
+        );
+        let TransformNode::Join { keys, .. } = &g[0].nodes[2] else {
+            panic!("expected a join: {:?}", g[0].nodes);
+        };
+        assert_eq!(
+            keys,
+            &vec![
+                ("c.id".to_string(), "o.entity_id".to_string()),
+                ("o.x".to_string(), "c.y".to_string())
+            ]
+        );
+    }
+
+    /// RFC 0257: a statement that defines a view or routine says so, with the body statement of
+    /// every routine node and an ordinal per same-named definition.
+    #[test]
+    fn view_and_routine_statements_record_their_owner() {
+        let sql = "CREATE VIEW v AS SELECT a FROM t WHERE a > 1;\n\
+                   CREATE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 FROM t; SELECT 2 FROM u $$;\n\
+                   CREATE FUNCTION f(x int) RETURNS int LANGUAGE sql AS $$ SELECT x FROM w $$;\n\
+                   SELECT 1 FROM z;";
+        let dialect = sqlparser::dialect::PostgreSqlDialect {};
+        let g = parse_sql_to_statement_graphs(sql, "a.sql", "postgres", &dialect);
+        assert_eq!(g.len(), 4);
+        assert_eq!(
+            g[0].owner,
+            Some(StatementOwner {
+                kind: "view",
+                name: "v".into()
+            })
+        );
+        assert_eq!(g[1].owner.as_ref().map(|o| o.kind), Some("routine"));
+        // Each body SELECT is a Source and a Calculate (`SELECT 1`).
+        assert_eq!(g[1].statement_of, vec![0, 0, 1, 1]);
+        assert!(g[3].owner.is_none());
+
+        let mut seen = std::collections::HashMap::new();
+        let mut lowered: Vec<KirGraph> = Vec::new();
+        for s in &g {
+            let mut k = lower_to_kir(&s.graph);
+            stamp_owner(&mut k, s, &mut seen);
+            lowered.push(k);
+        }
+        let p = |k: &KirGraph, i: usize, key: &str| k.objects[i].properties.get(key).cloned();
+        assert_eq!(p(&lowered[0], 0, "owner"), Some(serde_json::json!("v")));
+        assert_eq!(p(&lowered[0], 0, "statement"), None);
+        assert_eq!(p(&lowered[1], 2, "statement"), Some(serde_json::json!(1)));
+        assert_eq!(
+            p(&lowered[1], 0, "owner_ordinal"),
+            Some(serde_json::json!(0))
+        );
+        assert_eq!(
+            p(&lowered[2], 0, "owner_ordinal"),
+            Some(serde_json::json!(1))
+        );
+        assert_eq!(p(&lowered[3], 0, "owner"), None);
+    }
+
     #[test]
     fn select_with_group_by() {
         let g = graphs(
@@ -1031,7 +1239,8 @@ SELECT id, status FROM customers
         let last = graph.nodes.last().unwrap();
         assert!(matches!(
             last,
-            TransformNode::Sink { object_name, .. } if object_name == "customer_orders"
+            TransformNode::Sink { object_name, columns } if object_name == "customer_orders"
+                && columns == &["id".to_string(), "name".to_string()]
         ));
         let last_id = NodeId((graph.nodes.len() - 1) as u32);
         assert!(graph.edges.iter().any(|(_, to)| *to == last_id));

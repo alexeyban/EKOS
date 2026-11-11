@@ -1,6 +1,6 @@
 # RFC 0257 — The transformation chain: a visual view, comments on a step, and structured edits
 
-**Status:** Accepted (2026-11-11, on the maintainer's instruction to start work)
+**Status:** Accepted (2026-11-11, on the maintainer's instruction to start work); phases 1–2 built on the EKOS side (§9)
 **Date:** 2026-11-11
 **Depends on:** RFC 0027 / 0028 (Transformation IR), RFC 0195 (gold drafter), RFC 0215 (requirements as mart
 metadata), RFC 0228 (marts: propose, merge, build, reconcile), RFC 0247 (annotations), RFC 0248 (terms, triage,
@@ -166,3 +166,101 @@ Phases 1–3 change nothing and can ship before sign-off of the edit path.
 3. Should a recovered legacy transformation and the mart that replaces it be shown side by side (the
    `ekos_transformation_diff` result, drawn)? It fits the migration use case and is a natural phase 6.
 4. Large graphs: a routine with hundreds of nodes. Collapse by statement, with expansion on selection?
+
+---
+
+## 9. Implementation log
+
+### 2026-11-11 — Phases 1 and 2, EKOS side (branch `rfc0257`)
+
+**Scope.** The recovered-transformation half of phase 1 and phase 2. The mart half (`lakehouse marts graph`, the
+term → node join, a mart with a planted `Unmapped` node, every approved mart rendering) lives in ekos-lakehouse and
+is not built here. Phases 3–5 are not started.
+
+#### What was built
+
+| Piece | Where | What |
+|---|---|---|
+| Owner and statement on IR nodes | `recovery/src/sql_transform_analyzer.rs` (pass version `v4`) | every node of a `CREATE VIEW` / `CREATE FUNCTION` / `CREATE PROCEDURE` statement records `owner`, `owner_kind` (`view` / `routine`), `owner_ordinal` (which same-named definition in the file: overloads) and, in a routine, `statement` (the body statement it came from). `parse_sql_to_statement_graphs` keeps them; `parse_sql_to_transform_graphs` is unchanged for its callers |
+| Two recovery fixes found on LedgerSMB | same file | `JOIN … ON (a = b)` lost its key pairs (`Expr::Nested` was not unwrapped: every join of `order__search` had none); a view's `Sink` now carries the view's output column names |
+| The chain | `semantic/src/transform_chain.rs` (pure) | `select` (a `TransformNode`, `View` or `Procedure` id → its graph; a ledger from before this change still finds a view through its `Sink`), `build` → `ChainGraph`: nodes with the template sentence, columns in / out / used, source text, span, evidence, annotations, `term`/`rule`/`fidelity` = `null`, `status: unmapped`; edges; the span map; groups; counts; `rows.available = false` with the reason |
+| CLI | `cli/src/commands/transformation.rs`, catalogue rows `transformation graph` / `transformation list` (class *read*) | `ekos transformation graph --object <id> [--expand all\|1,3] [--json]`, `ekos transformation list [--filter] [--limit] [--all] [--json]`. The definition's text is read from its file by the recorded span through `redaction::read_redacted` (RFC 0043) |
+| MCP | `ekos_transformation_graph` in `SCOPED_TOOLS` (and `web/api/app/mcp_policy.py`) | read-only, through the call's scoped store; the definition text is read only for an owning `View`/`Procedure` that store returned |
+| Console | `routes/transformations.py` (`read`, not `scoped`), `readproc` shapes, `pages/Transformations.tsx`, `chain-shared.ts`, a "Transformations" tab, "Open as a chain of steps" on an object panel | list → chain (layered, left to right) → step panel (sentence, source text, columns, evidence, notes, the add-a-note form) ↔ source text with every step's span marked; clicking either side selects the step |
+| Annotations on a step (phase 2) | `AddForm` exported from `pages/Annotations.tsx` with a fixed target | the step's node id is the target; the write is the existing `POST /workspaces/{id}/annotations` → human-only `ekos annotate add`. The graph document carries each step's current annotations (`annotate list`'s rendering), so the step shows them |
+
+#### The JSON shape, for `lakehouse marts graph`
+
+`ekos.transformation-graph/1`, documented field by field in `semantic/src/transform_chain.rs`'s module docs and
+typed in `web/ui/src/pages/chain-shared.ts`. A mart's command prints the same document with `transformation.recovered
+= false`, each node's `term` / `rule` / `fidelity` filled, `status: unmapped` on a node mapped to no term (the defect
+the RFC asks to flag), and `rows.available` set when §3.3 is built. An extension page can draw it with the existing
+RFC 0207 `graph` view kind: `nodes: "/nodes"`, `edges: "/edges"`, `id: "/id"`, `label: "/label"`, `group: "/group"`,
+`badge: "/fidelity"`, `from: "/from"`, `to: "/to"` (`drafted` and `unmapped` now read as attention badges).
+
+#### Decisions
+
+- **The view kind (§3.2, to be confirmed in phase 1).** The `graph` view kind already exists (RFC 0207): a
+  deterministic layered left-to-right SVG layout (`layoutGraph`: layer = longest path, one lane per group). The chain
+  page reuses that layout; no dependency is added. `react-force-graph-2d` also has a `dagMode="lr"`, but it is a
+  force simulation on a canvas — positions not reproducible and nothing a jsdom test can read — so it is not used.
+- **Open question 4 — large graphs.** Collapse by statement, with expansion on selection. Above 40 nodes a routine's
+  body statements are each drawn as one `Statement` node, joined by dashed `order` edges (body order, not data flow),
+  and a run of consecutive statements none of which recovery understood is one block. Selecting a statement and
+  "show its steps" asks for it in full (`--expand <n>`); "show every step" is `--expand all`. Measured: LedgerSMB's
+  `payment_post`, 64 nodes (62 not understood), is drawn as 5.
+- **Spans are found, never guessed.** The IR keeps expressions reprinted by `sqlparser`, not their offsets, so a node's
+  span is its recorded text located in the definition ignoring case and whitespace runs. A reprinted expression
+  (`'CO', 'CL'` for `'CO','CL'`) is not found and the step has no span.
+- **Source columns** are the qualified columns other steps name through the read's alias or table name; an unqualified
+  column is not placed.
+- **Read scope.** The console routes run the CLI unscoped, so they are not `scoped` (a restricted reader is refused);
+  the MCP tool is scoped. RFC test (§5) "a restricted reader sees no step whose source is out of scope":
+  `transformation::tests::a_restricted_reader_sees_no_step_whose_source_is_out_of_scope`.
+- **Open questions 1 and 2** are the mart's (term → clause map) and phase 3's (row counts); nothing was decided here.
+- **Phase 2 for recovered transformations.** A comment or instruction on a step is stored and shown; for a recovered
+  transformation nothing resolves, so the exit "an instruction changes the next resolution of that term" belongs to
+  the mart side. A note goes stale when the step's content changes (RFC 0247 digest), e.g. after a re-recover changes
+  the node.
+
+#### Measured (LedgerSMB `sql/`, scratch project, `postgres`, no model)
+
+Recover found 1,442 transformations with a graph that recovery understood something of (753 standalone statements
+of which it understood nothing are not listed by default): 17 views, 559 routines, 866 queries. Every view and
+routine was rendered with `ekos transformation graph --expand all --json`, 576 calls, 0 failures, median 3.6 s
+(debug build, the whole ledger read per call).
+
+| | graphs | definition text found | steps understood | of them with a span | not understood |
+|---|---|---|---|---|---|
+| views | 17 | 17 | 59 | 58 (98%) | 11 |
+| routines | 559 | 558 | 961 | 911 (95%) | 2,201 (70% of routine steps) |
+
+Spans by step type (routines): Source 409/410, Join 162/164, Filter 201/217, Calculate 120/146, Aggregate 19/24 — the
+misses are expressions `sqlparser` reprinted differently from the file. 258 of the 559 routines are wholly "not
+understood" (PL/pgSQL bodies); 217 are wholly understood (mostly `LANGUAGE sql`).
+
+The three rendered for the exit, from `sql/modules/`:
+
+- view `file_order_links` (Files.sql) — 7 steps, all understood, 7/7 spans: reads `file_secondary_attachment` as
+  `sl`, joins `oe` where `sl.ref_key = oe.id`, joins `oe_class`, "keeps rows where `sl.source_class` is `2`",
+  defines the view with its 7 output columns;
+- routine `order__search` (OrderEntry.sql, `LANGUAGE sql`) — 17 steps, all understood, 16/17 spans: six joins (two
+  inner, four left, keys recovered after the `ON (…)` fix), the search filter, three calculated columns;
+- routine `payment_post` (Payment.sql, PL/pgSQL) — 64 steps, 62 not understood, drawn collapsed as 5 nodes
+  (statements 1–24, a Source, 26–29, a Calculate, 31–64).
+
+Phase 2: `ekos annotate add 057d18cb… comment "source_class 2 is orders; should quotations (class 3/4) be here
+too?" --as rfc0257-test` on the Filter step of `file_order_links`; the next `ekos transformation graph` shows it on
+that step (`active`), and the MCP tool `ekos_transformation_graph` over stdio returns the same document with the
+annotation.
+
+#### Not done
+
+- The mart side of phases 1 and 2 (ekos-lakehouse): `lakehouse marts graph`, node ↔ term map, planted-`Unmapped`
+  check, every approved mart on iDempiere.
+- Phases 3 (row counts), 4 (structured edits), 5 (the assistant); open question 3 (side by side).
+- A PL/pgSQL body is split by the RFC 0027 SQL front end and is mostly "not understood" (see the counts above);
+  RFC 0163's procedural IR describes these routines statement by statement but is not lowered into the
+  Transformation IR (RFC 0164). Drawing routines from it is the obvious next step.
+- Columns linked to their lineage down to the source column (§3.2) — columns are shown, not linked.
+- The console page was verified by its vitest suite, not in a browser.
