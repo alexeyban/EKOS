@@ -1012,6 +1012,22 @@ mod tests {
             .count()
     }
 
+    /// Removes a directory a just-finished build may still be writing into: the search index
+    /// finishes a merge on a background thread, so a single `remove_dir_all` can meet a file
+    /// created after it listed the directory ("Directory not empty", seen in CI's coverage run).
+    fn remove_dir_settled(path: &std::path::Path) {
+        let mut last = None;
+        for _ in 0..40 {
+            match std::fs::remove_dir_all(path) {
+                Ok(()) => return,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+                Err(e) => last = Some(e),
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        panic!("could not remove {}: {last:?}", path.display());
+    }
+
     #[tokio::test]
     async fn rebuilding_after_a_ledger_clear_reproduces_file_objects_despite_a_fingerprint_hit() {
         // RFC 0077: found live — clearing just `.ekos/ledger/` while keeping the artifact cache
@@ -1030,7 +1046,7 @@ mod tests {
 
         // Real scenario: only the ledger is cleared. The artifact cache and fingerprints.json
         // survive untouched.
-        std::fs::remove_dir_all(config.ekos_dir(dir.path()).join("ledger")).unwrap();
+        remove_dir_settled(&config.ekos_dir(dir.path()).join("ledger"));
 
         // Source content is unchanged, so the fingerprint would normally match and skip
         // everything — but the ledger is now empty, so this must force a real rescan instead.

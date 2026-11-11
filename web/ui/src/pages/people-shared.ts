@@ -12,6 +12,8 @@ export const QUESTION_TYPES: Record<string, string> = {
   is_this_a_reference: "is this a reference?",
   what_is_a_row: "what is a row?",
   still_true: "is a note still true?",
+  who_is_this_writer: "who writes this?",
+  who_owns_this_table: "who owns this table?",
 };
 
 export function questionChip(s: QuestionStatus): string {

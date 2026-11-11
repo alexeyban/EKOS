@@ -47,6 +47,8 @@ pub struct PassportInput {
     pub interaction: Option<Matrix>,
     /// RFC 0256: how many `ObservedAccess` facts the matrix holds (0: the source provided none).
     pub observed_facts: usize,
+    /// RFC 0256: the current `InteractionFinding` ids (`<state>/interaction/findings.json`).
+    pub interaction_findings: BTreeSet<String>,
 }
 
 /// An open question's state as `ekos questions` computes it.
@@ -939,6 +941,32 @@ fn window_words(c: &Cell) -> String {
     format!("{from} – {}{cut}", day(&o.window_end))
 }
 
+/// The table's open interaction findings, under its writers and readers.
+fn interaction_findings(m: &Model, name: &str) -> String {
+    let current = &m.input.passport.interaction_findings;
+    let rows: Vec<Vec<String>> = m
+        .input
+        .objects
+        .iter()
+        .filter(|o| custom(o) == Some("InteractionFinding") && current.contains(&o.id.to_string()))
+        .filter(|o| prop(o, "table").is_some_and(|t| tkey(t) == tkey(name)))
+        .map(|o| {
+            vec![
+                cell(&prop(o, "finding").unwrap_or("").replace('_', " ")),
+                code(prop(o, "actor").unwrap_or("-")),
+                strings(o, "operations").join(", "),
+            ]
+        })
+        .collect();
+    if rows.is_empty() {
+        return String::new();
+    }
+    format!(
+        "Open findings (`ekos interaction findings`):\n\n{}\n",
+        table(&["finding", "actor", "operations"], &rows)
+    )
+}
+
 /// RFC 0256 §3.5: "Writers and readers" — every actor's operations on the table, declared by code
 /// and observed in the database, writers first. `None` when the matrix was not given.
 pub(super) fn interaction_section(m: &Model, name: &str, page: &str) -> Option<String> {
@@ -970,5 +998,6 @@ pub(super) fn interaction_section(m: &Model, name: &str, page: &str) -> Option<S
         table(&["actor", "name", "declared", "observed", "window"], &rows)
     );
     b.push('\n');
+    b.push_str(&interaction_findings(m, name));
     Some(b)
 }

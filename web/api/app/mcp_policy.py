@@ -27,6 +27,7 @@ SCOPED_TOOLS = frozenset(
         "ekos_annotations",
         "ekos_profile",
         "ekos_relationships",
+        "ekos_interaction",
         "ekos_questions",
         "ekos_testimony",
         "ekos_probe",

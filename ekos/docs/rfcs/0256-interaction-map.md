@@ -286,5 +286,29 @@ table).
 - After `etl_nightly` then deleted a row of `orders`, the decision was `outdated` and both its
   writes were findings again.
 
-**Not yet.** Phase 4 (console page, MCP `ekos_interaction`, the lakehouse plan warning). Oracle
-observed access.
+### Phase 4, EKOS side (2026-11-11)
+
+**Built.**
+- MCP **`ekos_interaction`** (read-only, in `SCOPED_TOOLS` and the console's `mcp_policy`): the
+  matrix (`table` / `actor` filters, at most 50 tables unfiltered) and the current findings for the
+  tables shown. The analyst-loop tools now go through one `analyst_tool` dispatcher in `mcp.rs`, which
+  keeps `call_tool` under the complexity limit.
+- A restricted reader (RFC 0181) gets a row only for a relation its store returned.
+  - Found while testing: observed facts carry no link to the table object, so with the table denied,
+    its row and findings still came back through them. `retain_visible` now drops them; a unit test
+    covers it.
+  - Measured with `mcp serve --read-scope` denying both `customers` tables (file and live): the table
+    and its two findings are gone, `orders` and its finding remain. A source-restricted reader sees no
+    observed access at all (the facts carry no source).
+- Console: an **Interaction** page (findings, then the matrix per table, with a table filter), routes
+  `GET …/interaction` and `GET …/interaction/findings` (read), and both CLI reads on the
+  `readproc` allowlist. `who_is_this_writer` / `who_owns_this_table` are in the Questions page's type
+  filter. Accounting for a role stays on the Review page (`interaction` subject).
+- The estate table page lists the table's open findings under "Writers and readers".
+
+**Not yet.**
+- The lakehouse extraction-plan warning with advice and the operator's explicit decision (§3.6). It
+  lives in ekos-lakehouse, where RFC 0255 is changing the plan code now, so it is left for after that
+  merges. Open question 1 (where the decision is stored) is still open.
+- Oracle observed access.
+- The browser run of the exit.

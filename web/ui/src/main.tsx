@@ -84,6 +84,10 @@ const router = createBrowserRouter([
             lazy: () => import("./pages/Questions").then((m) => ({ Component: m.Questions })),
           },
           {
+            path: "interaction",
+            lazy: () => import("./pages/Interaction").then((m) => ({ Component: m.Interaction })),
+          },
+          {
             path: "inbox",
             lazy: () => import("./pages/Inbox").then((m) => ({ Component: m.Inbox })),
           },

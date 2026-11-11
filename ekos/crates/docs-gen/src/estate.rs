@@ -2286,6 +2286,7 @@ mod tests {
             current_semantics: None,
             interaction: None,
             observed_facts: 0,
+            interaction_findings: Default::default(),
             reviewed: [
                 (
                     format!("relationships:{}", fk.id),

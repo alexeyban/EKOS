@@ -58,6 +58,7 @@ const TABS: { to: string; label: string; end?: boolean }[] = [
   { to: "semantics", label: "Semantics" },
   { to: "conflicts", label: "Conflicts" },
   { to: "questions", label: "Questions" },
+  { to: "interaction", label: "Interaction" },
   { to: "inbox", label: "Inbox" },
   { to: "annotations", label: "Notes" },
   { to: "integrity", label: "Integrity" },

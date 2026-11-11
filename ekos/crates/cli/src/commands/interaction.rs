@@ -125,7 +125,21 @@ pub fn build_from(
         },
     );
     let observed = add_observed(&mut m, objects, current_ids(config, cwd).as_ref());
+    retain_visible(&mut m, objects);
     Ok((m, observed))
+}
+
+/// RFC 0181: a row only for a relation this reader's store returned. Observed facts carry no link
+/// to the table object, so without this a denied table would come back through them.
+fn retain_visible(m: &mut Matrix, objects: &[KirObject]) {
+    let visible: BTreeSet<String> = objects
+        .iter()
+        .filter(|o| {
+            matches!(o.kind, ObjectKind::Table | ObjectKind::Dataset) || is_custom(o, "View")
+        })
+        .map(|o| interaction::table_key(&o.name))
+        .collect();
+    m.retain_tables(|t| visible.contains(t));
 }
 
 /// Keeps the rows `--table` and the cells `--actor` (`kind:name`, or a name) select.
@@ -1016,6 +1030,52 @@ pub fn findings(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
     Ok(())
 }
 
+/// Tables an MCP answer lists at most without a `table` filter.
+const AGENT_TABLES: usize = 50;
+
+/// MCP `ekos_interaction` (read-only, RFC 0256 §3.5): the matrix and the current findings through
+/// the caller's store — a restricted reader sees only tables its scope returns.
+pub fn agent_matrix(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeReader,
+    args: &Value,
+) -> Result<Value> {
+    let (mut m, observed) = build(config, cwd, ledger)?;
+    filter(
+        &mut m,
+        args.get("table").and_then(Value::as_str),
+        args.get("actor").and_then(Value::as_str),
+    );
+    let total = m.tables.len();
+    if args.get("table").is_none() && total > AGENT_TABLES {
+        let keep: BTreeSet<String> = m.tables.keys().take(AGENT_TABLES).cloned().collect();
+        m.retain_tables(|t| keep.contains(t));
+    }
+    let tables: BTreeSet<&String> = m.tables.keys().collect();
+    let findings: Vec<Value> = current_findings(config, cwd, ledger)?
+        .iter()
+        .filter(|o| s(o, "table").is_some_and(|t| tables.contains(&t.to_string())))
+        .map(|o| json!({"finding": s(o, "finding"), "table": s(o, "table"), "actor": s(o, "actor"),
+                        "operations": o.properties.get("operations"), "detail": o.properties.get("detail")}))
+        .collect();
+    let mut v = to_json(&m, observed);
+    v["findings"] = json!(findings);
+    v["tables_total"] = json!(total);
+    if m.tables.len() < total {
+        v["truncated"] = json!(format!(
+            "{} of {total} tables shown; pass `table` for one",
+            m.tables.len()
+        ));
+    }
+    v["note"] = json!(
+        "Declared access is stated by code (routines, Java components, Kettle jobs); observed access \
+         is a database role's aggregated statement statistics over a dated window. A finding is \
+         derived, not a decision: only a person accounts for a role (`ekos review interaction`)."
+    );
+    Ok(v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1093,5 +1153,20 @@ mod tests {
         );
         let cur = BTreeSet::from([o.id.to_string()]);
         assert_eq!(add_observed(&mut m, &[o], Some(&cur)), 1);
+    }
+
+    #[test]
+    fn observed_access_to_a_table_the_reader_cannot_see_is_dropped() {
+        let mut m = Matrix::default();
+        let seen = Observed {
+            calls: 3,
+            ..Default::default()
+        };
+        m.add_observed("customers", "etl", Op::Update, seen.clone());
+        m.add_observed("orders", "etl", Op::Update, seen);
+        // The scoped store returned `orders` only.
+        let visible = [KirObject::new("orders", ObjectKind::Table)];
+        retain_visible(&mut m, &visible);
+        assert_eq!(m.tables.keys().collect::<Vec<_>>(), ["orders"]);
     }
 }

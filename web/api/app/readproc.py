@@ -62,6 +62,9 @@ _ALLOWED: dict[tuple[str, ...], frozenset[str]] = {
         {"--status", "--type", "--table", "--addressee", "--limit"}
     ),
     ("questions", "digest", "--json"): frozenset(),
+    # RFC 0256: who reads and writes each table, and the findings.
+    ("interaction", "matrix", "--json"): frozenset({"--table", "--actor"}),
+    ("interaction", "findings", "--json"): frozenset(),
 }
 
 # RFC 0213: `review show <subject> --json [--undecided] [--limit <n>]` — the subject is one of a

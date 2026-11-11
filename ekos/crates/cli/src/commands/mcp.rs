@@ -135,6 +135,10 @@ pub const SCOPED_TOOLS: &[&str] = &[
     // RFC 0252: `FkCandidate` objects through the scoped store; they carry no source, so a
     // source-restricted reader sees none of them.
     "ekos_relationships",
+    // RFC 0256: the matrix is built from the scoped store's objects (a table it does not return
+    // has no row); observed facts and findings carry no source, so a source-restricted reader
+    // sees declared access only, for tables in scope.
+    "ekos_interaction",
     // RFC 0254: `OpenQuestion` objects through the scoped store; they carry no source either.
     "ekos_questions",
     // RFC 0253: `Testimony` objects through the scoped store; no source, so a source-restricted
@@ -1194,6 +1198,7 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     tools.push(annotations_tool_definition());
     tools.push(profile_tool_definition());
     tools.push(relationships_tool_definition());
+    tools.push(interaction_tool_definition());
     if config.questions.enabled {
         tools.push(questions_tool_definition());
     }
@@ -1276,6 +1281,21 @@ fn testimony_tool_definition() -> Value {
                 "about": { "type": "string" },
                 "author": { "type": "string" },
                 "question": { "type": "string", "description": "An open question id (or prefix)" }
+            }
+        }
+    })
+}
+
+/// RFC 0256 — read-only: who reads and writes each table, declared and observed.
+fn interaction_tool_definition() -> Value {
+    json!({
+        "name": "ekos_interaction",
+        "description": "Who reads and writes each table: routines, application components (Java), Kettle ETL jobs and database roles, with the operations each performs — `declared` (stated by code) and `observed` (a database role's aggregated statement statistics over a dated window; \"not observed\" is not \"never happens\", and when no usage statistics were read the answer says so). `findings` lists unexplained writers (a role writing where no code does), writes no observed statement explains, tables several systems write, and declared writes never observed. Read-only: a finding is derived, not a decision.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "table": { "type": "string", "description": "Only this table" },
+                "actor": { "type": "string", "description": "Only this actor: `kind:name` (component, routine, etl_job, db_role) or a name" }
             }
         }
     })
@@ -2067,6 +2087,30 @@ fn tools_call(
     }
 }
 
+/// RFC 0252–0256: the read-only analyst-loop tools, each over the caller's (scoped) store.
+/// `None`: not one of them.
+fn analyst_tool(
+    config: &EkosConfig,
+    workspace: &Path,
+    name: &str,
+    args: &Value,
+    cache: &mut StoreCache,
+) -> Option<Result<Value>> {
+    let tool: fn(&EkosConfig, &Path, &dyn KnowledgeStore, &Value) -> Result<Value> = match name {
+        "ekos_profile" => |c, w, l, a| super::profile::agent_profile(c, w, l, a),
+        "ekos_testimony" => |_, _, l, a| super::testimony::agent_list(l, a),
+        "ekos_questions" => |c, w, l, a| super::questions::agent_list(c, w, l, a),
+        "ekos_relationships" => |c, w, l, a| super::relationships::agent_list(c, w, l, a),
+        "ekos_interaction" => |c, w, l, a| super::interaction::agent_matrix(c, w, l, a),
+        _ => return None,
+    };
+    Some(
+        cache
+            .get(config, workspace)
+            .and_then(|ledger| tool(config, workspace, ledger, args)),
+    )
+}
+
 fn call_tool(
     config: &EkosConfig,
     workspace: &Path,
@@ -2137,9 +2181,8 @@ fn call_tool(
         return ossie_export(config, workspace, cache, args);
     }
 
-    if name == "ekos_profile" {
-        let ledger = cache.get(config, workspace)?;
-        return super::profile::agent_profile(config, workspace, ledger, args);
+    if let Some(result) = analyst_tool(config, workspace, name, args, cache) {
+        return result;
     }
 
     if name == "ekos_probe" {
@@ -2148,21 +2191,6 @@ fn call_tool(
         }
         let ledger = cache.get(config, workspace)?;
         return super::probe::run(config, workspace, ledger, args, "mcp");
-    }
-
-    if name == "ekos_testimony" {
-        let ledger = cache.get(config, workspace)?;
-        return super::testimony::agent_list(ledger, args);
-    }
-
-    if name == "ekos_questions" {
-        let ledger = cache.get(config, workspace)?;
-        return super::questions::agent_list(config, workspace, ledger, args);
-    }
-
-    if name == "ekos_relationships" {
-        let ledger = cache.get(config, workspace)?;
-        return super::relationships::agent_list(config, workspace, ledger, args);
     }
 
     if name == "ekos_sql_check" {
@@ -3829,6 +3857,8 @@ mod tests {
                 // RFC 0252 — read-only.
                 "ekos_profile",
                 "ekos_relationships",
+                // RFC 0256 — read-only.
+                "ekos_interaction",
                 // RFC 0254 — read-only.
                 "ekos_questions",
                 // RFC 0253 — read-only.

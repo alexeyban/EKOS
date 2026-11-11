@@ -48,6 +48,8 @@ QType = Literal[
     "is_this_a_reference",
     "what_is_a_row",
     "still_true",
+    "who_is_this_writer",
+    "who_owns_this_table",
 ]
 
 

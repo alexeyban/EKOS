@@ -363,6 +363,8 @@ pub fn generate(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()> {
         super::interaction::build_from(config, cwd, &*ledger, &objects, &relationships)?;
     passport.interaction = Some(matrix);
     passport.observed_facts = observed;
+    passport.interaction_findings =
+        super::interaction::current_finding_ids(config, cwd).unwrap_or_default();
     let pages = estate::build(&EstateInput {
         objects: &objects,
         relationships: &relationships,
