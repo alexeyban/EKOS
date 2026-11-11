@@ -85,10 +85,13 @@ for f in json.load(sys.stdin):
 ' | filter || found=1
 fi
 
-mapfile -t py < <(printf '%s\n' "${files[@]}" | grep -E '^web/api/.*\.py$' | grep -v '^web/api/tests/' || true)
+# Every Python file Sonar analyses as main code: not docs, demos or fixtures (`sonar.exclusions`),
+# not test code (`sonar.tests`: web/api/tests, deploy/e2e; scripts/tests by name).
+mapfile -t py < <(printf '%s\n' "${files[@]}" | grep -E '\.py$' \
+  | grep -vE '^(docs/|web/api/tests/|deploy/e2e/|deploy/fixtures/|scripts/tests/)|/demo/|/tests/fixtures/' || true)
 if [ "${#py[@]}" -gt 0 ]; then
   echo "── Python: ruff ASYNC + RUF029 (changed lines)"
-  (cd web/api && uv run ruff check --preview --select ASYNC,RUF029 --output-format json "${py[@]/#web\/api\//}" || true) \
+  (uv run --project web/api ruff check --preview --select ASYNC,RUF029 --output-format json "${py[@]}" || true) \
     | python3 -c '
 import json, sys
 for m in json.load(sys.stdin):
