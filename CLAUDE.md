@@ -338,7 +338,12 @@ only), no public API break, compiler diagnostics, logging, examples.
   - Rust: clippy plus Sonar's extra rules, and cognitive complexity;
   - TS/TSX: `eslint-plugin-sonarjs`, `jsx-a11y` and `react`, in `scripts/sonar-local/`;
   - Python: ruff `ASYNC`/`RUF029`, and `pycogc.py`, which counts complexity as Sonar does — it
-    matched Sonar's numbers where `complexipy` scored up to half.
+    matched Sonar's numbers where `complexipy` scored up to half;
+  - shell: `shcheck.py` (`[[` tests, a default `case`, `npm --ignore-scripts`, positional
+    parameters into variables).
+- `git add` new files first: it checks the files git knows, as Sonar does.
+- The helpers never open a path given on their command line. Sonar's taint analysis reports that
+  as path traversal (a security rating, so a red gate): the files come from git.
 - **What it doesn't cover:** coverage, duplication and Python regex backtracking. SonarCloud still
   decides those.
 

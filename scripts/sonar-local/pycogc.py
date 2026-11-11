@@ -9,15 +9,26 @@ conditions. This follows SonarSource's specification ("Cognitive Complexity", G.
   is free, recursion is not counted;
 * nesting grows inside those structures and inside a nested function or lambda.
 
-Usage: `pycogc.py <limit> <file>...` → JSON lines {file, line, end, name, complexity} for every
-function over the limit. Standard library only.
+Usage: `pycogc.py <limit> <base>` → JSON lines {file, line, end, name, complexity} for every
+function over the limit in the Python files changed since <base> that SonarCloud analyses as main
+code. The files come from git, never from the command line. Standard library only.
 """
 
 from __future__ import annotations
 
 import ast
 import json
+import re
 import sys
+
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+from changed_lines import changed, git_diff, repo_root
+
+# What Sonar analyses as main code: not docs, demos or fixtures (`sonar.exclusions`), not test code
+# (`sonar.tests`: web/api/tests, deploy/e2e; scripts/tests by name).
+NOT_MAIN = re.compile(
+    r"^(docs/|web/api/tests/|deploy/e2e/|deploy/fixtures/|scripts/tests/)|/demo/|/tests/fixtures/"
+)
 
 
 class Counter(ast.NodeVisitor):
@@ -105,6 +116,7 @@ class Counter(ast.NodeVisitor):
 
 def functions(tree: ast.AST):
     """Every function, with its qualified name; nested functions count inside their parent."""
+
     def walk(node: ast.AST, prefix: str):
         for child in ast.iter_child_nodes(node):
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -124,13 +136,32 @@ def score(fn: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
 
 def main() -> int:
     limit = int(sys.argv[1])
-    for path in sys.argv[2:]:
-        tree = ast.parse(open(path, encoding="utf-8").read(), filename=path)
+    root = repo_root()
+    for rel in sorted(changed(git_diff(sys.argv[2]))):
+        path = (root / rel).resolve()
+        if (
+            not rel.endswith(".py")
+            or NOT_MAIN.search(rel)
+            or not path.is_relative_to(root)
+        ):
+            continue
+        if not path.is_file():
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
         for name, fn in functions(tree):
             n = score(fn)
             if n > limit:
-                print(json.dumps({"file": path, "line": fn.lineno, "end": fn.end_lineno,
-                                  "name": name, "complexity": n}))
+                print(
+                    json.dumps(
+                        {
+                            "file": rel,
+                            "line": fn.lineno,
+                            "end": fn.end_lineno,
+                            "name": name,
+                            "complexity": n,
+                        }
+                    )
+                )
     return 0
 
 

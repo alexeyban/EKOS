@@ -13,6 +13,8 @@
 # Python (web/api): ruff ASYNC (S7493 blocking I/O in async), RUF029 (S7503 async without await),
 #       scripts/sonar-local/pycogc.py (S3776, limit 15 — Sonar's counting; it matches Sonar's
 #       numbers on the functions Sonar flagged here, where `complexipy` scored up to half).
+# Shell (*.sh): scripts/sonar-local/shcheck.py (S7688 `[[`, S131 default case, S6505
+#       npm --ignore-scripts, S7679 positional parameters).
 # Not covered locally: Python regex backtracking (S8786), async methods without await (ruff's
 # RUF029 skips methods), new-code coverage and duplication — SonarCloud still decides those.
 # Exit status 1 when anything is reported. Needs: cargo, uv, node (npm install in
@@ -21,14 +23,16 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$root"
 tools="$root/scripts/sonar-local"
-base="${1:-$(git merge-base HEAD origin/main)}"
-work="$(mktemp -d)"
-trap 'rm -r "$work"' EXIT
-git diff -U0 "$base" > "$work/diff"
-mapfile -t files < <(git diff --name-only --diff-filter=AM "$base"; git ls-files --others --exclude-standard)
-filter() { python3 "$tools/changed_lines.py" "$work/diff" "$root"; }
+requested_base="${1:-}"
+base="${requested_base:-$(git merge-base HEAD origin/main)}"
+# Files git knows about: `git add` a new file before running this, as SonarCloud only sees those.
+mapfile -t files < <(git diff --name-only --diff-filter=AM "$base")
+filter() { python3 "$tools/changed_lines.py" "$base"; }
 found=0
-has() { printf '%s\n' "${files[@]}" | grep -qE "$1"; }
+has() {
+  local pattern="$1"
+  printf '%s\n' "${files[@]}" | grep -qE "$pattern"
+}
 
 if has '^ekos/.*\.rs$'; then
   echo "── Rust: clippy (changed lines)"
@@ -53,26 +57,30 @@ for raw in sys.stdin:
   # reference does not compile and Sonar does not report it. So these are listed, not failed:
   # check each, and use `Type::method` where the method takes `&self`.
   for f in "${files[@]}"; do
-    case "$f" in ekos/*.rs) [ -f "$f" ] && grep -nE '\|\s*([a-z_][a-z0-9_]*)\s*\|\s*\1\s*\.\s*[a-z_][a-z0-9_]*\s*\(\s*\)\s*[),]' "$f" \
+    case "$f" in
+      ekos/*.rs) [[ -f "$f" ]] && grep -nE '\|\s*([a-z_][a-z0-9_]*)\s*\|\s*\1\s*\.\s*[a-z_][a-z0-9_]*\s*\(\s*\)\s*[),]' "$f" \
         | python3 -c '
 import json, sys
 for raw in sys.stdin:
     n, text = raw.split(":", 1)
     print(json.dumps({"file": sys.argv[1], "line": int(n), "rule": "S1612",
                       "message": "replace the closure with a method reference: " + text.strip()[:90]}))
-' "$f" ;; esac
+' "$f" ;;
+      *) ;;
+    esac
   done | filter || true
   echo "── Rust: cognitive complexity (whole tree, limit 30)"
   # The complexity tool is built in its own directory; a CARGO_TARGET_DIR would move it.
   if ! out="$(env -u CARGO_TARGET_DIR scripts/cognitive-complexity.sh)"; then
     echo "scripts/cognitive-complexity.sh failed"; found=1
-  elif [ -n "$out" ]; then echo "$out"; found=1; fi
+  elif [[ -n "$out" ]]; then echo "$out"; found=1; fi
 fi
 
 # Test files are Sonar test code (`sonar.tests`), held to other rules: left out here too.
 mapfile -t ts < <(printf '%s\n' "${files[@]}" | grep -E '^web/ui/src/.*\.tsx?$' | grep -vE '\.test\.tsx?$' || true)
-if [ "${#ts[@]}" -gt 0 ]; then
-  [ -x "$tools/node_modules/.bin/eslint" ] || (cd "$tools" && npm install --no-audit --no-fund --loglevel=error)
+if [[ "${#ts[@]}" -gt 0 ]]; then
+  # --ignore-scripts: the linters need no install scripts, and none may run.
+  [[ -x "$tools/node_modules/.bin/eslint" ]] || (cd "$tools" && npm ci --ignore-scripts --no-audit --no-fund --loglevel=error)
   echo "── TypeScript: eslint sonarjs + jsx-a11y (changed lines)"
   "$tools/node_modules/.bin/eslint" --config "$tools/eslint.config.mjs" --no-warn-ignored -f json "${ts[@]}" \
     | python3 -c '
@@ -89,7 +97,7 @@ fi
 # not test code (`sonar.tests`: web/api/tests, deploy/e2e; scripts/tests by name).
 mapfile -t py < <(printf '%s\n' "${files[@]}" | grep -E '\.py$' \
   | grep -vE '^(docs/|web/api/tests/|deploy/e2e/|deploy/fixtures/|scripts/tests/)|/demo/|/tests/fixtures/' || true)
-if [ "${#py[@]}" -gt 0 ]; then
+if [[ "${#py[@]}" -gt 0 ]]; then
   echo "── Python: ruff ASYNC + RUF029 (changed lines)"
   (uv run --project web/api ruff check --preview --select ASYNC,RUF029 --output-format json "${py[@]}" || true) \
     | python3 -c '
@@ -98,7 +106,7 @@ for m in json.load(sys.stdin):
     print(json.dumps({"file": m["filename"], "line": m["location"]["row"], "rule": m["code"], "message": m["message"]}))
 ' | filter || found=1
   echo "── Python: cognitive complexity (changed files, limit 15; Sonar's counting, pycogc.py)"
-  python3 "$tools/pycogc.py" 15 "${py[@]}" | python3 -c '
+  python3 "$tools/pycogc.py" 15 "$base" | python3 -c '
 import json, sys
 for raw in sys.stdin:
     f = json.loads(raw)
@@ -107,5 +115,10 @@ for raw in sys.stdin:
 ' | filter || found=1
 fi
 
-if [ "$found" -eq 0 ]; then echo "sonar-local: nothing on the changed lines"; else echo "sonar-local: fix the findings above before pushing"; fi
+if has '\.sh$'; then
+  echo "── Shell: [[ ]] tests, default case, npm --ignore-scripts, positional parameters (changed lines)"
+  python3 "$tools/shcheck.py" "$base" | filter || found=1
+fi
+
+if [[ "$found" -eq 0 ]]; then echo "sonar-local: nothing on the changed lines"; else echo "sonar-local: fix the findings above before pushing"; fi
 exit "$found"
