@@ -26,7 +26,7 @@
     ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>EKOS</DisplayName>
+    <DisplayName>EKOS.DEV</DisplayName>
     <PublisherDisplayName>Alexey Banaev</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
@@ -43,7 +43,7 @@
     <Application Id="EKOS" Executable="ekos.exe" EntryPoint="Windows.FullTrustApplication"
       desktop4:SupportsMultipleInstances="true">
       <uap:VisualElements
-        DisplayName="EKOS"
+        DisplayName="EKOS.DEV"
         Description="A compiler for enterprise knowledge: an evidence-backed ledger served to AI agents over MCP."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"

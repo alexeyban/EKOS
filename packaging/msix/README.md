@@ -10,7 +10,7 @@ MSIX cannot be installed outside the Store.
 
 The manifest carries the identity from Partner Center → EKOS → Product identity
 (`AlexeyBanaev.EKOS.DEV`, publisher `CN=77359C36-EF40-49A6-8F61-6727869C79BA`, display name
-`Alexey Banaev`); they must stay equal character for character. Package family name
+`Alexey Banaev`, reserved app name `EKOS.DEV` as the display name); they must stay equal character for character. Package family name
 `AlexeyBanaev.EKOS.DEV_hbn1emg27zd0m`, Store ID `9NX411QFSW9C`,
 <https://apps.microsoft.com/detail/9NX411QFSW9C>.
 
