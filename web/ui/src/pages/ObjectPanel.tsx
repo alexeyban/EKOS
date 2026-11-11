@@ -1,9 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { useOutletContext } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
 import { api } from "../api/client";
 import { type Me, seesAll } from "../WorkspaceShell";
 import { ObjectNotes } from "./ObjectNotes";
 import { ObjectTestimony } from "./ObjectTestimony";
+
+// RFC 0257: the kinds whose recovered Transformation IR graph `ekos transformation graph` draws.
+const CHAIN_KINDS = new Set(["View", "Procedure", "TransformNode"]);
 
 interface Evidence {
   location?: { path?: string; line?: number };
@@ -105,6 +108,11 @@ export function ObjectPanel({
             </details>
           )}
 
+          {wholeProject && !asOf && CHAIN_KINDS.has(o.kind) && (
+            <p>
+              <Link to={`/w/${workspace}/transformations?object=${o.id}`}>Open as a chain of steps</Link>
+            </p>
+          )}
           <ObjectNotes workspace={workspace} objectId={o.id} enabled={wholeProject && !asOf} />
           <ObjectTestimony workspace={workspace} objectId={o.id} enabled={wholeProject && !asOf} />
 

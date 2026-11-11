@@ -230,6 +230,9 @@ const ATTENTION = new Set([
   "open",
   "rewritten",
   "llm-drafted",
+  // RFC 0257: a step recovery did not understand; a mart step drafted rather than exact.
+  "unmapped",
+  "drafted",
 ]);
 const BAD = new Set([
   "failing",

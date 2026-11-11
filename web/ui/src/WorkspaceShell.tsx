@@ -61,6 +61,7 @@ const TABS: { to: string; label: string; end?: boolean }[] = [
   { to: "inbox", label: "Inbox" },
   { to: "annotations", label: "Notes" },
   { to: "integrity", label: "Integrity" },
+  { to: "transformations", label: "Transformations" },
   { to: "review", label: "Review" },
   { to: "config", label: "ekos.toml" },
 ];

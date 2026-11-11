@@ -97,6 +97,11 @@ const router = createBrowserRouter([
             lazy: () => import("./pages/Integrity").then((m) => ({ Component: m.Integrity })),
           },
           {
+            path: "transformations",
+            lazy: () =>
+              import("./pages/Transformations").then((m) => ({ Component: m.Transformations })),
+          },
+          {
             path: "sources",
             lazy: () => import("./pages/Sources").then((m) => ({ Component: m.Sources })),
           },

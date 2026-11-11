@@ -110,7 +110,7 @@ fn state_name(e: Effective) -> &'static str {
     }
 }
 
-fn view(a: &Annotation, objects: &[KirObject]) -> Value {
+pub(crate) fn view(a: &Annotation, objects: &[KirObject]) -> Value {
     let e = annotations::effective(a, current_digest(objects)(&a.target).as_deref());
     json!({
         "id": a.id.0.to_string(),

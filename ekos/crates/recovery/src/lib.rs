@@ -129,7 +129,8 @@ pub use sql_dialect_registry::{
     resolve_dialect_name,
 };
 pub use sql_transform_analyzer::{
-    SqlTransformAnalyzerPass, SqlTransformStats, parse_sql_to_transform_graphs,
+    SqlTransformAnalyzerPass, SqlTransformStats, StatementGraph, StatementOwner,
+    parse_sql_to_statement_graphs, parse_sql_to_transform_graphs,
 };
 pub use treasury_analyzer::TreasuryAnalyzerPass;
 pub use trigger_analyzer::{TriggerAnalyzerPass, TriggerStats};

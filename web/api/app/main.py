@@ -48,6 +48,7 @@ from .routes import (
     stats,
     tenants,
     testimony,
+    transformations,
     workspaces,
 )
 from .runner import JobRunner
@@ -79,6 +80,7 @@ ROUTERS = (
     sources,
     tenants,
     testimony,
+    transformations,
     platform,
     questions,
     cli,
