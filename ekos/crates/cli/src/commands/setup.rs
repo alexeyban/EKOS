@@ -694,6 +694,26 @@ pub trait Effects {
     fn run(&self, program: &Path, args: &[String], stdin: Option<&str>) -> Result<String> {
         self.run_env(program, args, &[], stdin)
     }
+
+    /// Windows: remove `dir` a few seconds after this process exits (a running .exe cannot be
+    /// deleted). Recorded as a `cmd` run by default; [`RealEffects`] starts it detached.
+    fn remove_after_exit(&self, dir: &Path) -> Result<()> {
+        self.run(
+            Path::new("cmd"),
+            &["/c".into(), remove_after_exit_command(dir)],
+            None,
+        )
+        .map(|_| ())
+    }
+}
+
+/// The `cmd /c` command that waits, then removes `dir`. `ping` waits without a console, which
+/// `timeout` refuses to do.
+fn remove_after_exit_command(dir: &Path) -> String {
+    format!(
+        "ping -n 4 127.0.0.1 >nul & rmdir /s /q \"{}\"",
+        dir.display()
+    )
 }
 
 pub struct RealEffects;
@@ -743,6 +763,24 @@ impl Effects for RealEffects {
     }
     fn open(&self, url: &str) -> bool {
         super::console::open_browser(url)
+    }
+
+    #[cfg(windows)]
+    fn remove_after_exit(&self, dir: &Path) -> Result<()> {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        // `raw_arg`: the command line exactly as cmd reads it. Passed as a normal argument, its
+        // quotes would be escaped with backslashes, which cmd does not understand.
+        Command::new("cmd")
+            .raw_arg(format!("/d /c {}", remove_after_exit_command(dir)))
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW)
+            .spawn()
+            .context("starting the removal of the program directory")?;
+        Ok(())
     }
 }
 
@@ -1394,18 +1432,7 @@ pub fn uninstall(home: &Path, purge: bool, m: &Machine, fx: &dyn Effects) -> Res
         if dir.is_dir() {
             let r = if part == "bin" && m.os == Os::Windows {
                 // A running .exe cannot be deleted on Windows: remove it once this exits.
-                fx.run(
-                    Path::new("cmd"),
-                    &[
-                        "/c".into(),
-                        format!(
-                            "start \"\" /b cmd /c \"timeout /t 3 >nul & rmdir /s /q \"{}\"\"",
-                            dir.display()
-                        ),
-                    ],
-                    None,
-                )
-                .map(|_| ())
+                fx.remove_after_exit(&dir)
             } else {
                 std::fs::remove_dir_all(&dir).map_err(Into::into)
             };
