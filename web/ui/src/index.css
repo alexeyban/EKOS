@@ -1264,8 +1264,21 @@ details.cfg-sub {
 .ext-lane { fill: var(--ink-soft, currentColor); font-size: 0.7rem; }
 /* RFC 0257: the transformation chain — the selected step, and its span in the source text. */
 .ext-node.chain-selected rect { stroke: var(--accent-a); }
-mark.chain-span { background: rgba(127, 127, 127, 0.14); color: inherit; cursor: pointer; border-radius: 2px; }
-mark.chain-span.selected { background: rgba(214, 158, 46, 0.45); }
+/* A source span is a button (it selects its step) drawn as highlighted text inside the <pre>. */
+button.chain-span {
+  background: rgba(127, 127, 127, 0.14);
+  color: inherit;
+  cursor: pointer;
+  border: 0;
+  border-radius: 2px;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  white-space: inherit;
+  text-align: inherit;
+  display: inline;
+}
+button.chain-span.selected { background: rgba(214, 158, 46, 0.45); }
 
 /* RFC 0213 — workflow step bar and the Review page */
 .step-bar {

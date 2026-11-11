@@ -250,13 +250,15 @@ export function SourcePanel({
           if (!s.node) return <span key={s.start}>{piece}</span>;
           const node = s.node;
           return (
-            <mark
+            <button
+              type="button"
               key={s.start}
               className={s.selected ? "chain-span selected" : "chain-span"}
+              aria-pressed={s.selected}
               onClick={() => onSelect(node)}
             >
               {piece}
-            </mark>
+            </button>
           );
         })}
       </pre>

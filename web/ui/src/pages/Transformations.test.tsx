@@ -176,7 +176,7 @@ describe("Transformations page", () => {
     expect(within(panel).getByText("cancelled orders too?")).toBeInTheDocument();
     expect(within(panel).getByText(/row counts are measured for a mart only/)).toBeInTheDocument();
     const source = screen.getByLabelText("source text");
-    const marked = source.querySelector("mark.chain-span.selected");
+    const marked = source.querySelector("button.chain-span.selected");
     expect(marked?.textContent).toBe("o.docstatus IN ('CO','CL')");
     fireEvent.click(within(source).getByText("oe"));
     expect(within(screen.getByRole("complementary", { name: "step" })).getByText("reads `oe` as `o`")).toBeInTheDocument();
