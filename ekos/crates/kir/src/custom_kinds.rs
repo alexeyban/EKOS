@@ -432,6 +432,11 @@ prefixes constantly",
         structurally_keyed: true,
         note: "(method locator, rule index) — RFC 0148 stage 2; one reconstructed rule per slot",
     },
+    CustomKind {
+        name: "SourceCapabilities",
+        structurally_keyed: true,
+        note: "(source name) — RFC 0255 §3.5; one per [[databases]] entry or Lakehouse source, its latest version the current state (`source_capabilities::id_of`)",
+    },
     // RFC 0190 — EKOS Lakehouse, an extension in its own repository: as with `Binary*`
     // (RFC 0149), the rows live here so identity resolution never merges these objects.
     CustomKind {

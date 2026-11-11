@@ -841,7 +841,12 @@ fn table_page(m: &Model, name: &str, t: &KirObject, order: usize) -> EstatePage 
             ),
         ]
     };
-    b.push_str("## Keys and references\n\n**Declared — references**\n\n");
+    b.push_str("## Keys and references\n");
+    b.push_str(&passport::engine_limit(
+        m.input.objects,
+        ekos_kir::source_capabilities::Capability::DeclaredKeys,
+    ));
+    b.push_str("\n**Declared — references**\n\n");
     let rows: Vec<Vec<String>> = out.iter().map(|f| fk_row(f, &f.to)).collect();
     b.push_str(&table(&["table", "columns", "on delete"], &rows));
     b.push_str("\n**Declared — referenced by**\n\n");
@@ -1656,6 +1661,7 @@ fn home(m: &Model, counts: &[(&str, String)]) -> EstatePage {
         .map(|(k, v)| vec![k.to_string(), v.clone()])
         .collect();
     b.push_str(&table(&["", "count"], &rows));
+    b.push_str(&passport::source_engines_section(m.input.objects));
     b.push_str("\n## Contents\n\n");
     for (path, title) in [
         ("data-model/index.md", "Data model"),
@@ -1892,6 +1898,61 @@ mod tests {
             .find(|p| p.path == path)
             .unwrap_or_else(|| panic!("no {path}"))
             .body
+    }
+
+    /// RFC 0255 §4 phase 4 exit: the iDempiere source shows its engine's capability table at the
+    /// top of the estate, and a table page says when declared keys are a limit of the engine.
+    #[test]
+    fn the_source_engine_table_is_at_the_top_of_the_source() {
+        use ekos_kir::source_capabilities::{
+            CAPABILITIES_VERSION, Capabilities, Capability, SourceCapabilities, Support, object,
+        };
+        let (mut o, r) = fixture();
+        let none = render(&o, &r);
+        assert!(!body(&none, "index.md").contains("## Source engines"));
+        let declared = Capabilities::of(Capability::ALL.iter().map(|c| (*c, Support::Provided)))
+            .with(
+                Capability::UsageStats,
+                Support::absent("not read by the Oracle connector"),
+            )
+            .with(
+                Capability::DeclaredKeys,
+                Support::partial("0 keys read from 2 tables"),
+            );
+        o.push(object(&SourceCapabilities {
+            source: "erp".into(),
+            engine: "oracle".into(),
+            capabilities_version: CAPABILITIES_VERSION,
+            capabilities: declared,
+            conformance_run: Some("9353523a".into()),
+            downgrades: vec!["declared_keys: declared provided, downgraded to partial".into()],
+        }));
+        let pages = render(&o, &r);
+        let home = body(&pages, "index.md");
+        assert!(home.contains("## Source engines"), "{home}");
+        assert!(
+            home.contains(
+                "**erp** — engine `oracle`, capability list v1, conformance run `9353523a`"
+            ),
+            "{home}"
+        );
+        assert!(
+            home.contains("| `usage_stats` | absent | not read by the Oracle connector |"),
+            "{home}"
+        );
+        assert!(
+            home.contains("- declared_keys: declared provided, downgraded to partial"),
+            "{home}"
+        );
+        let page = pages
+            .iter()
+            .find(|p| p.body.contains("## Keys and references"))
+            .expect("a table page");
+        assert!(
+            page.body.contains("_The source engine `oracle` has `declared_keys` partial (0 keys read from 2 tables)"),
+            "{}",
+            page.body
+        );
     }
 
     #[test]

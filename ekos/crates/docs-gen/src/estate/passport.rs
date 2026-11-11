@@ -1001,3 +1001,77 @@ pub(super) fn interaction_section(m: &Model, name: &str, page: &str) -> Option<S
     b.push_str(&interaction_findings(m, name));
     Some(b)
 }
+
+/// RFC 0255 §3.5: every source's recorded engine capabilities (`SourceCapabilities`), by source.
+fn source_capabilities(
+    objects: &[KirObject],
+) -> Vec<ekos_kir::source_capabilities::SourceCapabilities> {
+    let mut v: Vec<_> = objects
+        .iter()
+        .filter_map(ekos_kir::source_capabilities::from_object)
+        .collect();
+    v.sort_by(|a, b| a.source.cmp(&b.source));
+    v
+}
+
+/// RFC 0255 §3.5: what each source's engine provides and what it cannot, at the top of the
+/// source: an analyst reading "no relationships" sees whether that is a fact about the database
+/// or a limit of the engine. Empty when no source recorded its capabilities.
+pub fn source_engines_section(objects: &[KirObject]) -> String {
+    let all = source_capabilities(objects);
+    if all.is_empty() {
+        return String::new();
+    }
+    let mut b = String::from(
+        "\n## Source engines\n\nWhat each source's engine provides (RFC 0255). A capability that is \
+         not provided is a limit of the engine, not a fact about the database.\n",
+    );
+    for sc in &all {
+        b.push_str(&format!(
+            "\n**{}** — engine {}, capability list v{}{}\n\n",
+            plain(&sc.source),
+            code(&sc.engine),
+            sc.capabilities_version,
+            sc.conformance_run
+                .as_deref()
+                .map(|r| format!(", conformance run {}", code(r)))
+                .unwrap_or_default()
+        ));
+        b.push_str(&ekos_kir::source_capabilities::markdown_table(sc));
+        for d in &sc.downgrades {
+            b.push_str(&format!("\n- {}", plain(d)));
+        }
+        if !sc.downgrades.is_empty() {
+            b.push('\n');
+        }
+    }
+    b
+}
+
+/// RFC 0255 §3.5: a line saying that `capability` is a limit of the engine, when the project has
+/// exactly one recorded source and its engine does not provide it.
+pub fn engine_limit(
+    objects: &[KirObject],
+    capability: ekos_kir::source_capabilities::Capability,
+) -> String {
+    let all = source_capabilities(objects);
+    let [sc] = all.as_slice() else {
+        return String::new();
+    };
+    let s = sc.capabilities.get(capability);
+    if s.is_provided() {
+        return String::new();
+    }
+    format!(
+        "\n_The source engine {} has `{}` {}{}: what is missing here may be a limit of the engine, \
+         not a fact about the database._\n",
+        code(&sc.engine),
+        capability.name(),
+        s.word(),
+        if s.detail().is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", plain(s.detail()))
+        }
+    )
+}

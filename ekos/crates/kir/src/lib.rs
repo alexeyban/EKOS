@@ -7,6 +7,7 @@ pub mod annotations;
 pub mod custom_kinds;
 pub mod interaction;
 pub mod predicates;
+pub mod source_capabilities;
 
 /// Unique identifier for any KIR node.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
