@@ -335,19 +335,19 @@ jobs:
           if (-not $installed) { throw "the package $($m.Package.Identity.Name) is not installed" }
           $installed | Format-List Name, Version, InstallLocation
 
-          # The alias lives in WindowsApps. Windows creates it when a signed-in user's session is
-          # set up, which a hosted runner may not have: on the first run the package installed and
-          # no alias appeared. Use the alias when it is there; otherwise warn, and run the
-          # package's own ekos.exe, so the binary that ships is still the one tested.
+          # The alias is a zero-byte ekos.exe in WindowsApps that Windows creates for the package.
+          # Run it by its full path: on the runner `Get-Command` did not find it although the file
+          # was there. If it is missing, warn and run the package's own ekos.exe, so the binary
+          # that ships is still the one tested.
           $apps = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
-          Get-ChildItem $apps -ErrorAction SilentlyContinue | Format-Table Name, Length
-          $env:PATH = "$apps;$env:PATH"
-          $alias = Get-Command ekos -ErrorAction SilentlyContinue
-          if ($alias -and $alias.Source -like '*WindowsApps*') {
-            $script:ekos = $alias.Source
-            Write-Host "alias: $($alias.Source)"
+          $aliasPath = Join-Path $apps 'ekos.exe'
+          for ($i = 0; $i -lt 10 -and -not (Test-Path $aliasPath); $i++) { Start-Sleep -Seconds 1 }
+          if (Test-Path $aliasPath) {
+            $script:ekos = $aliasPath
+            Write-Host "testing through the execution alias $aliasPath"
           } else {
-            Write-Host "::warning::the ekos execution alias was not created on this runner (found: '$($alias.Source)'); testing the package's ekos.exe directly"
+            Get-ChildItem $apps -ErrorAction SilentlyContinue | Format-Table Name, Length
+            Write-Host "::warning::the ekos execution alias was not created on this runner; testing the package's ekos.exe directly"
             $script:ekos = Join-Path $installed.InstallLocation 'ekos.exe'
             if (-not (Test-Path $script:ekos)) { throw "no ekos.exe in $($installed.InstallLocation)" }
           }
@@ -365,7 +365,10 @@ jobs:
           $found = Ekos query find orders | Out-String
           Write-Host $found
           if ($found -notmatch '\borders\b') { throw 'query find did not return the orders table' }
-          $check = 'SELECT o.total_amount FROM orders o' | Ekos sql check --dialect postgres | Out-String
+          # A file, not a pipe: text piped into `Ekos` (a PowerShell function) never reaches the
+          # program's stdin — the first run's check saw an empty query.
+          'SELECT o.total_amount FROM orders o' | Set-Content q.sql
+          $check = Ekos sql check q.sql --dialect postgres | Out-String
           Write-Host $check
           if ($check -notmatch 'L001') { throw 'sql check did not report the unknown column (L001)' }
 
