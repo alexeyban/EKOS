@@ -33,6 +33,7 @@
 
 pub mod bisect;
 pub mod canon;
+pub mod conformance;
 pub mod dialect;
 pub mod divergence;
 pub mod fixtures;
@@ -43,7 +44,9 @@ pub mod tiers;
 pub mod value;
 
 pub use canon::{NULL_SENTINEL, UNIT_SEPARATOR, canon, row_canonical};
-pub use dialect::{ColumnRule, Dialect, bucket_checksum_query, canon_expr, canon_expr_of};
+pub use dialect::{
+    CanonDialect, ColumnRule, Dialect, bucket_checksum_query, canon_expr, canon_expr_of,
+};
 pub use divergence::{Class, Divergence};
 pub use hash::{BucketChecksum, bucket_of, checksum_buckets, prefix60, row_hash};
 pub use reader::{EngineReader, MockReader, ReadError};

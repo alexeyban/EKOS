@@ -98,12 +98,15 @@ impl Family {
             (Self::Timestamp, Dialect::ClickHouse) => "Nullable(DateTime64(6))".into(),
             // Never run (`run` refuses an engine pair other than PostgreSQL → ClickHouse); the
             // types are Trino's plain equivalents so the table stays total.
-            (Self::Int, Dialect::Trino) => "bigint".into(),
-            (Self::Decimal, Dialect::Trino) => format!("decimal(30,{DECIMAL_SCALE})"),
-            (Self::Text, Dialect::Trino) => "varchar".into(),
-            (Self::Bool, Dialect::Trino) => "boolean".into(),
-            (Self::Date, Dialect::Trino) => "date".into(),
-            (Self::Timestamp, Dialect::Trino) => "timestamp(6)".into(),
+            // A registered (out-of-tree, RFC 0255) dialect is not a V5 engine either.
+            (Self::Int, Dialect::Trino | Dialect::Registered(_)) => "bigint".into(),
+            (Self::Decimal, Dialect::Trino | Dialect::Registered(_)) => {
+                format!("decimal(30,{DECIMAL_SCALE})")
+            }
+            (Self::Text, Dialect::Trino | Dialect::Registered(_)) => "varchar".into(),
+            (Self::Bool, Dialect::Trino | Dialect::Registered(_)) => "boolean".into(),
+            (Self::Date, Dialect::Trino | Dialect::Registered(_)) => "date".into(),
+            (Self::Timestamp, Dialect::Trino | Dialect::Registered(_)) => "timestamp(6)".into(),
             // Never run either: Oracle is a lakehouse source (RFC 0216), not a V5 engine.
             (Self::Int, Dialect::Oracle) => "NUMBER(19)".into(),
             (Self::Decimal, Dialect::Oracle) => format!("NUMBER(30,{DECIMAL_SCALE})"),
@@ -596,7 +599,7 @@ impl Plan {
                 .map(|(c, f)| format!("{} {}", ident(c), f.column_type(d)))
                 .collect();
             let engine = match d {
-                Dialect::Postgres | Dialect::Trino | Dialect::Oracle => "",
+                Dialect::Postgres | Dialect::Trino | Dialect::Oracle | Dialect::Registered(_) => "",
                 Dialect::ClickHouse => " ENGINE = Memory",
             };
             out.push(format!(
@@ -623,7 +626,9 @@ impl Plan {
         out.push(match d {
             Dialect::Postgres => self.source_view.clone(),
             // There is no lowering to Trino; `run` refuses it before setting anything up.
-            Dialect::ClickHouse | Dialect::Trino | Dialect::Oracle => self.lowered_view.clone(),
+            Dialect::ClickHouse | Dialect::Trino | Dialect::Oracle | Dialect::Registered(_) => {
+                self.lowered_view.clone()
+            }
         });
         out
     }
@@ -1087,6 +1092,7 @@ mod tests {
                 Dialect::ClickHouse => "fake:clickhouse",
                 Dialect::Trino => "fake:trino",
                 Dialect::Oracle => "fake:oracle",
+                Dialect::Registered(_) => "fake:registered",
             }
         }
         fn run(

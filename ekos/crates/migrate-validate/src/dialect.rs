@@ -11,7 +11,11 @@
 use crate::canon::UNIT_SEPARATOR;
 
 /// Which engine an expression is being generated for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The four built-in dialects, plus [`Dialect::Registered`]: an engine built out of tree (RFC
+/// 0255 §3.4) that brings its own [`CanonDialect`]. `Dialect` stays `Copy` and comparable, so
+/// every caller that passes `Dialect::Trino` or compares `src == Dialect::Oracle` is unchanged.
+#[derive(Clone, Copy)]
 pub enum Dialect {
     Postgres,
     ClickHouse,
@@ -25,6 +29,149 @@ pub enum Dialect {
     /// characters `.,`, binary comparison), time zone UTC, and a database character set of
     /// AL32UTF8, because `STANDARD_HASH` hashes a string's bytes in the database character set.
     Oracle,
+    /// RFC 0255: an out-of-tree engine's canonical-form rules. A `&'static` reference, so the
+    /// dialect needs no registry and no lookup: the engine's crate declares
+    /// `static CANON: MyCanon = MyCanon;` and passes `Dialect::Registered(&CANON)`.
+    Registered(&'static dyn CanonDialect),
+}
+
+impl Dialect {
+    /// The dialect's name: `postgres`, `clickhouse`, `trino`, `oracle`, or a registered one's.
+    pub fn name(&self) -> &str {
+        match self {
+            Dialect::Postgres => "postgres",
+            Dialect::ClickHouse => "clickhouse",
+            Dialect::Trino => "trino",
+            Dialect::Oracle => "oracle",
+            Dialect::Registered(c) => c.name(),
+        }
+    }
+
+    /// The engine cannot build one row string; columns are digested one by one (RFC 0216 §2.5).
+    pub fn digest_columns(&self) -> bool {
+        match self {
+            Dialect::Oracle => true,
+            Dialect::Registered(c) => c.digest_columns(),
+            Dialect::Postgres | Dialect::ClickHouse | Dialect::Trino => false,
+        }
+    }
+}
+
+impl std::fmt::Debug for Dialect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Dialect::Postgres => f.write_str("Postgres"),
+            Dialect::ClickHouse => f.write_str("ClickHouse"),
+            Dialect::Trino => f.write_str("Trino"),
+            Dialect::Oracle => f.write_str("Oracle"),
+            Dialect::Registered(c) => write!(f, "Registered({:?})", c.name()),
+        }
+    }
+}
+
+/// Two dialects are the same when they are the same built-in, or registered under one name.
+impl PartialEq for Dialect {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Dialect::Registered(a), Dialect::Registered(b)) => a.name() == b.name(),
+            (Dialect::Registered(_), _) | (_, Dialect::Registered(_)) => false,
+            _ => std::mem::discriminant(self) == std::mem::discriminant(other),
+        }
+    }
+}
+
+impl Eq for Dialect {}
+
+/// RFC 0255 §3.4: the canonical form (RFC 0155) rendered by an engine that is not one of the
+/// built-in four. Implemented by an out-of-tree engine and wrapped in [`Dialect::Registered`]; the
+/// free functions of this module then dispatch to it.
+///
+/// Three methods are required — the per-rule rendering, the hash and the 60-bit prefix, where
+/// engines genuinely differ. The rest default to portable SQL (`CASE`, `||`, `MOD`, `SUM` over
+/// `DECIMAL(38, 0)`, a grouped subquery) and are overridden where the engine needs it. An
+/// implementation is trusted only after [`crate::conformance::run`] passes on a live engine:
+/// without that run the engine's `reconcile` capability is absent, whatever it implements.
+pub trait CanonDialect: Send + Sync {
+    /// A stable name, for diagnostics and the conformance run's record.
+    fn name(&self) -> &str;
+
+    /// The canonical form of a value known to be non-NULL, under `rule`. Text rules must escape
+    /// backslashes and the unit separator exactly as [`crate::canon`] does.
+    fn canon_body(&self, expr: &str, rule: ColumnRule) -> String;
+
+    /// SHA-256 of a text expression's UTF-8 bytes, as lowercase hex.
+    fn hash_hex_expr(&self, text_expr: &str) -> String;
+
+    /// The first 15 hex digits of a hash, read big-endian, as an exact integer.
+    fn prefix60_expr(&self, hash_expr: &str) -> String;
+
+    /// The null sentinel as a SQL string literal.
+    fn null_literal(&self) -> &str {
+        "'\\N'"
+    }
+
+    fn quote_ident(&self, name: &str) -> String {
+        format!("\"{}\"", name.replace('"', "\"\""))
+    }
+
+    /// NULL decided on the column, never on the rendered value (see [`canon_expr_of`]).
+    fn canon_expr_of(&self, expr: &str, rule: ColumnRule) -> String {
+        format!(
+            "(CASE WHEN {expr} IS NULL THEN {} ELSE {} END)",
+            self.null_literal(),
+            self.canon_body(expr, rule)
+        )
+    }
+
+    /// The unit separator as a SQL expression.
+    fn separator(&self) -> String {
+        format!("CHR({})", UNIT_SEPARATOR as u32)
+    }
+
+    fn row_hash_expr(&self, column_exprs: &[String]) -> String {
+        self.hash_hex_expr(&column_exprs.join(&format!(" || {} || ", self.separator())))
+    }
+
+    fn column_digest_expr(&self, column_expr: &str) -> String {
+        format!("SUBSTR({}, 1, 16)", self.hash_hex_expr(column_expr))
+    }
+
+    /// The exact sum of 60-bit prefixes: a wrapping sum is a false green.
+    fn exact_sum(&self, prefix: &str) -> String {
+        format!("SUM(CAST({prefix} AS DECIMAL(38, 0)))")
+    }
+
+    fn modulo(&self, a: &str, n: u32) -> String {
+        format!("MOD({a}, {n})")
+    }
+
+    /// A string's length in bytes of its UTF-8 form.
+    fn byte_length(&self, expr: &str) -> String {
+        format!("OCTET_LENGTH({expr})")
+    }
+
+    /// The engine cannot build one row string; columns are digested one by one (RFC 0216 §2.5).
+    fn digest_columns(&self) -> bool {
+        false
+    }
+}
+
+/// The per-bucket query of a registered dialect: the bucket computed in a subquery, which every
+/// engine can group by.
+fn registered_buckets(
+    c: &dyn CanonDialect,
+    bucket: &str,
+    row: &str,
+    table: &str,
+    filter: &str,
+) -> String {
+    format!(
+        "SELECT bucket, COUNT(*) AS row_count, {} AS hash_sum FROM \
+         (SELECT {bucket} AS bucket, {} AS h FROM {table}{filter}) \
+         GROUP BY bucket ORDER BY bucket",
+        c.exact_sum("h"),
+        c.prefix60_expr(row)
+    )
 }
 
 /// The source column type an expression is generated for. Deliberately coarse: it names the
@@ -62,10 +209,14 @@ fn null_literal(d: Dialect) -> &'static str {
         // `standard_conforming_strings`.
         Dialect::Postgres | Dialect::Trino | Dialect::Oracle => "'\\N'",
         Dialect::ClickHouse => "'\\\\N'",
+        Dialect::Registered(c) => c.null_literal(),
     }
 }
 
 fn quote_ident(d: Dialect, name: &str) -> String {
+    if let Dialect::Registered(c) = d {
+        return c.quote_ident(name);
+    }
     // Every engine uses double quotes and escapes an embedded quote by doubling it. Identifiers
     // are never concatenated raw: RFC 0160's rule, applied here too.
     let escaped = name.replace('"', "\"\"");
@@ -89,6 +240,7 @@ fn escape_sql(d: Dialect, inner: &str) -> String {
         }
         // Oracle literals take a backslash literally too.
         Dialect::Oracle => format!("REPLACE(REPLACE({inner}, '\\', '\\\\'), CHR(31), '\\x1f')"),
+        Dialect::Registered(_) => unreachable!("a registered dialect escapes in its canon_body"),
     }
 }
 
@@ -103,6 +255,9 @@ pub fn canon_expr(d: Dialect, column: &str, rule: ColumnRule) -> String {
 /// which is what makes it a real check: if the harness rebuilt the expression itself, it would be
 /// testing its own copy rather than the one tiers V1–V3 actually push down.
 pub fn canon_expr_of(d: Dialect, expr: &str, rule: ColumnRule) -> String {
+    if let Dialect::Registered(r) = d {
+        return r.canon_expr_of(expr, rule);
+    }
     let c = expr.to_string();
     let body = match (d, rule) {
         (Dialect::Postgres, ColumnRule::Text | ColumnRule::Char | ColumnRule::Inet) => {
@@ -202,6 +357,7 @@ pub fn canon_expr_of(d: Dialect, expr: &str, rule: ColumnRule) -> String {
         }
         (Dialect::Oracle, ColumnRule::Uuid) => format!("LOWER(TO_CHAR({c}))"),
         (Dialect::Oracle, ColumnRule::Bytes) => format!("LOWER(RAWTOHEX({c}))"),
+        (Dialect::Registered(_), _) => unreachable!("returned above"),
     };
     // NULL is decided on the **column**, not on the rendered value, and the same way on both
     // sides. `coalesce(body, …)` on PostgreSQL only fired when the *rendering* was NULL — and the
@@ -216,6 +372,7 @@ pub fn canon_expr_of(d: Dialect, expr: &str, rule: ColumnRule) -> String {
         Dialect::Trino | Dialect::Oracle => {
             format!("(CASE WHEN {c} IS NULL THEN {null} ELSE {body} END)")
         }
+        Dialect::Registered(_) => unreachable!("returned above"),
     }
 }
 
@@ -234,20 +391,28 @@ fn oracle_decimal_format(s: u32) -> String {
 /// hashed over digests has a bounded length whatever its columns hold (see
 /// [`crate::tiers::UnitPlan::digest_columns`]).
 pub fn column_digest_expr(d: Dialect, column_expr: &str) -> String {
+    if let Dialect::Registered(c) = d {
+        return c.column_digest_expr(column_expr);
+    }
     let h = hash_hex_expr(d, column_expr);
     match d {
         Dialect::ClickHouse => format!("substring({h}, 1, 16)"),
         Dialect::Oracle => format!("SUBSTR({h}, 1, 16)"),
         Dialect::Postgres | Dialect::Trino => format!("substr({h}, 1, 16)"),
+        Dialect::Registered(_) => unreachable!("returned above"),
     }
 }
 
 /// The row-hash expression over a row's column expressions.
 pub fn row_hash_expr(d: Dialect, column_exprs: &[String]) -> String {
+    if let Dialect::Registered(c) = d {
+        return c.row_hash_expr(column_exprs);
+    }
     let sep = match d {
         Dialect::Postgres | Dialect::Trino => format!("chr({})", UNIT_SEPARATOR as u32),
         Dialect::ClickHouse => "char(31)".to_string(),
         Dialect::Oracle => format!("CHR({})", UNIT_SEPARATOR as u32),
+        Dialect::Registered(_) => unreachable!("returned above"),
     };
     if d == Dialect::Trino {
         let mut parts = Vec::with_capacity(column_exprs.len() * 2);
@@ -295,6 +460,7 @@ pub fn hash_hex_expr(d: Dialect, text_expr: &str) -> String {
         // The bytes of the text in the database character set, AL32UTF8 by the dialect's
         // contract. Not `UTL_I18N.STRING_TO_RAW`: a SQL `RAW` stops at 2000 bytes.
         Dialect::Oracle => format!("LOWER(RAWTOHEX(STANDARD_HASH({text_expr}, 'SHA256')))"),
+        Dialect::Registered(c) => c.hash_hex_expr(text_expr),
     }
 }
 
@@ -321,6 +487,7 @@ pub fn prefix60_expr(d: Dialect, hash_expr: &str) -> String {
         Dialect::Trino => format!("from_base(substr({hash_expr}, 1, 15), 16)"),
         // A hex format model reads big-endian too, into an exact NUMBER.
         Dialect::Oracle => format!("TO_NUMBER(SUBSTR({hash_expr}, 1, 15), 'XXXXXXXXXXXXXXX')"),
+        Dialect::Registered(c) => c.prefix60_expr(hash_expr),
     }
 }
 
@@ -333,6 +500,7 @@ fn exact_sum(d: Dialect, prefix: &str) -> String {
         Dialect::Trino => format!("sum(CAST({prefix} AS decimal(38, 0)))"),
         // NUMBER arithmetic is exact to 38 digits.
         Dialect::Oracle => format!("SUM({prefix})"),
+        Dialect::Registered(c) => c.exact_sum(prefix),
     }
 }
 
@@ -341,6 +509,7 @@ fn modulo(d: Dialect, a: &str, n: u32) -> String {
     match d {
         Dialect::Oracle => format!("MOD({a}, {n})"),
         Dialect::Postgres | Dialect::ClickHouse | Dialect::Trino => format!("{a} % {n}"),
+        Dialect::Registered(c) => c.modulo(a, n),
     }
 }
 
@@ -359,6 +528,7 @@ fn group_and_order(d: Dialect) -> &'static str {
         Dialect::Trino => "GROUP BY 1 ORDER BY 1",
         Dialect::Postgres | Dialect::ClickHouse => "GROUP BY bucket ORDER BY bucket",
         Dialect::Oracle => unreachable!("Oracle groups a subquery: oracle_buckets"),
+        Dialect::Registered(_) => unreachable!("a registered dialect groups a subquery"),
     }
 }
 
@@ -379,6 +549,9 @@ pub fn bucket_checksum_query(
     let bucket = modulo(d, &prefix60_expr(d, &pk_hash), buckets);
     if d == Dialect::Oracle {
         return oracle_buckets(&bucket, &prefix60_expr(d, &row), table, "");
+    }
+    if let Dialect::Registered(c) = d {
+        return registered_buckets(c, &bucket, &row, table, "");
     }
     let sum = exact_sum(d, &prefix60_expr(d, &row));
     let group = group_and_order(d);
@@ -413,6 +586,10 @@ pub fn sub_bucket_checksum_query(
     if d == Dialect::Oracle {
         let filter = format!(" WHERE {coarse} = {coarse_bucket}");
         return oracle_buckets(&fine, &prefix60_expr(d, &row), table, &filter);
+    }
+    if let Dialect::Registered(c) = d {
+        let filter = format!(" WHERE {coarse} = {coarse_bucket}");
+        return registered_buckets(c, &fine, &row, table, &filter);
     }
     let sum = exact_sum(d, &prefix60_expr(d, &row));
     let group = group_and_order(d);
@@ -474,6 +651,7 @@ pub fn aggregate_query(d: Dialect, table: &str, column_exprs: &[String]) -> Stri
             Dialect::Trino => format!("length(to_utf8({e}))"),
             // Bytes in the database character set: UTF-8, by the dialect's contract.
             Dialect::Oracle => format!("LENGTHB({e})"),
+            Dialect::Registered(c) => c.byte_length(e),
         };
         parts.push(format!("sum({len}) AS len_{i}"));
     }
@@ -481,7 +659,7 @@ pub fn aggregate_query(d: Dialect, table: &str, column_exprs: &[String]) -> Stri
     // both, so one form serves both dialects and there is one less place to diverge.
     match d {
         // Trino answers NULL over an empty table, as PostgreSQL does.
-        Dialect::Postgres | Dialect::Trino | Dialect::Oracle => {
+        Dialect::Postgres | Dialect::Trino | Dialect::Oracle | Dialect::Registered(_) => {
             format!("SELECT {} FROM {table}", parts.join(", "))
         }
         // Over an empty table PostgreSQL's min/max/sum are NULL and ClickHouse's are type defaults
