@@ -228,6 +228,94 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+  # The full Windows package, installed as a person would install it: `ekos setup` from an answers
+  # file (the same answers the browser wizard writes), into scratch directories. The package is
+  # assembled on Linux, so nothing else checks that its console and bundled Python start on Windows
+  # — the Linux equivalent is deploy/e2e/package.sh. A missing DLL (VCRUNTIME140, a wheel's own
+  # runtime) shows here as a console that never answers.
+  install-windows:
+    name: Install the full package on Windows
+    needs: package
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Download the full Windows package
+        uses: actions/download-artifact@v7
+        with:
+          name: ekos-full-x86_64-pc-windows-msvc
+          path: full
+
+      - name: Set up from answers, use the console, uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Check($what, [scriptblock]$ok) {
+            if (& $ok) { Write-Host "ok   $what" } else { throw "FAIL $what" }
+          }
+          $zip = Get-ChildItem full/*-full.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath "$env:RUNNER_TEMP\pkg"
+          $pkg = Get-ChildItem "$env:RUNNER_TEMP\pkg" -Directory | Select-Object -First 1
+          Check "the package has ekos.exe, a Python, the console and setup.cmd" {
+            (Test-Path "$($pkg.FullName)\bin\ekos.exe") -and (Test-Path "$($pkg.FullName)\console\python\python.exe") -and
+            (Test-Path "$($pkg.FullName)\console\app\main.py") -and (Test-Path "$($pkg.FullName)\setup.cmd")
+          }
+
+          # The bundled Python starts on its own (its vcruntime140.dll is beside it).
+          & "$($pkg.FullName)\console\python\python.exe" -c "import sys; print(sys.version)"
+          if ($LASTEXITCODE -ne 0) { throw "the bundled Python does not start" }
+
+          $src = "$env:RUNNER_TEMP\src\shop"
+          New-Item -ItemType Directory -Force "$src\db" | Out-Null
+          Set-Content "$src\db\schema.sql" "CREATE TABLE customers (id INT PRIMARY KEY, email TEXT);"
+          Set-Content "$src\README.md" "# Shop"
+          $home2 = "$env:RUNNER_TEMP\ekos-home"
+          $prog = "$env:RUNNER_TEMP\ekos-program"
+          $port = 18765
+          $answers = "$env:RUNNER_TEMP\answers.toml"
+          # TOML literal strings: Windows paths keep their backslashes.
+          @"
+          program_dir = '$prog'
+          home = '$home2'
+          add_to_path = false
+          [console]
+          mode = "local"
+          port = $port
+          [project]
+          name = "shop"
+          sources = ['$src']
+          detect = true
+          [start]
+          at_login = false
+          now = true
+          open = false
+          "@ -replace '(?m)^\s+', '' | Set-Content $answers
+
+          & "$($pkg.FullName)\bin\ekos.exe" setup --answers $answers | Tee-Object "$env:RUNNER_TEMP\setup.txt"
+          if ($LASTEXITCODE -ne 0) { throw "ekos setup failed ($LASTEXITCODE)" }
+          Check "setup reports every step ok" { -not (Select-String -Path "$env:RUNNER_TEMP\setup.txt" -Pattern '^FAIL' -Quiet) }
+          $ekos = Get-ChildItem $prog -Recurse -Filter ekos.exe | Select-Object -First 1
+          Check "the program is installed" { $null -ne $ekos }
+          Check "the project exists" { Test-Path "$home2\data\default\shop\ekos.toml" }
+
+          # The console answers on its port: it and its Python started, with every DLL found.
+          $up = $false
+          for ($i = 0; $i -lt 90 -and -not $up; $i++) {
+            try { $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/api/health" -TimeoutSec 5; $up = $r.StatusCode -eq 200 } catch { Start-Sleep 2 }
+          }
+          Check "the console answers /api/health" { $up }
+          $status = & $ekos.FullName --home $home2 console status | Out-String
+          Write-Host $status
+          Check "console status says running" { $status -match 'running' }
+
+          & $ekos.FullName --home $home2 console stop
+          & $ekos.FullName --home $home2 uninstall --purge --yes
+          if ($LASTEXITCODE -ne 0) { throw "uninstall failed ($LASTEXITCODE)" }
+          Check "the console stopped" {
+            try { Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/api/health" -TimeoutSec 3 | Out-Null; $false } catch { $true }
+          }
+          Check "the source tree was not written to" { (Get-ChildItem $src -Recurse -File).Count -eq 2 }
+
   # Microsoft Store package. MSIX, unsigned: Partner Center signs it during certification, so no
   # certificate lives in this repo or its secrets. Built from the same `ekos.exe` the `build` job
   # put in the zip — one binary, two channels. Uploaded as a workflow artifact for a manual
@@ -390,7 +478,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: [build, package]
+    needs: [build, package, install-windows]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     # The only job in this workflow that writes anything: `gh release create` creates the release

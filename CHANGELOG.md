@@ -1,8 +1,30 @@
 # Changelog
 
-## Unreleased
+## v1.5.0 — 2026-11-11
+
+**Windows**
+- **`ekos.exe` needs no Visual C++ runtime.** Earlier Windows builds stopped at start with
+  "VCRUNTIME140.dll was not found" on a machine without the Visual C++ Redistributable. The C
+  runtime is now linked into the binary (`+crt-static`); it loads only DLLs that ship with Windows.
+  The full Windows package (`…-x86_64-pc-windows-msvc-full.zip`: `ekos.exe`, the web console, a
+  bundled Python with its own `vcruntime140.dll`, and `setup.cmd`, the installer with its setup
+  wizard) brings every library it uses: every `.pyd`/`.dll` in it was checked for imports neither
+  Windows nor the package provides.
+- **Microsoft Store package** (MSIX, `store-msix-x64` artifact of the Release workflow, not a release
+  asset): the same `ekos.exe`, with an `ekos` command alias. The workflow installs it on Windows and
+  runs the pipeline, a query, an SQL check and the MCP server through the alias before uploading.
 
 **Features**
+- **The interaction map** (RFC 0256). `ekos interaction matrix` lists who reads and writes each table
+  — routines, Java components, Kettle jobs — as code declares it; `ekos interaction observe` adds what
+  database roles were seen doing (PostgreSQL `pg_stat_statements`, aggregated per role, table and
+  operation, no statement text kept). `ekos interaction findings`: unexplained writers, writes no
+  statement explains, several systems writing a table, declared writes never observed — raising open
+  questions. Review subject `interaction`; MCP `ekos_interaction`; an **Interaction** console page;
+  "Writers and readers" on every estate table page.
+- **The transformation chain** (RFC 0257, phases 1–2). `ekos transformation graph --object <id>` draws
+  a view or routine as a chain of steps (a sentence per step, source text, columns, evidence);
+  a **Transformations** console tab; MCP `ekos_transformation_graph`; notes on a step.
 - **The source passport** (RFC 0254 §3.6). Every table page of `ekos docs generate --layout estate`
   gains the analyst's sections, each only when it has content and each fact with its status and
   evidence: *What a row is* (grain, row count), *Keys and references* (declared, then code- and
@@ -91,6 +113,12 @@
   Testbed: `docker-compose.informix.yml` + `deploy/fixtures/informix/load.sh`.
 - RFCs 0252 (profiling for source understanding), 0253 (people as a source) and 0254 (the analyst
   loop) accepted.
+
+**Fixes**
+- **A project run never writes a source repository.** Git is run with `GIT_OPTIONAL_LOCKS=0`: a
+  read such as `git diff` or `git blame` could otherwise rewrite `.git/index` when a file was
+  "racily clean".
+- SQL transformation recovery keeps `JOIN … ON (a = b)` key pairs and a view's output columns.
 
 **Security**
 - **`rusqlite` 0.32 → 0.41** (bundled SQLite via `libsqlite3-sys` 0.30 → 0.39) for
