@@ -12,7 +12,8 @@
 #       S3776 limit 15, S6847/S1082 interactions, S6772 JSX spacing, slow regexes).
 # Python (web/api): ruff ASYNC (S7493 blocking I/O in async), RUF029 (S7503 async without await),
 #       scripts/sonar-local/pycogc.py (S3776, limit 15 — Sonar's counting; it matches Sonar's
-#       numbers on the functions Sonar flagged here, where `complexipy` scored up to half).
+#       numbers on the functions Sonar flagged here, where `complexipy` scored up to half),
+#       scripts/sonar-local/pyrules.py (S5850 anchors in an alternation).
 # Shell (*.sh): scripts/sonar-local/shcheck.py (S7688 `[[`, S131 default case, S6505
 #       npm --ignore-scripts, S7679 positional parameters).
 # Not covered locally: Python regex backtracking (S8786), async methods without await (ruff's
@@ -105,6 +106,8 @@ import json, sys
 for m in json.load(sys.stdin):
     print(json.dumps({"file": m["filename"], "line": m["location"]["row"], "rule": m["code"], "message": m["message"]}))
 ' | filter || found=1
+  echo "── Python: regex anchors in an alternation (S5850, changed files)"
+  python3 "$tools/pyrules.py" "$base" | filter || found=1
   echo "── Python: cognitive complexity (changed files, limit 15; Sonar's counting, pycogc.py)"
   python3 "$tools/pycogc.py" 15 "$base" | python3 -c '
 import json, sys

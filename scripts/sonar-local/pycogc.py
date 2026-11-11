@@ -27,7 +27,8 @@ from changed_lines import changed, git_diff, repo_root
 # What Sonar analyses as main code: not docs, demos or fixtures (`sonar.exclusions`), not test code
 # (`sonar.tests`: web/api/tests, deploy/e2e; scripts/tests by name).
 NOT_MAIN = re.compile(
-    r"^(docs/|web/api/tests/|deploy/e2e/|deploy/fixtures/|scripts/tests/)|/demo/|/tests/fixtures/"
+    r"(?:^(?:docs/|web/api/tests/|deploy/e2e/|deploy/fixtures/|scripts/tests/))"
+    r"|(?:/demo/)|(?:/tests/fixtures/)"
 )
 
 
