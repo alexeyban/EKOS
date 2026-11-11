@@ -73,6 +73,7 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("relationships list", Class::Read, false),
     ("interaction matrix", Class::Read, false),
     ("interaction observe", Class::External, false),
+    ("interaction findings", Class::Read, false),
     ("database add", Class::Write, false),
     ("database list", Class::Read, false),
     // Connects to the live database.
@@ -135,6 +136,7 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("review identity", Class::Review, false),
     ("review write-behaviour", Class::Review, false),
     ("review relationships", Class::Review, false),
+    ("review interaction", Class::Review, false),
     ("signoff show", Class::Read, false),
     ("workflow status", Class::Read, false),
     ("signoff approve", Class::Review, false),

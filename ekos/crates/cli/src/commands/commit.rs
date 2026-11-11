@@ -341,6 +341,10 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     // evidence. Read-only over the ledger; written to a file under the state directory, never to
     // the ledger (the findings are derived and change every commit).
     let xref_stats = xref_step(config, cwd, &*ledger)?;
+    // RFC 0256: role items and interaction findings over the latest observation (nothing before
+    // a first `ekos interaction observe`). Before the questions, which they raise.
+    ledger.set_write_context(Some(write_ctx("commit:interaction")));
+    let interaction_stats = super::interaction::commit_step(config, cwd, &*ledger)?;
     // RFC 0254: code-vs-data findings and the open questions every current origin raises — last,
     // over everything the steps above wrote. Deterministic, no model call.
     ledger.set_write_context(Some(write_ctx("commit:questions")));
@@ -461,6 +465,9 @@ pub async fn run_with(config: &EkosConfig, cwd: &Path, yes: bool, ext: &Extensio
     }
     print_write_behaviour(&write_behaviour);
     print_ticket_links(&ticket_links);
+    if let Some(i) = &interaction_stats {
+        println!("  {}", super::interaction::summary_line(i));
+    }
     if let Some(q) = &question_stats {
         println!(
             "  Open questions:        {}",

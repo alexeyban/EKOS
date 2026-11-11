@@ -242,5 +242,49 @@ table).
 - A scan of every file under `.ekos/` (zstd-decompressed) for text unique to the observed statements
   found none.
 
-**Not yet.** Phase 3 (role–actor links, findings, questions), phase 4 (console page, MCP
-`ekos_interaction`, the lakehouse plan warning). Oracle observed access.
+### Phase 3 (2026-11-11)
+
+**Built.**
+- `ekos_kir::interaction::{link_hypotheses, findings}`, pure:
+  - a role is linked to the one component or ETL job whose tables contain every table the role
+    touches (none or several: no hypothesis);
+  - findings `unexplained_writer`, `unattributed_writes` (per operation, from the table counters),
+    `multiple_writing_systems`, `declared_not_observed` (needs a known window longer than
+    `quiet-after-days` and no truncation). With no observation window, nothing is derived.
+- Review subject **`interaction`** (optional, like `relationships`; `ekos review interaction <role>
+  --confirm|--reject [--reason] --as`, human-only through the review machinery). One item per role
+  seen writing:
+  - signed facts: database, role, the `table:operation`s it writes, the proposed system;
+  - shown only: calls and the tables where its writes are unexplained (blocking while undecided).
+  - Because the writes are signed, a confirmation goes `outdated` when the role starts writing
+    elsewhere. This is the RFC's "does not carry forward" rule, with no extra code.
+- `interaction::commit_step` at the end of `ekos commit` (before the questions) and of `ekos
+  interaction observe`: `DbRole` items and `InteractionFinding` facts (appended only when changed),
+  `<state>/interaction/findings.json`. `ekos interaction findings [--json]` (class *read*).
+- Questions (RFC 0254): `unexplained_writer` and `unattributed_writes` → `who_is_this_writer` (the
+  first blocking); `multiple_writing_systems` → `who_owns_this_table`. `declared_not_observed` asks
+  nothing (low confidence by construction).
+
+**Decisions.**
+- *Explained*: a person confirmed the role; or the role is linked and its actor declares that write;
+  or, with **no link**, some code actor declares that write on the table. Without the last rule,
+  every role running known code (an application role calling the routines EKOS read) would be
+  "unexplained" until someone confirms it. That is noise, and it hides the writer outside the code,
+  which is the point.
+- The role link is not a separate `SameAs`-style relationship. It is the review item's
+  `proposed_actor`: a confirmation accounts for the role (as that system, or as the one the reviewer
+  names in the reason); a rejection drops the proposal.
+- `multiple_writing_systems` counts components and ETL jobs that declare a write, plus unexplained
+  roles. Routines are not systems; they are called by them.
+
+**Measured** (the phase 2 fixture):
+- `etl_nightly`'s update of `customers` is an `unexplained_writer` and raises a blocking
+  `who_is_this_writer`. `app_writer` is explained by `place_order`/`pay_order`.
+- The 50 rows loaded into `customers` before the statistics reset are `unattributed_writes` (insert).
+- `ekos review interaction etl_nightly --confirm` removes the finding and its question at the next
+  commit.
+- After `etl_nightly` then deleted a row of `orders`, the decision was `outdated` and both its
+  writes were findings again.
+
+**Not yet.** Phase 4 (console page, MCP `ekos_interaction`, the lakehouse plan warning). Oracle
+observed access.

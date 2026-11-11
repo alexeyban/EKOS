@@ -40,10 +40,12 @@ pub enum Subject {
     Glossary,
     /// RFC 0252 §3.6: references inferred from data and code, not declared in the schema.
     Relationships,
+    /// RFC 0256 §3.3: database roles seen writing — which system each one is.
+    Interaction,
 }
 
 impl Subject {
-    pub const ALL: [Subject; 7] = [
+    pub const ALL: [Subject; 8] = [
         Subject::Scope,
         Subject::Pii,
         Subject::Conflicts,
@@ -51,12 +53,14 @@ impl Subject {
         Subject::WriteBehaviour,
         Subject::Glossary,
         Subject::Relationships,
+        Subject::Interaction,
     ];
 
     /// A subject that exists only once something produced its items: `relationships` after
-    /// `ekos relationships discover`. Without items it is not listed and not required.
+    /// `ekos relationships discover`, `interaction` after `ekos interaction observe`. Without items
+    /// it is not listed and not required.
     pub fn is_optional(self) -> bool {
-        matches!(self, Subject::Relationships)
+        matches!(self, Subject::Relationships | Subject::Interaction)
     }
 
     pub fn as_str(self) -> &'static str {
@@ -68,6 +72,7 @@ impl Subject {
             Subject::WriteBehaviour => "write-behaviour",
             Subject::Glossary => "glossary",
             Subject::Relationships => "relationships",
+            Subject::Interaction => "interaction",
         }
     }
 
@@ -80,7 +85,11 @@ impl Subject {
     pub fn decided_here(self) -> bool {
         matches!(
             self,
-            Subject::Scope | Subject::Pii | Subject::WriteBehaviour | Subject::Relationships
+            Subject::Scope
+                | Subject::Pii
+                | Subject::WriteBehaviour
+                | Subject::Relationships
+                | Subject::Interaction
         )
     }
 }
@@ -225,6 +234,9 @@ pub struct Inputs<'a> {
     /// RFC 0252: the `FkCandidate`s the latest `ekos relationships discover` wrote
     /// (`<state>/profile/relationships.json`); `None` = all.
     pub relationships_current: Option<&'a BTreeSet<String>>,
+    /// RFC 0256: the `DbRole` items the latest interaction step wrote
+    /// (`<state>/interaction/findings.json`); `None` = all.
+    pub interaction_current: Option<&'a BTreeSet<String>>,
     pub rules: &'a ScopeRules,
 }
 
@@ -685,6 +697,45 @@ fn relationship_items(inputs: &Inputs<'_>, d: &HashMap<(String, String), &KirObj
         .collect()
 }
 
+/// RFC 0256 §3.3: one item per database role seen writing. Signed: the role, the tables and
+/// operations it writes, and the system proposed for it — a decision goes stale when the role
+/// starts writing elsewhere. Calls are shown only.
+fn interaction_items(inputs: &Inputs<'_>, d: &HashMap<(String, String), &KirObject>) -> Vec<Item> {
+    inputs
+        .objects
+        .iter()
+        .filter(|o| custom_kind(o) == Some("DbRole"))
+        .filter(|o| {
+            inputs
+                .interaction_current
+                .is_none_or(|c| c.contains(&o.id.to_string()))
+        })
+        .filter(|o| {
+            o.properties
+                .get("writes")
+                .and_then(Value::as_array)
+                .is_some_and(|w| !w.is_empty())
+        })
+        .map(|o| {
+            let get = |k: &str| o.properties.get(k).cloned().unwrap_or(Value::Null);
+            let mut item = Item::new(o.id.to_string(), o.name.clone())
+                .fact("database", get("database"))
+                .fact("role", get("role"))
+                .fact("writes", get("writes"))
+                .fact("proposed_actor", get("proposed_actor"))
+                .info("unexplained", get("unexplained"))
+                .info("calls", get("calls"));
+            apply_decision(&mut item, Subject::Interaction, d);
+            item.blocking = item.decision.is_none()
+                && o.properties
+                    .get("unexplained")
+                    .and_then(Value::as_array)
+                    .is_some_and(|u| !u.is_empty());
+            item
+        })
+        .collect()
+}
+
 fn glossary_items(inputs: &Inputs<'_>) -> Vec<Item> {
     inputs
         .objects
@@ -725,6 +776,7 @@ pub fn items(subject: Subject, inputs: &Inputs<'_>) -> Vec<Item> {
         Subject::WriteBehaviour => write_behaviour_items(inputs, &scope(), &d),
         Subject::Glossary => glossary_items(inputs),
         Subject::Relationships => relationship_items(inputs, &d),
+        Subject::Interaction => interaction_items(inputs, &d),
     };
     out.sort_by(|a, b| a.id.cmp(&b.id));
     out
@@ -777,6 +829,10 @@ pub fn check_decision(subject: Subject, decision: &Value) -> Result<Value, Strin
             _ => Err(
                 "a relationship decision is `confirm`, `reject` or `confirm-with-orphans`".into(),
             ),
+        },
+        Subject::Interaction => match get("link") {
+            Some(v @ ("confirm" | "reject")) => Ok(json!({ "link": v })),
+            _ => Err("an interaction decision is `confirm` (the role is accounted for, as the proposed system or as named in the reason) or `reject`".into()),
         },
         other => Err(format!(
             "{} items are decided with their own command",
@@ -1115,6 +1171,7 @@ mod tests {
                     semantics_current: None,
                     identity_current: current_ids,
                     relationships_current: None,
+                    interaction_current: None,
                     rules: &rules,
                 },
             )
@@ -1150,6 +1207,7 @@ mod tests {
                 semantics_current: None,
                 identity_current: None,
                 relationships_current: None,
+                interaction_current: None,
                 rules: &rules,
             },
         )

@@ -458,8 +458,8 @@ fn custom_object(name: String, kind: &str, key: &str, props: Value) -> KirObject
     o
 }
 
-/// The facts of one reading: one `ObservedAccess` per (role, table, operation), one `DbRole` per
-/// role, one `ObservationWindow` for the database. Every one cites the same evidence, which says
+/// The facts of one reading: one `ObservedAccess` per (role, table, operation) and one
+/// `ObservationWindow` for the database (the `DbRole` items are written by [`commit_step`]). Every one cites the same evidence, which says
 /// what was read and that no statement text was kept.
 fn facts(
     database: &str,
@@ -482,10 +482,8 @@ fn facts(
     ev.id = kid(&format!("observation:{database}:evidence"));
     let truncated = reading.dealloc > 0 || reading.statements_truncated;
     let mut out = Vec::new();
-    let mut roles = BTreeSet::new();
     for ((role, table, op), (calls, rows)) in &agg.cells {
         let shown = label(role);
-        roles.insert(shown.clone());
         out.push(custom_object(
             format!("{shown} {} {table}", op.as_str()),
             OBSERVED_KIND,
@@ -493,14 +491,6 @@ fn facts(
             json!({"database": database, "role": shown, "table": table, "operation": op.as_str(),
                    "calls": calls, "rows": rows, "window_start": reading.stats_reset,
                    "window_end": at, "truncated": truncated, "status": "observed"}),
-        ));
-    }
-    for role in &roles {
-        out.push(custom_object(
-            role.clone(),
-            ROLE_KIND,
-            &format!("db-role:{database}:{role}"),
-            json!({"database": database, "role": role}),
         ));
     }
     let unparsed: BTreeMap<String, u64> = agg
@@ -607,9 +597,10 @@ pub fn observe(
         }
         let ids: Vec<String> = objects.iter().map(|o| o.id.to_string()).collect();
         manifest["databases"][&db.name] = json!({"ids": ids, "at": at});
+        let roles: BTreeSet<&str> = agg.cells.keys().map(|(r, _, _)| r.as_str()).collect();
         report.push(json!({
             "database": db.name, "statements": reading.rows.len(), "cells": agg.cells.len(),
-            "roles": objects.iter().filter(|o| is_custom(o, ROLE_KIND)).count(),
+            "roles": roles.len(),
             "unparsed_calls": agg.unparsed_calls.values().sum::<u64>(), "hidden_calls": agg.hidden_calls,
             "own_calls_left_out": agg.own_calls, "window_start": reading.stats_reset,
             "truncated": reading.dealloc > 0 || reading.statements_truncated,
@@ -617,12 +608,410 @@ pub fn observe(
     }
     std::fs::create_dir_all(path.parent().expect("a state directory"))?;
     std::fs::write(&path, serde_json::to_vec_pretty(&manifest)?)?;
+    // §3.4: the roles and findings now, not at the next commit; then the questions they raise.
+    let step = commit_step(config, cwd, &*ledger)?;
+    let questions = super::questions::commit_step(config, cwd, &*ledger)?;
     if json_out {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({"databases": report, "step": step}))?
+        );
     } else {
         for r in &report {
             println!("{}", serde_json::to_string(r)?);
         }
+        if let Some(st) = &step {
+            println!("{}", summary_line(st));
+        }
+        if let Some(q) = &questions {
+            println!("{}", super::questions::summary_line(q));
+        }
+    }
+    Ok(())
+}
+
+// ── Roles, findings and the commit step (RFC 0256 §3.3–3.4) ───────────────────────────────────
+
+/// A derived finding.
+pub const FINDING_KIND: &str = "InteractionFinding";
+
+/// `<state>/interaction/findings.json`: the `DbRole` items and findings of the latest step.
+fn findings_path(config: &EkosConfig, cwd: &Path) -> std::path::PathBuf {
+    config
+        .ekos_dir(cwd)
+        .join("interaction")
+        .join("findings.json")
+}
+
+fn manifest_ids(config: &EkosConfig, cwd: &Path, key: &str) -> Option<BTreeSet<String>> {
+    let v: Value = serde_json::from_slice(&std::fs::read(findings_path(config, cwd)).ok()?).ok()?;
+    Some(
+        v[key]
+            .as_array()?
+            .iter()
+            .filter_map(|x| x.as_str().map(str::to_string))
+            .collect(),
+    )
+}
+
+/// The current `DbRole` review items.
+pub fn current_role_ids(config: &EkosConfig, cwd: &Path) -> Option<BTreeSet<String>> {
+    manifest_ids(config, cwd, "roles")
+}
+
+/// The current findings.
+pub fn current_finding_ids(config: &EkosConfig, cwd: &Path) -> Option<BTreeSet<String>> {
+    manifest_ids(config, cwd, "findings")
+}
+
+/// PostgreSQL prints `2026-11-11 14:10:50.54464+00`; EKOS writes RFC 3339.
+fn parse_time(t: &str) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+    chrono::DateTime::parse_from_rfc3339(t)
+        .ok()
+        .or_else(|| {
+            chrono::DateTime::parse_from_str(&format!("{t}00"), "%Y-%m-%d %H:%M:%S%.f%z").ok()
+        })
+        .or_else(|| chrono::DateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S%.f%z").ok())
+}
+
+/// The current `ObservationWindow`s, with the observed days computed.
+fn windows(objects: &[KirObject], current: &BTreeSet<String>) -> Vec<interaction::Window> {
+    objects
+        .iter()
+        .filter(|o| is_custom(o, WINDOW_KIND) && current.contains(&o.id.to_string()))
+        .map(|o| {
+            let days = s(o, "window_start")
+                .and_then(parse_time)
+                .zip(s(o, "window_end").and_then(parse_time))
+                .map(|(a, b)| (b - a).num_seconds() as f64 / 86_400.0);
+            let table_writes = o
+                .properties
+                .get("table_writes")
+                .and_then(Value::as_object)
+                .into_iter()
+                .flatten()
+                .map(|(t, w)| {
+                    let n = |k: &str| w[k].as_u64().unwrap_or(0);
+                    (t.clone(), (n("insert"), n("update"), n("delete")))
+                })
+                .collect();
+            interaction::Window {
+                database: s(o, "database").unwrap_or_default().to_string(),
+                days,
+                truncated: o
+                    .properties
+                    .get("truncated")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                table_writes,
+            }
+        })
+        .collect()
+}
+
+/// One `DbRole` review item per role seen writing: what it writes (signed), the system proposed
+/// for it, and (shown only) its calls and the tables where its writes are unexplained.
+fn role_objects(
+    m: &Matrix,
+    databases: &BTreeMap<String, String>,
+    hypotheses: &BTreeMap<String, Actor>,
+    unexplained: &BTreeMap<String, BTreeSet<String>>,
+) -> Vec<KirObject> {
+    let mut writes: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+    let mut calls: BTreeMap<&str, u64> = BTreeMap::new();
+    for (t, row) in &m.tables {
+        for (a, c) in row
+            .iter()
+            .filter(|(a, _)| a.kind == interaction::ActorKind::DbRole)
+        {
+            *calls.entry(&a.name).or_default() += c.observed.values().map(|o| o.calls).sum::<u64>();
+            for (op, o) in &c.observed {
+                if op.is_write() && o.calls > 0 {
+                    writes
+                        .entry(&a.name)
+                        .or_default()
+                        .insert(format!("{t}:{}", op.as_str()));
+                }
+            }
+        }
+    }
+    calls
+        .keys()
+        .map(|role| {
+            let db = databases.get(*role).map(String::as_str).unwrap_or("");
+            custom_object(
+                (*role).to_string(),
+                ROLE_KIND,
+                &format!("db-role:{db}:{role}"),
+                json!({"database": db, "role": role,
+                       "writes": writes.get(role).cloned().unwrap_or_default(),
+                       "proposed_actor": hypotheses.get(*role).map(Actor::key),
+                       "calls": calls[role],
+                       "unexplained": unexplained.get(*role).cloned().unwrap_or_default()}),
+            )
+        })
+        .collect()
+}
+
+/// The people's decisions on the role items: roles accounted for (confirmed, still valid), and the
+/// links that hold (a confirmed proposal; a rejected one is dropped).
+fn decided(
+    objects: &[KirObject],
+    relationships: &[ekos_kir::KirRelationship],
+    roles: &[KirObject],
+    hypotheses: &BTreeMap<String, Actor>,
+) -> (BTreeSet<String>, BTreeMap<String, Actor>) {
+    use ekos_semantic::review::{self, Inputs, ScopeRules, Subject};
+    let ids: BTreeSet<String> = roles.iter().map(|o| o.id.to_string()).collect();
+    let mut all: Vec<KirObject> = objects
+        .iter()
+        .filter(|o| !ids.contains(&o.id.to_string()))
+        .cloned()
+        .collect();
+    all.extend(roles.iter().cloned());
+    let rules = ScopeRules::default();
+    let items = review::items(
+        Subject::Interaction,
+        &Inputs {
+            objects: &all,
+            relationships,
+            conflicts_current: None,
+            semantics_current: None,
+            identity_current: None,
+            relationships_current: None,
+            interaction_current: Some(&ids),
+            rules: &rules,
+        },
+    );
+    let mut accounted = BTreeSet::new();
+    let mut links = hypotheses.clone();
+    for it in items.iter().filter(|i| !i.outdated) {
+        let role = it.label.clone();
+        match it
+            .decision
+            .as_ref()
+            .and_then(|d| d.get("link"))
+            .and_then(Value::as_str)
+        {
+            Some("confirm") => {
+                accounted.insert(role);
+            }
+            Some("reject") => {
+                links.remove(&role);
+            }
+            _ => {}
+        }
+    }
+    (accounted, links)
+}
+
+fn finding_object(f: &interaction::Finding, evidence: KirId) -> KirObject {
+    let mut o = custom_object(
+        format!("{} on {}", f.kind.as_str(), f.table),
+        FINDING_KIND,
+        &format!("interaction-finding:{}", f.key()),
+        json!({"finding": f.kind.as_str(), "table": f.table, "status": "open",
+               "actor": f.actor.as_ref().map(Actor::key),
+               "operations": f.operations, "detail": f.detail}),
+    );
+    o.evidence = vec![evidence];
+    o
+}
+
+/// Appends `o` unless the ledger's latest version already says the same.
+fn append_if_changed(
+    ledger: &dyn ekos_ledger::KnowledgeStore,
+    latest: &HashMap<KirId, &KirObject>,
+    o: &KirObject,
+) -> Result<bool> {
+    if latest
+        .get(&o.id)
+        .is_some_and(|p| p.properties == o.properties && p.name == o.name)
+    {
+        return Ok(false);
+    }
+    ledger.append_object(o)?;
+    Ok(true)
+}
+
+/// What one step derived.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StepSummary {
+    pub roles: usize,
+    pub accounted: usize,
+    pub findings: BTreeMap<&'static str, usize>,
+}
+
+/// One line for the terminal.
+pub fn summary_line(s: &StepSummary) -> String {
+    let parts: Vec<String> = s.findings.iter().map(|(k, n)| format!("{n} {k}")).collect();
+    format!(
+        "Interaction: {} writing role(s), {} accounted for; findings: {} — `ekos interaction findings`",
+        s.roles,
+        s.accounted,
+        if parts.is_empty() {
+            "none".to_string()
+        } else {
+            parts.join(", ")
+        }
+    )
+}
+
+/// RFC 0256 §3.4, run at the end of `ekos commit` and of `ekos interaction observe`: role items,
+/// findings and their manifest. Nothing happens before a first observation — no finding is ever
+/// derived from absence.
+pub fn commit_step(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn ekos_ledger::KnowledgeStore,
+) -> Result<Option<StepSummary>> {
+    let Some(current) = current_ids(config, cwd) else {
+        return Ok(None);
+    };
+    let objects = ledger.all_objects()?;
+    let relationships = ledger.all_relationships()?;
+    let (m, _) = build_from(config, cwd, ledger, &objects, &relationships)?;
+    let windows = windows(&objects, &current);
+    let databases: BTreeMap<String, String> = objects
+        .iter()
+        .filter(|o| is_custom(o, OBSERVED_KIND) && current.contains(&o.id.to_string()))
+        .filter_map(|o| Some((s(o, "role")?.to_string(), s(o, "database")?.to_string())))
+        .collect();
+    let hypotheses = interaction::link_hypotheses(&m);
+    // First pass without decisions, to find each role's item as it stands, then the decisions on
+    // those items, then the findings that remain.
+    let draft = role_objects(&m, &databases, &hypotheses, &BTreeMap::new());
+    let (accounted, links) = decided(&objects, &relationships, &draft, &hypotheses);
+    let input = interaction::FindingInput {
+        windows: &windows,
+        accounted: &accounted,
+        links: &links,
+        quiet_after_days: config.interaction.quiet_after_days,
+    };
+    let found = interaction::findings(&m, &input);
+    let mut unexplained: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for f in found
+        .iter()
+        .filter(|f| f.kind == interaction::FindingKind::UnexplainedWriter)
+    {
+        if let Some(a) = &f.actor {
+            unexplained
+                .entry(a.name.clone())
+                .or_default()
+                .insert(f.table.clone());
+        }
+    }
+    let roles: Vec<KirObject> = role_objects(&m, &databases, &hypotheses, &unexplained)
+        .into_iter()
+        .filter(|o| {
+            o.properties
+                .get("writes")
+                .and_then(Value::as_array)
+                .is_some_and(|w| !w.is_empty())
+        })
+        .collect();
+    let latest: HashMap<KirId, &KirObject> = objects.iter().map(|o| (o.id, o)).collect();
+    let evidence = windows
+        .first()
+        .map(|w| kid(&format!("observation:{}:evidence", w.database)));
+    for o in &roles {
+        let mut o = o.clone();
+        o.evidence = evidence.into_iter().collect();
+        append_if_changed(ledger, &latest, &o)?;
+    }
+    let mut finding_ids = Vec::new();
+    let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
+    if let Some(ev) = evidence {
+        for f in &found {
+            let o = finding_object(f, ev);
+            append_if_changed(ledger, &latest, &o)?;
+            finding_ids.push(o.id.to_string());
+            *counts.entry(f.kind.as_str()).or_default() += 1;
+        }
+    }
+    let path = findings_path(config, cwd);
+    std::fs::create_dir_all(path.parent().expect("a state directory"))?;
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&json!({
+            "roles": roles.iter().map(|o| o.id.to_string()).collect::<Vec<_>>(),
+            "findings": finding_ids,
+        }))?,
+    )?;
+    Ok(Some(StepSummary {
+        roles: roles.len(),
+        accounted: accounted.len(),
+        findings: counts,
+    }))
+}
+
+/// The current findings, through `ledger` (a restricted reader sees only tables in scope).
+pub fn current_findings(
+    config: &EkosConfig,
+    cwd: &Path,
+    ledger: &dyn KnowledgeReader,
+) -> Result<Vec<KirObject>> {
+    let Some(ids) = current_finding_ids(config, cwd) else {
+        return Ok(Vec::new());
+    };
+    let mut out: Vec<KirObject> = ledger
+        .all_objects()?
+        .into_iter()
+        .filter(|o| is_custom(o, FINDING_KIND) && ids.contains(&o.id.to_string()))
+        .collect();
+    out.sort_by(|a, b| (s(a, "finding"), s(a, "table")).cmp(&(s(b, "finding"), s(b, "table"))));
+    Ok(out)
+}
+
+fn finding_words(o: &KirObject) -> String {
+    let actor = s(o, "actor").unwrap_or("-");
+    let ops: Vec<&str> = o
+        .properties
+        .get("operations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let detail = o.properties.get("detail").cloned().unwrap_or(Value::Null);
+    format!(
+        "{:<26} {:<24} {:<36} {:<16} {}",
+        s(o, "finding").unwrap_or(""),
+        s(o, "table").unwrap_or(""),
+        actor,
+        ops.join(","),
+        detail
+    )
+}
+
+/// `ekos interaction findings [--json]`.
+pub fn findings(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
+    let ledger = super::store::open_store_read_only(config, cwd)?;
+    let list = current_findings(config, cwd, &*ledger)?;
+    if json_out {
+        let v: Vec<Value> = list
+            .iter()
+            .map(|o| {
+                json!({"id": o.id.to_string(), "finding": s(o, "finding"), "table": s(o, "table"),
+                            "actor": s(o, "actor"), "operations": o.properties.get("operations"),
+                            "detail": o.properties.get("detail")})
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&v)?);
+        return Ok(());
+    }
+    if current_ids(config, cwd).is_none() {
+        println!(
+            "No observation yet (`ekos interaction observe`): without usage statistics no finding \
+             is derived — absence of an observation is not evidence."
+        );
+        return Ok(());
+    }
+    if list.is_empty() {
+        println!("No findings.");
+    }
+    for o in &list {
+        println!("{}", finding_words(o));
     }
     Ok(())
 }

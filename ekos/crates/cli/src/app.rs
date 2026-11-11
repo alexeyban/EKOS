@@ -1343,6 +1343,7 @@ fn dispatch_interaction(
             allow_writable_role,
             json,
         } => interaction::observe(config, cwd, database.as_deref(), allow_writable_role, json),
+        InteractionCommands::Findings { json } => interaction::findings(config, cwd, json),
     }
 }
 
@@ -1600,6 +1601,12 @@ enum InteractionCommands {
         /// Only this actor (`kind:name`, or a name)
         #[arg(long)]
         actor: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// What the matrix shows that needs a person: an unexplained writer, writes no observed
+    /// statement explains, several systems writing one table, a declared write never observed
+    Findings {
         #[arg(long)]
         json: bool,
     },
@@ -2018,6 +2025,21 @@ enum ReviewCommands {
         /// Confirm, noting that orphans exist and must be tolerated
         #[arg(long = "confirm-with-orphans")]
         with_orphans: bool,
+        #[arg(long)]
+        reason: Option<String>,
+        #[arg(long = "as")]
+        by: Option<String>,
+    },
+    /// Database roles seen writing (RFC 0256 §3.3): confirm that a role is accounted for — the
+    /// proposed system, or the one you name in --reason — or reject the proposed link
+    Interaction {
+        /// Role item ids or role names
+        #[arg(required = true)]
+        roles: Vec<String>,
+        #[arg(long, conflicts_with = "reject")]
+        confirm: bool,
+        #[arg(long)]
+        reject: bool,
         #[arg(long)]
         reason: Option<String>,
         #[arg(long = "as")]
@@ -3510,6 +3532,28 @@ fn dispatch_review(
                 Subject::Relationships,
                 &candidates,
                 d,
+                reason,
+                by,
+            )
+        }
+        ReviewCommands::Interaction {
+            roles,
+            confirm,
+            reject,
+            reason,
+            by,
+        } => {
+            let v = match (confirm, reject) {
+                (true, _) => "confirm",
+                (_, true) => "reject",
+                _ => anyhow::bail!("pass --confirm or --reject"),
+            };
+            review::decide(
+                config,
+                cwd,
+                Subject::Interaction,
+                &roles,
+                json!({ "link": v }),
                 reason,
                 by,
             )

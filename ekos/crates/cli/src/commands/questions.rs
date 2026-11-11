@@ -130,6 +130,7 @@ pub fn commit_step(
     let conflicts = super::conflicts::current_ids(config, cwd);
     let references = super::relationships::current_ids(config, cwd);
     let grain = super::profile::grain_ids(config, cwd);
+    let findings = super::interaction::current_finding_ids(config, cwd);
     let scope = out_of_scope(&objects);
     let owners = owners(config);
     let derived = questions::derive(&Origins {
@@ -139,6 +140,7 @@ pub fn commit_step(
         conflicts_current: conflicts.as_ref(),
         references_current: references.as_ref(),
         grain_current: grain.as_ref(),
+        findings_current: findings.as_ref(),
         out_of_scope: &scope,
         owners: &owners,
     });

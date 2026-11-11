@@ -24,6 +24,7 @@ struct Loaded {
     semantics: Option<BTreeSet<String>>,
     identity: Option<BTreeSet<String>>,
     references: Option<BTreeSet<String>>,
+    interaction: Option<BTreeSet<String>>,
     rules: ScopeRules,
 }
 
@@ -36,6 +37,7 @@ impl Loaded {
             semantics: ids_in(&config.ekos_dir(cwd).join("semantics").join("current.json")),
             identity: ids_in(&identity_current_path(config, cwd)),
             references: super::relationships::current_ids(config, cwd),
+            interaction: super::interaction::current_role_ids(config, cwd),
             rules: ScopeRules::from_config(&config.review.scope),
         })
     }
@@ -50,6 +52,7 @@ impl Loaded {
                 semantics_current: self.semantics.as_ref(),
                 identity_current: self.identity.as_ref(),
                 relationships_current: self.references.as_ref(),
+                interaction_current: self.interaction.as_ref(),
                 rules: &self.rules,
             },
         )
@@ -161,6 +164,7 @@ fn cache_key(config: &EkosConfig, cwd: &Path, ledger: &dyn KnowledgeReader) -> R
     let semantics = ids_in(&config.ekos_dir(cwd).join("semantics").join("current.json"));
     let identity = ids_in(&identity_current_path(config, cwd));
     let relationships = super::relationships::current_ids(config, cwd);
+    let interaction = super::interaction::current_role_ids(config, cwd);
     Ok(ekos_common::ContentHash::of_str(&review::canonical(&json!([
         CACHE_VERSION,
         review::REVIEW_VERSION,
@@ -171,6 +175,7 @@ fn cache_key(config: &EkosConfig, cwd: &Path, ledger: &dyn KnowledgeReader) -> R
         semantics,
         identity,
         relationships,
+        interaction,
         serde_json::to_value(&config.review)?,
     ])))
     .0)

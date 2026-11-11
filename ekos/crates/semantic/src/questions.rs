@@ -31,6 +31,9 @@ pub const TYPES: &[&str] = &[
     "is_this_a_reference",
     "what_is_a_row",
     "still_true",
+    // RFC 0256 §3.4: from interaction findings.
+    "who_is_this_writer",
+    "who_owns_this_table",
 ];
 
 /// Who is likely to know: `pattern` (a table, `table.column`, or a `*` glob over either) →
@@ -50,6 +53,8 @@ pub struct Origins<'a> {
     pub conflicts_current: Option<&'a BTreeSet<String>>,
     pub references_current: Option<&'a BTreeSet<String>>,
     pub grain_current: Option<&'a BTreeSet<String>>,
+    /// RFC 0256: the `InteractionFinding`s the latest interaction step derived.
+    pub findings_current: Option<&'a BTreeSet<String>>,
     /// Lowercase table names a person put out of scope (RFC 0213): they produce no questions.
     pub out_of_scope: &'a BTreeSet<String>,
     pub owners: &'a Owners,
@@ -276,6 +281,68 @@ fn logic_vs_data(check: &str, code: &str, m: &Value) -> (&'static str, String, f
     ("logic_vs_data", text, share)
 }
 
+/// RFC 0256 §3.4: an unexplained writer or unattributed writes asks who writes; several writing
+/// systems ask who owns the table. A declared write never observed asks nothing (low confidence).
+fn interaction_draft(o: &KirObject) -> Option<Draft<'_>> {
+    let table = s(o, "table").to_string();
+    let actor = s(o, "actor");
+    let role = actor.strip_prefix("db_role:").unwrap_or(actor);
+    let ops: Vec<&str> = o
+        .properties
+        .get("operations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let detail = o.properties.get("detail").cloned().unwrap_or(Value::Null);
+    let (qtype, text, share) = match s(o, "finding") {
+        "unexplained_writer" => (
+            "who_is_this_writer",
+            format!(
+                "The database role {role} writes {table} ({}), and no code EKOS read does. Who or what is {role}, and should it write here?",
+                ops.join(", ")
+            ),
+            0.9,
+        ),
+        "unattributed_writes" => (
+            "who_is_this_writer",
+            format!(
+                "The counters of {table} show rows written ({}) that no statement in the observed window explains. What writes them?",
+                ops.join(", ")
+            ),
+            0.6,
+        ),
+        "multiple_writing_systems" => (
+            "who_owns_this_table",
+            format!(
+                "Several systems write {table}: {}. Which one owns it?",
+                detail["writers"]
+                    .as_array()
+                    .map(|w| w
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", "))
+                    .unwrap_or_default()
+            ),
+            0.7,
+        ),
+        _ => return None,
+    };
+    Some(Draft {
+        origin: o,
+        qtype,
+        subject: None,
+        table: table.to_lowercase(),
+        column: String::new(),
+        text,
+        context: json!({"finding": s(o, "finding"), "actor": actor, "operations": ops, "detail": detail}),
+        blocking: qtype == "who_is_this_writer" && s(o, "finding") == "unexplained_writer",
+        share,
+    })
+}
+
 fn reference_draft(o: &KirObject) -> Option<Draft<'_>> {
     if s(o, "verdict") != "unclear" {
         return None;
@@ -489,6 +556,9 @@ pub fn derive(o: &Origins<'_>) -> Vec<KirObject> {
             }
             Some("GrainCandidate") if current(o.grain_current, x) => {
                 drafts.extend(grain_draft(x, o.relationships, &keyed));
+            }
+            Some("InteractionFinding") if current(o.findings_current, x) => {
+                drafts.extend(interaction_draft(x));
             }
             _ => {}
         }
@@ -712,6 +782,7 @@ mod tests {
             conflicts_current: None,
             references_current: None,
             grain_current: None,
+            findings_current: None,
             out_of_scope: scope,
             owners,
         }
@@ -876,5 +947,43 @@ mod tests {
             .find(|q| s(q, "question_type") == "what_is_a_row")
             .unwrap();
         assert_eq!(g.properties["addressees"], json!(["rev"]));
+    }
+
+    #[test]
+    fn interaction_findings_ask_who_writes_and_who_owns() {
+        let finding = |kind: &str, actor: &str, detail: Value| {
+            let mut o = KirObject::new(kind, ObjectKind::Custom("InteractionFinding".into()));
+            o.id = kid(&format!("f:{kind}"));
+            for (k, v) in [
+                ("finding", json!(kind)),
+                ("table", json!("customers")),
+                ("actor", json!(actor)),
+                ("operations", json!(["update"])),
+                ("detail", detail),
+            ] {
+                o.properties.insert(k.into(), v);
+            }
+            o
+        };
+        let objects = vec![
+            finding("unexplained_writer", "db_role:etl", json!({})),
+            finding(
+                "multiple_writing_systems",
+                "",
+                json!({"writers": ["component:erp", "etl_job:x.ktr"]}),
+            ),
+            finding("declared_not_observed", "routine:purge", json!({})),
+        ];
+        let scope = BTreeSet::new();
+        let owners = Owners::default();
+        let qs = derive(&origins(&objects, &scope, &owners));
+        let mut types: Vec<&str> = qs.iter().map(|q| s(q, "question_type")).collect();
+        types.sort();
+        assert_eq!(types, ["who_is_this_writer", "who_owns_this_table"]);
+        let writer = qs
+            .iter()
+            .find(|q| s(q, "question_type") == "who_is_this_writer")
+            .unwrap();
+        assert!(s(writer, "text").contains("The database role etl writes customers (update)"));
     }
 }
