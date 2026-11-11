@@ -338,7 +338,7 @@ export function Chat() {
             Tell EKOS something
           </label>
           <label className="linkish">
-            Attach a file
+            {"Attach a file"}
             <input
               type="file"
               aria-label="attach a file"
