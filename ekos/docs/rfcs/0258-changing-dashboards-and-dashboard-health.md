@@ -195,3 +195,109 @@ Phase 3 does not depend on phases 1–2 and can be built first.
    simpler for an analyst; it is a console change, not a new mechanism.
 6. Building a `mart_change` per branch would need a gold schema per branch (RFC 0231 has per-project schemas).
    Left out here for cost; worth revisiting if branches of marts are asked for.
+
+## 9. Implementation log
+
+### 9.1 Phase 3 — dashboard health (2026-11-11, ekos-lakehouse branch `rfc0258`, commit `c8e4d49`)
+
+**What a "dashboard EKOS published" is today (gap to RFC 0248 §2.4).**
+- RFC 0248's YAML bundle was never built; `lakehouse gold ask` only triages.
+- Dashboards are published by the Superset fork's "Ask your data" page (`ekos-superset`,
+  `superset/ekos_ai/service.py::_build`). For each chart it creates a virtual dataset named
+  `ai_<6 hex>_<n>` holding the chart's SQL, a chart and a layout. Nothing is recorded outside Superset,
+  and no marker says EKOS made it.
+
+Phase 3 therefore adds the minimum health needs, read from Superset's REST API:
+
+- **`lakehouse dashboards sync`** (class *external*, GET only):
+  - reads `/api/v1/dashboard/`, `/dashboard/<id>/charts` and `/dashboard/<id>/datasets`;
+  - selects the dashboards whose datasets are all the fork's `ai_…` datasets (`select = "all"` or
+    `ids = [...]` widen the selection);
+  - maps each chart to its dataset (`form_data.datasource`) and parses the dataset's SQL with
+    `sqlparser` for the tables it reads (CTE names excluded; one-part names qualified with the
+    dataset's schema; a physical dataset reads its own table);
+  - records one `LakehouseMetric` fact with `metric: dashboard` per dashboard, under a fixed id, holding
+    the charts and the tables they read. A dashboard gone from Superset gets a new version marked
+    `removed`.
+- **Mapping to marts at read time:**
+  - `gold[_tag].m` becomes mart `gold.m`. The mart's silver tables come from its requirement approval's
+    `needs` (RFC 0215), and each silver table leads to the bronze table of the same name.
+  - `silver_[tag_]<schema>.t` and `bronze_[tag_]<schema>.t` resolve against the tables RFC 0196
+    health knows.
+  - Any other table (for example the source database itself) is "not a lakehouse table".
+- **Bundle still needed:** the RFC 0248 bundle (§3.1: the request, the terms, the mart digests per
+  chart) is still needed for phases 1, 2 and 4. When it exists, `sync` should read it instead of
+  parsing SQL.
+
+**Health**, in `ekos_lakehouse_health::dashboard`, pure and computed on read. Nothing is stored as a
+decision.
+
+| Chart state | Built from |
+|---|---|
+| `failing` | a table on the chain is failing (RFC 0196); or the mart's latest reconciliation for its latest build has a measure that differs (RFC 0228) |
+| `unverified` | a chain table is `unverified` or `schema_pending`; or the mart was built and not reconciled since; or the mart's silver tables are not recorded; or a chain table has no fact; or the chart reads a table outside the lakehouse; or its SQL does not parse |
+| `late` | a chain table is `late` |
+| `drifted` | **not evaluated** (phase 4) |
+| `needs review` | **not evaluated**: no bundle records a chart's terms; approval validity needs the pipeline repository, not the ledger |
+| `trusted` | none of the above |
+
+- **Precedence:** a chart takes the worst condition that holds. Every finding is listed, worst first,
+  each naming its table and layer. A dashboard is the worst of its charts.
+- **Data as of:** the earliest last successful load among the bronze tables on the chain. It is unknown
+  if any of them has never loaded.
+- **Stand-in for chart reconciliation:** the chart check of RFC 0248 §2.4 does not exist. On a chart
+  that reads a mart, the mart's own reconciliation with silver (RFC 0228 §2.5) stands in for it.
+- Every chart lists what was not evaluated (`not_evaluated`), so "trusted" is read for what it is.
+
+**Surfaces.**
+- **`lakehouse dashboards status [--json]`** (class *read*, ledger only), plus a "Dashboards" panel and
+  a "Read dashboards from Superset" action on the Lakehouse console page.
+- **`lakehouse dashboards publish-health [--dry-run]`** (class *external*):
+  - off unless `superset-header = true` in `[extensions.lakehouse.dashboards]`;
+  - adds or replaces a first-row markdown header (`ROW-ekos-health`): the state, data as of, the first
+    three findings, a link to `console-url`, and the sentence saying it is the state of the pipeline
+    and not a business sign-off;
+  - sets `certified_by = "EKOS (pipeline health)"` when trusted, and removes only EKOS's own mark
+    otherwise. **Decision, a narrowing of §3.5:** a certification by a person is never removed by
+    EKOS; the command reports it.
+  - A dashboard with no layout of its own gets no header (a layout holding only the header would hide
+    its charts); only the certification is written.
+  - Writes send Superset's CSRF token with its session cookie. Superset 4.1.1 accepts `certified_by`
+    and `certification_details` on `PUT /api/v1/dashboard/<id>` (`DashboardPutSchema`).
+  - Credentials are named, never stored: `superset-token-env`, or `superset-user` +
+    `superset-password-env`.
+- **`lakehouse alert`:** posts when a dashboard leaves `trusted`, or is first seen in another state,
+  once per transition. Previous states are kept in `.lakehouse/dashboard-alerts.json`.
+- **MCP `ekos_dashboard_health`:** read-only, in `mcp_tool_is_scoped`.
+  - Lakehouse facts carry no source, so a source-restricted reader sees none.
+  - Each record keeps `chain_known`, the chain tables that had facts when it was recorded. If one is
+    missing on a later read, the reader's scope hid it, and the dashboard is not shown.
+
+**Tests** (the RFC §5 rules that apply to phase 3):
+- **Precedence** (late + failing → failing, both facts listed):
+  `health::dashboard::tests::late_and_failing_is_failing_with_both_facts_listed`.
+- **Data as of over two sources:** `trusted_with_data_as_of_the_earliest_of_two_sources`.
+- **Restricted reader:** pure (`a_dashboard_whose_chain_leaves_the_readers_scope_is_not_shown`), and
+  through a real `ScopedStore` and the MCP tool, with a source-restricted scope and with a scope that
+  allows only the dashboard's own fact (`tests/dashboards.rs::a_restricted_reader_sees_no_dashboard`).
+- **Planted failed load → failing with the table named, then recovery → trusted:** a pure test, and end
+  to end against a local Superset stub
+  (`a_failed_load_turns_the_dashboard_failing_in_superset_and_recovery_trusted`):
+  - sync → trusted → certified with a header;
+  - a failed bronze load of `public.orders` → `failing`, the alert fires once, the header names
+    `public.orders` and the certification is removed;
+  - recovery → `trusted` and certified again.
+- **Also covered:** mart divergence → failing; a build not reconciled since → unverified; reference
+  resolution (catalog, layer tag, Oracle upper case); a dataset's SQL read without CTE names;
+  fork-dataset selection; a header added once and then replaced; a person's certification left in
+  place.
+
+**Not done in phase 3.**
+- The `lakehouse/health` Dagster asset (generated in `bronze`) does not yet call `publish-health` after
+  a run. RFC §4's "within one run" needs that one line in the generated asset.
+- No real Superset was called: the only local Superset was someone else's container, and Azure was not
+  touched.
+- Console: only the extension panel. The request feed and review screen of RFC 0248 §2.5 do not exist.
+- Open question 2 stands: the header is editable in Superset, and phase 4's drift check must ignore
+  `ROW-ekos-health` / `MARKDOWN-ekos-health`.
+- Phases 1, 2, 4 and 5 wait on RFC 0248's bundle and publishing.

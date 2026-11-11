@@ -563,7 +563,7 @@ fn unattributed(window: &Window, m: &Matrix, out: &mut Vec<Finding>) {
         let observed: BTreeSet<Op> = m
             .row(table)
             .into_iter()
-            .flat_map(|row| row.values())
+            .flat_map(BTreeMap::values)
             .flat_map(|c| observed_writes(c).map(|(op, _)| op))
             .collect();
         let missing: BTreeMap<Op, u64> = [(Op::Insert, ins), (Op::Update, upd), (Op::Delete, del)]
