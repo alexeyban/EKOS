@@ -73,7 +73,7 @@ fn a_registered_dialect_is_reached_through_every_function() {
         "{q}"
     );
     assert!(
-        q.ends_with("FROM t) GROUP BY bucket ORDER BY bucket"),
+        q.ends_with("FROM t) b GROUP BY bucket ORDER BY bucket"),
         "{q}"
     );
     let sub = sub_bucket_checksum_query(d, "t", "pk", &["a".into()], 16, 3, 256);

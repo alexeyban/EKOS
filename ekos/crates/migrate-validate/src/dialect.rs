@@ -157,7 +157,7 @@ pub trait CanonDialect: Send + Sync {
 }
 
 /// The per-bucket query of a registered dialect: the bucket computed in a subquery, which every
-/// engine can group by.
+/// engine can group by. The subquery's alias has no `AS`, the one spelling every engine takes.
 fn registered_buckets(
     c: &dyn CanonDialect,
     bucket: &str,
@@ -167,7 +167,7 @@ fn registered_buckets(
 ) -> String {
     format!(
         "SELECT bucket, COUNT(*) AS row_count, {} AS hash_sum FROM \
-         (SELECT {bucket} AS bucket, {} AS h FROM {table}{filter}) \
+         (SELECT {bucket} AS bucket, {} AS h FROM {table}{filter}) b \
          GROUP BY bucket ORDER BY bucket",
         c.exact_sum("h"),
         c.prefix60_expr(row)
