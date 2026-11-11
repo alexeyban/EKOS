@@ -104,6 +104,18 @@ def inbox_purge_argv(item: str, by: str) -> list[str]:
 # ── testimony ────────────────────────────────────────────────────────────────
 
 
+def _testimony_text(text: str) -> str:
+    """The person's words, trimmed and checked."""
+    text = (text or "").strip()
+    if not text:
+        raise ReviewError("a testimony needs the person's text")
+    if len(text) > _MAX_TEXT:
+        raise ReviewError(f"the text is longer than {_MAX_TEXT} characters")
+    if "\x00" in text:
+        raise ReviewError("the text contains a NUL byte")
+    return text
+
+
 def testimony_add_argv(
     text: str,
     by: str,
@@ -119,13 +131,7 @@ def testimony_add_argv(
 ) -> list[str]:
     """`ekos testimony add --text=… --as=<by> … --json`. `text` is the person's own words (or
     their edit of them): never a model's."""
-    text = (text or "").strip()
-    if not text:
-        raise ReviewError("a testimony needs the person's text")
-    if len(text) > _MAX_TEXT:
-        raise ReviewError(f"the text is longer than {_MAX_TEXT} characters")
-    if "\x00" in text:
-        raise ReviewError("the text contains a NUL byte")
+    text = _testimony_text(text)
     about = about or []
     if len(about) > _MAX_ABOUT:
         raise ReviewError(f"at most {_MAX_ABOUT} subjects")

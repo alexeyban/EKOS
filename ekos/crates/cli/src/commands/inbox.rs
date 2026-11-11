@@ -80,7 +80,7 @@ fn safe_name(name: &str) -> String {
 fn extension(name: &str) -> String {
     Path::new(name)
         .extension()
-        .and_then(|e| e.to_str())
+        .and_then(std::ffi::OsStr::to_str)
         .unwrap_or("")
         .to_ascii_lowercase()
 }
@@ -181,7 +181,7 @@ fn items(config: &EkosConfig, cwd: &Path) -> Vec<(String, PathBuf)> {
 fn find(config: &EkosConfig, cwd: &Path, id: &str) -> Option<PathBuf> {
     items(config, cwd).into_iter().map(|(_, p)| p).find(|p| {
         p.file_name()
-            .and_then(|n| n.to_str())
+            .and_then(std::ffi::OsStr::to_str)
             .is_some_and(|n| n.starts_with(id))
     })
 }
@@ -297,7 +297,7 @@ pub async fn add(
             .with_context(|| format!("reading {what}"))?;
         let name = p
             .file_name()
-            .and_then(|n| n.to_str())
+            .and_then(std::ffi::OsStr::to_str)
             .unwrap_or("file")
             .to_string();
         (name, bytes, None)
@@ -386,7 +386,7 @@ pub fn accept(config: &EkosConfig, cwd: &Path, id: &str, by: &str) -> Result<()>
     write_meta(&dir, &meta)?;
     let month = dir
         .parent()
-        .and_then(|p| p.file_name())
+        .and_then(std::path::Path::file_name)
         .ok_or_else(|| anyhow!("bad inbox path"))?;
     let target = root(config, cwd)
         .join("accepted")

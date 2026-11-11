@@ -63,6 +63,36 @@ export function itemsOf(messages: Stored[]): Item[] {
 }
 
 /** An assistant message's tool calls, or its answer when it made none. */
+function toolMark(ok: boolean | undefined): string {
+  if (ok === undefined) return "…";
+  return ok ? "✓" : "✗";
+}
+
+/** One line of the conversation. */
+function ChatItem({ item, workspace, reviewer }: { item: Item; workspace: string; reviewer: string | null }) {
+  switch (item.kind) {
+    case "user":
+      return <div className="chat-user">{item.text}</div>;
+    case "answer":
+      return <div className="chat-answer">{item.text}</div>;
+    case "tool":
+      return (
+        <details className="chat-tool">
+          <summary>
+            {toolMark(item.ok)} <code>{item.name}</code> <code className="muted">{JSON.stringify(item.args)}</code>
+          </summary>
+          {item.result && <pre>{item.result}</pre>}
+        </details>
+      );
+    case "card":
+      return <TellCard workspace={workspace} card={item.card} reviewer={reviewer} />;
+    case "note":
+      return <p className="muted">{item.text}</p>;
+    default:
+      return <p className="err">{item.text}</p>;
+  }
+}
+
 function assistantItems(m: Extract<Stored, { role: "assistant" }>): Item[] {
   const calls = m.tool_calls ?? [];
   const items: Item[] = calls.map((c) => ({ kind: "tool", id: c.id, name: c.name, args: c.arguments }));
@@ -294,42 +324,18 @@ export function Chat() {
         )}
         <div className="chat-items">
           {items.length === 0 && <p className="muted">Ask about this project: what a table holds, what depends on a module, where a term is defined.</p>}
-          {items.map((it, i) =>
-            it.kind === "user" ? (
-              <div key={i} className="chat-user">
-                {it.text}
-              </div>
-            ) : it.kind === "answer" ? (
-              <div key={i} className="chat-answer">
-                {it.text}
-              </div>
-            ) : it.kind === "tool" ? (
-              <details key={i} className="chat-tool">
-                <summary>
-                  {it.ok === undefined ? "…" : it.ok ? "✓" : "✗"} <code>{it.name}</code> <code className="muted">{JSON.stringify(it.args)}</code>
-                </summary>
-                {it.result && <pre>{it.result}</pre>}
-              </details>
-            ) : it.kind === "card" ? (
-              <TellCard key={i} workspace={id} card={it.card} reviewer={reviewer} />
-            ) : it.kind === "note" ? (
-              <p key={i} className="muted">
-                {it.text}
-              </p>
-            ) : (
-              <p key={i} className="err">
-                {it.text}
-              </p>
-            ),
-          )}
+          {items.map((it, i) => (
+            <ChatItem key={i} item={it} workspace={id} reviewer={reviewer} />
+          ))}
         </div>
         <div className="btnrow chat-tell">
           <label>
-            <input type="radio" name="chat-mode" checked={mode === "ask"} onChange={() => setMode("ask")} /> Ask
+            <input type="radio" name="chat-mode" checked={mode === "ask"} onChange={() => setMode("ask")} />{" "}
+            Ask
           </label>
           <label>
-            <input type="radio" name="chat-mode" checked={mode === "tell"} onChange={() => setMode("tell")} /> Tell EKOS
-            something
+            <input type="radio" name="chat-mode" checked={mode === "tell"} onChange={() => setMode("tell")} />{" "}
+            Tell EKOS something
           </label>
           <label className="linkish">
             Attach a file

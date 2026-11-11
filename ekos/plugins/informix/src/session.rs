@@ -118,7 +118,10 @@ pub(crate) fn reported(length: usize) -> Reported {
 
 #[cfg(feature = "informix")]
 mod driver {
-    use super::*;
+    use super::{
+        DELIMIDENT, Guards, ISOLATIONS, InformixConnection, LOCK_WAIT_SECS, QUERY_TIMEOUT_SECS,
+        Reported, Rows, password, reported, scrub, session_lost,
+    };
     use odbc_api::buffers::{ColumnarBuffer, Indicator, TextColumn, TextRowSet};
     use odbc_api::{Connection, ConnectionOptions, Cursor, ResultSetMetadata};
 
@@ -324,7 +327,7 @@ mod driver {
 
 #[cfg(not(feature = "informix"))]
 mod driver {
-    use super::*;
+    use super::{Guards, InformixConnection, NOT_BUILT, Rows, password};
 
     /// The session of a build without the driver binding: it never connects.
     pub struct Session {

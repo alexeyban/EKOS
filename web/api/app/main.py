@@ -170,6 +170,19 @@ def _seed_registry_if_empty() -> None:
             log.warning("seed workspace %r skipped: %s has no ekos.toml", seed.id, root)
 
 
+def _start_channels(app: FastAPI, settings) -> None:
+    """RFC 0253: the channels service and its digest job, only when a channel is configured."""
+    app.state.channels = channel_service.build(settings, app.state.supervisor)
+    if app.state.channels is None:
+        return
+    app.state.channels.start()
+    trigger = channel_service.digest_trigger(settings.channels_digest_cron)
+    if trigger is not None:
+        app.state.scheduler.add_platform_job(
+            "ekos-questions-digest", app.state.channels.digest, trigger
+        )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     settings = get_settings()
@@ -216,14 +229,7 @@ async def _lifespan(app: FastAPI):
     )
     holder = asyncio.create_task(lease.hold(lifecycle.shut_down)) if lease is not None else None
     # RFC 0253: the channels service, only when a channel is configured.
-    app.state.channels = channel_service.build(settings, app.state.supervisor)
-    if app.state.channels is not None:
-        app.state.channels.start()
-        trigger = channel_service.digest_trigger(settings.channels_digest_cron)
-        if trigger is not None:
-            app.state.scheduler.add_platform_job(
-                "ekos-questions-digest", app.state.channels.digest, trigger
-            )
+    _start_channels(app, settings)
     if settings.backup_url:
         job = cloud.BackupJob(settings.ekos_bin, settings.backup_url)
         app.state.backup = job

@@ -60,9 +60,10 @@ def _hedges(text: str) -> bool:
 def _json_body(reply: str) -> Any:
     """The JSON object in a reply: the whole text, a fenced block, or the outermost braces."""
     text = reply.strip()
-    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, re.S)
-    if fenced:
-        text = fenced.group(1).strip()
+    opened = text.find("```")
+    closed = text.find("```", opened + 3) if opened >= 0 else -1
+    if closed > opened:
+        text = text[opened + 3 : closed].removeprefix("json").strip()
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end <= start:
         return None

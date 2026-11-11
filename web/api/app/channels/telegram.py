@@ -75,25 +75,30 @@ def _strip_mention(text: str, bot_username: str) -> str:
     return text.strip()
 
 
+def _parse_click(cb: dict) -> ButtonClick | None:
+    """A button press (`callback_query`) on one of the bot's messages."""
+    sender = cb.get("from") or {}
+    msg = cb.get("message") or {}
+    data = str(cb.get("data") or "")
+    if sender.get("is_bot") or not data.startswith("b:"):
+        return None
+    return ButtonClick(
+        channel="telegram",
+        account=str(sender.get("id")),
+        conversation=str((msg.get("chat") or {}).get("id", "")),
+        ref=data[2:],
+        message_ref=str(msg.get("message_id", "")),
+        extra={"callback_query_id": str(cb.get("id", ""))},
+    )
+
+
 def parse_update(
     update: dict, *, bot_username: str = "", bot_id: int | None = None
 ) -> ChannelMessage | ButtonClick | None:
     """One `getUpdates` result → what the core handles, or `None` (not for the bot, or a bot)."""
     cb = update.get("callback_query")
     if isinstance(cb, dict):
-        sender = cb.get("from") or {}
-        msg = cb.get("message") or {}
-        data = str(cb.get("data") or "")
-        if sender.get("is_bot") or not data.startswith("b:"):
-            return None
-        return ButtonClick(
-            channel="telegram",
-            account=str(sender.get("id")),
-            conversation=str((msg.get("chat") or {}).get("id", "")),
-            ref=data[2:],
-            message_ref=str(msg.get("message_id", "")),
-            extra={"callback_query_id": str(cb.get("id", ""))},
-        )
+        return _parse_click(cb)
     message = update.get("message")
     if not isinstance(message, dict):
         return None
@@ -202,7 +207,8 @@ class TelegramAdapter:
             raise TelegramError(f"download: {r.status_code}")
         return r.content
 
-    async def members(self, msg: ChannelMessage) -> list[str] | None:
+    # The adapter protocol awaits `members`; this adapter has nothing to await.
+    async def members(self, msg: ChannelMessage) -> list[str] | None:  # NOSONAR
         return None  # the Bot API cannot list a group's members
 
     async def run(self, handle, stop: asyncio.Event) -> None:

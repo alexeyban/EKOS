@@ -39,25 +39,24 @@ class TeamsAuthError(TeamsError):
     """The request is not the Bot Framework's (→ 401)."""
 
 
+def _attachment(a: object) -> Attachment | None:
+    """One Teams attachment as a file to fetch, or `None` (inline HTML, no file)."""
+    if not isinstance(a, dict):
+        return None
+    name = str(a.get("name") or "file")
+    if a.get("contentType") == _FILE_INFO:
+        url = str((a.get("content") or {}).get("downloadUrl") or "")
+        return Attachment(name=name, fetch=url) if url else None
+    if a.get("contentUrl") and not str(a.get("contentType", "")).startswith("text/html"):
+        return Attachment(
+            name=name, media_type=str(a.get("contentType") or ""), fetch=str(a["contentUrl"])
+        )
+    return None
+
+
 def _attachments(activity: dict) -> tuple[Attachment, ...]:
-    out = []
-    for a in activity.get("attachments") or []:
-        if not isinstance(a, dict):
-            continue
-        if a.get("contentType") == _FILE_INFO:
-            content = a.get("content") or {}
-            url = str(content.get("downloadUrl") or "")
-            if url:
-                out.append(Attachment(name=str(a.get("name") or "file"), fetch=url))
-        elif a.get("contentUrl") and not str(a.get("contentType", "")).startswith("text/html"):
-            out.append(
-                Attachment(
-                    name=str(a.get("name") or "file"),
-                    media_type=str(a.get("contentType") or ""),
-                    fetch=str(a["contentUrl"]),
-                )
-            )
-    return tuple(out)
+    found = (_attachment(a) for a in activity.get("attachments") or [])
+    return tuple(a for a in found if a is not None)
 
 
 def _account(activity: dict) -> str:
@@ -78,23 +77,27 @@ def _routing(activity: dict) -> dict[str, str]:
     }
 
 
+def _parse_click(activity: dict) -> ButtonClick | None:
+    """An `Action.Execute` on one of the bot's cards."""
+    action = (activity.get("value") or {}).get("action") or {}
+    ref = str((action.get("data") or {}).get("ekos") or "")
+    if action.get("type") != "Action.Execute" or not ref:
+        return None
+    return ButtonClick(
+        channel="teams",
+        account=_account(activity),
+        conversation=str((activity.get("conversation") or {}).get("id") or ""),
+        ref=ref,
+        message_ref=str(activity.get("replyToId") or ""),
+        extra=_routing(activity),
+    )
+
+
 def parse_activity(activity: dict) -> ChannelMessage | ButtonClick | None:
     kind = activity.get("type")
     conv = activity.get("conversation") or {}
     if kind == "invoke" and activity.get("name") == "adaptiveCard/action":
-        action = (activity.get("value") or {}).get("action") or {}
-        data = action.get("data") or {}
-        ref = str(data.get("ekos") or "")
-        if action.get("type") != "Action.Execute" or not ref:
-            return None
-        return ButtonClick(
-            channel="teams",
-            account=_account(activity),
-            conversation=str(conv.get("id") or ""),
-            ref=ref,
-            message_ref=str(activity.get("replyToId") or ""),
-            extra=_routing(activity),
-        )
+        return _parse_click(activity)
     if kind != "message":
         return None
     routing = _routing(activity)
