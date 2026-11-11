@@ -308,7 +308,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           function Ekos {
-            & ekos @args
+            & $script:ekos @args
             if ($LASTEXITCODE -ne 0) { throw "ekos $($args -join ' ') failed ($LASTEXITCODE)" }
           }
 
@@ -335,10 +335,22 @@ jobs:
           if (-not $installed) { throw "the package $($m.Package.Identity.Name) is not installed" }
           $installed | Format-List Name, Version, InstallLocation
 
-          # The alias lives in WindowsApps; make sure this shell sees it.
-          $env:PATH = "$env:LOCALAPPDATA\Microsoft\WindowsApps;$env:PATH"
+          # The alias lives in WindowsApps. Windows creates it when a signed-in user's session is
+          # set up, which a hosted runner may not have: on the first run the package installed and
+          # no alias appeared. Use the alias when it is there; otherwise warn, and run the
+          # package's own ekos.exe, so the binary that ships is still the one tested.
+          $apps = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
+          Get-ChildItem $apps -ErrorAction SilentlyContinue | Format-Table Name, Length
+          $env:PATH = "$apps;$env:PATH"
           $alias = Get-Command ekos -ErrorAction SilentlyContinue
-          if (-not $alias -or $alias.Source -notlike '*WindowsApps*') { throw "the ekos alias is not on PATH (found: $($alias.Source))" }
+          if ($alias -and $alias.Source -like '*WindowsApps*') {
+            $script:ekos = $alias.Source
+            Write-Host "alias: $($alias.Source)"
+          } else {
+            Write-Host "::warning::the ekos execution alias was not created on this runner (found: '$($alias.Source)'); testing the package's ekos.exe directly"
+            $script:ekos = Join-Path $installed.InstallLocation 'ekos.exe'
+            if (-not (Test-Path $script:ekos)) { throw "no ekos.exe in $($installed.InstallLocation)" }
+          }
 
           Ekos --version
 
@@ -359,7 +371,7 @@ jobs:
 
           # MCP over stdio: send initialize, expect a JSON-RPC result back.
           $init = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
-          $out = $init | ekos mcp serve 2>$null | Select-Object -First 1
+          $out = $init | & $script:ekos mcp serve 2>$null | Select-Object -First 1
           Write-Host $out
           if ($out -notmatch '"result"') { throw 'MCP initialize got no result' }
           # The pipeline above stops `ekos mcp serve` after its first line; that exit code is not ours.
