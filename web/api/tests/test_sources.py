@@ -169,7 +169,9 @@ def test_argv_builders_take_names_only() -> None:
     pg = database_add_argv("wh", "h/shop", "ro", "V", ["public"], "p2", None, "postgres")
     assert "--profile=p2" in pg
     # RFC 0256: iDempiere's dictionary is read on PostgreSQL as on Oracle.
-    idem = database_add_argv("idem", "h/idempiere", "ro", "V", ["adempiere"], "p0", "idempiere", "postgres")
+    idem = database_add_argv(
+        "idem", "h/idempiere", "ro", "V", ["adempiere"], "p0", "idempiere", "postgres"
+    )
     assert "--dictionary=idempiere" in idem
     for kind, connect, profile, dictionary in (
         ("postgres", "https://h:8443", "p0", None),

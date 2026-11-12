@@ -189,7 +189,11 @@ def test_whoever_a_command_names_as_acting_is_the_person_signed_in(client: TestC
 
     entry = next(e for e in CATALOGUE if e["path"] == ["lakehouse", "dashboards", "change"])
     argv = catalogue.build_argv(
-        entry, {"dashboard": "sales", "by": "the-author"}, reviewer="someone", base=Path("/"), allowed=[]
+        entry,
+        {"dashboard": "sales", "by": "the-author"},
+        reviewer="someone",
+        base=Path("/"),
+        allowed=[],
     )
     assert "--as=the-author" not in argv
     assert "--as=someone" in argv
