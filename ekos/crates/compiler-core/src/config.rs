@@ -1393,7 +1393,8 @@ pub struct DatabaseConfig {
     #[serde(default)]
     pub profile: DatabaseProfile,
     /// RFC 0212: also read the application dictionary's table flags (`idempiere`: whether users
-    /// may delete a table's rows and whether deletes are change-logged). Off by default.
+    /// may delete a table's rows and whether deletes are change-logged) and, RFC 0256, its
+    /// processes (`AD_Process`, `AD_Scheduler`). Oracle and PostgreSQL. Off by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dictionary: Option<DatabaseDictionary>,
 }
@@ -1609,6 +1610,43 @@ impl EkosConfig {
         Ok(config)
     }
 
+    /// Keys in `content` that no setting reads — a typo, or a key of another version — as dotted
+    /// paths (`recover.sql.dialect-rules.0.pattern`). A section that denies unknown fields already
+    /// fails to parse on one; this finds them in the sections that accept and ignore them. Empty
+    /// when the text does not parse (the parse error says more).
+    pub fn unknown_keys(content: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let de = toml::Deserializer::new(content);
+        let parsed: Result<Self, _> =
+            serde_ignored::deserialize(de, |path| out.push(path.to_string()));
+        if parsed.is_err() {
+            return Vec::new();
+        }
+        out
+    }
+
+    /// The config at `path` for a command: the file's settings, or the defaults when there is no
+    /// file. A file that does not parse is an error naming it — never silently the defaults,
+    /// which ran a whole pipeline without its databases or dialect rules. Keys nothing reads are
+    /// returned beside it, for the caller to say.
+    pub fn load(path: &Path) -> anyhow::Result<(Self, Vec<String>)> {
+        if !path.exists() {
+            return Ok((Self::default(), Vec::new()));
+        }
+        let config = Self::from_file(path).map_err(|e| {
+            anyhow::anyhow!(
+                "{} is not valid: {e}\n(check it with `ekos config validate`)",
+                path.display()
+            )
+        })?;
+        let unknown = std::fs::read_to_string(path)
+            .map(|c| Self::unknown_keys(&c))
+            .unwrap_or_default();
+        Ok((config, unknown))
+    }
+
+    /// The config at `path`, or the defaults when it is missing **or invalid** (logged). For
+    /// tools that must start whatever the file says; a command uses [`EkosConfig::load`].
     pub fn from_file_or_default(path: &Path) -> Self {
         if path.exists() {
             match Self::from_file(path) {
@@ -1674,11 +1712,15 @@ impl EkosConfig {
             if d.owners.is_empty() {
                 anyhow::bail!("[[databases]] {:?} lists no owners to read", d.name);
             }
-            // RFC 0235: the application dictionary is read for Oracle only; refused rather than
-            // silently ignored for the other kinds. Profiles are read for every kind (RFC 0252).
-            if d.kind != DatabaseKind::Oracle && d.dictionary.is_some() {
+            // RFC 0235 / 0256: the application dictionary is read on Oracle and PostgreSQL (where
+            // iDempiere runs); refused rather than silently ignored for the other kinds. Profiles
+            // are read for every kind (RFC 0252).
+            if !matches!(d.kind, DatabaseKind::Oracle | DatabaseKind::Postgres)
+                && d.dictionary.is_some()
+            {
                 anyhow::bail!(
-                    "[[databases]] {:?}: an application dictionary is read for oracle databases only",
+                    "[[databases]] {:?}: an application dictionary is read for oracle and postgres \
+                     databases only",
                     d.name
                 );
             }
@@ -1765,6 +1807,47 @@ impl EkosConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keys_nothing_reads_are_found_in_sections_that_ignore_them() {
+        let text = r#"
+[workspace]
+root = "."
+colour = "blue"
+
+[[recover.sql.dialect-rules]]
+path-glob = "sql/**"
+pattern = "sql/**"
+dialect = "postgres"
+"#;
+        let mut keys = EkosConfig::unknown_keys(text);
+        keys.sort();
+        assert_eq!(
+            keys,
+            ["recover.sql.dialect-rules.0.pattern", "workspace.colour"]
+        );
+        assert!(EkosConfig::unknown_keys("[workspace]\nroot = \".\"\n").is_empty());
+        // Extension tables are free-form: never reported.
+        assert!(EkosConfig::unknown_keys("[extensions.lakehouse]\nanything = 1\n").is_empty());
+    }
+
+    #[test]
+    fn an_invalid_file_is_an_error_naming_it_never_the_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ekos.toml");
+        std::fs::write(
+            &path,
+            "[[databases]]\nname = \"shop\"\nkind = \"postgres\"\nconnect = \"h:1/d\"\n",
+        )
+        .unwrap();
+        let err = EkosConfig::load(&path).unwrap_err().to_string();
+        assert!(
+            err.contains("ekos.toml is not valid") && err.contains("ekos config validate"),
+            "{err}"
+        );
+        let missing = dir.path().join("none.toml");
+        assert!(EkosConfig::load(&missing).unwrap().0.databases.is_empty());
+    }
 
     #[test]
     fn parse_minimal_config() {
@@ -2030,8 +2113,9 @@ path = "/tmp/ekos-containers/b"
         );
     }
 
-    /// RFC 0235: PostgreSQL and ClickHouse databases parse; the dictionary is Oracle-only and
-    /// refused for them. Profiles are read for every kind (RFC 0252).
+    /// RFC 0235: PostgreSQL and ClickHouse databases parse; the dictionary is read on Oracle and
+    /// (RFC 0256) PostgreSQL, where iDempiere runs, and refused for the others. Profiles are read
+    /// for every kind (RFC 0252).
     #[test]
     fn postgres_and_clickhouse_databases_parse_without_oracle_only_settings() {
         for (kind, connect) in [
@@ -2049,8 +2133,19 @@ path = "/tmp/ekos-containers/b"
             assert_eq!(cfg.databases[0].kind.as_str(), kind);
             let c: EkosConfig =
                 toml::from_str(&format!("{db}dictionary = \"idempiere\"\n")).unwrap();
-            let err = c.check_sources().unwrap_err().to_string();
-            assert!(err.contains("oracle databases only"), "{kind}: {err}");
+            if kind == "postgres" {
+                c.check_sources().unwrap();
+                assert_eq!(
+                    c.databases[0].dictionary,
+                    Some(DatabaseDictionary::Idempiere)
+                );
+            } else {
+                let err = c.check_sources().unwrap_err().to_string();
+                assert!(
+                    err.contains("oracle and postgres databases only"),
+                    "{kind}: {err}"
+                );
+            }
             for tier in ["p1", "p2"] {
                 let c: EkosConfig = toml::from_str(&format!("{db}profile = \"{tier}\"\n")).unwrap();
                 c.check_sources().unwrap();

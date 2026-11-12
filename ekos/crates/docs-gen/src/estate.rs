@@ -2504,6 +2504,43 @@ mod tests {
         assert!(!page.contains("## Open conflicts"), "{page}");
     }
 
+    /// RFC 0252 §3.2(b): "new" in the Codes section — a value the data held before the code named
+    /// it, and values no code names that all appeared after the code last changed.
+    #[test]
+    fn the_passport_marks_new_codes() {
+        let (mut o, r, p) = passport_fixture();
+        for x in &mut o {
+            if x.name == "C_ORDER.DOCSTATUS = CO" {
+                x.properties.insert(
+                    "code_history".into(),
+                    json!({"introduced": "2021-04-02T00:00:00+00:00", "order": "data_before_code",
+                           "data_first_seen": "2019-01", "path": "X_C_Order.java", "line": 12}),
+                );
+            }
+            if x.name == "C_ORDER.DOCSTATUS: data holds values no code names" {
+                x.properties.insert("new".into(), json!(true));
+                x.properties.insert(
+                    "code_last_changed".into(),
+                    json!({"date": "2019-11-30T00:00:00+00:00", "sha": "abc"}),
+                );
+            }
+        }
+        let pages = render_passport(&o, &r, &p);
+        let page = body(&pages, "data-model/c/c_order.md");
+        assert!(
+            page.contains(
+                "not null<br>new: in the data before the code named it (code since 2021-04) |"
+            ),
+            "{page}"
+        );
+        assert!(
+            page.contains(
+                "| unexplained<br>new: all first seen after the code last changed (2019-11) |"
+            ),
+            "{page}"
+        );
+    }
+
     #[test]
     fn the_passport_leaves_out_stale_withdrawn_obsolete_and_values() {
         let (o, r, p) = passport_fixture();

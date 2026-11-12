@@ -10,7 +10,10 @@
 //!
 //! There is no Informix grammar in `sqlparser`, so the guard parses with the generic dialect: a
 //! query only Informix reads (`SELECT FIRST 10 …`, `MATCHES`, outer joins written `OUTER t`) is
-//! refused as "not sent" rather than sent unchecked.
+//! refused as "not sent" rather than sent unchecked. One Informix form is read: a table of the
+//! server's `sysmaster` database written `sysmaster:table` (RFC 0252 usage evidence reads
+//! `sysmaster:syssqltrace` and `sysmaster:sysptprof`) — the guard parses it as `sysmaster.table`,
+//! which has the same structure, and the original text is sent.
 
 use crate::InformixConnection;
 use crate::session::Session;
@@ -57,8 +60,30 @@ impl InformixProbe {
 /// session stops fetching after `max_rows + 1` rows instead, because Informix refuses an
 /// `ORDER BY` inside a derived table and generated queries usually end in one.
 pub fn probe_text(sql: &str) -> Result<String, String> {
-    single_select(sql, &GenericDialect {})?;
+    single_select(&guard_text(sql), &GenericDialect {})?;
     Ok(sql.trim().trim_end_matches(';').to_string())
+}
+
+/// What the guard parses: `sysmaster:t` → `sysmaster.t` (a qualifier the generic grammar reads).
+/// Nothing else changes, so a statement that is not one `SELECT` stays one that is not.
+fn guard_text(sql: &str) -> String {
+    const DB: &str = "sysmaster:";
+    let lower = sql.to_ascii_lowercase();
+    let mut out = String::with_capacity(sql.len());
+    let mut i = 0;
+    while let Some(at) = lower[i..].find(DB) {
+        let start = i + at;
+        let end = start + DB.len();
+        let next_is_name = sql[end..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '"');
+        out.push_str(&sql[i..end - 1]);
+        out.push(if next_is_name { '.' } else { ':' });
+        i = end;
+    }
+    out.push_str(&sql[i..]);
+    out
 }
 
 impl Probe for InformixProbe {
@@ -95,6 +120,31 @@ mod tests {
         assert_eq!(
             probe_text("SELECT id FROM \"sales\".orders ORDER BY id;").unwrap(),
             "SELECT id FROM \"sales\".orders ORDER BY id"
+        );
+        // Usage evidence reads the server's sysmaster tables; a write there is still refused.
+        let t = vec![ekos_observation_sdk::usage::TableName {
+            owner: "sales".into(),
+            table: "orders".into(),
+        }];
+        for src in [
+            ekos_observation_sdk::usage::UsageSource::SqlTrace,
+            ekos_observation_sdk::usage::UsageSource::PartitionProfile,
+        ] {
+            let sql = ekos_observation_sdk::usage::usage_sql(src, &t).unwrap();
+            assert_eq!(probe_text(&sql).unwrap(), sql);
+        }
+        for write in [
+            "DELETE FROM sysmaster:syssqltrace",
+            "SELECT 1 FROM sysmaster:sysptprof; DROP TABLE t",
+        ] {
+            assert!(
+                probe_text(write).unwrap_err().starts_with("not sent"),
+                "{write}"
+            );
+        }
+        assert_eq!(
+            guard_text("a sysmaster:x, SYSMASTER:\"y\" sysmaster:"),
+            "a sysmaster.x, SYSMASTER.\"y\" sysmaster:"
         );
         // The profile's own aggregates pass the guard.
         assert!(

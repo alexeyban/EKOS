@@ -612,13 +612,22 @@ mod tests {
         );
         assert_eq!(c.databases[1].kind, DatabaseKind::Clickhouse);
         assert_eq!(infos(&c)[1].kind, "clickhouse");
-        // RFC 0252: every kind is profiled; the dictionary stays Oracle-only.
+        // RFC 0252: every kind is profiled. RFC 0256: iDempiere's dictionary is read on
+        // PostgreSQL as on Oracle, and refused for the other kinds.
         let mut p2 = args("pg2", "postgres", "h/db");
         p2.profile = Some("p2".into());
         add(&p, p2).unwrap();
         let c: EkosConfig = toml::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
         assert_eq!(c.databases[2].profile, DatabaseProfile::P2);
         let mut d = args("pg3", "postgres", "h/db");
+        d.dictionary = Some("idempiere".into());
+        add(&p, d).unwrap();
+        let c: EkosConfig = toml::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(
+            c.databases[3].dictionary,
+            Some(DatabaseDictionary::Idempiere)
+        );
+        let mut d = args("ch2", "clickhouse", "http://ch.local:8123");
         d.dictionary = Some("idempiere".into());
         assert!(add(&p, d).is_err());
     }

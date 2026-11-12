@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod compiler;
 pub mod config;
+pub mod current_knowledge;
 pub mod diagnostics;
 pub mod pass;
 pub mod scheduler;

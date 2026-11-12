@@ -89,3 +89,41 @@ rebuild.
 
 1. Is a resolution in silver allowed without a declared key when exactly one join exists?
 2. Superset row-level security versus a Trino-side view per dashboard for "gold + silver only".
+
+## 7. Implementation log
+
+### 7.1 §2.4 the bundle, and dashboards from terms in the Superset fork (2026-11-12, uncommitted worktrees)
+
+Built with RFC 0258 phases 1, 2, 4 and 5 (its §9.2 has the details and the measured exits).
+
+- **The bundle** (`ekos_lakehouse_gold::dashboard::Bundle`, `dashboards/<key>.yaml` in the pipeline
+  repository): per chart the structured request (terms only), the resolved terms with the rule that
+  applied, the digest of the mart it reads, the SQL, the reconciliation with silver, the Superset ids
+  and the form data as published. Every publication is a commit of it.
+- **§2.1 in the fork** (`EKOS_AI_DASHBOARD_MODE = "terms"`; the default stays `sql`): the model is
+  given the gold marts' terms (MCP `ekos_dashboard_compile` without charts, from ekos-lakehouse) and
+  answers with terms only; anything else it writes, SQL included, is not passed on. A term named
+  without its definition takes the one the vocabulary lists under that exact name when exactly one
+  does. EKOS compiles each chart's SQL (`ekos_dashboard_compile` with charts: read-only, the pipeline
+  repository's plan and mart descriptions); a term that does not resolve comes back as a question
+  and nothing is created. Only the drawing is completed by the fork (a big number over dimensions is
+  drawn as a bar; a missing `x` is the first dimension), never a term.
+- **§2.4 reconcile:** before anything is created, each chart's total per sum or count is compared
+  with the same terms compiled over silver, on the Superset database; a difference refuses the whole
+  dashboard. The fork still applies its read-only guard to every statement EKOS compiled.
+- **The fork writes the bundle** (`superset/ekos_ai/bundle.py`) into `EKOS_AI_BUNDLE_DIR` (the
+  pipeline repository's `dashboards/`, mounted), atomically, keyed `dash-<Superset id>`.
+  `lakehouse dashboards sync` commits a bundle it finds uncommitted as its author's first version,
+  and from then on reads the bundle — marts, digests, reconciliation, drift — instead of parsing the
+  datasets' SQL (RFC 0258 §9.1 asked for this).
+- **`lakehouse dashboards publish <file>`** publishes a dashboard of terms from the lakehouse side
+  (the same compile, reconcile and bundle), for an operator or a test without the fork.
+- The fork's model call (`llm.complete`) now has `EKOS_AI_MODEL_TIMEOUT` (default 45 s) and turns a
+  timeout or a connection failure into a `ModelError` saying so (it was a bare 500).
+- **Measured:** one live run through the fork's API against local Ollama (`qwen2.5-coder:3b`):
+  dashboard 7, two charts, both reconciled, bundle written and committed by `sync`, then changed by
+  request. Before the vocabulary was given as flat `name: definition` lists with one example chart,
+  the same model put mart names where dimension names go and the run was refused (nothing created).
+- **Not built here:** §2.2's `unsafe` (RFC 0249), §2.3's AI review, §2.5's request feed and review
+  screen (the Lakehouse console page has a versions panel and a copies/pull-requests panel only), the
+  §4 measures over the 18-question set.

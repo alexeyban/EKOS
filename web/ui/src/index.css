@@ -1359,3 +1359,25 @@ button.chain-span.selected { background: rgba(214, 158, 46, 0.45); }
   grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
   gap: 0.3rem 1rem;
 }
+
+/* RFC 0252: usage over time (rows per month of a code value). */
+.usage-over-time {
+  margin: 0.75rem 0;
+}
+.usage-chart {
+  display: block;
+  margin: 0.25rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+.usage-bar {
+  fill: var(--accent-a);
+}
+.usage-bar.withheld {
+  fill: var(--ink-soft);
+  opacity: 0.5;
+}
+.usage-code-mark {
+  stroke: var(--accent-b);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}

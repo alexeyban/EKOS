@@ -100,7 +100,13 @@ fn is_known_extension(ext: &str) -> bool {
 pub fn build_validate_report(config_path: &Path, root: &Path) -> ValidateReport {
     match EkosConfig::from_file(config_path) {
         Ok(cfg) => {
-            let warnings = observe_warnings(&cfg.observe, root);
+            let mut warnings = observe_warnings(&cfg.observe, root);
+            // Keys nothing reads: a typo is otherwise ignored without a word.
+            let text = std::fs::read_to_string(config_path).unwrap_or_default();
+            warnings.extend(EkosConfig::unknown_keys(&text).into_iter().map(|k| Finding {
+                code: "unknown-key",
+                detail: format!("`{k}` is not a setting EKOS reads (a typo, or another version's key); it is ignored"),
+            }));
             ValidateReport {
                 schema_version: 1,
                 ok: true,
@@ -365,6 +371,22 @@ mod tests {
         // A clean minimal config validates.
         std::fs::write(&cfg, "[observe]\npaths = []\n").unwrap();
         assert!(build_validate_report(&cfg, tmp.path()).ok);
+    }
+
+    #[test]
+    fn a_key_nothing_reads_is_a_warning() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cfg = tmp.path().join("ekos.toml");
+        std::fs::write(&cfg, "[observe]\npaths = []\nignore-patern = [\"x\"]\n").unwrap();
+        let report = build_validate_report(&cfg, tmp.path());
+        assert!(report.ok);
+        let unknown: Vec<&Finding> = report
+            .warnings
+            .iter()
+            .filter(|f| f.code == "unknown-key")
+            .collect();
+        assert_eq!(unknown.len(), 1, "{:?}", report.warnings);
+        assert!(unknown[0].detail.contains("observe.ignore-patern"));
     }
 
     #[test]

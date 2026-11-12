@@ -183,11 +183,19 @@ table).
    warnings it answers; keeping the mode is a new change of the same kind, `--keep`. No second store.
 2. Statement statistics are cumulative. Reading them at every build gives a series of windows; should EKOS keep
    deltas between builds to answer "since when"? It is cheap, and moves toward monitoring, which RFC 0252 keeps
-   out of profiling.
+   out of profiling. *Decided (2026-11-12):* the cheap half only, no series. Each observed cell carries
+   `first_observed` (the earliest observation that held it) and `calls_since_previous` (known only when the
+   statistics were not reset in between). Nothing is kept per observation beyond the newest fact.
 3. `pg_stat_statements` has no client application name. A sampled read of `pg_stat_activity` would add it and is
    a point-in-time sample of sessions, including client addresses. Worth it only if roles prove too coarse.
+   *Decided (2026-11-12): not now.*
+   - On every fixture so far (LedgerSMB, the phase 2 fixture, iDempiere on Oracle, ClickHouse) roles were enough.
+   - A connection's declared user (§3.3) separated an ETL job from the application without it.
+   - A session sample would bring client addresses into the ledger's inputs, which nothing here needs.
+   - Revisit when a source shows one role shared by several systems.
 4. iDempiere's application dictionary names scheduled processes. RFC 0212's opt-in dictionary reader reads only
-   `AD_Table`; extending it to processes would give a fifth actor kind for dictionary-driven ERPs.
+   `AD_Table`; extending it to processes would give a fifth actor kind for dictionary-driven ERPs. *Done
+   (2026-11-12)*, see §9.
 
 ## 9. Implementation log
 
@@ -311,8 +319,8 @@ table).
 - The lakehouse extraction-plan warning with advice and the operator's explicit decision (§3.6). It
   lives in ekos-lakehouse, where RFC 0255 is changing the plan code now, so it is left for after that
   merges. Open question 1 (where the decision is stored) is still open.
-- Oracle observed access.
-- The browser run of the exit.
+- Oracle observed access (done 2026-11-12, see "Remaining tasks").
+- The browser run of the exit (done 2026-11-12, see "Remaining tasks").
 
 ### Phase 4, lakehouse side (2026-11-12)
 
@@ -348,5 +356,180 @@ table).
 - a new role reopens the warning.
 
 **Not yet.**
-- The phase 4 exit: a browser run on the testbed with the planted writer. Not run: the testbed was not up.
-- Oracle observed access.
+- The phase 4 exit: a browser run on the testbed with the planted writer (done 2026-11-12, see "Remaining tasks").
+- Oracle observed access (done 2026-11-12).
+
+### Remaining tasks (2026-11-12)
+
+**Built.**
+
+- **Observed access on more engines** (§3.2).
+  - **Every engine.** `interaction observe` reads each `[[databases]]` engine through the same read-only probe
+    session, parses its statements in its own dialect, and drops them.
+  - **ClickHouse:** `system.query_log`.
+    - One sample statement per (user, normalized statement) of the finished queries on the entry's `owners`.
+    - `normalizeQuery`'s `?..` lists do not parse, so the sample keeps its literals until it is dropped.
+    - The window starts at the oldest entry the log keeps. There are no table counters, so no
+      `unattributed_writes`.
+    - An insert whose rows came as data (`INSERT INTO t VALUES`, `… FORMAT CSV`) gets a placeholder row before
+      parsing, so its table is still found.
+  - **Oracle:** `V$SQL` joined to `ALL_USERS` (the reader needs `SELECT_CATALOG_ROLE`).
+    - Inserts, selects, updates, deletes and merges, by users Oracle does not maintain itself.
+    - The window starts at the instance's start-up.
+    - Cursors age out of the shared pool, so every observation is marked partial and never yields
+      `declared_not_observed`.
+    - `DBA_TAB_MODIFICATIONS` counts since the last statistics gathering, a different window, so it is not the
+      cross-check.
+  - **SQL Server and Informix** record no per-login statement statistics EKOS reads. Each is recorded as
+    "provides no usage statistics", with the reason.
+  - **Schema statements** (`CREATE`, `DROP`, `ALTER` other than a ClickHouse mutation, grants) are counted
+    apart (`ddl_calls`) and attributed to no table. A `CREATE TABLE` used to read as a read of the new table.
+  - **The reading user** is left out case-insensitively (Oracle upper-cases it).
+- **A source without usage statistics is said so everywhere** (§3.2, §5).
+  - `<state>/interaction/current.json` records the reason per database.
+  - The matrix (`no_usage_statistics`, the observed note), `findings`, MCP `ekos_interaction` and the console
+    page all state it.
+  - An earlier observation of that database stops being current, and no finding is derived from the absence.
+- **Since when** (open question 2): `first_observed` and `calls_since_previous` on every observed cell.
+  `unexplained_writer` carries `first_observed`; the lakehouse warning shows "first seen <date>".
+- **Link by connection** (§3.3).
+  - The Kettle analyzer (pass `v3`) records `connection_user` on each step that uses a connection: the
+    `<username>` of the transformation's `<connection>`, never the password. A user given as a variable is
+    skipped.
+  - `link_hypotheses_with` proposes a role that is the user of exactly one system's connections as that system
+    before the table-containment rule.
+  - The role item shows `link_basis` (`connection` | `tables`) as information, not as a signed fact.
+  - Users are compared as roles are shown (hashed when roles are), and case-insensitively.
+  - A `[[databases]]` entry's user is EKOS's own, already left out.
+- **Kettle write steps.** `Update`, `InsertUpdate`, `Delete` and `SynchronizeAfterMerge` are sinks on their
+  `<lookup>` table. Before this, a job that updates a table declared only a read of it.
+- **`read_only_consumers`** (§3.4): per table, the actors that only read it, declared or observed. Pure
+  (`interaction::read_only_consumers`), apart from the problems: it asks no question and no lakehouse warning
+  reads it. The console lists it under the findings.
+- **A trigger explains no role's write.** A trigger's declared access (its own table) used to explain every
+  outside update of the table through the no-link rule; now it does not. A trigger runs because a statement
+  wrote the table, and `pg_stat_statements` tracks top-level statements only.
+- **The system-level graph** (§3.5): the console's Interaction page has Per table / Systems views.
+  - Systems draws components, ETL jobs, processes and roles writing into a table and reading out of it.
+  - It uses the existing deterministic `layoutGraph`, marks tables with open findings, shows at most 25 tables
+    (the most written first), and says how many it left out.
+- **Application processes** (open question 4).
+  - `ora-live::dictionary::read_all` reads `AD_Process` (value, name, procedure, class, active, active
+    `AD_Scheduler` entries) with the `AD_Table` flags, in the same read-only transaction.
+  - The Oracle catalog analyzer (`oracle-catalog/6`) writes one keyed `AppProcess` per process. It is a new
+    registry row, with an identity namespace of its own, because a process is named after the table it
+    maintains or the procedure it runs.
+  - `ActorKind::Process` acts through the procedure (by name) or the Java class (`JavaMethod.owner`) it runs:
+    only that class's own SQL, not calls into other classes.
+- **Lakehouse.**
+  - The Oracle engine's `usage_stats` is now `partial` (V$SQL through `interaction observe`), no longer
+    `absent`.
+  - The warnings panel drops the long reason column; the reason is in the table's evidence.
+
+**Not done, and why.**
+- **Deleted code still counts** — *fixed the same day*, see "Deleted code" below.
+- **iDempiere's PostgreSQL dictionary:** the dictionary reader is Oracle-only (RFC 0212), so processes come
+  from Oracle sources only — *done the same day*, see "iDempiere on PostgreSQL" below.
+
+**Measured.**
+- **PostgreSQL** (phase 2 fixture).
+  - `first_observed` carried from the first observation (2026-11-11), `calls_since_previous` 0 on a re-read.
+  - A Kettle job connecting as `etl_nightly` and updating `customers` made `etl_nightly` proposed as that job
+    (`link_basis=connection`), though by tables alone it touches `orders` too.
+  - Its update of `customers` became explained; its delete of `orders`, which the job does not declare,
+    stayed an `unexplained_writer`.
+- **ClickHouse 24.8** (the migrate testbed, scratch database `rfc0256_ix`).
+  - The workload: `loader` 5 inserts into `events`; `ekos` 3 selects of `events` and 1 insert into `kinds`;
+    3 DDL statements.
+  - The facts equal it, with 0 unparsed and `ddl_calls` 3; the reading user `ekos_obs` was left out.
+- **Oracle XE 21c** (the iDempiere seed).
+  - `ETL_NIGHTLY` 4 updates of `C_BPARTNER` (bind variables `:1`) and `ADEMPIERE` 3 reads and 3 updates of
+    `C_ORDER` (rolled back) became exactly those cells.
+  - Both are `unexplained_writer`s, the observation is marked partial, and `EKOS_RO`'s 24 calls were left out.
+  - 337 `AppProcess`es read, equal to a direct count (4 procedures, 333 classes). With
+    `org/compiere/process` (37 classes) added, 8 processes are actors on 13 cells (for example
+    `DatabaseTableRename` reads `ad_table`).
+- **Phase 4 exit, in a browser** (Playwright on the console, local mode, the lakehouse binary built on this
+  EKOS). The fixture's `customers` was given an `updated_at` watermark proven by a trigger, a planted role
+  `fixer` updated it, and the run passed 17/17:
+  - the Extraction page carried the warning (role `fixer`, update, window, first seen) with the advice "load in
+    full", costed at 50 rows, while the plan kept `customers` incremental;
+  - "Keep the planned mode" (with a reason) left the mode incremental and answered the warning, recorded with
+    who and when; a new plan on the same evidence kept it answered;
+  - `etl_nightly` then updated `customers`: the warning reopened for `etl_nightly` only, `fixer`'s stayed
+    answered, and the mode stayed incremental;
+  - "Load in full" changed the mode to full and answered the open warning;
+  - no script error in the page.
+
+### Deleted code (2026-11-12)
+
+A removed `.ktr` stayed an actor, explaining a planted writer's update. There were three causes, one per layer:
+
+1. **The collectors.** `recover`'s file collectors pick the newest observation per target from an append-only
+   store, which for a deleted file is its last one. `present_files` now drops an observation whose target
+   exists under no observe base (Pentaho, Python, Rust, Perl, Elixir, JavaScript, Java, local documents).
+2. **The knowledge artifacts.**
+   - A pass that no longer runs (a deleted SQL file's) leaves its output in the store, and a multi-input pass
+     writes one artifact per run with different inputs.
+   - `compile`'s newest-per-target dedup kept both kinds.
+   - `PassManager` now records the knowledge artifacts each pass writes (a `RecordingStore` around the pass's
+     store). Each pass's cache manifest keeps them as `outputs`, so a cached pass still names its output.
+   - `recover` writes the run's union to `<artifacts>/current-knowledge.json`.
+   - `compile` and `resolve` read only those (`ekos_semantic::select_knowledge_artifact_ids`). A pass whose
+     manifest predates `outputs` is kept by name until it next runs. `resolve` used to read every artifact
+     ever written.
+3. **The ledger.** It is append-only, so a deleted file's objects stay there. The interaction map counts a
+   code object (procedure, view, trigger, Java method, Kettle node, process) only when the latest compiled
+   model holds it.
+
+Measured on the phase 2 fixture: with the `.ktr` removed, the compiled model has 33 objects and no Kettle
+node, and the matrix shows no job. With it restored, the job is back, and removing it again drops it again.
+EKL, search and documentation still read the whole ledger; whether they should see only current objects is a
+separate decision.
+
+### iDempiere on PostgreSQL (2026-11-12)
+
+iDempiere runs on PostgreSQL as well as Oracle, with the same dictionary tables in the application's schema.
+`[[databases]] kind = "postgres"` with `dictionary = "idempiere"` now reads the same `AD_Table` flags and the
+same `AD_Process` / `AD_Scheduler` processes as Oracle, and the catalog pass produces the same table
+`dictionary` flags and the same `AppProcess` objects.
+
+**Built.**
+- `ekos_observation_sdk::app_dictionary` (new, pure) holds what both engines share: `DictionaryKind`,
+  `TableFlags`, `AppProcess`, the two queries, the row mapping, process-name redaction and the `dictionary`
+  artifact (`<scheme>://<database>/<owner>/dictionary`). The queries quote only the owner and leave every
+  other identifier unquoted, so the same text runs on both engines (Oracle upper-cases `AD_Table`, PostgreSQL
+  lower-cases it). `ora-live::dictionary` re-exports the types and keeps its functions; its query text is
+  unchanged (its tests pin it).
+- `pg-live::dictionary::read_all`: both queries in one `REPEATABLE READ READ ONLY` snapshot
+  (`PgSource::begin_read_only_snapshot` / `end_transaction`, which rolls back), on top of the session's
+  `default_transaction_read_only`. A failed query still ends the transaction.
+- `ekos-plugin-postgres`: `LiveReader::dictionary`, `read_with(.., dictionary)` (same session as the catalog
+  read), `DatabaseReading::dictionaries` (schema → flags and processes); the observer emits one `dictionary`
+  artifact per schema. The Oracle plugin emits its artifact through the same SDK function.
+- Config: the dictionary is accepted for `oracle` and `postgres` (`check_sources`), refused for the others;
+  `ekos database add --dictionary idempiere` and the console's Sources form follow (`sources_write.py`,
+  `Sources.tsx` — the choice is shown for PostgreSQL too and is not sent for a kind without one).
+- The catalog analyzer needed no change: it was already engine-neutral for dictionary artifacts (tables are
+  matched upper-cased, so `c_order` takes `C_Order`'s flags). A test now pins that.
+
+**Tests.** SDK `app_dictionary` 3, `pg-live::dictionary` 3, plugin 1 (one `dictionary` artifact per schema),
+analyzer 1 (a PostgreSQL dictionary gives the same flags and processes as Oracle's, ids keyed by engine),
+config and `database add` updated. Live (`EKOS_IDEMPIERE_PG_LIVE=1`): `plugins/postgres/tests/dictionary_live.rs`
+compares the reader with direct counts and checks the role's write is refused; Oracle's
+`the_dictionary_processes_match_a_direct_count` (`ora-live/tests/live.rs`) does the same on Oracle.
+
+**Measured.** The shared iDempiere PostgreSQL has no credential this work could use, so the live run used its
+own PostgreSQL 16 (`ekos-live-idem-pg`, 127.0.0.1:56544, database `idempiere`, schema `adempiere`, read-only
+role `ekos_ro`): `AD_Table`, `AD_Process` and `AD_Scheduler` with every column and row of the Oracle seed
+(dumped through `EKOS_RO`, iDempiere's PostgreSQL types: `numeric`, `varchar`, `char(1)`, `timestamp`), plus
+five business tables' structure. The seed has no `AD_Scheduler` rows, so four were planted (three active).
+- The reader: 1,056 tables (765 deletable, 718 change-logged) and 337 processes (4 procedures, 333 classes) —
+  the same as Oracle's live test on the seed — and 3 active schedules, equal to direct counts.
+- End to end (`build` … `commit`, one project per engine, only `[[databases]]`): 337 `AppProcess`es on each;
+  name, title, procedure, class, active and origin equal for all 337 (owner `adempiere` vs `ADEMPIERE` and the
+  planted schedules differ, as they should); the eight PostgreSQL tables carry the same `dictionary` flags as
+  their Oracle namesakes.
+- Not measured: a real iDempiere installation on PostgreSQL (the shared `idemseed-pg`), whose rows would
+  differ from the Oracle seed's.
+

@@ -98,6 +98,14 @@ pub trait RationaleSource {
     /// The commits that last touched `lines` of `path` (a ledger evidence path). Lines it cannot
     /// answer for are simply absent.
     fn blame(&self, path: &str, lines: &[u32]) -> Vec<BlameHit>;
+
+    /// RFC 0252 §3.2(b): the commit that introduced `needle` (a code literal as the ledger writes
+    /// it, `'A'` or `7`) at `line` of `path` — following that line back through history to the
+    /// oldest version that still names it. `None` when it cannot tell (no history, the line does
+    /// not name it, an excluded path). The default knows no history.
+    fn introduced(&self, _path: &str, _line: u32, _needle: &str) -> Option<BlameHit> {
+        None
+    }
 }
 
 /// What one run produced.
@@ -121,6 +129,10 @@ pub struct SemanticsStats {
     pub dead_codes: usize,
     pub never_seen_codes: usize,
     pub data_only_gaps: usize,
+    /// RFC 0252 §3.2(b): code values the data held before the code named them, and columns whose
+    /// values no code names all appeared after the code last changed ("new codes").
+    pub data_before_code: usize,
+    pub new_value_columns: usize,
 }
 
 /// Everything synthesized, ready to append.
@@ -1293,6 +1305,11 @@ pub fn synthesize(
         b.out.stats.never_seen_codes = fs.never_seen;
         b.out.stats.data_only_gaps = fs.data_only_gaps;
         b.out.stats.gaps += fs.data_only_gaps;
+        if let Some(src) = rationale {
+            let ds = crate::data_usage::date_codes(&mut b.out, src);
+            b.out.stats.data_before_code = ds.data_before_code;
+            b.out.stats.new_value_columns = ds.new_value_columns;
+        }
     }
     suggest_mappings(&mut b.out, cfg);
     sign_items(&mut b.out);

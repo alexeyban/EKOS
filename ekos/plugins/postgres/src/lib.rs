@@ -10,6 +10,7 @@
 
 use async_trait::async_trait;
 use ekos_common::redaction::RedactionConfig;
+use ekos_observation_sdk::app_dictionary::{self, AppProcess, DictionaryKind, TableFlags};
 use ekos_observation_sdk::live_catalog::{self, LiveObject, OwnerCatalog};
 use ekos_observation_sdk::{ObservationPackage, ObserveError, Observer, ScanContext};
 use ekos_pg_live::{CatalogObject, CatalogSnapshot, ObjectKind, PgError, PgSource, SessionPolicy};
@@ -92,7 +93,13 @@ impl PgConnection {
 pub struct DatabaseReading {
     pub catalogs: Vec<OwnerCatalog>,
     pub write_check: Option<Value>,
+    /// RFC 0256: schema → the application dictionary's table flags and processes, for the
+    /// schemas `[[databases]] dictionary` asked to read (none otherwise).
+    pub dictionaries: Dictionaries,
 }
+
+/// RFC 0256: schema → its application dictionary's table flags and processes.
+pub type Dictionaries = BTreeMap<String, (Vec<TableFlags>, Vec<AppProcess>)>;
 
 /// Where a reading comes from: the live database, or a fixed reading in tests.
 pub trait CatalogReader: Send + Sync {
@@ -107,16 +114,19 @@ pub struct LiveReader {
     pub redaction: RedactionConfig,
     /// RFC 0211 §3.4: how much the read measures beyond the planner's statistics.
     pub profile: ProfileTier,
+    /// RFC 0212 / 0256: also read the application dictionary of every listed schema.
+    pub dictionary: Option<DictionaryKind>,
 }
 
 impl CatalogReader for LiveReader {
     fn read(&self) -> Result<DatabaseReading, PgError> {
-        read(
+        read_with(
             &self.connection,
             &self.schemas,
             &self.run_id,
             &self.redaction,
             self.profile,
+            self.dictionary,
         )
     }
 }
@@ -129,6 +139,19 @@ pub fn read(
     run_id: &str,
     redaction: &RedactionConfig,
     tier: ProfileTier,
+) -> Result<DatabaseReading, PgError> {
+    read_with(connection, schemas, run_id, redaction, tier, None)
+}
+
+/// [`read`], plus each schema's application dictionary when `dictionary` names one (RFC 0256),
+/// on the same session.
+pub fn read_with(
+    connection: &PgConnection,
+    schemas: &[String],
+    run_id: &str,
+    redaction: &RedactionConfig,
+    tier: ProfileTier,
+    dictionary: Option<DictionaryKind>,
 ) -> Result<DatabaseReading, PgError> {
     let source = connection.connect(run_id)?;
     let snapshot = ekos_pg_live::introspect(&source, schemas, redaction)?;
@@ -157,10 +180,40 @@ pub fn read(
         ekos_pg_live::WriteCheck::RefusedByServer { message } => Err(message),
         ekos_pg_live::WriteCheck::RoleCanWrite => Ok(()),
     });
+    let dictionaries = match dictionary {
+        Some(kind) => read_dictionaries(&source, kind, schemas, redaction)?,
+        None => BTreeMap::new(),
+    };
     Ok(DatabaseReading {
         catalogs,
         write_check: Some(write_check),
+        dictionaries,
     })
+}
+
+/// RFC 0212 / 0256: each schema's application dictionary — `AD_Table`'s flags and the processes
+/// of `AD_Process` — in one read-only snapshot per schema, process names redacted. A schema
+/// without the dictionary's tables is an error, as on Oracle: the entry asked for it.
+pub fn read_dictionaries(
+    source: &PgSource,
+    kind: DictionaryKind,
+    schemas: &[String],
+    redaction: &RedactionConfig,
+) -> Result<Dictionaries, PgError> {
+    let mut out = BTreeMap::new();
+    for schema in schemas {
+        let started = std::time::Instant::now();
+        let (flags, mut processes) = ekos_pg_live::dictionary::read_all(source, kind, schema)?;
+        app_dictionary::redact_names(&mut processes, redaction);
+        ekos_common::run_log::emit(
+            "postgres.dictionary",
+            "read AD_Table flags and AD_Process",
+            &json!({ "owner": schema, "tables": flags.len(), "processes": processes.len(),
+                     "ms": started.elapsed().as_millis() as u64 }),
+        );
+        out.insert(schema.clone(), (flags, processes));
+    }
+    Ok(out)
 }
 
 /// The census type a catalog kind is counted under, or `None` for one not counted per schema.
@@ -438,6 +491,17 @@ impl Observer for PostgresObserver {
         ) {
             pkg.push(a);
         }
+        for (schema, (flags, processes)) in &reading.dictionaries {
+            pkg.push(app_dictionary::artifact(
+                OBSERVER,
+                "ekos-plugin-postgres",
+                SCHEME,
+                &self.database,
+                schema,
+                flags,
+                processes,
+            ));
+        }
         let objects: usize = reading.catalogs.iter().map(|c| c.objects.len()).sum();
         tracing::info!(database = %self.database, schemas = reading.catalogs.len(), objects, "postgres catalog read");
         Ok(pkg)
@@ -620,11 +684,61 @@ mod tests {
         }
     }
 
+    /// RFC 0256: an iDempiere dictionary on PostgreSQL is emitted exactly as Oracle's is — one
+    /// `dictionary` artifact per schema that has one, beside its catalog.
+    #[tokio::test]
+    async fn a_dictionary_reading_emits_one_dictionary_artifact_per_schema() {
+        use ekos_observation_sdk::app_dictionary::{AppProcess, TableFlags};
+        let flags = vec![TableFlags {
+            table_name: "C_Order".into(),
+            deleteable: Some(true),
+            change_log: Some(true),
+            view: Some(false),
+            active: Some(true),
+        }];
+        let processes = vec![AppProcess {
+            value: "C_Invoice_Generate".into(),
+            name: "Generate Invoices".into(),
+            procedure_name: None,
+            classname: Some("org.compiere.process.InvoiceGenerate".into()),
+            active: Some(true),
+            schedules: 1,
+        }];
+        let reading = DatabaseReading {
+            catalogs: normalize(&snapshot(), &["shop".into()]),
+            write_check: None,
+            dictionaries: BTreeMap::from([("shop".to_string(), (flags, processes))]),
+        };
+        let pkg = PostgresObserver::new("erp", Arc::new(Fixed(reading)))
+            .scan(&ScanContext::new("."))
+            .await
+            .unwrap();
+        let dict: Vec<_> = pkg
+            .artifacts
+            .iter()
+            .filter(|a| a.content.data["kind"] == "dictionary")
+            .collect();
+        assert_eq!(dict.len(), 1);
+        assert_eq!(dict[0].content.target, "postgres://erp/shop/dictionary");
+        assert_eq!(dict[0].content.data["owner"], "shop");
+        assert_eq!(dict[0].content.data["tables"][0]["table_name"], "C_Order");
+        assert_eq!(
+            dict[0].content.data["processes"][0]["classname"],
+            "org.compiere.process.InvoiceGenerate"
+        );
+        assert!(
+            dict[0].content.data["processes"][0]
+                .get("procedure_name")
+                .is_none()
+        );
+    }
+
     #[tokio::test]
     async fn a_scan_emits_the_live_catalog_shape() {
         let reading = DatabaseReading {
             catalogs: normalize(&snapshot(), &["shop".into()]),
             write_check: Some(live_catalog::write_check(Err("permission denied".into()))),
+            dictionaries: BTreeMap::new(),
         };
         let pkg = PostgresObserver::new("shop", Arc::new(Fixed(reading.clone())))
             .scan(&ScanContext::new("."))

@@ -21,6 +21,8 @@
 //! this is a choice of API surface rather than of implementation.
 
 pub mod catalog;
+/// RFC 0256: an iDempiere application dictionary hosted on PostgreSQL.
+pub mod dictionary;
 /// Moved to `ekos_common::pii` (RFC 0211) so `ora-live` shares it; re-exported at its old path.
 pub use ekos_common::pii;
 pub mod profile;

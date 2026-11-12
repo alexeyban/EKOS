@@ -409,3 +409,53 @@ lakehouse repository has no CI workflow, so the script is the job.
 - The fixture landing bronze and reconciling end to end: needs a Trino catalog for its source.
 - Open question 5 (core recording `SourceCapabilities` for every `[[databases]]` entry): unchanged; the
   vocabulary now lives in `ekos-kir`, so a second producer needs no new schema.
+
+### 2026-11-12 — every live suite run
+
+Phase 2's note stands corrected: the suites that failed on `CATALOG_NOT_FOUND`, and Oracle's, now ran — on a
+second copy of the lakehouse sandbox, not the shared one. A private compose project (`ekos-live`, containers
+`ekos-live-{pg,seaweedfs,polaris,trino}`, Trino on 127.0.0.1:59080, PostgreSQL 18 + pgvector on 56533) with
+the sandbox's own catalog files, re-pointed at those containers: `pagila` (`deploy/fixtures/pagila.sh` with
+`EKOS_LH_PG_CONTAINER=ekos-live-pg`), `m3` and `ledgersmb` (empty databases), `postgresql` (`source`),
+`iceberg` (its own Polaris and SeaweedFS), and `idempiere` (the Oracle XE testbed, reached by joining Trino to
+the testbed's network). The lakehouse was built against this EKOS checkout through the local `[patch]`.
+
+The only code change the runs needed was in the tests' own wiring (ekos-lakehouse): they named the
+sandbox's ports in the code. `bronze_live`, `changes_live`, `capabilities_live` and `oracle_live` now read
+`EKOS_LH_TRINO_URL` and `EKOS_LH_SOURCE` (`host:port`) as `trino/tests/live.rs` and the fixture engine already
+did, defaulting to the sandbox. Oracle's delete test planted and deleted rows in `ADEMPIERE.AD_MESSAGE` as the
+schema owner; it now plants in `EKOS_ORACLE_WRITE_SCHEMA` (default `ADEMPIERE`, password
+`EKOS_ORACLE_WRITE_PASSWORD`), so a shared testbed's application schema is never written. The run used
+`EKOS_LIVE_DEL`: a copy of `AD_MESSAGE` (2,061 rows, its key), readable by `EKOS_RO`.
+
+| Suite | Result |
+|---|---|
+| `trino/tests/live.rs` (dialect, kit, hashes, buckets, **Trino planted defect**) | 6/6 — the planted one-row defect fails V3 and not V1 |
+| `lakehouse-ext/tests/capabilities_live.rs` | 1/1 — PostgreSQL 31 cases, `reconcile` provided |
+| `lakehouse-ext/tests/bronze_live.rs` (Pagila) | 1/1 — 16 tables green with control fired; update, insert, delete; maintenance |
+| `lakehouse-ext/tests/changes_live.rs` (`m3`) | 1/1 — all nine change classes, merges, reconciled green |
+| `lakehouse-ext/tests/oracle_live.rs` | 5/5 — **Oracle conformance kit 29 cases**, canonical forms/hashes/buckets, iDempiere 901 planned + 2 refused (`(NUMBER)`), 12 tables loaded and green, deletes found, guarded (148 of 2,210) and tombstoned, retained purge |
+| `examples/fixture-engine` (`scripts/out-of-tree-engine.sh`, live) | 5/5 — the fixture's own dialect passes the kit on PostgreSQL 18 |
+| EKOS `migrate-validate/tests/conformance.rs` (shared migrate sandboxes, read only) | 5/5 — PostgreSQL 31, ClickHouse 29, planted Trino-on-PostgreSQL fails |
+
+No engine code failed. Still not done: the iDempiere passport on the published demo, and §3.6 in core.
+
+**Oracle's delete test no longer writes into `ADEMPIERE` by default.** It needs both
+`EKOS_ORACLE_WRITE_SCHEMA` and `EKOS_ORACLE_WRITE_PASSWORD`, a scratch schema holding a copy of
+`AD_MESSAGE`; without them it is skipped and says why. Measured: skipped without them, 1/1 on
+`EKOS_LIVE_DEL` with them, and `ADEMPIERE.AD_MESSAGE` has no planted row afterwards.
+
+**The fixture engine end to end** (`examples/fixture-engine/tests/fixture.rs`,
+`live_the_fixture_lands_bronze_and_reconciles_end_to_end`, run by `scripts/out-of-tree-engine.sh`).
+The test needs a source database `fixture` and a Trino catalog `fixture` over it; the private stack got
+both. It builds its own source (`orders` with a watermark proven by a `BEFORE UPDATE` trigger,
+`customers` with a backslash and `CHR(31)` in its text, `ledger` with a `money` column) and then:
+- plans through the registered provider: `orders` and `customers` are planned, `orders` incremental;
+  `ledger` is refused, naming `total (money)`, and the lock names engine `fixture`;
+- lands bronze through Trino and reconciles both tables at V1–V3 with the fixture's own canonical dialect
+  on the source side: green, control fired;
+- updates one order and inserts one, runs the incremental load: green;
+- changes one value in bronze behind the pipeline: `Diverged`.
+Result 1/1, and the whole fixture suite 6/6. No public crate changed; the fixture gained the dev-dependency
+`postgres` for the test's own setup.
+

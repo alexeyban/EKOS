@@ -366,6 +366,13 @@ fn profile_tier(p: ekos_compiler_core::DatabaseProfile) -> ProfileTier {
     }
 }
 
+/// RFC 0212 / 0256: the dictionary a `[[databases]] dictionary` names, one type for every engine.
+fn dictionary_kind(k: ekos_compiler_core::DatabaseDictionary) -> DictionaryKind {
+    match k {
+        ekos_compiler_core::DatabaseDictionary::Idempiere => DictionaryKind::Idempiere,
+    }
+}
+
 /// RFC 0211: one observer per `[[databases]]` entry, with its name. Kept apart from the file
 /// observers: a database is live state, so it is read once per build — never once per source
 /// directory, and never skipped because the source tree's fingerprint is unchanged.
@@ -385,6 +392,8 @@ fn database_observers(config: &EkosConfig) -> Result<Vec<(String, Box<dyn Observ
                         run_id: format!("build/{}", d.name),
                         redaction: config.redaction_config(),
                         profile: profile_tier(d.profile),
+                        // RFC 0256: iDempiere's dictionary on PostgreSQL, as on Oracle.
+                        dictionary: d.dictionary.map(dictionary_kind),
                     }),
                 )),
                 // RFC 0252 §3.5.
@@ -434,11 +443,7 @@ fn database_observers(config: &EkosConfig) -> Result<Vec<(String, Box<dyn Observ
                         policy: Default::default(),
                         redaction: config.redaction_config(),
                         profile: profile_tier(d.profile),
-                        dictionary: d.dictionary.map(|k| match k {
-                            ekos_compiler_core::DatabaseDictionary::Idempiere => {
-                                DictionaryKind::Idempiere
-                            }
-                        }),
+                        dictionary: d.dictionary.map(dictionary_kind),
                     }),
                 )),
             };

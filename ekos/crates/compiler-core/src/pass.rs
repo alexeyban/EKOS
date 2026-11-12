@@ -224,9 +224,7 @@ impl PassManager {
 
         let order = self.execution_order()?;
         let run_started = std::time::Instant::now();
-        let mut report = ExecutionReport {
-            outcomes: Vec::new(),
-        };
+        let mut report = ExecutionReport::default();
         let manifest_dir = ctx.config.artifact_dir(&ctx.cwd).join("pass-manifests");
         let cfg_hash = crate::cache::config_hash(
             &serde_json::to_value(ctx.config.as_ref()).unwrap_or_default(),
@@ -239,20 +237,37 @@ impl PassManager {
                 .find(|p| p.name() == name.as_str())
                 .expect("execution_order only contains registered pass names");
 
+            report.knowledge.passes.insert(name.clone());
             if !crate::cache::should_recompute(pass.as_ref(), &cfg_hash, &manifest_dir) {
                 tracing::info!(pass = %name, "skipping pass (cached)");
+                match crate::cache::cached_outputs(pass.as_ref(), &manifest_dir) {
+                    Some(o) => report.knowledge.ids.extend(o),
+                    None => {
+                        report.knowledge.unknown_passes.insert(name.clone());
+                    }
+                }
                 report.outcomes.push(PassOutcome::skipped(name.clone()));
                 continue;
             }
 
             tracing::info!(pass = %name, "running pass");
             let started = std::time::Instant::now();
+            // What this run writes is the pass's current output.
+            let recording = Arc::new(crate::current_knowledge::RecordingStore::new(
+                ctx.artifact_store.clone(),
+            ));
+            let original = std::mem::replace(&mut ctx.artifact_store, recording.clone());
             let result = pass.run(ctx).await;
+            ctx.artifact_store = original;
             let failed = result.is_err();
             log_pass(name, started, failed);
 
-            if !failed {
-                crate::cache::record_manifest(pass.as_ref(), &cfg_hash, &manifest_dir);
+            if failed {
+                report.knowledge.unknown_passes.insert(name.clone());
+            } else {
+                let outputs = recording.knowledge_written();
+                crate::cache::record_manifest(pass.as_ref(), &cfg_hash, &manifest_dir, &outputs);
+                report.knowledge.ids.extend(outputs);
             }
 
             report.outcomes.push(PassOutcome::ran(name.clone(), result));
@@ -353,9 +368,7 @@ impl PassManager {
         let levels = self.execution_levels()?;
         let run_started = std::time::Instant::now();
         let mut passes = std::mem::take(&mut self.passes);
-        let mut report = ExecutionReport {
-            outcomes: Vec::new(),
-        };
+        let mut report = ExecutionReport::default();
         let mut failed_overall = false;
 
         for level in &levels {
@@ -373,18 +386,28 @@ impl PassManager {
             let mut handles = Vec::new();
             for (name, mut pass) in level_passes {
                 let mut pass_ctx = ctx.clone();
+                let recording = Arc::new(crate::current_knowledge::RecordingStore::new(
+                    ctx.artifact_store.clone(),
+                ));
+                pass_ctx.artifact_store = recording.clone();
                 handles.push(tokio::spawn(async move {
                     tracing::info!(pass = %name, "running pass (parallel)");
                     let started = std::time::Instant::now();
                     let result = pass.run(&mut pass_ctx).await;
                     log_pass(&name, started, result.is_err());
-                    (name, result)
+                    (name, result, recording)
                 }));
             }
 
             for handle in handles {
-                let (name, result) = handle.await.expect("pass task panicked");
+                let (name, result, recording) = handle.await.expect("pass task panicked");
                 let failed = result.is_err();
+                report.knowledge.passes.insert(name.clone());
+                if failed {
+                    report.knowledge.unknown_passes.insert(name.clone());
+                } else {
+                    report.knowledge.ids.extend(recording.knowledge_written());
+                }
                 report.outcomes.push(PassOutcome::ran(name, result));
                 if failed && matches!(failure_mode, FailureMode::FailFast) {
                     failed_overall = true;
@@ -508,6 +531,68 @@ mod tests {
     fn zero_passes_empty_order() {
         let pm = PassManager::new();
         assert_eq!(pm.execution_order().unwrap(), Vec::<String>::new());
+    }
+
+    /// Writes one knowledge artifact per run: what `recover` must report as current.
+    struct KnowledgePass(&'static str);
+
+    #[async_trait]
+    impl CompilerPass for KnowledgePass {
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn version(&self) -> &str {
+            "v1"
+        }
+        fn cache_inputs(&self) -> Vec<String> {
+            vec!["input-1".into()]
+        }
+        async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
+            let json = serde_json::json!({"artifact_type": "knowledge", "pass_name": self.0});
+            let id = ekos_artifact::ArtifactId::compute(&json);
+            ctx.artifact_store
+                .write(&id, &json)
+                .map_err(|e| PassError::failed(e.to_string()))?;
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_pass_names_its_knowledge_output_when_it_runs_and_when_it_is_cached() {
+        let config = Arc::new(EkosConfig::default());
+        let dir = tempfile::tempdir().unwrap();
+        let expected = ekos_artifact::ArtifactId::compute(
+            &serde_json::json!({"artifact_type": "knowledge", "pass_name": "k"}),
+        )
+        .to_string();
+        let run = || async {
+            let mut pm = PassManager::new();
+            pm.register(Box::new(KnowledgePass("k")));
+            let mut ctx = PassContext::new(config.clone(), dir.path().to_path_buf());
+            pm.run_all(&mut ctx, FailureMode::Collect).await.unwrap()
+        };
+        let first = run().await;
+        assert_eq!(first.passes_run(), 1);
+        assert_eq!(first.knowledge.ids, [expected.clone()].into());
+        let cached = run().await;
+        assert_eq!(cached.passes_skipped(), 1);
+        assert_eq!(
+            cached.knowledge.ids,
+            [expected.clone()].into(),
+            "from the manifest"
+        );
+        assert!(cached.knowledge.unknown_passes.is_empty());
+        assert_eq!(cached.knowledge.passes, ["k".to_string()].into());
+
+        // Run in parallel, every pass runs and is recorded too.
+        let mut pm = PassManager::new();
+        pm.register(Box::new(KnowledgePass("k")));
+        let ctx = PassContext::new(config.clone(), dir.path().to_path_buf());
+        let par = pm
+            .run_all_parallel(&ctx, FailureMode::Collect)
+            .await
+            .unwrap();
+        assert_eq!(par.knowledge.ids, [expected].into());
     }
 
     #[tokio::test]

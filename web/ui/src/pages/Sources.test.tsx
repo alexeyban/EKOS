@@ -136,7 +136,7 @@ describe("Sources page", () => {
     expect(screen.getByLabelText("password")).toHaveValue("");
   });
 
-  it("adds a PostgreSQL or ClickHouse database with a profile and without Oracle's dictionary", async () => {
+  it("adds a PostgreSQL or ClickHouse database with a profile; only PostgreSQL also offers iDempiere's dictionary", async () => {
     vi.spyOn(client, "api").mockResolvedValue({
       sources: [],
       databases: [],
@@ -156,7 +156,11 @@ describe("Sources page", () => {
       screen.getByPlaceholderText("db.local:5432/shop"),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("profile")).toBeInTheDocument();
-    expect(screen.queryByLabelText("dictionary")).toBeNull();
+    // RFC 0256: iDempiere runs on PostgreSQL too. A choice made here is not sent for a kind
+    // without a dictionary (ClickHouse, below).
+    fireEvent.change(screen.getByLabelText("dictionary"), {
+      target: { value: "idempiere" },
+    });
     // RFC 0252 §3.5: SQL Server reads schemas, is profiled, has no dictionary.
     fireEvent.change(screen.getByLabelText("database kind"), {
       target: { value: "sqlserver" },

@@ -14,7 +14,7 @@ pub use catalog::{
     CatalogObject, CatalogSnapshot, CatalogSource, Census, ObjectKind, ViewFamily, introspect,
     reconcile,
 };
-pub use dictionary::{DictionaryKind, TableFlags};
+pub use dictionary::{AppProcess, DictionaryKind, TableFlags};
 pub use profile::{ProfileStats, ProfileTier, ScanSource};
 pub use session::{OraConnection, OraSource, PreviewRows, SessionPolicy, WriteCheck};
 

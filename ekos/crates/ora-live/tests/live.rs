@@ -311,3 +311,47 @@ fn the_dictionary_flags_match_a_direct_count() {
     );
     assert_eq!((flags.len(), deleteable, logged), (n(0), n(1), n(2)));
 }
+
+/// RFC 0256 open question 4: the processes the dictionary reader returns agree with a direct
+/// count, as the read-only user — every process that runs a procedure or a class, and the active
+/// schedules that run them.
+#[test]
+fn the_dictionary_processes_match_a_direct_count() {
+    if !live() {
+        return;
+    }
+    let s = read_only();
+    let (flags, processes) = ekos_ora_live::dictionary::read_all(
+        &s,
+        ekos_ora_live::DictionaryKind::Idempiere,
+        "ADEMPIERE",
+    )
+    .unwrap();
+    let direct = s
+        .rows_of(
+            "SELECT (SELECT COUNT(*) FROM ADEMPIERE.AD_Table), \
+             (SELECT COUNT(*) FROM ADEMPIERE.AD_Process \
+              WHERE ProcedureName IS NOT NULL OR Classname IS NOT NULL), \
+             (SELECT COUNT(*) FROM ADEMPIERE.AD_Process WHERE ProcedureName IS NOT NULL), \
+             (SELECT COUNT(*) FROM ADEMPIERE.AD_Scheduler s JOIN ADEMPIERE.AD_Process p \
+              ON p.AD_Process_ID = s.AD_Process_ID WHERE s.IsActive = 'Y' \
+              AND (p.ProcedureName IS NOT NULL OR p.Classname IS NOT NULL)) FROM dual",
+            &[],
+        )
+        .unwrap();
+    let n = |i: usize| -> usize { direct[0][i].as_deref().unwrap().parse().unwrap() };
+    let procedures = processes
+        .iter()
+        .filter(|p| p.procedure_name.is_some())
+        .count();
+    let schedules: usize = processes.iter().map(|p| p.schedules as usize).sum();
+    println!(
+        "dictionary: {} tables, {} processes ({procedures} procedures), {schedules} schedules",
+        flags.len(),
+        processes.len()
+    );
+    assert_eq!(
+        (flags.len(), processes.len(), procedures, schedules),
+        (n(0), n(1), n(2), n(3))
+    );
+}

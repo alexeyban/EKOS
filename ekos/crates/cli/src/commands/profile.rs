@@ -5,8 +5,13 @@
 //! and unexplained-value gaps) and the live tables — and, per `[[databases]]` entry whose
 //! `profile` is p1 or p2:
 //!
-//! - literal coverage and first/last month per code value (`ekos_observation_sdk::signals`);
-//! - each table's grain: its declared primary key, or a levelwise key search.
+//! - literal coverage and first/last month per code value (`ekos_observation_sdk::signals`), and
+//!   rows per month per code value (counted by the database, months under `[questions] min-cell`
+//!   rows kept without their count);
+//! - each table's grain: its declared primary key, or a levelwise key search;
+//! - usage evidence — which statements touch which tables, from the database's own workload
+//!   statistics (`ekos_observation_sdk::usage`; counts only, read before anything else so the
+//!   run's own queries are not in the counters).
 //!
 //! It writes `<state>/profile/current.json` (counts only; the only values in it are literals from
 //! code) and one keyed `GrainCandidate` per table, then re-runs the semantics step so every
@@ -24,9 +29,10 @@ use ekos_kir::{
 use ekos_ledger::KnowledgeStore;
 use ekos_observation_sdk::profile::Flavor;
 use ekos_observation_sdk::signals::{self, Coverage};
+use ekos_observation_sdk::usage::{self, TableName};
 use ekos_semantic::business_semantics::{self, ENUM_MEANING, GAP};
 use ekos_semantic::data_usage::{
-    ColumnSignal, DataSignals, GrainSignal, HistorySignal, ImplicationSignal,
+    ColumnSignal, DataSignals, GrainSignal, HistorySignal, ImplicationSignal, UsageSignal,
 };
 use ekos_sqlgen::probe::Probe;
 use serde_json::{Value, json};
@@ -46,11 +52,14 @@ const KEY_MAX_QUERIES: usize = 24;
 
 pub struct RunOpts<'a> {
     pub database: Option<&'a str>,
-    /// Which signals: `literal`, `temporal`, `keys` (empty: all).
+    /// Which signals: `literal`, `temporal`, `monthly`, `conditional`, `keys`, `history`, `usage`
+    /// (empty: all).
     pub signals: Vec<String>,
     /// Skip tables whose estimated rows exceed this (0: no limit).
     pub max_rows: i64,
     pub dead_after_months: i64,
+    /// A month with fewer rows of a value is kept without its count.
+    pub min_cell: i64,
     pub allow_writable_role: bool,
     pub json: bool,
 }
@@ -168,6 +177,7 @@ struct Measure<'a> {
     probe: &'a dyn Probe,
     redaction: &'a RedactionConfig,
     tier: &'static str,
+    min_cell: i64,
     errors: Vec<Value>,
 }
 
@@ -184,7 +194,7 @@ impl Measure<'_> {
         t: &KirObject,
         column: &str,
         literals: &[String],
-        temporal: bool,
+        (temporal, monthly): (bool, bool),
     ) -> Option<ColumnSignal> {
         let (owner, table) = (s(t, "owner"), t.name.as_str());
         let time = temporal
@@ -215,6 +225,9 @@ impl Measure<'_> {
                 Err(e) => self.fail(owner, table, "literal", &e),
             }
         }
+        if let (true, Some(t)) = (monthly, time.as_deref()) {
+            cov.monthly = self.monthly(owner, table, column, literals, t);
+        }
         Some(ColumnSignal {
             database: self.db.name.clone(),
             owner: owner.to_string(),
@@ -225,6 +238,78 @@ impl Measure<'_> {
             coverage: cov,
             references: None,
         })
+    }
+
+    /// Rows per month per code value, counted by the database; small months kept without a count.
+    fn monthly(
+        &mut self,
+        owner: &str,
+        table: &str,
+        column: &str,
+        literals: &[String],
+        time: &str,
+    ) -> Option<signals::Monthly> {
+        let r = signals::literal_monthly_sql(self.flavor, owner, table, column, literals, time)
+            .and_then(|q| self.probe.preview(&q, MONTHLY_MAX_GROUPS));
+        match r {
+            Ok(p) => Some(signals::parse_monthly(
+                literals,
+                &p.rows,
+                self.min_cell,
+                p.truncated,
+            )),
+            Err(e) => {
+                self.fail(owner, table, "monthly", &e);
+                None
+            }
+        }
+    }
+
+    /// Usage evidence for `tables` from every source the engine has (§3.5): one aggregate query
+    /// per source. A source that is off or not readable is reported, not an error.
+    fn usage(&mut self, tables: &[&KirObject], report: &mut Vec<Value>) -> Vec<UsageSignal> {
+        let names: Vec<TableName> = tables
+            .iter()
+            .map(|t| TableName {
+                owner: s(t, "owner").to_string(),
+                table: t.name.clone(),
+            })
+            .collect();
+        let mut out = Vec::new();
+        for src in usage::sources(self.flavor) {
+            let available = match usage::available_sql(*src) {
+                None => Ok(true),
+                Some(q) => number(self.probe, q).map(|n| n > 0),
+            };
+            let state = match available {
+                Ok(false) => json!({"source": src.name(), "state": "off"}),
+                Err(e) => {
+                    json!({"source": src.name(), "state": "unavailable", "reason": redact(&e, self.redaction)})
+                }
+                Ok(true) => {
+                    let r = usage::usage_sql(*src, &names)
+                        .and_then(|q| self.probe.preview(&q, USAGE_MAX_ROWS));
+                    match r {
+                        Ok(p) => {
+                            let found = usage::parse_usage(*src, &names, &p.rows);
+                            let n = found.len();
+                            out.extend(found.into_iter().map(|u| UsageSignal {
+                                database: self.db.name.clone(),
+                                scope: src.scope().into(),
+                                includes_own_reads: src.includes_own_reads(),
+                                table: u,
+                            }));
+                            json!({"source": src.name(), "state": "read", "tables": n, "truncated": p.truncated})
+                        }
+                        Err(e) => {
+                            json!({"source": src.name(), "state": "unavailable", "reason": redact(&e, self.redaction)})
+                        }
+                    }
+                }
+            };
+            report.push(state);
+        }
+        out
     }
 
     fn grain(&mut self, t: &KirObject) -> Option<GrainSignal> {
@@ -304,8 +389,14 @@ struct Measured {
     grain: Vec<GrainSignal>,
     implications: Vec<ImplicationSignal>,
     history: Vec<HistorySignal>,
+    usage: Vec<UsageSignal>,
     errors: Vec<Value>,
 }
+
+/// (value, month) groups read per coded column.
+const MONTHLY_MAX_GROUPS: usize = 50_000;
+/// Rows read from a usage query (tables × statement kinds).
+const USAGE_MAX_ROWS: usize = 100_000;
 
 /// Coded columns with at most this many values are conditioned on (RFC `conditional_max_distinct`).
 const CONDITIONAL_MAX_VALUES: usize = 32;
@@ -406,11 +497,18 @@ fn measure_database(
         probe: &worker,
         redaction,
         tier,
+        min_cell: opts.min_cell,
         errors: Vec::new(),
     };
     let mut out = Measured::default();
     let mut skipped = 0usize;
-    for t in live_tables(objects, &db.name) {
+    let tables = live_tables(objects, &db.name);
+    // First, before this run's own reads reach the database's counters.
+    let mut usage_report = Vec::new();
+    if wants(opts, "usage") && !tables.is_empty() {
+        out.usage = m.usage(&tables, &mut usage_report);
+    }
+    for t in tables {
         if opts.max_rows > 0 && known_rows(t).is_some_and(|n| n > opts.max_rows) {
             skipped += 1;
             continue;
@@ -424,8 +522,12 @@ fn measure_database(
             };
             let lits: Vec<String> = lits.iter().cloned().collect();
             if wants(opts, "literal") {
-                out.columns
-                    .extend(m.coverage(t, name, &lits, wants(opts, "temporal")));
+                out.columns.extend(m.coverage(
+                    t,
+                    name,
+                    &lits,
+                    (wants(opts, "temporal"), wants(opts, "monthly")),
+                ));
             }
             if wants(opts, "conditional") {
                 out.implications.extend(m.conditional(t, name, &lits));
@@ -441,6 +543,7 @@ fn measure_database(
     report.push(json!({
         "database": db.name, "tier": tier, "columns": out.columns.len(), "tables": out.grain.len(),
         "implications": out.implications.len(), "history_patterns": out.history.len(),
+        "usage_tables": out.usage.len(), "usage_sources": usage_report,
         "skipped_large": skipped, "errors": m.errors.len(),
     }));
     out.errors = m.errors;
@@ -542,6 +645,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
         all.grain.extend(m.grain);
         all.implications.extend(m.implications);
         all.history.extend(m.history);
+        all.usage.extend(m.usage);
         all.errors.extend(m.errors);
     }
     // M5 (QA): a column following a declared foreign key (in any database: a copy keeps the
@@ -583,6 +687,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
         );
         all.history
             .extend(prev.history.iter().filter(|h| keep(&h.database)).cloned());
+        all.usage
+            .extend(prev.usage.iter().filter(|u| keep(&u.database)).cloned());
         let prev_ids = grain_ids(config, cwd).unwrap_or_default();
         kept_ids = objects
             .iter()
@@ -598,6 +704,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
         grain: all.grain,
         implications: all.implications,
         history: all.history,
+        usage: all.usage,
     };
     let mut grain_ids = write_grain(&*ledger, &objects, &signals)?;
     for id in kept_ids {
@@ -698,6 +805,32 @@ fn summary(
     let (dead, never, data_only): (usize, usize, usize) = folded
         .map(|s| (s.dead_codes, s.never_seen_codes, s.data_only_gaps))
         .unwrap_or_default();
+    let (before, new_cols) = folded
+        .map(|s| (s.data_before_code, s.new_value_columns))
+        .unwrap_or_default();
+    let used: BTreeSet<(&str, &str, &str)> = signals
+        .usage
+        .iter()
+        .map(|u| {
+            (
+                u.database.as_str(),
+                u.table.owner.as_str(),
+                u.table.table.as_str(),
+            )
+        })
+        .collect();
+    let written: BTreeSet<(&str, &str, &str)> = signals
+        .usage
+        .iter()
+        .filter(|u| u.table.counts.iter().any(|c| c.is_write() && c.count > 0))
+        .map(|u| {
+            (
+                u.database.as_str(),
+                u.table.owner.as_str(),
+                u.table.table.as_str(),
+            )
+        })
+        .collect();
     json!({
         "measured_at": signals.measured_at,
         "columns": signals.columns.len(),
@@ -713,6 +846,10 @@ fn summary(
         "dead_codes": dead,
         "never_seen_codes": never,
         "data_only_gaps": data_only,
+        "data_before_code": before,
+        "new_value_columns": new_cols,
+        "monthly_columns": signals.columns.iter().filter(|c| c.coverage.monthly.is_some()).count(),
+        "usage": {"tables": used.len(), "written": written.len()},
         "semantics": folded.is_some(),
         "databases": doc["report"],
         "errors": doc["errors"],
@@ -757,11 +894,33 @@ fn print_summary(
             "Code values: {} measured, {} dead, {} never seen in data; {} column(s) hold values no code names.",
             v["code_values_measured"], v["dead_codes"], v["never_seen_codes"], v["data_only_gaps"]
         );
+        println!(
+            "Against the code's history: {} code value(s) the data held before the code named them; {} column(s) whose unnamed values all appeared after the code last changed.",
+            v["data_before_code"], v["new_value_columns"]
+        );
     } else {
         println!(
             "[semantics] is off: the signals are in {} but no meaning carries them.",
             path.display()
         );
+    }
+    println!(
+        "Per-month usage: {} coded column(s). Usage evidence: {} table(s), {} of them written by someone.",
+        v["monthly_columns"], v["usage"]["tables"], v["usage"]["written"]
+    );
+    for d in v["databases"].as_array().into_iter().flatten() {
+        for u in d["usage_sources"].as_array().into_iter().flatten() {
+            println!(
+                "  {} usage from {}: {}{}",
+                d["database"].as_str().unwrap_or(""),
+                u["source"].as_str().unwrap_or(""),
+                u["state"].as_str().unwrap_or(""),
+                u["reason"]
+                    .as_str()
+                    .map(|r| format!(" — {r}"))
+                    .unwrap_or_default()
+            );
+        }
     }
     for e in v["errors"].as_array().into_iter().flatten().take(10) {
         println!(
@@ -774,6 +933,144 @@ fn print_summary(
     }
 }
 
+/// What the code's history says about a column's values (RFC 0252 §3.2(b)), from the current
+/// semantics items: `code_history` per code value, and `new` / `code_last_changed` of the column's
+/// data-only gap per database.
+#[derive(Default)]
+struct CodeDates {
+    /// (table, column, value) → `code_history`.
+    values: BTreeMap<(String, String, String), Value>,
+    /// (table, column, database) → `{new, code_last_changed}`.
+    columns: BTreeMap<(String, String, String), Value>,
+}
+
+impl CodeDates {
+    fn from_items(items: &[KirObject]) -> Self {
+        let mut d = CodeDates::default();
+        for o in items {
+            let key = |third: &str| {
+                (
+                    tail(s(o, "table")),
+                    s(o, "column").to_lowercase(),
+                    third.to_string(),
+                )
+            };
+            if let Some(h) = o.properties.get("code_history") {
+                d.values.insert(key(s(o, "value")), h.clone());
+            }
+            if let Some(n) = o.properties.get("new") {
+                d.columns.insert(
+                    key(s(o, "database")),
+                    json!({"new": n, "code_last_changed": o.properties.get("code_last_changed")}),
+                );
+            }
+        }
+        d
+    }
+
+    fn load(config: &EkosConfig, cwd: &Path, ledger: &dyn ekos_ledger::KnowledgeReader) -> Self {
+        super::semantics::items_in(config, cwd, ledger)
+            .map(|items| Self::from_items(&items))
+            .unwrap_or_default()
+    }
+
+    /// A column's signal as JSON with the code's dates beside the data's.
+    fn column_json(&self, c: &ColumnSignal) -> Value {
+        let mut v = serde_json::to_value(c).unwrap_or_default();
+        let (t, col) = (tail(&c.table), c.column.to_lowercase());
+        let hist: serde_json::Map<String, Value> = c
+            .coverage
+            .literals
+            .keys()
+            .filter_map(|l| {
+                self.values
+                    .get(&(t.clone(), col.clone(), l.clone()))
+                    .map(|h| (l.clone(), h.clone()))
+            })
+            .collect();
+        if !hist.is_empty() {
+            v["code_history"] = Value::Object(hist);
+        }
+        if let Some(n) = self.columns.get(&(t, col, c.database.clone())) {
+            v["values_no_code_names"] = n.clone();
+        }
+        v
+    }
+}
+
+/// The last `n` months of a series as a bar of block characters: `·` for a month whose count is
+/// withheld (fewer than `min_cell` rows), a space for a month without rows.
+pub fn sparkline(series: &[signals::MonthCount], n: usize) -> String {
+    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    let Some(last) = series.last() else {
+        return String::new();
+    };
+    let months: Vec<String> = (0..n as i64)
+        .rev()
+        .filter_map(|back| shift_month(&last.month, -back))
+        .collect();
+    let by: BTreeMap<&str, Option<i64>> =
+        series.iter().map(|m| (m.month.as_str(), m.rows)).collect();
+    let max = series
+        .iter()
+        .filter_map(|m| m.rows)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    months
+        .iter()
+        .map(|m| match by.get(m.as_str()) {
+            None => ' ',
+            Some(None) => '·',
+            Some(Some(r)) => BARS[((*r as f64 / max as f64) * 7.0).round() as usize],
+        })
+        .collect()
+}
+
+/// `YYYY-MM` moved by `by` months.
+fn shift_month(month: &str, by: i64) -> Option<String> {
+    let (y, m) = month.get(..7)?.split_once('-')?;
+    let total = y.parse::<i64>().ok()? * 12 + m.parse::<i64>().ok()? - 1 + by;
+    Some(format!(
+        "{:04}-{:02}",
+        total.div_euclid(12),
+        total.rem_euclid(12) + 1
+    ))
+}
+
+/// One line per source of a table's usage evidence.
+fn usage_lines(u: &UsageSignal) -> String {
+    let counts: Vec<String> = u
+        .table
+        .counts
+        .iter()
+        .map(|c| match c.statements {
+            Some(st) => format!("{} {st} statement(s) / {} {}", c.kind, c.count, c.unit),
+            None => format!("{} {} {}", c.kind, c.count, c.unit),
+        })
+        .collect();
+    format!(
+        "    usage ({}): {}{}{}{}",
+        u.table.source,
+        counts.join(", "),
+        u.table
+            .last_used
+            .as_ref()
+            .map(|m| format!("; last {m}"))
+            .unwrap_or_default(),
+        if u.includes_own_reads {
+            "; reads include EKOS's own"
+        } else {
+            ""
+        },
+        if u.table.ambiguous {
+            "; another owner has a table of this name"
+        } else {
+            ""
+        }
+    )
+}
+
 /// `ekos profile show [TABLE]`: what the latest run measured, as text or JSON.
 pub fn show(config: &EkosConfig, cwd: &Path, table: Option<&str>, json_out: bool) -> Result<()> {
     let Some(sig) = load(config, cwd) else {
@@ -783,15 +1080,21 @@ pub fn show(config: &EkosConfig, cwd: &Path, table: Option<&str>, json_out: bool
         |t: &str| table.is_none_or(|w| t.eq_ignore_ascii_case(w) || tail(w) == t.to_lowercase());
     let cols: Vec<&ColumnSignal> = sig.columns.iter().filter(|c| want(&c.table)).collect();
     let grain: Vec<&GrainSignal> = sig.grain.iter().filter(|g| want(&g.table)).collect();
-    if let (Some(t), true, true) = (table, cols.is_empty(), grain.is_empty()) {
+    let used: Vec<&UsageSignal> = sig.usage.iter().filter(|u| want(&u.table.table)).collect();
+    if let (Some(t), true, true, true) = (table, cols.is_empty(), grain.is_empty(), used.is_empty())
+    {
         bail!("nothing measured for {t} (ekos profile show lists every table)");
     }
+    let dates = super::store::open_store_read_only(config, cwd)
+        .map(|l| CodeDates::load(config, cwd, &*l))
+        .unwrap_or_default();
     if json_out {
+        let columns: Vec<Value> = cols.iter().map(|c| dates.column_json(c)).collect();
         println!(
             "{}",
             serde_json::to_string_pretty(&json!({
                 "measured_at": sig.measured_at, "dead_after_months": sig.dead_after_months,
-                "columns": cols, "grain": grain,
+                "columns": columns, "grain": grain, "usage": used,
             }))?
         );
         return Ok(());
@@ -815,6 +1118,11 @@ pub fn show(config: &EkosConfig, cwd: &Path, table: Option<&str>, json_out: bool
             "{}.{}.{} — {} rows, {key}",
             g.database, g.owner, g.table, g.rows
         );
+        for u in used.iter().filter(|u| {
+            u.database == g.database && u.table.owner == g.owner && u.table.table == g.table
+        }) {
+            println!("{}", usage_lines(u));
+        }
     }
     for c in cols {
         println!(
@@ -829,22 +1137,71 @@ pub fn show(config: &EkosConfig, cwd: &Path, table: Option<&str>, json_out: bool
                 .map(|t| format!(", dated by {t}"))
                 .unwrap_or_default()
         );
+        let (t, col) = (tail(&c.table), c.column.to_lowercase());
+        let monthly = c.coverage.monthly.as_ref();
+        let spark = |series: Option<&Vec<signals::MonthCount>>| {
+            series
+                .filter(|v| !v.is_empty())
+                .map(|v| format!("  {}", sparkline(v, 24)))
+                .unwrap_or_default()
+        };
         for (lit, u) in &c.coverage.literals {
+            let code = dates
+                .values
+                .get(&(t.clone(), col.clone(), lit.clone()))
+                .map(|h| {
+                    let since = h["introduced"]
+                        .as_str()
+                        .unwrap_or("")
+                        .get(..7)
+                        .unwrap_or("");
+                    match h["order"].as_str() {
+                        Some("data_before_code") => {
+                            format!("  code since {since} — the data held it first")
+                        }
+                        _ => format!("  code since {since}"),
+                    }
+                })
+                .unwrap_or_default();
             println!(
-                "    {lit:>12}  {:>10} row(s)  {} → {}",
+                "    {lit:>12}  {:>10} row(s)  {} → {}{code}{}",
                 u.rows,
                 u.first_seen.as_deref().unwrap_or("-"),
-                u.last_seen.as_deref().unwrap_or("-")
+                u.last_seen.as_deref().unwrap_or("-"),
+                spark(monthly.and_then(|m| m.literals.get(lit)))
             );
         }
         if c.coverage.unexplained.rows > 0 {
+            let new = dates
+                .columns
+                .get(&(t.clone(), col.clone(), c.database.clone()))
+                .filter(|n| n["new"] == true)
+                .map(|n| {
+                    format!(
+                        " — all first seen after the code last changed ({})",
+                        n["code_last_changed"]["date"]
+                            .as_str()
+                            .unwrap_or("")
+                            .get(..7)
+                            .unwrap_or("")
+                    )
+                })
+                .unwrap_or_default();
             println!(
-                "    {:>12}  {:>10} row(s) in {} value(s) no code names",
+                "    {:>12}  {:>10} row(s) in {} value(s) no code names{new}{}",
                 "(other)",
                 c.coverage.unexplained.rows,
                 c.coverage
                     .unexplained_distinct
-                    .map_or("?".into(), |d| d.to_string())
+                    .as_ref()
+                    .map_or("?".into(), ToString::to_string),
+                spark(monthly.map(|m| &m.other))
+            );
+        }
+        if let Some(m) = monthly {
+            println!(
+                "    {:>12}  last 24 months per value; · = fewer than {} rows that month",
+                "", m.min_cell
             );
         }
     }
@@ -882,6 +1239,7 @@ pub fn agent_profile(
         .filter(|o| database.is_none_or(|d| s(o, "database") == d))
         .collect();
     let signals = load(config, cwd);
+    let dates = CodeDates::load(config, cwd, ledger);
     let rel_current = super::relationships::current_ids(config, cwd);
     let mut out = Vec::new();
     for t in tables {
@@ -896,7 +1254,7 @@ pub fn agent_profile(
             .map(|c| json!({"name": c["name"], "data_type": c["data_type"], "profile": c["profile"]}))
             .collect();
         let on_table = |d: &str, o: &str, n: &str| d == db && o == owner && n == t.name;
-        let coverage: Vec<&ColumnSignal> = signals
+        let coverage: Vec<Value> = signals
             .iter()
             .flat_map(|sg| sg.columns.iter())
             .filter(|c| on_table(&c.database, &c.owner, &c.table))
@@ -905,6 +1263,12 @@ pub fn agent_profile(
                     .as_deref()
                     .is_none_or(|w| c.column.to_lowercase() == w)
             })
+            .map(|c| dates.column_json(c))
+            .collect();
+        let usage: Vec<&UsageSignal> = signals
+            .iter()
+            .flat_map(|sg| sg.usage.iter())
+            .filter(|u| on_table(&u.database, &u.table.owner, &u.table.table))
             .collect();
         let grain: Option<&GrainSignal> = signals
             .iter()
@@ -932,6 +1296,7 @@ pub fn agent_profile(
             "columns": cols,
             "grain": grain,
             "code_values": coverage,
+            "usage": usage,
             "references": references,
         }));
     }
@@ -968,6 +1333,26 @@ mod tests {
             l[&("orders".to_string(), "status".to_string())],
             ["'A'", "1", "9"].iter().map(|s| s.to_string()).collect()
         );
+    }
+
+    #[test]
+    fn a_sparkline_shows_counted_withheld_and_empty_months() {
+        let m = |month: &str, rows: Option<i64>| signals::MonthCount {
+            month: month.into(),
+            rows,
+        };
+        // Dec 2025 counted (the peak), Jan 2026 empty, Feb withheld, Mar a small count.
+        let s = sparkline(
+            &[
+                m("2025-12", Some(70)),
+                m("2026-02", None),
+                m("2026-03", Some(10)),
+            ],
+            5,
+        );
+        assert_eq!(s, " █ ·▂");
+        assert_eq!(shift_month("2026-01", -1).as_deref(), Some("2025-12"));
+        assert_eq!(sparkline(&[], 3), "");
     }
 
     #[test]

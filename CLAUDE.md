@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
 Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
-`devlog_332.md` as of this writing) before starting non-trivial work: they are the project's
+`devlog_333.md` as of this writing) before starting non-trivial work: they are the project's
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
@@ -259,6 +259,26 @@ crate-map entry.
   human-only with `inbox accept/purge`). New MCP tools `ekos_profile`, `ekos_relationships`,
   `ekos_questions`, `ekos_testimony`, `ekos_probe` (opt-in) are all read-only and in `SCOPED_TOOLS`
   (keep `web/api/app/mcp_policy.py` in step).
+
+### Current state of recover output and config (2026-11-12)
+
+- **What compile reads.** `recover` records each pass's knowledge outputs (`PassManager` wraps the store in
+  `compiler_core::current_knowledge::RecordingStore`; a cached pass names its output from its manifest's
+  `outputs`) and writes `<artifacts>/current-knowledge.json`. `compile` and `resolve` read only
+  `ekos_semantic::select_knowledge_artifact_ids` — never list every knowledge artifact yourself (a deleted file's
+  last output and a multi-input pass's earlier runs would come back). File collectors in `recover` drop
+  observations of files that no longer exist (`present_files`). The ledger itself stays append-only history:
+  a reader that must see only current code checks the latest `ckm/model.json` (`interaction::current_code`).
+- **`ekos.toml` loading.** `app.rs::load_config` refuses a file that does not parse (it used to run silently on
+  defaults); `config validate`, `doctor` and `init` are the tolerant commands. Keys nothing reads are warnings
+  (`EkosConfig::unknown_keys`, `serde_ignored`).
+- **Foreign keys** between the same two tables stay separate: `semantic::dedup_relationships` keys a
+  `ForeignKey` by its `constraint` / `fk_desc`.
+- **Application dictionary** (`[[databases]] dictionary = "idempiere"`): Oracle and PostgreSQL;
+  `observation_sdk::app_dictionary` holds the shared queries, types and artifact; processes become keyed
+  `AppProcess` objects (interaction actor kind `process`).
+- **Console identity.** `catalogue.build_argv` sets `by` (`--as`) to the signed-in person for every command
+  class, not only review.
 
 ### Key invariants (enforced by review, not just convention)
 

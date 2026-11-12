@@ -7098,8 +7098,9 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
       `value_overlap` on `SameAs` — `ekos relationships discover|list`
 - [x] RFC 0252 §3.5: SQL Server (live-verified) and Informix (live-verified over DRDA) live sources
 - [x] RFC 0252 §3.6–3.7: `relationships` review subject; MCP `ekos_profile`, `ekos_relationships`
-- [ ] RFC 0252: "new codes" (needs per-literal git dates); per-month usage chart; Informix CSDK path
-      run live (needs an IBM account); usage evidence from Query Store / `sysmaster`
+- [x] RFC 0252: new codes (`code_history`, `new`), per-month usage (CLI sparkline, console chart), usage
+      evidence (Query Store / dm_exec / syssqltrace / sysptprof / pg_stat_statements / pg_stat_user_tables)
+- [ ] RFC 0252: Informix CSDK path live (needs an IBM account)
 - [ ] RFC 0252 §8: iDempiere precision measurement (confirmed / proposed) and the BIRD re-run with
       the new signals in the pack
 - [x] RFC 0253 Phase 1: images / sheets / slides parsers, the inbox source (files, links), testimony
@@ -7110,10 +7111,8 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
 - [x] RFC 0254 §3.6: the source passport on estate table pages
 - [ ] RFC 0254: `null_not_handled`, `cast_will_fail`; docx/xlsx questionnaire export; RFC 0228
       expectation hand-off; acceptance on LedgerSMB + iDempiere top-20 judged by an operator
-- [ ] Pre-existing, found by the RFC 0252–0254 QA session: after any recover pass re-runs with a new
-      cache key (a version bump, some config edits) `ekos resolve` loads every knowledge artifact
-      ever written (510 artifacts instead of 248), doubling objects and proposing ~190 same-name
-      auto-merges. Resolve should read only the current pass outputs (the pass manifests).
+- [x] `ekos resolve` read every knowledge artifact ever written (510 instead of 248 after a cache-key
+      change): it now reads the same selection as `compile` (current outputs, newest per target)
 - [ ] RFC 0252–0254 QA leftovers: testimony evidence from a probe keeps counts without their code
       labels; `--about` ambiguity lists no ids; `questions show | head` broken pipe; passport shows
       "_unknown_" where the licence gate withheld a meaning; `[questions] owners` take effect only at
@@ -7125,23 +7124,49 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
       (lakehouse), `CanonDialect` / `Dialect::Registered` + conformance kit (`migrate-validate`),
       `SourceCapabilities` recorded at plan and shown in the estate docs, an out-of-tree fixture engine
       and the guide; byte-identical locks and reconciliation SQL measured before/after (849-table lock)
-- [ ] RFC 0255: live suites re-run once the Trino sandbox has the `pagila`/`m3`/`postgresql` catalogs
-      and the Oracle testbed is up
+- [x] RFC 0255: every live suite run 2026-11-12 on a private stack — trino 6/6 (planted defect),
+      capabilities, bronze (Pagila), changes (m3), oracle_live 5/5 incl. the Oracle conformance kit, the
+      fixture engine end to end (bronze + reconcile) 6/6; the Oracle delete test writes only to a named
+      scratch schema
 - [x] RFC 0256 phases 1–3 and phase 4 EKOS side: matrix, PostgreSQL observed access, findings, role
       review, questions, console Interaction page, MCP `ekos_interaction`
 - [x] RFC 0256 phase 4 lakehouse side: extraction-plan writer warnings with advice; decision recorded
       in the RFC 0226 changes (`--keep`); open question 1 decided (ekos-lakehouse ba1ebf6)
-- [ ] RFC 0256: phase 4 exit browser run on the testbed; Oracle observed access
+- [x] RFC 0256: phase 4 exit browser run (17/17, Playwright on the console); observed access on Oracle
+      (`V$SQL`) and ClickHouse (`system.query_log`), "no usage statistics" stated on every surface for
+      SQL Server / Informix / a PostgreSQL without `pg_stat_statements`; `first_observed` /
+      `calls_since_previous`; role → Kettle job by connection user; Kettle Update/Delete steps are writes;
+      `read_only_consumers`; triggers explain no role's write; console Systems graph; `AppProcess` actors
+      from the iDempiere dictionary (open question 4); open questions 2–4 decided
+- [x] Deleted code no longer counts (2026-11-12): `recover` records each pass's knowledge outputs
+      (also for cached passes, in the pass manifest) in `<artifacts>/current-knowledge.json`;
+      `compile` and `resolve` read only those; file collectors skip observations of deleted files;
+      the interaction map counts only code the latest compile holds
+- [ ] Ledger reads (EKL, search, docs, MCP) still return a deleted file's objects: the ledger is
+      append-only history. A "current" filter for them is a separate decision (`AS OF` semantics)
+- [x] RFC 0256: iDempiere's dictionary on PostgreSQL (`kind = "postgres"` + `dictionary = "idempiere"`):
+      identical `AppProcess` objects and table flags; 337/337 equal on a seeded copy of the Oracle seed
+- [ ] RFC 0256: verify the PostgreSQL dictionary on the real idemseed-pg (needs a read-only credential)
+- [x] Foreign keys between the same two tables no longer merge into one (`dedup_relationships` keys
+      them by constraint / `fk_desc`): iDempiere 3,686 declared FKs, BIRD european_football_2 31
 - [x] RFC 0257 phases 1–2, EKOS side: `ekos transformation graph|list`, MCP
       `ekos_transformation_graph`, console Transformations tab, notes on a step
 - [ ] RFC 0257: the mart side (`lakehouse marts graph`, term → node), phases 3–5
 - [x] RFC 0258 phase 3: dashboard health in ekos-lakehouse (`lakehouse dashboards sync|status|publish-health`,
       alert rule, `ekos_dashboard_health`)
-- [ ] RFC 0258: phases 1, 2, 4 (need RFC 0248's bundle)
+- [x] RFC 0248 §2.4: dashboard bundle (`dashboards/<key>.yaml`); the fork's terms mode with
+      EKOS-compiled SQL (`ekos_dashboard_compile`) and reconciliation with silver; `sync` reads bundles
+- [x] RFC 0258 phases 1, 2, 4, 5: versions, revert, copies on branches, term-level merge and
+      conflicts, mart_addition/mart_change through the §2.3 gates, drift and republish, adoption
+      (measured on a synthetic testbed, RFC 0258 §9.2)
+- [ ] RFC 0248 §2.3 AI review and build queue; the Dagster path for dashboard marts; `needs review`;
+      the §2.5 console review screen; the §4 measures
 - [x] `scripts/sonar-local.sh`: SonarCloud's gate rules locally on the changed lines (Rust, TS/TSX, Python, shell)
 - [x] v1.5.0 released: Windows full package installed and its console started in the Release workflow;
       setup/uninstall hangs on Windows fixed; local chat gets an Ollama context that holds its tools;
       MSIX for the Microsoft Store built as a workflow artifact
-- [ ] Microsoft Store submission of the MSIX (Partner Center, by the owner); confirm the display name
-- [ ] `ekos.toml`: an unknown key (e.g. `pattern` for `path-glob`) silently falls back to defaults in
-      `from_file_or_default` — warn or refuse
+- [ ] Microsoft Store submission of the MSIX (Partner Center, by the owner); display name `EKOS.DEV`
+      approved by the owner (2026-11-12)
+- [x] `ekos.toml` that does not parse is an error naming the file (it silently ran on defaults);
+      `config validate`, `doctor`, `init` still run on it; keys nothing reads are warnings
+      (`serde_ignored`), also in `config validate` (`unknown-key`)

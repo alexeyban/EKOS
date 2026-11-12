@@ -113,6 +113,16 @@ pub fn load_project(location: &ProjectLocation) -> Result<(EkosConfig, PathBuf)>
     }
     let mut config = EkosConfig::from_file(&config_path)
         .with_context(|| format!("project config {}", config_path.display()))?;
+    for key in std::fs::read_to_string(&config_path)
+        .map(|c| EkosConfig::unknown_keys(&c))
+        .unwrap_or_default()
+    {
+        eprintln!(
+            "warning: {}: `{key}` is not a setting EKOS reads (a typo, or another version's key); \
+             ignored",
+            config_path.display()
+        );
+    }
     let root = config.workspace.root.clone();
     if !root.is_absolute() {
         bail!(

@@ -181,6 +181,125 @@ pub struct Coverage {
     /// The latest month any non-null row of the column was seen (the reference for "dead").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest: Option<String>,
+    /// Rows per month per literal (and for everything else), when the table has a time column.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub monthly: Option<Monthly>,
+}
+
+// ── Per-month usage ────────────────────────────────────────────────────────────────────────────
+
+/// Months kept per value: the latest ones.
+pub const MAX_MONTHS: usize = 120;
+
+/// Rows of one value group in one month. `rows` is `None` when fewer than the run's `min_cell`
+/// rows hold it that month (small-cell suppression): the month is known to have some, not how many.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MonthCount {
+    pub month: String,
+    pub rows: Option<i64>,
+}
+
+/// Per-month rows of a coded column, counted by the database. Keys are literals as the ledger
+/// writes them; `other` is every value no literal names, as one group.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Monthly {
+    /// The suppression threshold the counts were cut at.
+    pub min_cell: i64,
+    pub literals: BTreeMap<String, Vec<MonthCount>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub other: Vec<MonthCount>,
+    /// Months older than the latest [`MAX_MONTHS`] of a value were dropped, or the database
+    /// returned more groups than were read.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+}
+
+/// One row per (literal or `NULL` for everything else, month): `value, month, rows`, aggregated by
+/// the database. Rows whose time column is null are not counted.
+pub fn literal_monthly_sql(
+    flavor: Flavor,
+    owner: &str,
+    table: &str,
+    column: &str,
+    literals: &[String],
+    time_column: &str,
+) -> Result<String, String> {
+    let texts = literal_texts(literals);
+    if texts.is_empty() {
+        return Err("no literal to count".into());
+    }
+    let tbl = profile::table_ref(flavor, owner, table)?;
+    let col = profile::ident(flavor, column)?;
+    let t = profile::ident(flavor, time_column)?;
+    let txt = as_text(flavor, &col);
+    let bucket = format!(
+        "CASE WHEN {txt} IN ({}) THEN {txt} END",
+        in_list(flavor, &texts)
+    );
+    let m = month(flavor, &t);
+    // Informix groups by select-list positions, not by expressions.
+    let group = if flavor == Flavor::Informix {
+        "1, 2".to_string()
+    } else {
+        format!("{bucket}, {m}")
+    };
+    Ok(format!(
+        "SELECT {bucket}, {m}, {} FROM {tbl} WHERE {col} IS NOT NULL AND {t} IS NOT NULL GROUP BY {group}",
+        count(flavor)
+    ))
+}
+
+/// The answer of [`literal_monthly_sql`]: months sorted, the latest [`MAX_MONTHS`] per value kept,
+/// a month with fewer than `min_cell` rows (but some) kept without its count.
+pub fn parse_monthly(
+    literals: &[String],
+    rows: &[Vec<Option<String>>],
+    min_cell: i64,
+    truncated: bool,
+) -> Monthly {
+    let by_text: BTreeMap<String, &String> =
+        literals.iter().map(|l| (literal_text(l), l)).collect();
+    let mut groups: BTreeMap<Option<String>, BTreeMap<String, i64>> = BTreeMap::new();
+    for r in rows {
+        let Some(month) = cell(r, 1) else { continue };
+        let n = cell(r, 2)
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0) as i64;
+        // A value cell is a literal (the database returned it only because code names it) or NULL.
+        let key = match row_value(r) {
+            None => None,
+            Some(v) => match by_text.get(&v) {
+                Some(l) => Some((*l).clone()),
+                None => continue,
+            },
+        };
+        *groups.entry(key).or_default().entry(month).or_default() += n;
+    }
+    let mut out = Monthly {
+        min_cell,
+        truncated,
+        ..Default::default()
+    };
+    for (key, months) in groups {
+        let skip = months.len().saturating_sub(MAX_MONTHS);
+        out.truncated |= skip > 0;
+        let series: Vec<MonthCount> = months
+            .into_iter()
+            .skip(skip)
+            .filter(|(_, n)| *n > 0)
+            .map(|(month, n)| MonthCount {
+                month,
+                rows: (n >= min_cell).then_some(n),
+            })
+            .collect();
+        match key {
+            Some(l) => {
+                out.literals.insert(l, series);
+            }
+            None => out.other = series,
+        }
+    }
+    out
 }
 
 fn cell(row: &[Option<String>], i: usize) -> Option<String> {
@@ -259,6 +378,8 @@ const TIME_NAMES: &[&[&str]] = &[
         "order_date",
         "invoice_date",
         "event_time",
+        "placed_at",
+        "ordered_at",
     ],
     &["updated", "modified", "last_update", "changed"],
 ];
@@ -373,8 +494,14 @@ pub fn conditional_sql(
                 .map(|y| format!("COUNT(CASE WHEN {y} IS NOT NULL THEN 1 END)"))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    // Informix groups by a select-list position, not by an expression (measured: -201).
+    let group = if flavor == Flavor::Informix {
+        "1"
+    } else {
+        bucket.as_str()
+    };
     Ok(format!(
-        "SELECT {bucket}, {}, {} FROM {tbl} WHERE {col} IS NOT NULL GROUP BY {bucket}",
+        "SELECT {bucket}, {}, {} FROM {tbl} WHERE {col} IS NOT NULL GROUP BY {group}",
         count(flavor),
         counts.join(", ")
     ))
@@ -789,6 +916,90 @@ mod tests {
     }
 
     #[test]
+    fn monthly_sql_groups_by_literal_or_null_and_month_in_every_dialect() {
+        for f in [
+            Flavor::Postgres,
+            Flavor::Oracle,
+            Flavor::ClickHouse,
+            Flavor::SqlServer,
+            Flavor::Informix,
+        ] {
+            let sql = literal_monthly_sql(
+                f,
+                "s",
+                "orders",
+                "status",
+                &lits(&["1", "'A'"]),
+                "created_at",
+            )
+            .unwrap();
+            // The value cell is a literal from code or NULL — never the raw column.
+            assert!(sql.starts_with("SELECT CASE WHEN"), "{sql}");
+            assert!(!sql.contains("ELSE"), "{sql}");
+            assert!(sql.contains("GROUP BY"), "{sql}");
+            assert!(sql.contains("IS NOT NULL AND"), "{sql}");
+        }
+        let ifx = literal_monthly_sql(Flavor::Informix, "s", "t", "c", &lits(&["1"]), "d").unwrap();
+        assert!(ifx.ends_with("GROUP BY 1, 2"), "{ifx}");
+        assert!(literal_monthly_sql(Flavor::Postgres, "s", "t", "c", &[], "d").is_err());
+    }
+
+    #[test]
+    fn monthly_counts_keep_the_ledger_spelling_and_hide_small_cells() {
+        let r = |v: Option<&str>, m: &str, n: &str| {
+            vec![v.map(str::to_string), Some(m.into()), Some(n.into())]
+        };
+        let rows = vec![
+            r(Some("A"), "2024-02", "40"),
+            r(Some("A"), "2024-01", "3"),
+            r(None, "2024-01", "12"),
+            // Not a literal (cannot happen with the planned SQL): dropped, never kept as a value.
+            r(Some("Z"), "2024-01", "99"),
+        ];
+        let m = parse_monthly(&lits(&["'A'", "'B'"]), &rows, 5, false);
+        assert_eq!(
+            m.literals["'A'"],
+            vec![
+                MonthCount {
+                    month: "2024-01".into(),
+                    rows: None
+                },
+                MonthCount {
+                    month: "2024-02".into(),
+                    rows: Some(40)
+                },
+            ]
+        );
+        assert!(!m.literals.contains_key("'B'"));
+        assert_eq!(
+            m.other,
+            vec![MonthCount {
+                month: "2024-01".into(),
+                rows: Some(12)
+            }]
+        );
+        let text = serde_json::to_string(&m).unwrap();
+        assert!(!text.contains("\"Z\"") && !text.contains("99"), "{text}");
+    }
+
+    #[test]
+    fn monthly_keeps_only_the_latest_months() {
+        let rows: Vec<Vec<Option<String>>> = (0..(MAX_MONTHS + 5))
+            .map(|i| {
+                vec![
+                    Some("1".into()),
+                    Some(format!("{}-{:02}", 2000 + i / 12, i % 12 + 1)),
+                    Some("10".into()),
+                ]
+            })
+            .collect();
+        let m = parse_monthly(&lits(&["1"]), &rows, 5, false);
+        assert_eq!(m.literals["1"].len(), MAX_MONTHS);
+        assert!(m.truncated);
+        assert_eq!(m.literals["1"][0].month, "2000-06");
+    }
+
+    #[test]
     fn months_between_counts_calendar_months() {
         assert_eq!(months_between("2024-05", "2026-11"), Some(30));
         assert_eq!(months_between("x", "2026-11"), None);
@@ -878,6 +1089,30 @@ mod tests {
 
     fn lits_y() -> Vec<String> {
         lits(&["cancelled_at", "note"])
+    }
+
+    #[test]
+    fn conditional_sql_groups_by_position_on_informix() {
+        let sql = conditional_sql(
+            Flavor::Informix,
+            "sales",
+            "orders",
+            "status",
+            &lits(&["1"]),
+            &lits(&["note"]),
+        )
+        .unwrap();
+        assert!(sql.ends_with("GROUP BY 1"), "{sql}");
+        let pg = conditional_sql(
+            Flavor::Postgres,
+            "s",
+            "t",
+            "c",
+            &lits(&["1"]),
+            &lits(&["n"]),
+        )
+        .unwrap();
+        assert!(pg.ends_with("IN ('1') THEN \"c\"::text END"), "{pg}");
     }
 
     #[test]

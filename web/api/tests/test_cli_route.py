@@ -71,6 +71,13 @@ CATALOGUE = [
         "args": [_arg("source", "source")],
     },
     {
+        "path": ["lakehouse", "dashboards", "change"],
+        "about": "change a dashboard",
+        "class": "external",
+        "metered": False,
+        "args": [_arg("dashboard", "dashboard", required=True), _arg("by", "as")],
+    },
+    {
         "path": ["commit"],
         "about": "commit",
         "class": "write",
@@ -173,6 +180,19 @@ def test_a_review_names_the_person_not_the_form(client: TestClient) -> None:
     assert "--as=someone-else" not in argv
     assert "--as=static:write" in argv
     assert argv[-3:] == ["--", "a", "b"]
+
+
+def test_whoever_a_command_names_as_acting_is_the_person_signed_in(client: TestClient) -> None:
+    # RFC 0258: the person changing a dashboard decides in place (theirs) or a copy (anyone
+    # else's), so a form cannot name someone else for any class, not only a review.
+    from app import catalogue
+
+    entry = next(e for e in CATALOGUE if e["path"] == ["lakehouse", "dashboards", "change"])
+    argv = catalogue.build_argv(
+        entry, {"dashboard": "sales", "by": "the-author"}, reviewer="someone", base=Path("/"), allowed=[]
+    )
+    assert "--as=the-author" not in argv
+    assert "--as=someone" in argv
 
 
 def test_a_token_cannot_review(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -226,6 +226,32 @@ impl PgSource {
         &self.label
     }
 
+    /// Open one read-only snapshot for several reads (RFC 0256: the application dictionary's two
+    /// queries see the same state). `REPEATABLE READ READ ONLY`: the session is read-only
+    /// already; this also pins the snapshot. End it with [`Self::end_transaction`].
+    pub fn begin_read_only_snapshot(&self) -> Result<(), PgError> {
+        let sql = "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY";
+        self.client
+            .borrow_mut()
+            .batch_execute(sql)
+            .map_err(|e| PgError::Query {
+                sql: sql.to_string(),
+                message: describe(&e),
+            })
+    }
+
+    /// End the transaction [`Self::begin_read_only_snapshot`] opened. It wrote nothing, so it is
+    /// rolled back.
+    pub fn end_transaction(&self) -> Result<(), PgError> {
+        self.client
+            .borrow_mut()
+            .batch_execute("ROLLBACK")
+            .map_err(|e| PgError::Query {
+                sql: "ROLLBACK".into(),
+                message: describe(&e),
+            })
+    }
+
     /// Run a query and render every column as text — the shape every tier and the catalog reader
     /// consume.
     ///

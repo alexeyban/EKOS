@@ -100,8 +100,9 @@ impl CompilerPass for PentahoAnalyzerPass {
 
     /// `v2` = RFC 0170 Phase 3: Filter nodes carry `predicates`. `cache_inputs` names only the
     /// artifacts read, so without this a cached run would keep serving filters without them.
+    /// `v3` = RFC 0256 §3.3: a step that uses a database connection carries `connection_user`.
     fn version(&self) -> &str {
-        "v2"
+        "v3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -164,6 +165,14 @@ impl CompilerPass for PentahoAnalyzerPass {
             // RFC 0170 Phase 3: a FilterRows step's condition as normalized predicates, so the
             // business rules in a Kettle job join the ones recovered from SQL.
             if data.kettle_kind != "job" {
+                // RFC 0256 §3.3: the database user a step connects as, so a role seen running
+                // statements can be proposed as this job.
+                for (index, user) in step_connection_users(&data.xml) {
+                    if let Some(o) = lowered.objects.get_mut(index) {
+                        o.properties
+                            .insert("connection_user".into(), serde_json::json!(user));
+                    }
+                }
                 for (index, sites) in filter_predicates(&data.xml, &graph) {
                     if let Some(o) = lowered.objects.get_mut(index) {
                         o.properties
@@ -199,6 +208,38 @@ impl CompilerPass for PentahoAnalyzerPass {
         );
         Ok(())
     }
+}
+
+// ── RFC 0256 §3.3: the user each step connects as ───────────────────────────
+
+/// Step index (in `<step>` order, as [`parse_ktr`] numbers nodes) → the `<username>` of the
+/// transformation-level `<connection>` the step names. Only the user is read — never a password.
+/// A user given as a variable (`${DB_USER}`) or left empty says nothing about the role and is
+/// skipped.
+pub fn step_connection_users(xml: &str) -> Vec<(usize, String)> {
+    let Ok(doc) = roxmltree::Document::parse(xml) else {
+        return vec![];
+    };
+    let root = doc.root_element();
+    let users: HashMap<String, String> = root
+        .children()
+        .filter(|n| n.has_tag_name("connection"))
+        .filter_map(|c| {
+            let name = child_text(&c, "name")?;
+            let user = child_text(&c, "username")?;
+            let user = user.trim();
+            (!user.is_empty() && !user.contains("${") && !user.contains("%%"))
+                .then(|| (name, user.to_string()))
+        })
+        .collect();
+    root.children()
+        .filter(|n| n.has_tag_name("step"))
+        .enumerate()
+        .filter_map(|(i, step)| {
+            let conn = child_text(&step, "connection")?;
+            users.get(conn.trim()).map(|u| (i, u.clone()))
+        })
+        .collect()
 }
 
 // ── RFC 0170: FilterRows conditions as predicates ───────────────────────────
@@ -529,6 +570,32 @@ fn map_step(step: &roxmltree::Node, step_type: &str, xml: &str) -> TransformNode
                 columns,
             }
         }
+        // RFC 0256: Kettle's write steps name their table under `<lookup>`: they write it as
+        // surely as a TableOutput does, so they are sinks — what an interaction map needs to see
+        // a job's updates and deletes. The columns are the ones the step sets.
+        "Update" | "InsertUpdate" | "Delete" | "SynchronizeAfterMerge" => {
+            let lookup = step.children().find(|n| n.has_tag_name("lookup"));
+            let Some(table) = lookup
+                .as_ref()
+                .and_then(|l| child_text(l, "table"))
+                .filter(|t| !t.trim().is_empty())
+            else {
+                return TransformNode::Unmapped {
+                    raw: xml_slice(xml, step),
+                    reason: format!("{step_type} step without a lookup table"),
+                };
+            };
+            let columns = lookup
+                .iter()
+                .flat_map(roxmltree::Node::children)
+                .filter(|n| n.has_tag_name("value"))
+                .filter_map(|v| child_text(&v, "name"))
+                .collect();
+            TransformNode::Sink {
+                object_name: table,
+                columns,
+            }
+        }
         other => TransformNode::Unmapped {
             raw: xml_slice(xml, step),
             reason: format!("unrecognized step type: {other}"),
@@ -848,6 +915,57 @@ mod tests {
             KTR_ALL_MAPPED_TYPES,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn kettle_update_and_delete_steps_write_their_lookup_table() {
+        let step = |ty: &str, inner: &str| {
+            format!(
+                "<transformation><step><name>s</name><type>{ty}</type>{inner}</step></transformation>"
+            )
+        };
+        let lookup = "<lookup><schema>public</schema><table>customers</table>\
+                      <value><name>name</name><rename>name</rename></value></lookup>";
+        for ty in ["Update", "InsertUpdate", "Delete", "SynchronizeAfterMerge"] {
+            let g = parse_kettle_xml("t.ktr", "transformation", &step(ty, lookup)).unwrap();
+            match &g.nodes[0] {
+                TransformNode::Sink {
+                    object_name,
+                    columns,
+                } => {
+                    assert_eq!(object_name, "customers", "{ty}");
+                    assert_eq!(columns, &vec!["name".to_string()], "{ty}");
+                }
+                n => panic!("{ty}: {n:?}"),
+            }
+        }
+        let g = parse_kettle_xml("t.ktr", "transformation", &step("Update", "")).unwrap();
+        assert!(matches!(g.nodes[0], TransformNode::Unmapped { .. }));
+    }
+
+    #[test]
+    fn a_step_carries_the_user_of_the_connection_it_names_never_a_password() {
+        let xml = r#"<transformation>
+            <connection><name>dwh</name><server>db</server><username>etl_nightly</username>
+              <password>Encrypted 2be98afc86aa7f2e4cb79ce10bec3fd89</password></connection>
+            <connection><name>vars</name><username>${DB_USER}</username></connection>
+            <step><name>read</name><type>TableInput</type><connection>dwh</connection>
+              <sql>SELECT * FROM customers</sql></step>
+            <step><name>calc</name><type>Calculator</type></step>
+            <step><name>write</name><type>TableOutput</type><connection>vars</connection>
+              <table>customers</table></step>
+            <step><name>also</name><type>TableOutput</type><connection>dwh</connection>
+              <table>orders</table></step>
+          </transformation>"#;
+        let users = step_connection_users(xml);
+        assert_eq!(
+            users,
+            vec![
+                (0, "etl_nightly".to_string()),
+                (3, "etl_nightly".to_string())
+            ]
+        );
+        assert!(!format!("{users:?}").contains("Encrypted"));
     }
 
     #[test]

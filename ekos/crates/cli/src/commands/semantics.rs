@@ -61,14 +61,23 @@ pub async fn commit_step(
         // RFC 0252: what the latest `ekos profile run` measured.
         data: super::profile::load(config, cwd),
     };
+    let dates_path = config
+        .ekos_dir(cwd)
+        .join("semantics")
+        .join("code-dates.json");
     let blame = (config.semantics.rationale)
         .then(|| GitBlame::new(cwd, config.redaction_config()))
-        .flatten();
+        .flatten()
+        .map(|b| b.with_saved_dates(&dates_path));
     let mut out = business_semantics::synthesize(
         &graph,
         &cfg,
         blame.as_ref().map(|b| b as &dyn RationaleSource),
     );
+    // RFC 0252: keep this run's literal dates for the next run at the same commit.
+    if let Some(b) = &blame {
+        b.save_dates(&dates_path);
+    }
     // RFC 0170 Phase 2: a human decision holds while what it was about is unchanged.
     let current: HashMap<KirId, &KirObject> = graph
         .objects
@@ -268,6 +277,7 @@ fn stats_json(s: &SemanticsStats) -> Value {
         "rationale_links": s.rationale_links,
         "data_values_measured": s.data_values_measured, "dead_codes": s.dead_codes,
         "never_seen_codes": s.never_seen_codes, "data_only_gaps": s.data_only_gaps,
+        "data_before_code": s.data_before_code, "new_value_columns": s.new_value_columns,
     })
 }
 
@@ -301,6 +311,8 @@ pub fn summary_line(s: &SemanticsStats, written: usize) -> String {
 pub struct GitBlame {
     cwd: PathBuf,
     redaction: RedactionConfig,
+    /// `introduced` answers of this run, by (path, line, literal): one history walk each.
+    dates: std::sync::Mutex<HashMap<String, Option<BlameHit>>>,
 }
 
 impl GitBlame {
@@ -318,6 +330,7 @@ impl GitBlame {
         ok.then(|| Self {
             cwd: cwd.to_path_buf(),
             redaction,
+            dates: Default::default(),
         })
     }
 }
@@ -353,6 +366,172 @@ impl RationaleSource for GitBlame {
             _ => Vec::new(),
         }
     }
+
+    fn introduced(&self, path: &str, line: u32, needle: &str) -> Option<BlameHit> {
+        let key = format!("{path}\u{0}{line}\u{0}{needle}");
+        if let Some(hit) = self.dates.lock().ok()?.get(&key) {
+            return hit.clone();
+        }
+        let mut hit = self
+            .line_log(path, line)
+            .and_then(|out| parse_line_log(&out, line, needle));
+        if let Some(h) = &mut hit {
+            h.summary = redact(&h.summary, &self.redaction);
+        }
+        self.dates.lock().ok()?.insert(key, hit.clone());
+        hit
+    }
+}
+
+impl GitBlame {
+    /// The workspace repository's `HEAD`, which keys saved literal dates: a new commit can move a
+    /// line, so dates from another `HEAD` are not reused.
+    fn head(&self) -> Option<String> {
+        let o = Command::new("git")
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .arg("-C")
+            .arg(&self.cwd)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .ok()?;
+        o.status
+            .success()
+            .then(|| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    }
+
+    /// Loads the literal dates a previous run saved at the same `HEAD` (`introduced` walks a
+    /// line's history, ~0.3 s per line on LedgerSMB; a commit re-runs every one otherwise).
+    pub fn with_saved_dates(self, path: &Path) -> Self {
+        let saved: Option<Value> = std::fs::read(path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok());
+        if let (Some(v), Some(head)) = (saved, self.head())
+            && v["head"].as_str() == Some(head.as_str())
+            && let (Some(dates), Ok(mut mem)) = (v["dates"].as_object(), self.dates.lock())
+        {
+            for (k, h) in dates {
+                mem.insert(k.clone(), hit_from_json(h));
+            }
+        }
+        self
+    }
+
+    /// Writes this run's literal dates, keyed by `HEAD`. Best effort: a failure only costs time.
+    pub fn save_dates(&self, path: &Path) {
+        let (Some(head), Ok(mem)) = (self.head(), self.dates.lock()) else {
+            return;
+        };
+        let dates: serde_json::Map<String, Value> = mem
+            .iter()
+            .map(|(k, h)| {
+                (
+                    k.clone(),
+                    h.as_ref().map(hit_to_json).unwrap_or(Value::Null),
+                )
+            })
+            .collect();
+        let doc = json!({"rfc": "0252", "head": head, "dates": dates});
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(path, serde_json::to_vec(&doc).unwrap_or_default());
+    }
+
+    /// The history of one line (`git log -L`), newest first, as `(sha, author time, author,
+    /// summary, the line's text after the commit)`.
+    fn line_log(&self, path: &str, line: u32) -> Option<String> {
+        let file = self.cwd.join(path);
+        let (Some(dir), Some(name)) = (file.parent(), file.file_name()) else {
+            return None;
+        };
+        if !file.is_file() || line == 0 || is_excluded_path(path, &self.redaction) {
+            return None;
+        }
+        let mut cmd = Command::new("git");
+        cmd.env("GIT_OPTIONAL_LOCKS", "0");
+        cmd.arg("-C")
+            .arg(dir)
+            .args(["log", "--no-color", "--format=%x1e%H%x1f%at%x1f%an%x1f%s"])
+            .arg(format!("-L{line},{line}:{}", name.to_string_lossy()));
+        match cmd.output() {
+            Ok(o) if o.status.success() => Some(String::from_utf8_lossy(&o.stdout).into_owned()),
+            _ => None,
+        }
+    }
+}
+
+fn hit_to_json(h: &BlameHit) -> Value {
+    json!({"line": h.line, "sha": h.sha, "summary": h.summary, "author": h.author, "date": h.date})
+}
+
+fn hit_from_json(v: &Value) -> Option<BlameHit> {
+    let s = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
+    Some(BlameHit {
+        line: u32::try_from(v.get("line")?.as_u64()?).ok()?,
+        sha: s("sha")?,
+        summary: s("summary").unwrap_or_default(),
+        author: s("author").unwrap_or_default(),
+        date: s("date")?,
+    })
+}
+
+/// RFC 0252 §3.2(b): from `git log -L` output (newest first, records starting with `0x1e`, the
+/// header fields split by `0x1f`), the oldest commit of the unbroken run, from the newest, whose
+/// version of the line still names `needle`: where the code started to know the literal there.
+pub fn parse_line_log(out: &str, line: u32, needle: &str) -> Option<BlameHit> {
+    let mut found: Option<BlameHit> = None;
+    for record in out.split('\u{1e}').filter(|r| !r.trim().is_empty()) {
+        let (header, diff) = record.split_once('\n').unwrap_or((record, ""));
+        let f: Vec<&str> = header.split('\u{1f}').collect();
+        let [sha, time, author, summary] = f[..] else {
+            continue;
+        };
+        // The line after the commit: added (`+`) or unchanged context (` `) lines of the hunk.
+        let after = diff
+            .lines()
+            .skip_while(|l| !l.starts_with("@@"))
+            .skip(1)
+            .filter(|l| (l.starts_with('+') && !l.starts_with("+++")) || l.starts_with(' '))
+            .any(|l| names_literal(&l[1..], needle));
+        if !after {
+            break;
+        }
+        found = Some(BlameHit {
+            line,
+            sha: sha.to_string(),
+            summary: summary.to_string(),
+            author: author.to_string(),
+            date: time
+                .trim()
+                .parse::<i64>()
+                .ok()
+                .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                .as_ref()
+                .map(chrono::DateTime::to_rfc3339)
+                .unwrap_or_default(),
+        });
+    }
+    found
+}
+
+/// Whether `text` names the literal `needle` as the ledger writes it: a quoted literal (`'A'`)
+/// verbatim, anything else as a whole token (`7` in `= 7)` but not in `17` or `x7` or `7.5`).
+pub fn names_literal(text: &str, needle: &str) -> bool {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return false;
+    }
+    if needle.starts_with('\'') {
+        return text.contains(needle);
+    }
+    let word = |c: char| c.is_alphanumeric() || c == '_' || c == '.';
+    let lower = text.to_lowercase();
+    let n = needle.to_lowercase();
+    lower.match_indices(&n).any(|(at, _)| {
+        let before = lower[..at].chars().next_back();
+        let after = lower[at + n.len()..].chars().next();
+        !before.is_some_and(word) && !after.is_some_and(word)
+    })
 }
 
 /// Parse `git blame --porcelain`: a header `<sha> <orig> <final> [<n>]` per line, with the
@@ -439,7 +618,7 @@ pub fn current_items_for_write(
 pub fn items_in(
     config: &EkosConfig,
     cwd: &Path,
-    ledger: &dyn KnowledgeStore,
+    ledger: &dyn ekos_ledger::KnowledgeReader,
 ) -> Result<Vec<KirObject>> {
     let current: Option<BTreeSet<String>> = std::fs::read(manifest_path(config, cwd))
         .ok()
@@ -1657,6 +1836,77 @@ mod tests {
         );
         assert!(hits[0].summary.contains("[REDACTED:aws-access-key-id]"));
         assert!(blame.blame("prod.sql", &[1]).is_empty());
+    }
+
+    /// RFC 0252 §3.2(b): a literal's introduction is the oldest commit of the line's unbroken run
+    /// of versions naming it — not the commit that last touched the line, and not an older
+    /// version that named another value.
+    #[test]
+    fn a_literal_is_dated_by_the_commit_that_put_it_on_its_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str], when: &str| {
+            let ok = Command::new("git")
+                .arg("-C")
+                .arg(dir.path())
+                .env("GIT_AUTHOR_DATE", when)
+                .env("GIT_COMMITTER_DATE", when)
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.com"])
+                .args(args)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "git {args:?}");
+        };
+        let write = |text: &str| std::fs::write(dir.path().join("q.sql"), text).unwrap();
+        git(&["init", "-q"], "2019-01-01T00:00:00Z");
+        write("SELECT 1;\nWHERE status = 2\nAND kind = 'A'\n");
+        git(&["add", "."], "2019-01-01T00:00:00Z");
+        git(&["commit", "-q", "-m", "first"], "2019-01-01T00:00:00Z");
+        // Line 2 now names 7 (not 2); line 3 is touched without changing its literal.
+        write("SELECT 1;\nWHERE status = 7\nAND kind = 'A' -- AKIAIOSFODNN7EXAMPLE\n");
+        git(
+            &["commit", "-qam", "seven AKIAIOSFODNN7EXAMPLE"],
+            "2021-05-01T00:00:00Z",
+        );
+        write("-- header\nSELECT 1;\nWHERE status = 7\nAND kind = 'A' -- AKIAIOSFODNN7EXAMPLE\n");
+        git(&["commit", "-qam", "header"], "2023-03-01T00:00:00Z");
+
+        let blame = GitBlame::new(dir.path(), RedactionConfig::default()).unwrap();
+        let seven = blame.introduced("q.sql", 3, "7").expect("dated");
+        assert!(seven.date.starts_with("2021-05-01"), "{seven:?}");
+        assert!(!seven.summary.contains("AKIA"), "redacted: {seven:?}");
+        let a = blame.introduced("q.sql", 4, "'A'").expect("dated");
+        assert!(a.date.starts_with("2019-01-01"), "{a:?}");
+        // The line does not name 2 any more: no answer, not the old commit.
+        assert_eq!(blame.introduced("q.sql", 3, "2"), None);
+        assert_eq!(blame.introduced("missing.sql", 1, "7"), None);
+
+        // Saved at this HEAD, read back without walking history (the file is gone: only the saved
+        // answer can give it); a new commit drops them.
+        let saved = dir.path().join("dates.json");
+        blame.save_dates(&saved);
+        std::fs::remove_file(dir.path().join("q.sql")).unwrap();
+        let again = GitBlame::new(dir.path(), RedactionConfig::default())
+            .unwrap()
+            .with_saved_dates(&saved);
+        assert_eq!(again.introduced("q.sql", 3, "7"), Some(seven));
+        assert_eq!(again.introduced("q.sql", 3, "2"), None);
+        git(&["commit", "-qam", "drop q"], "2024-01-01T00:00:00Z");
+        let moved = GitBlame::new(dir.path(), RedactionConfig::default())
+            .unwrap()
+            .with_saved_dates(&saved);
+        assert_eq!(moved.introduced("q.sql", 3, "7"), None);
+    }
+
+    #[test]
+    fn a_literal_is_a_whole_token() {
+        assert!(names_literal("WHERE status = 7)", "7"));
+        assert!(!names_literal("WHERE status = 17", "7"));
+        assert!(!names_literal("WHERE x7 = 1", "7"));
+        assert!(!names_literal("WHERE a = 7.5", "7"));
+        assert!(names_literal("IN ('A', 'B')", "'A'"));
+        assert!(!names_literal("IN (A)", "'A'"));
+        assert!(names_literal("CASE WHEN c = -1", "-1"));
     }
 
     #[test]

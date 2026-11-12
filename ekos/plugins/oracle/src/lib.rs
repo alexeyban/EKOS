@@ -44,7 +44,8 @@ pub struct DatabaseReading {
     /// Archive-log and supplemental-logging state, per owner in snapshot order.
     pub log_states: Vec<serde_json::Value>,
     /// RFC 0212: the dictionary's table flags per owner, when `[[databases]] dictionary` asks.
-    pub dictionaries: Vec<Option<Vec<TableFlags>>>,
+    /// RFC 0212 table flags and RFC 0256 application processes, per owner, when read.
+    pub dictionaries: Vec<Option<(Vec<TableFlags>, Vec<ekos_ora_live::AppProcess>)>>,
 }
 
 /// Where a reading comes from: the live database, or a fixed reading in tests.
@@ -102,16 +103,23 @@ impl CatalogReader for LiveReader {
             dictionaries.push(match self.dictionary {
                 Some(kind) => {
                     let started = std::time::Instant::now();
-                    let flags = ekos_ora_live::dictionary::read(&source, kind, owner)?;
-                    let counts = serde_json::json!({ "tables": flags.len() });
+                    let (flags, mut processes) =
+                        ekos_ora_live::dictionary::read_all(&source, kind, owner)?;
+                    // A process's name is the application's text: redacted like any other.
+                    ekos_observation_sdk::app_dictionary::redact_names(
+                        &mut processes,
+                        &self.redaction,
+                    );
+                    let counts =
+                        serde_json::json!({ "tables": flags.len(), "processes": processes.len() });
                     log_step(
                         "oracle.dictionary",
-                        "read AD_Table flags",
+                        "read AD_Table flags and AD_Process",
                         owner,
                         started,
                         &counts,
                     );
-                    Some(flags)
+                    Some((flags, processes))
                 }
                 None => None,
             });
@@ -274,21 +282,16 @@ pub fn artifacts(database: &str, reading: &DatabaseReading) -> Vec<ObservationAr
             ObservationArtifact::new(OBSERVER, catalog_target(database, &s.owner), data)
                 .with_producer("ekos-plugin-oracle"),
         );
-        if let Some(Some(flags)) = reading.dictionaries.get(n) {
-            let data = serde_json::json!({
-                "kind": "dictionary",
-                "database": database,
-                "owner": s.owner,
-                "tables": flags,
-            });
-            out.push(
-                ObservationArtifact::new(
-                    OBSERVER,
-                    format!("{}/dictionary", catalog_target(database, &s.owner)),
-                    data,
-                )
-                .with_producer("ekos-plugin-oracle"),
-            );
+        if let Some(Some((flags, processes))) = reading.dictionaries.get(n) {
+            out.push(ekos_observation_sdk::app_dictionary::artifact(
+                OBSERVER,
+                "ekos-plugin-oracle",
+                OBSERVER,
+                database,
+                &s.owner,
+                flags,
+                processes,
+            ));
         }
         for o in &s.objects {
             let data = serde_json::json!({

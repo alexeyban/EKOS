@@ -1411,6 +1411,7 @@ async fn dispatch_profile(
                     signals,
                     max_rows,
                     dead_after_months: dead_after,
+                    min_cell: config.questions.min_cell,
                     allow_writable_role,
                     json,
                 },
@@ -1669,7 +1670,8 @@ enum ProfileCommands {
         /// Only this database
         #[arg(long)]
         database: Option<String>,
-        /// literal, temporal, conditional, keys, history (comma-separated; default all)
+        /// literal, temporal, monthly, conditional, keys, history, usage (comma-separated;
+        /// default all)
         #[arg(long, value_delimiter = ',')]
         signals: Vec<String>,
         /// Skip tables with more rows than this, by the catalog's estimate (0: no limit)
@@ -2854,6 +2856,40 @@ where
     Ok(cli)
 }
 
+/// The workspace's `ekos.toml` for `command`. A file that does not parse stops the command with
+/// the file and the error: falling back to the defaults silently ran whole pipelines without the
+/// project's databases or dialect rules (the warning went nowhere, logging starts after this).
+/// `config validate`, `doctor` and `init` still run on a broken file — they are how it is
+/// diagnosed or replaced — after saying so on stderr. Keys nothing reads are listed on stderr.
+fn load_config(
+    command: &Commands,
+    path: &std::path::Path,
+) -> Result<ekos_compiler_core::EkosConfig> {
+    let tolerant = matches!(
+        command,
+        Commands::Config { .. } | Commands::Doctor { .. } | Commands::Init { .. }
+    );
+    match ekos_compiler_core::EkosConfig::load(path) {
+        Ok((config, unknown)) => {
+            for key in unknown {
+                eprintln!(
+                    "warning: {}: `{key}` is not a setting EKOS reads (a typo, or another \
+                     version's key); ignored",
+                    path.display()
+                );
+            }
+            Ok(config)
+        }
+        Err(e) if tolerant => {
+            eprintln!(
+                "warning: {e}\nwarning: continuing with the default settings for this command"
+            );
+            Ok(ekos_compiler_core::EkosConfig::default())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// The whole `ekos` CLI: parses arguments and dispatches every command. The public binary calls
 /// it with [`Extensions::none`]; an RFC 0149 build passes its own extensions, which then take
 /// part in `build`/`recover`/`commit`, the MCP server, `architecture investigate` and the
@@ -2967,7 +3003,7 @@ where
                 mcp_workspace_flag.as_deref(),
                 env_workspace.as_deref(),
             );
-            let config = ekos_compiler_core::EkosConfig::from_file_or_default(&config_path);
+            let config = load_config(&command, &config_path)?;
             (config, std::env::current_dir()?, config_path, env_workspace)
         }
     };

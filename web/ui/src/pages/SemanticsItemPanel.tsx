@@ -8,6 +8,7 @@ import { useState } from "react";
 import { api, apiPost } from "../api/client";
 import type { SemanticsDetail } from "../api/types";
 import { type Me, mayReview } from "../WorkspaceShell";
+import { UsageOverTime } from "./UsageOverTime";
 import {
   KIND_LABEL,
   REVIEWABLE,
@@ -47,6 +48,23 @@ const SHOWN = [
 ];
 
 type Action = "confirm" | "reject" | "edit";
+
+/** RFC 0252: the column and value whose rows per month the panel charts, if any. */
+export function usageTarget(
+  d: SemanticsDetail,
+): { table: string; column: string; value: string | null } | null {
+  const table = prop(d, "table");
+  const column = prop(d, "column");
+  if (!table || !column) return null;
+  if (d.kind === "EnumMeaning") return { table, column, value: prop(d, "value") };
+  if (d.kind === "SemanticGap" && prop(d, "gap_type") === "unexplained_value") {
+    return { table, column, value: prop(d, "value") };
+  }
+  if (d.kind === "SemanticGap" && prop(d, "gap_type") === "data_only_values") {
+    return { table, column, value: null };
+  }
+  return null;
+}
 
 export function SemanticsItemPanel({
   workspace,
@@ -97,6 +115,7 @@ export function SemanticsItemPanel({
   });
 
   const d = detail.data;
+  const target = d ? usageTarget(d) : null;
   const reviewable = d ? REVIEWABLE.includes(d.kind) : false;
   const canWrite = mayReview(me);
   const needsName = me.mode === "token" && !reviewer.trim();
@@ -137,6 +156,7 @@ export function SemanticsItemPanel({
             ))}
           </dl>
           {previousReview(d) && <p className="muted">previously {previousReview(d)}</p>}
+          {target && <UsageOverTime workspace={workspace} {...target} />}
 
           <strong className="sem-sub">Evidence ({d.evidence.length})</strong>
           <ul className="sem-evidence">

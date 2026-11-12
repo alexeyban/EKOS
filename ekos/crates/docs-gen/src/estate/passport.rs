@@ -580,6 +580,16 @@ fn code_row(m: &Model, o: &KirObject, t: &KirObject) -> Vec<String> {
             .replace('_', " ");
         in_data.push_str(&format!("<br>implies {} {}", code(col), cell(&then)));
     }
+    // RFC 0252 §3.2(b): the data held the value before the code named it — the code is behind.
+    if let Some(h) = o.properties.get("code_history")
+        && h.get("order").and_then(Value::as_str) == Some("data_before_code")
+    {
+        let since = h.get("introduced").and_then(Value::as_str).unwrap_or("");
+        in_data.push_str(&format!(
+            "<br>new: in the data before the code named it (code since {})",
+            cell(since.get(..7).unwrap_or(since))
+        ));
+    }
     let mut ev = Vec::new();
     if let Some(b) = best
         && let Some(p) = b
@@ -639,6 +649,24 @@ fn usage_cells(usage: &[&Value]) -> [String; 4] {
     })
 }
 
+/// "unexplained", and "new" when every value no code names first appeared after the code that
+/// mentions the column last changed (RFC 0252 §3.2(b)).
+fn new_values_state(o: &KirObject) -> String {
+    if o.properties.get("new").and_then(Value::as_bool) != Some(true) {
+        return "unexplained".into();
+    }
+    let changed = o
+        .properties
+        .get("code_last_changed")
+        .and_then(|c| c.get("date"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    format!(
+        "unexplained<br>new: all first seen after the code last changed ({})",
+        cell(changed.get(..7).unwrap_or(changed))
+    )
+}
+
 /// One `data_only_values` gap: counts only.
 fn data_only_row(o: &KirObject) -> Vec<String> {
     let p = &o.properties;
@@ -657,7 +685,7 @@ fn data_only_row(o: &KirObject) -> Vec<String> {
             .map_or_else(|| "—".into(), pct),
         cell(prop(o, "first_seen").unwrap_or("—")),
         cell(prop(o, "last_seen").unwrap_or("—")),
-        "unexplained".into(),
+        new_values_state(o),
         status_words(o),
         profile_evidence(
             &format!(

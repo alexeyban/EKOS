@@ -12,6 +12,7 @@ rust-version.workspace = true
 postgres.workspace = true
 sqlparser.workspace = true
 ekos-common.workspace = true
+ekos-observation-sdk.workspace = true
 ekos-migrate.workspace = true
 ekos-migrate-validate.workspace = true
 ekos-migrate-dq.workspace = true

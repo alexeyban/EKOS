@@ -55,3 +55,30 @@ impl Probe for PgProbe {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_usage_queries_pass_the_guard() {
+        use ekos_observation_sdk::usage::{TableName, UsageSource, available_sql, usage_sql};
+        let t = vec![TableName {
+            owner: "public".into(),
+            table: "acc_trans".into(),
+        }];
+        for src in [UsageSource::PgStatStatements, UsageSource::TableStats] {
+            let sql = usage_sql(src, &t).unwrap();
+            if let Err(e) = single_select(&sql, &PostgreSqlDialect {}) {
+                panic!("{src:?}: {e}\n{sql}");
+            }
+        }
+        assert!(
+            single_select(
+                available_sql(UsageSource::PgStatStatements).unwrap(),
+                &PostgreSqlDialect {}
+            )
+            .is_ok()
+        );
+    }
+}

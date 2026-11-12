@@ -301,3 +301,152 @@ decision.
 - Open question 2 stands: the header is editable in Superset, and phase 4's drift check must ignore
   `ROW-ekos-health` / `MARKDOWN-ekos-health`.
 - Phases 1, 2, 4 and 5 wait on RFC 0248's bundle and publishing.
+
+### 9.2 Phases 1, 2, 4 and 5, and RFC 0248's bundle (2026-11-12, uncommitted worktrees)
+
+Built in ekos-lakehouse (`gold::dashboard`, `lakehouse-ext::{dashboard_change, dashboard_adopt,
+dashboard_cli, dashboard_tool}`), in the Superset fork (`superset/ekos_ai/{bundle,service,llm}.py`)
+and, for identity, in the EKOS console (`web/api/app/catalogue.py`). RFC 0248 §2.4's bundle is
+logged in RFC 0248 §7.
+
+**The bundle (§3.1; open question 1 answered: no, it did not exist; it does now).**
+`dashboards/<key>.yaml` in the pipeline repository, `format: 1`, read with unknown fields refused.
+Per chart: the presentation (title, chart type, x, group by, metric, order, number format, colour
+scheme by name), the structured request (measures, dimensions, filters, period — terms only), the
+mart it reads and that mart's digest (`gold::mart_id` of its compiled SQL), the resolved terms with
+the rule that applied and where the chart reads each (`sum of gold.sales_by_month.total`, `applied on
+gold.sales_by_month.customer`, `built into gold.sales_by_month`), the SQL, the reconciliation, the
+Superset ids and the form data as published. A copy also records its origin (dashboard and commit).
+
+**Chart SQL (pure, `gold::dashboard`).**
+- A chart is served by a mart whose dimensions and measures mean the same (compared on resolved terms
+  and join keys, not text); a finer mart is totalled (`sum(...)`, only for sums and counts); a filter
+  on a column a mart carries as a plain dimension is applied over it; every filter the mart has built
+  in must be stated by the chart (a new chart inherits them, and the bundle says so).
+- Among marts that serve, the order is: the chart's current mart, then one at the chart's own grain,
+  then the coarsest, then by name.
+- A period is `[from, to)` on a time dimension, each date the start of the unit, applied to the
+  truncated value on both sides of the reconciliation.
+- **Reconciliation (RFC 0248 §2.4):** per sum or count, the chart's total against the same terms
+  compiled over silver (`gold::compile` + `engine_sql`, not through gold). A chart with neither has
+  nothing to compare and says so. A difference blocks publication; nothing is written.
+
+**Phase 1 — changes, versions, revert, copies.**
+- A change is a delta, schema-checked (unknown fields, SQL characters, one quoted literal at the end of
+  a filter only). `--text` asks a local model for the delta; the delta is applied to the stored terms
+  before it is accepted and its error goes back to the model (three attempts). Model route: the
+  existing `requirements` task (no new EKOS task).
+- Classes: `presentation` (SQL kept), `query` (served by an existing mart), `mart_addition`,
+  `mart_change` (only filters differ from the chart's mart: the filters a dimension cannot carry move
+  into it), `needs_clarification`, `impossible`. Any blocked chart blocks the whole change.
+- Versions: each publication commits only the bundle file, as the person (author and committer).
+  `versions` lists the main line (`--first-parent`: a merged branch's own commits are not versions),
+  with the term diff of each. `diff` is terms first, SQL second. `revert` is `git revert` of a version,
+  the restored charts re-reconciled, the dashboard republished, one commit.
+- **Someone else's dashboard is always changed as a copy:** a branch `ekos/dash/<key>/<id>`, committed
+  with a temporary index (the checked-out tree is not touched), published as a separate Superset
+  dashboard titled `<title> (copy by <who>, from <key>)`. The branch's author may change it further.
+- `--preview`: old and new chart rows side by side on the same engine, the SQL diff, the term diff;
+  nothing is published.
+- An adopted chart whose dataset EKOS did not create gets a dataset of its own on its first query
+  change; the hand-made dataset is never rewritten.
+
+**Phase 2 — pull request, merge, conflicts, marts.**
+- `request-merge` (the branch's author) records the request; `review` shows the change, what moved on
+  the original since, and the conflicts.
+- `merge` (the original's author or a reviewer from `[extensions.lakehouse.dashboards] reviewers`):
+  a three-way merge of term maps (base = the origin commit). A term both sides changed differently is
+  a conflict unless `--choose <term>=ours|theirs`; any open conflict merges nothing. The result is
+  compiled over today's marts and every changed chart reconciled, or the merge is refused ("change the
+  branch again on the new original first"). Then the original is republished, a merge commit is made
+  (`-s ours` plus the merged bundle), the copy is removed unless `--keep-copy`, and the branch ref is
+  kept under `refs/ekos/dash-merged/…` (`dash-closed/…` for `close`).
+- `mart_addition` and `mart_change` go through RFC 0248 §2.3's hard gates:
+  - before the build: every term resolves; 0 invented atoms (`gold::check`);
+  - after a build into `<mart>__candidate`: the grain is unique (the generated dbt test); the mart
+    reconciles with silver (`gold::reconcile_sql`); at most 1,000,000 rows. Only then is the real
+    table replaced and the description committed.
+  - A modifying change first shows the confirmation (impact: every other dashboard and open branch
+    reading the mart; the consent text and its version; the daily limit) and stops. `--confirm`
+    records the consent in `.ekos/lakehouse/dashboard-consents.json`; one modifying change per day.
+  - An addition on a branch is built as `<mart>__b<id>` and its description committed only on the
+    branch; the merge adds it for real on the main line through the same gates and drops the
+    branch's table.
+  - `mart-build = "trino"` builds on the engine (`drop` + `create table … as`: the sandbox's memory
+    connector has no `create or replace`). The default, `dagster`, writes nothing and stops with
+    "build it with Dagster" — **not exercised**.
+  - **Not built:** RFC 0248 §2.3's AI review step; the per-mart build queue (builds run in the
+    command, one at a time per process).
+
+**Phase 4 — drift.** At each `sync`, `change`, `revert` and `merge`, the dashboard is read back: its
+title, the charts on it (a chart added or removed by hand), each chart's name, every form-data key EKOS
+published, and each dataset's SQL (whitespace-insensitive). The health header (phase 3) is not a chart
+and the layout is not compared, so the header never counts as drift; republishing keeps it. A drifted
+dashboard refuses a change; `republish` overwrites it from the bundle (a chart added by hand is taken
+off the dashboard, not deleted). Health: drift is a `drifted` finding (chart or dashboard level),
+below `failing`, `unverified` and `late`.
+
+**Phase 5 — adoption.** `adopt --superset-id <id>` reads each chart: a physical dataset over a gold
+mart, or one SELECT over one mart (plain columns, `sum`/`count` of a column, `AND`ed comparisons with
+literals), and the chart's metrics, x axis, group by and simple filters. Every other construct is an
+unresolved atom and becomes a question. A dataset reading a table outside gold and silver refuses the
+adoption, naming it. The bundle records adopted charts (SQL and form data as they are in Superset, no
+reconciliation: health says `unverified` until a change republishes them) and the unadopted ones with
+their atoms. Nothing in Superset changes.
+
+**Sync and health with a bundle (phase 3 follow-up).** `sync` first commits any bundle the fork wrote
+and did not commit (as its author; an invalid one is reported, not committed), then reads every
+bundle — the main line's and each open branch's copy (a copy has its own health) — instead of parsing
+SQL: each chart reads its mart, the mart's silver tables come from the compiled mart (no requirement
+approval needed), its own reconciliation replaces the mart stand-in (missing → `unverified`, a
+difference → `failing`, the mart's digest changed since → `unverified`), and drift is recorded. Charts
+adoption could not read are still judged by their SQL. `not_evaluated` for a chart with a bundle is
+only "stale instructions or synonyms and requirement approval validity" — `needs review` is **still
+not evaluated**.
+
+**Console.** The Lakehouse page gains "Dashboard versions" and "Dashboard copies and pull requests"
+panels and three actions: find drift, preview a change, change a dashboard (dashboard key + words).
+The EKOS console now fills `by` (`--as`) with the signed-in person for every command class, not only
+reviews: the person's identity decides between their own dashboard in place and someone else's as a
+copy, so a form must not name someone else (`web/api/tests/test_cli_route.py`).
+
+**Exits, measured on a local testbed** (`ekos-0258-trino`: Trino 483, memory catalog `iceberg`;
+`ekos-0258-superset`: Superset 4.1.1 with the fork's `ekos_ai` mounted). Data: synthetic,
+iDempiere-shaped silver tables (`random.Random(258)`: 600 orders, 1,529 lines, 354 invoices, 25
+partners), the three gold marts of `ekos-lakehouse-oracle/pipeline-sales` built from that repository's
+own generated dbt SQL, the pipeline repository a copy of it. Not the measured iDempiere run.
+
+| Phase | Exit | Result |
+|---|---|---|
+| 1 | five written changes, each a new version, each chart reconciled | **met**: presentation (line, `,.2f`), count of invoices added, period 2025, split by customer, `customer <> 'Internal Sales Office'`; versions 2–6, every chart's total equal to silver's (e.g. 1,377,426.01 = 1,377,426.01). Three were interpreted from words by local `qwen2.5-coder:3b`; for two (split by customer, leave a customer out) it gave no usable delta in three attempts (`chart type "bar\|line\|…"`, a filter it wanted to remove that the chart did not have) — both refused by the schema check, nothing changed — and they were written as deltas by hand. `glm-4.7-flash` answered with no text (thinking only); `llama3` (8B) did not answer within 280 s on the 4 GB GPU. |
+| 1 | a revert restores the previous one | **met**: the reverted version's terms and SQL equal the version before it; Superset in step (no drift) |
+| 1 | a second user's change leaves the original untouched | **met**: bob's change → branch and copy dashboard 2; the original's Superset state byte-identical before and after, its bundle and main line unchanged |
+| 2 | two branches changing different charts both merge | **met**: bob (chart 1 period, type) and carol (chart 2 type, format), both merged by alice, copies removed |
+| 2 | two changing the same term conflict and one is chosen | **met**: dave `,.1f` / erin `,.3f` on chart 2's number format → one conflict, main unchanged; `--choose …=theirs` merged, erin's title change merged with it |
+| 2 | a change needing a mart change passes the gates and the confirmation, and the other affected dashboard is listed | **met**: "USD only" on chart 1 → `mart_change` of `sales_by_month`; first run stopped at the confirmation listing the `customers` dashboard; with `--confirm`: 6 gates passed (mart 2,009,503.40 = silver), mart rebuilt, description committed, consent recorded; a second modifying change the same day refused. Also: an addition on the main line (`dash_a819b4cd`) and one on a branch (`dash_fab51a5e__bc155a6`, made real on merge, branch table dropped). After the mart change, the `customers` dashboard reports "its mart changed since the chart was reconciled". |
+| 4 | a chart edited by hand is reported drifted and refuses a change request | **met**: three differences reported (name, `viz_type`, `y_axis_format`), the change refused, `republish` cleared it. Live health showed the drift findings but the state `unverified`, because the testbed has no pipeline run facts (no table is healthy); `drifted` as the state is shown by `health::dashboard::tests::a_bundle_chart_is_judged_on_its_own_reconciliation_and_its_drift`. |
+| 5 | a hand-built dashboard over two gold marts is adopted fully; one with custom SQL is reported with its unresolved atoms | **met**: 3/3 charts over `sales_by_month` and `invoices_by_month` (a chart filter `customer != …` included); the custom-SQL dashboard 1/2, the other chart listed with 6 atoms (`sum(total) / nullif(sum(orders), 0)`, `upper(customer)`, `LIKE`, …); a dataset over `bronze_sales_adempiere.c_order` refused naming it. An adopted chart was then changed by request (period 2025, reconciled 1,110,439.71). |
+
+The fork's terms path end to end: "Total sales revenue by month and the number of orders per
+customer" → the local model named terms from the vocabulary → EKOS compiled both charts → both
+reconciled (2,009,503.40; 305) → Superset dashboard 7 and `dashboards/dash-7.yaml` → `sync` committed
+it as admin's version 1 → a change through `lakehouse dashboards change` published version 2.
+
+**Tests.** `gold::dashboard_tests` (14: compilation, roll-up limits, classes, period, the schema, the
+bundle round trip, merge and conflicts, diff, form data, mart choice), `lakehouse-ext`
+`dashboard_change_tests` (9, in-memory Superset + scripted engine + real git: versions and revert, a
+copy that leaves the original byte-identical, refusal on a bad delta and on a reconciliation
+difference, merges and conflicts, a mart change with gates, confirmation, impact and the daily limit,
+an addition on a branch, drift and republish, sync's bundle records, a fork-written bundle committed),
+`dashboard_adopt` (3), `health::dashboard` (bundle reconciliation and drift); the fork's
+`test_bundle.py` (6) and `test_llm.py` (+1).
+
+**Not done / limits.**
+- RFC 0248 §2.3 AI review; the Dagster build path for dashboard marts; the per-mart build queue.
+- `needs review` (stale annotations, approval validity) is not evaluated.
+- `branch-ttl-days` closes by the branch's last commit only; Superset view counts are not read.
+- No real pipeline run facts on the testbed, so no live `trusted` → `drifted` transition.
+- The side-by-side preview is rows and diffs in the command's output and the console action's log;
+  the console has no dedicated two-chart page (RFC 0248 §2.5's review screen is still not built).
+- A local 3B model turns about half of plain-language changes into a usable delta; the rest are
+  refused by the schema check, never published wrong.

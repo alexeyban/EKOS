@@ -32,7 +32,8 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 /// Bump when the mapping's output changes.
-pub const LOGIC_VERSION: &str = "oracle-catalog/5";
+/// `/6`: RFC 0256 — the dictionary's processes become `AppProcess` objects.
+pub const LOGIC_VERSION: &str = "oracle-catalog/6";
 
 /// The custom kind of the per-owner summary object.
 pub const CATALOG_KIND: &str = "OracleCatalog";
@@ -139,6 +140,8 @@ pub struct OracleCatalogStats {
     pub stale_objects: usize,
     /// RFC 0212: tables the application dictionary listed (0 when it was not read).
     pub dictionary_tables: usize,
+    /// RFC 0256: processes the application dictionary listed (a procedure or a class each).
+    pub dictionary_processes: usize,
 }
 
 fn live_id(d: CatalogDialect, prefix: &str, key: &str) -> KirId {
@@ -220,6 +223,8 @@ pub fn recover_catalog_as(
     let mut listed: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     // RFC 0212: (database, owner, TABLE) → the application dictionary's flags.
     let mut dictionary: Dictionary = BTreeMap::new();
+    // RFC 0256: (database, owner, VALUE) → (the dictionary artifact, the process).
+    let mut processes: BTreeMap<(String, String, String), (String, Value)> = BTreeMap::new();
     for (target, data) in artifacts {
         match data.get("kind").and_then(Value::as_str) {
             Some("catalog") => {
@@ -233,7 +238,10 @@ pub fn recover_catalog_as(
                 count_catalog(&mut stats, data);
             }
             Some("object") => items.extend(item(target, data)),
-            Some("dictionary") => read_dictionary(&mut dictionary, &mut stats, data),
+            Some("dictionary") => {
+                read_dictionary(&mut dictionary, &mut stats, data);
+                read_processes(&mut processes, target, data);
+            }
             _ => {}
         }
     }
@@ -303,7 +311,61 @@ pub fn recover_catalog_as(
         }
     }
     apply_dictionary(&mut graph, &dictionary);
+    stats.dictionary_processes = processes.len();
+    add_processes(&mut graph, d, &processes);
     (graph, stats)
+}
+
+/// RFC 0256 open question 4: one dictionary artifact's processes, the newest read of each winning.
+fn read_processes(
+    out: &mut BTreeMap<(String, String, String), (String, Value)>,
+    target: &str,
+    data: &Value,
+) {
+    let database = data["database"].as_str().unwrap_or_default();
+    let owner = data["owner"].as_str().unwrap_or_default();
+    for p in data["processes"].as_array().into_iter().flatten() {
+        if let Some(value) = p["value"].as_str() {
+            out.insert(
+                (database.to_string(), owner.to_string(), value.to_string()),
+                (target.to_string(), p.clone()),
+            );
+        }
+    }
+}
+
+/// One `AppProcess` per dictionary process, keyed by (database, owner, value): what it runs (a
+/// procedure or a Java class) and how many active schedules run it. The interaction map makes
+/// each an actor whose access is that of what it runs.
+fn add_processes(
+    graph: &mut KirGraph,
+    d: CatalogDialect,
+    processes: &BTreeMap<(String, String, String), (String, Value)>,
+) {
+    for ((database, owner, value), (target, p)) in processes {
+        let ev = graph.add_evidence(KirEvidence::new(
+            SourceLocation::file(target),
+            format!("AD_Process {value} in the application dictionary of {owner} in {database}"),
+        ));
+        let mut o =
+            KirObject::new(value, ObjectKind::Custom("AppProcess".into())).with_evidence(ev);
+        o.id = live_id(d, "process", &format!("{database}:{owner}:{value}"));
+        for (k, v) in [
+            ("database", json!(database)),
+            ("owner", json!(owner)),
+            ("origin", json!("live")),
+            ("title", p["name"].clone()),
+            ("procedure_name", p["procedure_name"].clone()),
+            ("classname", p["classname"].clone()),
+            ("active", p["active"].clone()),
+            ("schedules", p["schedules"].clone()),
+        ] {
+            if !v.is_null() {
+                o.properties.insert(k.into(), v);
+            }
+        }
+        graph.objects.push(o);
+    }
 }
 
 /// (database, owner, TABLE) → the application dictionary's flags (RFC 0212).
@@ -1008,6 +1070,48 @@ mod tests {
         assert!(!other.properties.contains_key("dictionary"));
     }
 
+    /// RFC 0256: each dictionary process is one keyed `AppProcess`, the newest read winning.
+    #[test]
+    fn dictionary_processes_become_keyed_app_processes() {
+        let mut artifacts = catalog();
+        let dict = |n: u32| {
+            json!({ "kind": "dictionary", "database": "erp", "owner": "ADEMPIERE", "tables": [],
+                    "processes": [
+                        { "value": "C_Invoice_Generate", "name": "Generate Invoices",
+                          "classname": "org.compiere.process.InvoiceGenerate", "active": true,
+                          "schedules": n },
+                        { "value": "AD_Synchronize", "name": "Sync",
+                          "procedure_name": "AD_Synchronize", "active": true, "schedules": 0 }
+                    ] })
+        };
+        artifacts.push(("oracle://erp/ADEMPIERE/dictionary".into(), dict(0)));
+        artifacts.push(("oracle://erp/ADEMPIERE/dictionary".into(), dict(2)));
+        let (g, stats) = recover_catalog(&artifacts);
+        assert_eq!(stats.dictionary_processes, 2);
+        let p: Vec<&KirObject> = g
+            .objects
+            .iter()
+            .filter(|o| matches!(&o.kind, ObjectKind::Custom(k) if k == "AppProcess"))
+            .collect();
+        assert_eq!(p.len(), 2);
+        let inv = p.iter().find(|o| o.name == "C_Invoice_Generate").unwrap();
+        assert_eq!(inv.properties["schedules"], 2, "the newest read wins");
+        assert_eq!(inv.properties["origin"], "live");
+        assert!(!inv.properties.contains_key("procedure_name"));
+        let sync = p.iter().find(|o| o.name == "AD_Synchronize").unwrap();
+        assert_eq!(sync.properties["procedure_name"], "AD_Synchronize");
+        assert_eq!(
+            inv.id,
+            recover_catalog(&artifacts)
+                .0
+                .objects
+                .iter()
+                .find(|o| o.name == "C_Invoice_Generate")
+                .unwrap()
+                .id
+        );
+    }
+
     #[test]
     fn the_catalog_summary_is_one_keyed_object_per_owner() {
         let (g, _) = recover_catalog(&catalog());
@@ -1120,6 +1224,81 @@ mod tests {
                 "CREATE TRIGGER orders_audit AFTER INSERT ON public.orders FOR EACH ROW EXECUTE FUNCTION public.order_audit()" }),
             ),
         ]
+    }
+
+    /// RFC 0256: iDempiere on PostgreSQL — the dictionary artifact `ekos-plugin-postgres` emits
+    /// gives the same table flags and the same `AppProcess` objects as Oracle's, matched to the
+    /// lower-case tables by name.
+    #[test]
+    fn a_postgres_dictionary_gives_the_same_flags_and_processes_as_oracle() {
+        let dict = |db: &str, owner: &str| {
+            json!({ "kind": "dictionary", "database": db, "owner": owner,
+                    "tables": [
+                        { "table_name": "Orders", "deleteable": false, "change_log": true,
+                          "view": false, "active": true }],
+                    "processes": [
+                        { "value": "C_Invoice_Generate", "name": "Generate Invoices",
+                          "classname": "org.compiere.process.InvoiceGenerate", "active": true,
+                          "schedules": 1 },
+                        { "value": "AD_Synchronize", "name": "Sync",
+                          "procedure_name": "AD_Synchronize", "active": true, "schedules": 0 }] })
+        };
+        let mut pg = pg_catalog();
+        pg.push((
+            "postgres://shop/public/dictionary".into(),
+            dict("shop", "public"),
+        ));
+        let (g, stats) = recover_catalog_as(CatalogDialect::Postgres, &pg);
+        assert_eq!(
+            (stats.dictionary_tables, stats.dictionary_processes),
+            (1, 2)
+        );
+        let orders = g.objects.iter().find(|o| o.name == "orders").unwrap();
+        assert_eq!(orders.properties["dictionary"]["deleteable"], false);
+        assert_eq!(orders.properties["dictionary"]["change_log"], true);
+        assert_eq!(orders.properties["dictionary"]["table_name"], "Orders");
+        let customers = g.objects.iter().find(|o| o.name == "customers").unwrap();
+        assert!(!customers.properties.contains_key("dictionary"));
+
+        let mut ora = catalog();
+        ora.push((
+            "oracle://erp/ADEMPIERE/dictionary".into(),
+            dict("erp", "ADEMPIERE"),
+        ));
+        let (og, _) = recover_catalog(&ora);
+        let processes = |g: &KirGraph| -> Vec<(String, serde_json::Map<String, Value>)> {
+            g.objects
+                .iter()
+                .filter(|o| matches!(&o.kind, ObjectKind::Custom(k) if k == "AppProcess"))
+                .map(|o| {
+                    let mut p = o.properties.clone();
+                    // Where it was read differs by design; what it is must not.
+                    for k in ["database", "owner", "dialect"] {
+                        p.remove(k);
+                    }
+                    (o.name.clone(), p.into_iter().collect())
+                })
+                .collect()
+        };
+        let (pp, op) = (processes(&g), processes(&og));
+        assert_eq!(pp.len(), 2);
+        assert_eq!(pp, op, "PostgreSQL's processes are Oracle's");
+        let sync = g
+            .objects
+            .iter()
+            .find(|o| o.name == "AD_Synchronize")
+            .unwrap();
+        assert_eq!(sync.properties["database"], "shop");
+        assert_eq!(sync.properties["owner"], "public");
+        assert_ne!(
+            sync.id,
+            og.objects
+                .iter()
+                .find(|o| o.name == "AD_Synchronize")
+                .unwrap()
+                .id,
+            "keyed by engine, database and owner"
+        );
     }
 
     #[test]

@@ -298,6 +298,7 @@ fn print_live_catalog_stats(
             "tables_profile_failed": s.tables_profile_failed,
             "stale_objects": s.stale_objects,
             "dictionary_tables": s.dictionary_tables,
+            "dictionary_processes": s.dictionary_processes,
         }),
     );
     println!(
@@ -1460,6 +1461,9 @@ pub async fn run_with(
 
     // ── SQL files ─────────────────────────────────────────────────────────
     let observe_paths = config.observe_bases(cwd);
+    // Where a file connector's targets live: an observation of a file under none of them is of a
+    // deleted file (`present_files`).
+    let bases: Vec<std::path::PathBuf> = observe_paths.iter().map(|b| b.path.clone()).collect();
 
     let ignore = &config.observe.ignore_patterns;
     // RFC 0043: shared by every direct-file-read block below (SQL scan, dependency-scan,
@@ -1648,13 +1652,21 @@ pub async fn run_with(
     }
 
     // ── Local document artifacts (RFC 0023) ──────────────────────────────
-    let localdocs_artifact_ids = collect_localdocs_artifact_ids(&*artifact_store);
+    let localdocs_artifact_ids = present_files(
+        &*artifact_store,
+        collect_localdocs_artifact_ids(&*artifact_store),
+        &bases,
+    );
     let localdocs_count = localdocs_artifact_ids.len();
     let docsem_stats =
         register_localdocs(config, cwd, &llm, localdocs_artifact_ids, &mut pass_manager);
 
     // ── Pentaho .ktr/.kjb artifacts (RFC 0027 Phase 3) ────────────────────
-    let pentaho_artifact_ids = collect_pentaho_artifact_ids(&*artifact_store);
+    let pentaho_artifact_ids = present_files(
+        &*artifact_store,
+        collect_pentaho_artifact_ids(&*artifact_store),
+        &bases,
+    );
     let pentaho_count = pentaho_artifact_ids.len();
     let mut pentaho_stats: Option<Arc<std::sync::Mutex<PentahoStats>>> = None;
     if !pentaho_artifact_ids.is_empty() {
@@ -1670,7 +1682,11 @@ pub async fn run_with(
     }
 
     // ── Python .py artifacts (RFC 0038/0040 Phase 2) ──────────────────────
-    let python_artifact_ids = collect_python_artifact_ids(&*artifact_store);
+    let python_artifact_ids = present_files(
+        &*artifact_store,
+        collect_python_artifact_ids(&*artifact_store),
+        &bases,
+    );
     let python_count = python_artifact_ids.len();
     let mut python_stats: Option<Arc<std::sync::Mutex<PythonStats>>> = None;
     if !python_artifact_ids.is_empty() {
@@ -1686,7 +1702,11 @@ pub async fn run_with(
     }
 
     // ── Rust .rs artifacts (RFC 0041) ──────────────────────────────────────
-    let rust_artifact_ids = collect_rust_artifact_ids(&*artifact_store);
+    let rust_artifact_ids = present_files(
+        &*artifact_store,
+        collect_rust_artifact_ids(&*artifact_store),
+        &bases,
+    );
     let rust_count = rust_artifact_ids.len();
     let mut rust_stats: Option<Arc<std::sync::Mutex<RustStats>>> = None;
     if !rust_artifact_ids.is_empty() {
@@ -1702,7 +1722,11 @@ pub async fn run_with(
     }
 
     // ── Elixir .ex/.exs artifacts (RFC 0081) ────────────────────────────────
-    let elixir_artifact_ids = collect_elixir_artifact_ids(&*artifact_store);
+    let elixir_artifact_ids = present_files(
+        &*artifact_store,
+        collect_elixir_artifact_ids(&*artifact_store),
+        &bases,
+    );
     let elixir_count = elixir_artifact_ids.len();
     let mut elixir_stats: Option<Arc<std::sync::Mutex<ElixirStats>>> = None;
     if !elixir_artifact_ids.is_empty() {
@@ -1718,7 +1742,11 @@ pub async fn run_with(
     }
 
     // ── Perl .pl/.pm/.t/.psgi/.cgi artifacts (RFC 0147) ─────────────────────
-    let perl_artifact_ids = collect_perl_artifact_ids(&*artifact_store);
+    let perl_artifact_ids = present_files(
+        &*artifact_store,
+        collect_perl_artifact_ids(&*artifact_store),
+        &bases,
+    );
     let perl_count = perl_artifact_ids.len();
     let mut perl_stats: Option<Arc<std::sync::Mutex<PerlStats>>> = None;
     if !perl_artifact_ids.is_empty() {
@@ -1734,7 +1762,11 @@ pub async fn run_with(
     }
 
     // ── Java .java artifacts (RFC 0209) ─────────────────────────────────────
-    let java_artifact_ids = collect_artifact_ids_for_connector(&*artifact_store, "java");
+    let java_artifact_ids = present_files(
+        &*artifact_store,
+        collect_artifact_ids_for_connector(&*artifact_store, "java"),
+        &bases,
+    );
     let java_count = java_artifact_ids.len();
     let mut java_stats: Option<Arc<std::sync::Mutex<JavaStats>>> = None;
     if !java_artifact_ids.is_empty() {
@@ -1754,7 +1786,11 @@ pub async fn run_with(
         register_extension_passes(ext, config, cwd, &*artifact_store, &mut pass_manager);
 
     // ── JavaScript/TypeScript artifacts (RFC 0085) ──────────────────────────
-    let javascript_artifact_ids = collect_javascript_artifact_ids(&*artifact_store);
+    let javascript_artifact_ids = present_files(
+        &*artifact_store,
+        collect_javascript_artifact_ids(&*artifact_store),
+        &bases,
+    );
     let javascript_count = javascript_artifact_ids.len();
     let mut javascript_stats: Option<Arc<std::sync::Mutex<JavaScriptStats>>> = None;
     if !javascript_artifact_ids.is_empty() {
@@ -1891,6 +1927,10 @@ pub async fn run_with(
     }
 
     if pass_manager.is_empty() {
+        // Nothing is current any more: compile must not keep serving earlier recovers' objects.
+        ekos_compiler_core::current_knowledge::CurrentKnowledge::default()
+            .write(&artifact_dir)
+            .map_err(|e| anyhow::anyhow!("cannot record the current knowledge: {e}"))?;
         println!(
             "Nothing to recover (no SQL files, git artifacts, crypto batches, dependency-scan source files, GitHub items, treasury payments, governance proposals, Confluence pages, ClickHouse tables, local documents, Pentaho jobs, Python files, Rust files, Cargo manifests, CI/CD workflows, dbt projects, or Apache Ossie models found)."
         );
@@ -1911,6 +1951,11 @@ pub async fn run_with(
             .await
             .map_err(|e| anyhow::anyhow!("scheduler error: {e}"))?
     };
+    // What compile and resolve read: this run's passes' outputs, not every artifact ever written.
+    report
+        .knowledge
+        .write(&artifact_dir)
+        .map_err(|e| anyhow::anyhow!("cannot record the current knowledge: {e}"))?;
 
     let summary = RecoverSummary {
         sql_count,
@@ -2075,6 +2120,29 @@ fn collect_elixir_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
 /// Collect ArtifactIds for every JavaScript/TypeScript artifact currently in the store (RFC 0085).
 fn collect_javascript_artifact_ids(store: &dyn ArtifactStore) -> Vec<ArtifactId> {
     collect_artifact_ids_for_connector(store, "javascript")
+}
+
+/// Observations of files that still exist under one of `bases`. The store keeps every observation
+/// ever made, and the collectors pick the newest per target — for a deleted file that is its last
+/// observation, which kept its objects alive on every recover (a removed Kettle job went on
+/// explaining writes). A file connector's target is the file's path relative to its observe base;
+/// an observation that cannot be read, or has no relative target, is kept.
+fn present_files(
+    store: &dyn ArtifactStore,
+    ids: Vec<ArtifactId>,
+    bases: &[std::path::PathBuf],
+) -> Vec<ArtifactId> {
+    ids.into_iter()
+        .filter(|id| {
+            let Ok(Some(json)) = store.read(id) else {
+                return true;
+            };
+            let target = json["target"].as_str().unwrap_or_default();
+            target.is_empty()
+                || Path::new(target).is_absolute()
+                || bases.iter().any(|b| b.join(target).exists())
+        })
+        .collect()
 }
 
 /// RFC 0026's opt-in gate: the document-semantics pass costs one LLM call per

@@ -98,8 +98,12 @@ def _check_review_show(extra: list[str]) -> None:
 # is an item id — a UUID, never a name, so nothing user-typed reaches the argv beyond 36 hex/dash
 # characters.
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+# RFC 0252: `profile show --json <table>` — a table name (optionally `schema.table`) of letters,
+# digits and `_ $ #`, never a path or a flag.
+_TABLE = re.compile(r"^[A-Za-z_][A-Za-z0-9_$#]{0,127}(\.[A-Za-z_][A-Za-z0-9_$#]{0,127})?$")
 _POSITIONAL: dict[tuple[str, ...], re.Pattern[str]] = {
     ("semantics", "show", "--json"): _UUID,
+    ("profile", "show", "--json"): _TABLE,
 }
 
 # RFC 0254: `questions show --json [--reveal] <id>` — the id hex (a question's UUID or the first

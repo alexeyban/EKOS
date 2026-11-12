@@ -439,6 +439,9 @@ fn is_expected_cross_namespace_group<'a>(group: impl Iterator<Item = &'a KirObje
         // RFC 0245: an Ossie dataset is named after its table, and a model or metric may share
         // a name with either; the commit-time link compares them instead.
         ("ossie", &["OssieModel", "OssieDataset", "OssieMetric"]),
+        // RFC 0256: an application process is named after the table it maintains or the
+        // procedure it runs (`C_AcctSchema_Default_Copy`); the interaction map links them.
+        ("appdictionary", &["AppProcess"]),
     ];
     const ROUTINES: &[&str] = &["View", "Procedure", "Trigger"];
     // namespace → distinct kinds seen in it
@@ -1306,6 +1309,25 @@ mod tests {
         ]);
         let result = DefaultResolver::new().resolve(&g);
         assert!(result.conflicts.is_empty(), "{:?}", result.conflicts);
+    }
+
+    /// RFC 0256: an application process named after its table or its procedure is expected.
+    #[test]
+    fn an_application_process_beside_its_table_or_procedure_does_not_conflict() {
+        for other in [
+            ObjectKind::Table,
+            ObjectKind::Custom("Procedure".to_string()),
+        ] {
+            let g = make_graph(&[
+                (
+                    "C_AcctSchema_Default_Copy",
+                    ObjectKind::Custom("AppProcess".to_string()),
+                ),
+                ("C_ACCTSCHEMA_DEFAULT_COPY", other),
+            ]);
+            let result = DefaultResolver::new().resolve(&g);
+            assert!(result.conflicts.is_empty(), "{:?}", result.conflicts);
+        }
     }
 
     /// RFC 0211: a table read from the live catalog never merges — not with the script's table

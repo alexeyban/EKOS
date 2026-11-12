@@ -717,3 +717,52 @@ export interface ChannelsOverview {
   accounts: ChannelAccount[];
   bindings: ChannelBinding[];
 }
+
+/** RFC 0252: one month of a value's rows; `rows` is null when fewer than `min_cell` held it. */
+export interface MonthCount {
+  month: string;
+  rows: number | null;
+}
+
+/** RFC 0252 §3.2(b): what the code's history says about one code value. */
+export interface CodeHistory {
+  introduced: string;
+  sha: string;
+  path: string;
+  line: number;
+  summary?: string;
+  data_first_seen: string;
+  order: "data_before_code" | "same_month" | "code_before_data";
+}
+
+export interface ProfileColumn {
+  database: string;
+  owner: string;
+  table: string;
+  column: string;
+  tier: string;
+  time_column?: string;
+  coverage: {
+    non_null: number;
+    literals: Record<string, { rows: number; first_seen?: string; last_seen?: string }>;
+    unexplained: { rows: number; first_seen?: string; last_seen?: string };
+    unexplained_distinct?: number;
+    latest?: string;
+    monthly?: {
+      min_cell: number;
+      literals: Record<string, MonthCount[]>;
+      other?: MonthCount[];
+      truncated?: boolean;
+    };
+  };
+  code_history?: Record<string, CodeHistory>;
+  values_no_code_names?: { new: boolean; code_last_changed?: { date: string; sha: string } };
+}
+
+/** `GET …/profile?table=`: the latest `ekos profile run` for one table, counts only. */
+export interface ProfileShow {
+  measured: boolean;
+  reason?: string;
+  measured_at?: string;
+  columns?: ProfileColumn[];
+}

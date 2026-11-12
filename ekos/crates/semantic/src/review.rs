@@ -723,6 +723,9 @@ fn interaction_items(inputs: &Inputs<'_>, d: &HashMap<(String, String), &KirObje
                 .fact("role", get("role"))
                 .fact("writes", get("writes"))
                 .fact("proposed_actor", get("proposed_actor"))
+                // RFC 0256 §3.3: why that actor — a connection it declares, or the tables. Shown
+                // only, so a decision does not go stale when the basis is learnt.
+                .info("link_basis", get("link_basis"))
                 .info("unexplained", get("unexplained"))
                 .info("calls", get("calls"));
             apply_decision(&mut item, Subject::Interaction, d);

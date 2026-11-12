@@ -88,6 +88,7 @@ pub fn add_observed(
                     .get("truncated")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                first_observed: s(o, "first_observed").map(str::to_string),
             },
         );
         n += 1;
@@ -115,6 +116,10 @@ pub fn build_from(
     objects: &[KirObject],
     relationships: &[ekos_kir::KirRelationship],
 ) -> Result<(Matrix, usize)> {
+    // Code removed from the workspace stays in the append-only ledger; only what the latest
+    // compile holds declares access (a deleted job no longer explains a write).
+    let current = current_code(config, cwd, objects);
+    let objects: &[KirObject] = current.as_deref().unwrap_or(objects);
     let paths = method_paths(objects, ledger)?;
     let mut m = interaction::declared(
         objects,
@@ -127,6 +132,39 @@ pub fn build_from(
     let observed = add_observed(&mut m, objects, current_ids(config, cwd).as_ref());
     retain_visible(&mut m, objects);
     Ok((m, observed))
+}
+
+/// The kinds whose objects state access: code that a deleted file takes away.
+const CODE_KINDS: [&str; 6] = [
+    "Procedure",
+    "View",
+    "Trigger",
+    "JavaMethod",
+    "TransformNode",
+    "AppProcess",
+];
+
+/// `objects` without code objects the latest compile no longer holds (`<state>/ckm/model.json`);
+/// `None` when there is no compiled model to compare with (every object counts, as before).
+fn current_code(config: &EkosConfig, cwd: &Path, objects: &[KirObject]) -> Option<Vec<KirObject>> {
+    let ids = compiled_ids(&config.ekos_dir(cwd).join("ckm").join("model.json"))?;
+    Some(
+        objects
+            .iter()
+            .filter(|o| match &o.kind {
+                ObjectKind::Custom(k) if CODE_KINDS.contains(&k.as_str()) => ids.contains(&o.id),
+                _ => true,
+            })
+            .cloned()
+            .collect(),
+    )
+}
+
+/// The ids of the latest compiled model's objects.
+fn compiled_ids(model: &Path) -> Option<std::collections::HashSet<KirId>> {
+    ekos_common::compress::resolve_auto(model)?;
+    let m: ekos_semantic::CkModel = ekos_common::compress::read_json_auto(model).ok()?;
+    Some(m.objects.into_iter().map(|o| o.id).collect())
 }
 
 /// RFC 0181: a row only for a relation this reader's store returned. Observed facts carry no link
@@ -172,7 +210,7 @@ fn ops(cell: &Cell) -> String {
 }
 
 /// The matrix as JSON: one entry per table, one cell per actor.
-pub fn to_json(m: &Matrix, observed: usize) -> Value {
+pub fn to_json(m: &Matrix, observed: usize, unavailable: &BTreeMap<String, String>) -> Value {
     let tables: Vec<Value> = m
         .tables
         .iter()
@@ -191,23 +229,37 @@ pub fn to_json(m: &Matrix, observed: usize) -> Value {
     json!({
         "tables": tables,
         "observed_facts": observed,
-        "observed_note": observed_note(observed),
+        "observed_note": observed_note(observed, unavailable),
+        "no_usage_statistics": unavailable,
     })
 }
 
 /// What "observed" means for this project right now, said in words (RFC 0256 §3.2: an empty
 /// observation is never shown as "nobody writes").
-fn observed_note(observed: usize) -> &'static str {
-    if observed == 0 {
+fn observed_note(observed: usize, unavailable: &BTreeMap<String, String>) -> String {
+    let none: Vec<String> = unavailable
+        .iter()
+        .map(|(db, why)| format!("{db}: {why}"))
+        .collect();
+    let base = if observed == 0 && !none.is_empty() {
+        "This source provides no usage statistics, so only declared access is shown — absence is \
+         not evidence that nothing else writes."
+    } else if observed == 0 {
         "No observed access recorded: the source provides no usage statistics, or they were not \
-         read. Only declared access is shown — absence is not evidence that nothing else writes."
+         read (`ekos interaction observe`). Only declared access is shown — absence is not \
+         evidence that nothing else writes."
     } else {
         "Observed access is aggregated from the engine's statement statistics over a dated, \
          possibly truncated window: \"not observed\" is not \"never happens\"."
+    };
+    if none.is_empty() {
+        base.to_string()
+    } else {
+        format!("{base} No usage statistics — {}", none.join("; "))
     }
 }
 
-fn print(m: &Matrix, observed: usize) {
+fn print(m: &Matrix, observed: usize, unavailable: &BTreeMap<String, String>) {
     if m.tables.is_empty() {
         println!("No table access found.");
     }
@@ -227,7 +279,7 @@ fn print(m: &Matrix, observed: usize) {
         "\n{} table(s), {} actor(s). {}",
         m.tables.len(),
         actors.len(),
-        observed_note(observed)
+        observed_note(observed, unavailable)
     );
 }
 
@@ -242,10 +294,14 @@ pub fn matrix(
     let ledger = super::store::open_store_read_only(config, cwd)?;
     let (mut m, observed) = build(config, cwd, &*ledger)?;
     filter(&mut m, table, actor);
+    let none = unavailable(config, cwd);
     if json_out {
-        println!("{}", serde_json::to_string_pretty(&to_json(&m, observed))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&to_json(&m, observed, &none))?
+        );
     } else {
-        print(&m, observed);
+        print(&m, observed, &none);
     }
     Ok(())
 }
@@ -280,10 +336,54 @@ pub struct Aggregate {
     pub hidden_calls: u64,
     /// Calls of the reading role itself (EKOS's own sessions), left out.
     pub own_calls: u64,
+    /// Calls of schema statements (`CREATE`, `DROP`, `ALTER`, grants): they change no rows, so they
+    /// are attributed to no table.
+    pub ddl_calls: u64,
+}
+
+/// A schema statement: it reads and writes no rows. A ClickHouse mutation (`ALTER TABLE … UPDATE
+/// | DELETE`) changes rows and is not one.
+fn is_ddl(text: &str) -> bool {
+    let upper = text.trim_start().to_ascii_uppercase();
+    let first = upper.split_whitespace().next().unwrap_or("");
+    match first {
+        "CREATE" | "DROP" | "GRANT" | "REVOKE" | "COMMENT" | "RENAME" => true,
+        "ALTER" => !(upper.contains(" UPDATE ") || upper.contains(" DELETE ")),
+        _ => false,
+    }
+}
+
+/// ClickHouse logs an `INSERT` whose rows came as data without them (`INSERT INTO t VALUES`,
+/// `… FORMAT CSV`). A placeholder row makes it parse, so its target table is still found; the
+/// text is never kept.
+fn complete_insert(text: &str) -> std::borrow::Cow<'_, str> {
+    let trimmed = text.trim_end().trim_end_matches(';');
+    let upper = trimmed.to_ascii_uppercase();
+    if !upper.trim_start().starts_with("INSERT") {
+        return text.into();
+    }
+    if upper.ends_with(" VALUES") {
+        return format!("{trimmed} (NULL)").into();
+    }
+    if let Some(i) = upper.rfind(" FORMAT ")
+        && !upper[i + 8..].trim().contains(' ')
+        && !upper.contains(" SELECT ")
+    {
+        return format!("{} VALUES (NULL)", &trimmed[..i]).into();
+    }
+    text.into()
 }
 
 fn is_system(table: &str) -> bool {
-    table.starts_with("pg_") || table == "information_schema"
+    table.starts_with("pg_")
+        || table == "information_schema"
+        || table == "dual"
+        || table.starts_with("v$")
+        || table.starts_with("gv$")
+        || table.starts_with("dba_")
+        || table.starts_with("all_")
+        || table.starts_with("user_")
+        || table.starts_with("system.")
 }
 
 /// Aggregates statement rows: each statement's text is redacted, parsed for the tables it reads
@@ -294,9 +394,24 @@ pub fn aggregate(
     own_role: &str,
     redaction: &ekos_common::redaction::RedactionConfig,
 ) -> Aggregate {
+    aggregate_in(
+        &sqlparser::dialect::PostgreSqlDialect {},
+        rows,
+        own_role,
+        redaction,
+    )
+}
+
+/// [`aggregate`] with the statements parsed in `dialect` (the engine they ran on).
+pub fn aggregate_in(
+    dialect: &dyn sqlparser::dialect::Dialect,
+    rows: &[StatementRow],
+    own_role: &str,
+    redaction: &ekos_common::redaction::RedactionConfig,
+) -> Aggregate {
     let mut a = Aggregate::default();
     for r in rows {
-        if r.role == own_role {
+        if r.role.eq_ignore_ascii_case(own_role) {
             a.own_calls += r.calls;
             continue;
         }
@@ -304,34 +419,16 @@ pub fn aggregate(
             a.hidden_calls += r.calls;
             continue;
         }
+        if is_ddl(&r.query) {
+            a.ddl_calls += r.calls;
+            continue;
+        }
         let text = ekos_common::redaction::redact(&r.query, redaction);
         let fp = ekos_recovery::plpgsql_footprint::statement_footprint_in(
-            &sqlparser::dialect::PostgreSqlDialect {},
-            &text,
+            dialect,
+            &complete_insert(&text),
         );
-        let mut touched: BTreeMap<String, BTreeSet<Op>> = BTreeMap::new();
-        let mut split = BTreeSet::new();
-        for (set, op) in [
-            (&fp.inserts, Op::Insert),
-            (&fp.updates, Op::Update),
-            (&fp.deletes, Op::Delete),
-            (&fp.reads, Op::Read),
-        ] {
-            for t in set {
-                let t = interaction::table_key(t);
-                if op.is_write() {
-                    split.insert(t.clone());
-                }
-                touched.entry(t).or_default().insert(op);
-            }
-        }
-        for t in &fp.writes {
-            let t = interaction::table_key(t);
-            if !split.contains(&t) {
-                touched.entry(t).or_default().insert(Op::Write);
-            }
-        }
-        touched.retain(|t, _| !is_system(t));
+        let touched = touched_tables(&fp);
         if touched.is_empty() {
             if !fp.errors.is_empty() {
                 *a.unparsed_calls.entry(r.role.clone()).or_default() += r.calls;
@@ -347,6 +444,37 @@ pub fn aggregate(
         }
     }
     a
+}
+
+/// One statement's footprint as table → operations: inserts, updates, deletes and reads by name;
+/// `writes` only for tables the split does not already name. System catalogs are left out.
+fn touched_tables(
+    fp: &ekos_recovery::plpgsql_footprint::Footprint,
+) -> BTreeMap<String, BTreeSet<Op>> {
+    let mut touched: BTreeMap<String, BTreeSet<Op>> = BTreeMap::new();
+    let mut split = BTreeSet::new();
+    for (set, op) in [
+        (&fp.inserts, Op::Insert),
+        (&fp.updates, Op::Update),
+        (&fp.deletes, Op::Delete),
+        (&fp.reads, Op::Read),
+    ] {
+        for t in set {
+            let t = interaction::table_key(t);
+            if op.is_write() {
+                split.insert(t.clone());
+            }
+            touched.entry(t).or_default().insert(op);
+        }
+    }
+    for t in &fp.writes {
+        let t = interaction::table_key(t);
+        if !split.contains(&t) {
+            touched.entry(t).or_default().insert(Op::Write);
+        }
+    }
+    touched.retain(|t, _| !is_system(t));
+    touched
 }
 
 /// How a role is shown under `[interaction] roles` (RFC 0256 §3.2): its name, or a salted hash.
@@ -388,18 +516,207 @@ struct Reading {
     /// table → (inserted, updated, deleted) rows since the counters' reset.
     table_writes: BTreeMap<String, (u64, u64, u64)>,
     statements_truncated: bool,
+    /// The view always loses entries (Oracle's shared pool ages cursors out): incomplete by
+    /// construction, so `declared_not_observed` is never derived from it.
+    always_partial: bool,
+    /// Where the statistics came from, for the evidence (`pg_stat_statements`, `V$SQL`, …).
+    view: &'static str,
+    /// What the window start means on this engine.
+    window_note: &'static str,
+}
+
+/// One database's usage statistics, or why there are none (RFC 0256 §3.2: every surface says
+/// so, rather than show an empty list).
+#[derive(Debug)]
+enum Availability {
+    Read(Reading),
+    Unavailable(String),
+}
+
+/// The dialect statements of `kind` are parsed in.
+fn statement_dialect(
+    kind: &ekos_compiler_core::DatabaseKind,
+) -> Box<dyn sqlparser::dialect::Dialect> {
+    use ekos_compiler_core::DatabaseKind as K;
+    match kind {
+        K::Postgres => Box::new(sqlparser::dialect::PostgreSqlDialect {}),
+        K::Clickhouse => Box::new(sqlparser::dialect::ClickHouseDialect {}),
+        _ => Box::new(sqlparser::dialect::GenericDialect {}),
+    }
+}
+
+/// Why an engine gives no per-role statement statistics EKOS reads.
+fn no_usage_statistics(kind: &ekos_compiler_core::DatabaseKind) -> Option<&'static str> {
+    use ekos_compiler_core::DatabaseKind as K;
+    match kind {
+        K::Sqlserver => Some(
+            "SQL Server's statement statistics (sys.dm_exec_query_stats, Query Store) do not \
+             record which login ran a statement: this source provides no usage statistics",
+        ),
+        K::Informix => Some(
+            "Informix keeps no per-user statement statistics EKOS reads: this source provides \
+             no usage statistics",
+        ),
+        _ => None,
+    }
 }
 
 fn num(v: &Option<String>) -> u64 {
     v.as_deref().and_then(|x| x.parse().ok()).unwrap_or(0)
 }
 
-/// Reads one PostgreSQL database's statement and table statistics in the read-only session.
+type Run<'a> = dyn Fn(&str, usize) -> std::result::Result<ekos_sqlgen::probe::Preview, String> + 'a;
+
+fn first_value(run: &Run, sql: &str) -> std::result::Result<Option<String>, String> {
+    Ok(run(sql, 1)?
+        .rows
+        .into_iter()
+        .next()
+        .and_then(|r| r.into_iter().next())
+        .flatten())
+}
+
+fn statement_rows(run: &Run, sql: &str, r: &mut Reading) -> std::result::Result<(), String> {
+    let st = run(sql, MAX_STATEMENTS)?;
+    r.statements_truncated = st.truncated;
+    for row in st.rows {
+        let [role, query, calls, rows] = <[Option<String>; 4]>::try_from(row)
+            .map_err(|_| format!("{}: unexpected columns", r.view))?;
+        r.rows.push(StatementRow {
+            role: role.unwrap_or_default(),
+            query: query.unwrap_or_default(),
+            calls: num(&calls),
+            rows: num(&rows),
+        });
+    }
+    Ok(())
+}
+
+/// PostgreSQL: `pg_stat_statements` (+ `_info`) and `pg_stat_user_tables`.
+fn read_postgres(run: &Run) -> std::result::Result<Availability, String> {
+    if first_value(run, SQL_EXTENSION)?.as_deref() != Some("1") {
+        return Ok(Availability::Unavailable(
+            "pg_stat_statements is not installed: this source provides no usage statistics".into(),
+        ));
+    }
+    let mut r = Reading {
+        me: first_value(run, SQL_ME)?.unwrap_or_default(),
+        view: "pg_stat_statements",
+        window_note: "the statistics' last reset",
+        ..Default::default()
+    };
+    statement_rows(run, SQL_STATEMENTS, &mut r)?;
+    // `pg_stat_statements_info` exists from PostgreSQL 14; without it the window start is unknown.
+    if let Ok(info) = run(SQL_INFO, 1)
+        && let Some(row) = info.rows.into_iter().next()
+    {
+        r.stats_reset = row.first().cloned().flatten();
+        r.dealloc = num(&row.get(1).cloned().flatten());
+    }
+    for row in run(SQL_TABLES, MAX_STATEMENTS)?.rows {
+        let get = |i: usize| row.get(i).cloned().flatten();
+        if let Some(t) = get(0) {
+            r.table_writes.insert(
+                interaction::table_key(&t),
+                (num(&get(1)), num(&get(2)), num(&get(3))),
+            );
+        }
+    }
+    Ok(Availability::Read(r))
+}
+
+const CH_HAS_LOG: &str =
+    "SELECT toString(count()) FROM system.tables WHERE database = 'system' AND name = 'query_log'";
+const CH_ME: &str = "SELECT currentUser()";
+/// One row per (user, normalized statement) of the finished queries touching `owners` (the
+/// `[[databases]]` entry's databases; the session's own when none is named). The text is a sample
+/// of the group (its literals included) because `normalizeQuery`'s `?..` lists do not parse; it
+/// is redacted, parsed for its footprint and dropped in process, like PostgreSQL's.
+fn ch_statements(owners: &[String]) -> String {
+    let scope = if owners.is_empty() {
+        "has(databases, currentDatabase())".to_string()
+    } else {
+        let list: Vec<String> = owners
+            .iter()
+            .map(|o| format!("'{}'", o.replace('\\', "\\\\").replace('\'', "\\'")))
+            .collect();
+        format!("hasAny(databases, [{}])", list.join(", "))
+    };
+    format!(
+        "SELECT user, substring(any(query), 1, 20000), toString(count()), \
+         toString(sum(written_rows) + sum(result_rows)) FROM system.query_log \
+         WHERE type = 'QueryFinish' AND {scope} GROUP BY user, normalized_query_hash"
+    )
+}
+const CH_WINDOW: &str = "SELECT toString(min(event_time)) FROM system.query_log";
+
+/// ClickHouse: `system.query_log`. Its window starts at the oldest entry the log keeps (its TTL);
+/// there are no per-table write counters, so no `unattributed_writes`.
+fn read_clickhouse(run: &Run, owners: &[String]) -> std::result::Result<Availability, String> {
+    if first_value(run, CH_HAS_LOG)?.as_deref() != Some("1") {
+        return Ok(Availability::Unavailable(
+            "system.query_log is not enabled on this server: this source provides no usage \
+             statistics"
+                .into(),
+        ));
+    }
+    let mut r = Reading {
+        me: first_value(run, CH_ME)?.unwrap_or_default(),
+        view: "system.query_log",
+        window_note: "the oldest entry the query log keeps",
+        ..Default::default()
+    };
+    statement_rows(run, &ch_statements(owners), &mut r)?;
+    r.stats_reset = first_value(run, CH_WINDOW)?.map(|t| format!("{}Z", t.replace(' ', "T")));
+    Ok(Availability::Read(r))
+}
+
+const ORA_ME: &str = "SELECT USER FROM DUAL";
+/// One row per (user, statement) of the cursors in the shared pool: inserts, selects, updates,
+/// deletes and merges (command types 2, 3, 6, 7, 189), by users Oracle does not maintain itself.
+const ORA_STATEMENTS: &str = "SELECT u.USERNAME, DBMS_LOB.SUBSTR(s.SQL_FULLTEXT, 4000, 1), \
+     TO_CHAR(SUM(s.EXECUTIONS)), TO_CHAR(SUM(s.ROWS_PROCESSED)) \
+     FROM V$SQL s JOIN ALL_USERS u ON u.USER_ID = s.PARSING_USER_ID \
+     WHERE s.COMMAND_TYPE IN (2, 3, 6, 7, 189) AND u.ORACLE_MAINTAINED = 'N' \
+     GROUP BY u.USERNAME, s.SQL_ID, DBMS_LOB.SUBSTR(s.SQL_FULLTEXT, 4000, 1)";
+const ORA_WINDOW: &str =
+    "SELECT TO_CHAR(STARTUP_TIME, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') FROM V$INSTANCE";
+
+/// Oracle: `V$SQL` (needs `SELECT_CATALOG_ROLE` or `SELECT ANY DICTIONARY`). The shared pool ages
+/// cursors out, so an observation is partial by construction; the window starts at the
+/// instance's start-up. `DBA_TAB_MODIFICATIONS` counts since the last statistics gathering, a
+/// different window from the cursors', so it is not used as the cross-check (no
+/// `unattributed_writes` on Oracle). A statement run inside a definer's-rights routine is
+/// attributed to the user that parsed it.
+fn read_oracle(run: &Run) -> std::result::Result<Availability, String> {
+    let me = first_value(run, ORA_ME)?.unwrap_or_default();
+    let mut r = Reading {
+        me,
+        always_partial: true,
+        view: "V$SQL",
+        window_note: "the instance's start-up; cursors aged out of the shared pool are missing",
+        ..Default::default()
+    };
+    if let Err(e) = statement_rows(run, ORA_STATEMENTS, &mut r) {
+        return Ok(Availability::Unavailable(format!(
+            "V$SQL is not readable by this user (grant SELECT_CATALOG_ROLE): this source \
+             provides no usage statistics ({e})"
+        )));
+    }
+    r.stats_reset = first_value(run, ORA_WINDOW).ok().flatten();
+    Ok(Availability::Read(r))
+}
+
+/// Reads one database's statement statistics in the read-only probe session.
 fn read_database(
     db: &ekos_compiler_core::DatabaseConfig,
     allow_writable_role: bool,
-) -> std::result::Result<Option<Reading>, String> {
+) -> std::result::Result<Availability, String> {
+    use ekos_compiler_core::DatabaseKind as K;
     use ekos_sqlgen::probe::Probe as _;
+    if let Some(why) = no_usage_statistics(&db.kind) {
+        return Ok(Availability::Unavailable(why.into()));
+    }
     let (worker, status) = super::sql_check::ProbeWorker::start(
         &super::sql_check::Target::Database(db.clone()),
         allow_writable_role,
@@ -410,50 +727,15 @@ fn read_database(
             _ => "not connected".into(),
         });
     };
-    let first = |sql: &str| -> std::result::Result<Option<String>, String> {
-        Ok(w.preview(sql, 1)?
-            .rows
-            .into_iter()
-            .next()
-            .and_then(|r| r.into_iter().next())
-            .flatten())
-    };
-    if first(SQL_EXTENSION)?.as_deref() != Some("1") {
-        return Ok(None);
+    let run = |sql: &str, n: usize| w.preview(sql, n);
+    match db.kind {
+        K::Postgres => read_postgres(&run),
+        K::Clickhouse => read_clickhouse(&run, &db.owners),
+        K::Oracle => read_oracle(&run),
+        _ => Ok(Availability::Unavailable(
+            "this engine provides no usage statistics".into(),
+        )),
     }
-    let mut r = Reading {
-        me: first(SQL_ME)?.unwrap_or_default(),
-        ..Default::default()
-    };
-    let st = w.preview(SQL_STATEMENTS, MAX_STATEMENTS)?;
-    r.statements_truncated = st.truncated;
-    for row in st.rows {
-        let [role, query, calls, rows] = <[Option<String>; 4]>::try_from(row)
-            .map_err(|_| "pg_stat_statements: unexpected columns".to_string())?;
-        r.rows.push(StatementRow {
-            role: role.unwrap_or_default(),
-            query: query.unwrap_or_default(),
-            calls: num(&calls),
-            rows: num(&rows),
-        });
-    }
-    // `pg_stat_statements_info` exists from PostgreSQL 14; without it the window start is unknown.
-    if let Ok(info) = w.preview(SQL_INFO, 1)
-        && let Some(row) = info.rows.into_iter().next()
-    {
-        r.stats_reset = row.first().cloned().flatten();
-        r.dealloc = num(&row.get(1).cloned().flatten());
-    }
-    for row in w.preview(SQL_TABLES, MAX_STATEMENTS)?.rows {
-        let get = |i: usize| row.get(i).cloned().flatten();
-        if let Some(t) = get(0) {
-            r.table_writes.insert(
-                interaction::table_key(&t),
-                (num(&get(1)), num(&get(2)), num(&get(3))),
-            );
-        }
-    }
-    Ok(Some(r))
 }
 
 fn kid(key: &str) -> KirId {
@@ -475,36 +757,77 @@ fn custom_object(name: String, kind: &str, key: &str, props: Value) -> KirObject
 /// The facts of one reading: one `ObservedAccess` per (role, table, operation) and one
 /// `ObservationWindow` for the database (the `DbRole` items are written by [`commit_step`]). Every one cites the same evidence, which says
 /// what was read and that no statement text was kept.
+/// RFC 0256 open question 2, answered cheaply: what an observed cell carries from the previous
+/// observation of it. `first_observed` is the earliest observation that held the cell; the calls
+/// since the previous observation are known only when the statistics were not reset in between
+/// (same window start, calls not lower).
+fn carried(
+    previous: Option<&KirObject>,
+    window_start: Option<&str>,
+    calls: u64,
+    at: &str,
+) -> Value {
+    let Some(p) = previous else {
+        return json!({"first_observed": at});
+    };
+    let first = s(p, "first_observed")
+        .or_else(|| s(p, "window_end"))
+        .unwrap_or(at)
+        .to_string();
+    let prev_calls = p.properties.get("calls").and_then(Value::as_u64);
+    let same_window = s(p, "window_start") == window_start && window_start.is_some();
+    let since = match prev_calls {
+        Some(n) if same_window && calls >= n => json!(calls - n),
+        _ => Value::Null,
+    };
+    json!({"first_observed": first, "calls_since_previous": since,
+           "previous_observation": s(p, "window_end")})
+}
+
 fn facts(
     database: &str,
     reading: &Reading,
     agg: &Aggregate,
     label: &dyn Fn(&str) -> String,
     at: &str,
+    previous: &HashMap<KirId, &KirObject>,
 ) -> (Vec<KirObject>, ekos_kir::KirEvidence) {
     let mut ev = ekos_kir::KirEvidence::new(
         ekos_kir::SourceLocation {
-            path: format!("observe://{database}/pg_stat_statements"),
+            path: format!("observe://{database}/{}", reading.view),
             line: None,
             column: None,
         },
         format!(
-            "{database}: statement statistics aggregated per role, table and operation at {at} (RFC 0256); \
-             no statement text kept"
+            "{database}: statement statistics ({}) aggregated per role, table and operation at {at} \
+             (RFC 0256); the window starts at {}; no statement text kept",
+            reading.view, reading.window_note
         ),
     );
     ev.id = kid(&format!("observation:{database}:evidence"));
-    let truncated = reading.dealloc > 0 || reading.statements_truncated;
+    let truncated = reading.dealloc > 0 || reading.statements_truncated || reading.always_partial;
     let mut out = Vec::new();
     for ((role, table, op), (calls, rows)) in &agg.cells {
         let shown = label(role);
+        let key = format!("observed-access:{database}:{shown}:{table}:{}", op.as_str());
+        let carry = carried(
+            previous.get(&kid(&key)).copied(),
+            reading.stats_reset.as_deref(),
+            *calls,
+            at,
+        );
+        let mut props = json!({"database": database, "role": shown, "table": table,
+                   "operation": op.as_str(), "calls": calls, "rows": rows,
+                   "window_start": reading.stats_reset, "window_end": at,
+                   "truncated": truncated, "status": "observed"});
+        if let (Value::Object(p), Value::Object(c)) = (&mut props, carry) {
+            p.extend(c);
+        }
         out.push(custom_object(
             format!("{shown} {} {table}", op.as_str()),
             OBSERVED_KIND,
-            &format!("observed-access:{database}:{shown}:{table}:{}", op.as_str()),
-            json!({"database": database, "role": shown, "table": table, "operation": op.as_str(),
-                   "calls": calls, "rows": rows, "window_start": reading.stats_reset,
-                   "window_end": at, "truncated": truncated, "status": "observed"}),
+            &key,
+            props,
         ));
     }
     let unparsed: BTreeMap<String, u64> = agg
@@ -523,6 +846,7 @@ fn facts(
         &format!("observation-window:{database}"),
         json!({"database": database, "window_start": reading.stats_reset, "window_end": at,
                "truncated": truncated, "dealloc": reading.dealloc, "statements": reading.rows.len(),
+               "view": reading.view, "window_note": reading.window_note,
                "unparsed_calls": unparsed, "hidden_calls": agg.hidden_calls,
                "table_writes": writes}),
     ));
@@ -538,6 +862,24 @@ pub fn current_path(config: &EkosConfig, cwd: &Path) -> std::path::PathBuf {
         .ekos_dir(cwd)
         .join("interaction")
         .join("current.json")
+}
+
+/// Databases the latest observation found without usage statistics, with the reason (RFC 0256
+/// §3.2): surfaces say so instead of showing an empty list. Empty when every database observed
+/// gave statistics, or nothing was observed yet.
+pub fn unavailable(config: &EkosConfig, cwd: &Path) -> BTreeMap<String, String> {
+    let Some(v) = std::fs::read(current_path(config, cwd))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+    else {
+        return BTreeMap::new();
+    };
+    v["databases"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(db, d)| Some((db.clone(), d["unavailable"].as_str()?.to_string())))
+        .collect()
 }
 
 /// The ids of the current observed facts (`None`: no observation yet).
@@ -586,25 +928,32 @@ pub fn observe(
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_else(|| json!({"databases": {}}));
     let mut report = Vec::new();
+    let latest_objects = ledger.all_objects()?;
+    let previous: HashMap<KirId, &KirObject> = latest_objects
+        .iter()
+        .filter(|o| is_custom(o, OBSERVED_KIND))
+        .map(|o| (o.id, o))
+        .collect();
     for db in dbs {
-        if db.kind != ekos_compiler_core::DatabaseKind::Postgres {
-            report.push(json!({"database": db.name, "skipped": "this engine provides no usage statistics EKOS reads (RFC 0256: PostgreSQL first)"}));
-            continue;
-        }
         let reading = match tokio::task::block_in_place(|| read_database(db, allow_writable_role)) {
-            Ok(Some(r)) => r,
-            Ok(None) => {
-                report.push(json!({"database": db.name, "skipped": "pg_stat_statements is not installed: this source provides no usage statistics"}));
+            Ok(Availability::Read(r)) => r,
+            Ok(Availability::Unavailable(why)) => {
+                // Recorded, so every surface says this source gives no usage statistics; the
+                // database's earlier facts stop being current.
+                manifest["databases"][&db.name] = json!({"ids": [], "at": at, "unavailable": why});
+                report.push(json!({"database": db.name, "skipped": why}));
                 continue;
             }
             Err(e) => {
+                // A failed read leaves the previous observation as it was.
                 report.push(json!({"database": db.name, "skipped": ekos_common::redaction::redact(&e, &redaction)}));
                 continue;
             }
         };
-        let agg = aggregate(&reading.rows, &reading.me, &redaction);
+        let dialect = statement_dialect(&db.kind);
+        let agg = aggregate_in(dialect.as_ref(), &reading.rows, &reading.me, &redaction);
         let label = |r: &str| role_label(r, config.interaction.roles, &salt, &redaction);
-        let (objects, ev) = facts(&db.name, &reading, &agg, &label, &at);
+        let (objects, ev) = facts(&db.name, &reading, &agg, &label, &at, &previous);
         ledger.append_evidence(&ev)?;
         for o in &objects {
             ledger.append_object(o)?;
@@ -616,8 +965,10 @@ pub fn observe(
             "database": db.name, "statements": reading.rows.len(), "cells": agg.cells.len(),
             "roles": roles.len(),
             "unparsed_calls": agg.unparsed_calls.values().sum::<u64>(), "hidden_calls": agg.hidden_calls,
+            "ddl_calls": agg.ddl_calls,
             "own_calls_left_out": agg.own_calls, "window_start": reading.stats_reset,
-            "truncated": reading.dealloc > 0 || reading.statements_truncated,
+            "view": reading.view,
+            "truncated": reading.dealloc > 0 || reading.statements_truncated || reading.always_partial,
         }));
     }
     std::fs::create_dir_all(path.parent().expect("a state directory"))?;
@@ -728,7 +1079,7 @@ fn windows(objects: &[KirObject], current: &BTreeSet<String>) -> Vec<interaction
 fn role_objects(
     m: &Matrix,
     databases: &BTreeMap<String, String>,
-    hypotheses: &BTreeMap<String, Actor>,
+    hypotheses: &BTreeMap<String, interaction::Link>,
     unexplained: &BTreeMap<String, BTreeSet<String>>,
 ) -> Vec<KirObject> {
     let mut writes: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
@@ -759,7 +1110,8 @@ fn role_objects(
                 &format!("db-role:{db}:{role}"),
                 json!({"database": db, "role": role,
                        "writes": writes.get(role).cloned().unwrap_or_default(),
-                       "proposed_actor": hypotheses.get(*role).map(Actor::key),
+                       "proposed_actor": hypotheses.get(*role).map(|l| l.actor.key()),
+                       "link_basis": hypotheses.get(*role).map(|l| l.basis.as_str()),
                        "calls": calls[role],
                        "unexplained": unexplained.get(*role).cloned().unwrap_or_default()}),
             )
@@ -773,7 +1125,7 @@ fn decided(
     objects: &[KirObject],
     relationships: &[ekos_kir::KirRelationship],
     roles: &[KirObject],
-    hypotheses: &BTreeMap<String, Actor>,
+    hypotheses: &BTreeMap<String, interaction::Link>,
 ) -> (BTreeSet<String>, BTreeMap<String, Actor>) {
     use ekos_semantic::review::{self, Inputs, ScopeRules, Subject};
     let ids: BTreeSet<String> = roles.iter().map(|o| o.id.to_string()).collect();
@@ -798,7 +1150,10 @@ fn decided(
         },
     );
     let mut accounted = BTreeSet::new();
-    let mut links = hypotheses.clone();
+    let mut links: BTreeMap<String, Actor> = hypotheses
+        .iter()
+        .map(|(r, l)| (r.clone(), l.actor.clone()))
+        .collect();
     for it in items.iter().filter(|i| !i.outdated) {
         let role = it.label.clone();
         match it
@@ -891,7 +1246,20 @@ pub fn commit_step(
         .filter(|o| is_custom(o, OBSERVED_KIND) && current.contains(&o.id.to_string()))
         .filter_map(|o| Some((s(o, "role")?.to_string(), s(o, "database")?.to_string())))
         .collect();
-    let hypotheses = interaction::link_hypotheses(&m);
+    // §3.3: a role that is a Kettle connection's user is proposed as that job first. Users are
+    // shown as roles are (hashed when roles are), so they compare with the matrix's role names.
+    let redaction = config.redaction_config();
+    let salt = super::relationships::salt(config, cwd)?;
+    let users: BTreeMap<String, BTreeSet<Actor>> = interaction::connection_users(&objects)
+        .into_iter()
+        .map(|(u, a)| {
+            (
+                role_label(&u, config.interaction.roles, &salt, &redaction),
+                a,
+            )
+        })
+        .collect();
+    let hypotheses = interaction::link_hypotheses_with(&m, &users);
     // First pass without decisions, to find each role's item as it stands, then the decisions on
     // those items, then the findings that remain.
     let draft = role_objects(&m, &databases, &hypotheses, &BTreeMap::new());
@@ -902,7 +1270,9 @@ pub fn commit_step(
         links: &links,
         quiet_after_days: config.interaction.quiet_after_days,
     };
-    let found = interaction::findings(&m, &input);
+    let mut found = interaction::findings(&m, &input);
+    // §3.4: who only reads each table — the list of who a change breaks, no question.
+    found.extend(interaction::read_only_consumers(&m));
     let mut unexplained: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for f in found
         .iter()
@@ -1014,6 +1384,9 @@ pub fn findings(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&v)?);
         return Ok(());
     }
+    for (db, why) in unavailable(config, cwd) {
+        println!("{db}: {why} — no finding is derived from its absence.");
+    }
     if current_ids(config, cwd).is_none() {
         println!(
             "No observation yet (`ekos interaction observe`): without usage statistics no finding \
@@ -1059,7 +1432,7 @@ pub fn agent_matrix(
         .map(|o| json!({"finding": s(o, "finding"), "table": s(o, "table"), "actor": s(o, "actor"),
                         "operations": o.properties.get("operations"), "detail": o.properties.get("detail")}))
         .collect();
-    let mut v = to_json(&m, observed);
+    let mut v = to_json(&m, observed, &unavailable(config, cwd));
     v["findings"] = json!(findings);
     v["tables_total"] = json!(total);
     if m.tables.len() < total {
@@ -1089,6 +1462,195 @@ mod tests {
             calls,
             rows: calls,
         }
+    }
+
+    #[test]
+    fn oracle_and_clickhouse_statements_are_parsed_in_their_own_dialect() {
+        let none = RedactionConfig::default();
+        // Oracle: upper-case names, positional and named bind variables, the reading user left out.
+        let ora = [
+            row(
+                "ETL_NIGHTLY",
+                "UPDATE ADEMPIERE.C_BPARTNER SET NAME = :1 WHERE C_BPARTNER_ID = :2",
+                4,
+            ),
+            row(
+                "APP",
+                "INSERT INTO C_ORDER (C_ORDER_ID, DOCSTATUS) VALUES (:B1, :B2)",
+                9,
+            ),
+            row(
+                "APP",
+                "SELECT DOCSTATUS FROM C_ORDER WHERE C_ORDER_ID = :id",
+                2,
+            ),
+            row("EKOS_READER", "SELECT COUNT(*) FROM C_ORDER", 1),
+            row("APP", "SELECT 1 FROM DUAL", 50),
+        ];
+        let generic = sqlparser::dialect::GenericDialect {};
+        let a = aggregate_in(&generic, &ora, "ekos_reader", &none);
+        assert_eq!(
+            a.cells[&("ETL_NIGHTLY".into(), "c_bpartner".into(), Op::Update)],
+            (4, 4)
+        );
+        assert_eq!(
+            a.cells[&("APP".into(), "c_order".into(), Op::Insert)],
+            (9, 9)
+        );
+        assert_eq!(a.cells[&("APP".into(), "c_order".into(), Op::Read)], (2, 2));
+        assert_eq!(
+            a.own_calls, 1,
+            "the reading user's own statements, whatever their case"
+        );
+        assert!(!a.cells.keys().any(|(_, t, _)| t == "dual"));
+        // ClickHouse: the sampled statement of a group, literals included, parsed and dropped; an
+        // insert logged without its rows still names its table; schema statements count apart.
+        let ch = [
+            row("loader", "INSERT INTO rfc.events VALUES ", 5),
+            row("loader", "INSERT INTO rfc.events (id, kind) FORMAT CSV", 2),
+            row(
+                "ops",
+                "CREATE TABLE rfc.kinds (kind String) ENGINE = MergeTree ORDER BY kind",
+                1,
+            ),
+            row("ops", "ALTER TABLE rfc.kinds UPDATE kind = 'x' WHERE 1", 1),
+            row(
+                "loader",
+                "INSERT INTO events (id, kind) VALUES (1, 'a'), (2, 'b')",
+                12,
+            ),
+            row(
+                "bi",
+                "SELECT kind, count() FROM default.events GROUP BY kind",
+                3,
+            ),
+        ];
+        let a = aggregate_in(
+            &sqlparser::dialect::ClickHouseDialect {},
+            &ch,
+            "ekos",
+            &none,
+        );
+        assert_eq!(
+            a.cells[&("loader".into(), "events".into(), Op::Insert)],
+            (19, 19)
+        );
+        assert_eq!(a.ddl_calls, 1, "the CREATE, not the mutation");
+        assert_eq!(a.cells[&("bi".into(), "events".into(), Op::Read)], (3, 3));
+    }
+
+    #[test]
+    fn an_observed_cell_keeps_when_it_was_first_seen_and_counts_since_the_last_read() {
+        let first = carried(None, Some("2026-11-01"), 5, "2026-11-10T00:00:00Z");
+        assert_eq!(first["first_observed"], "2026-11-10T00:00:00Z");
+        let mut prev = KirObject::new("p", ObjectKind::Custom(OBSERVED_KIND.into()));
+        prev.properties = json!({"first_observed": "2026-11-10T00:00:00Z", "calls": 5,
+                                 "window_start": "2026-11-01", "window_end": "2026-11-10T00:00:00Z"})
+        .as_object()
+        .unwrap()
+        .clone()
+        .into_iter()
+        .collect();
+        let next = carried(Some(&prev), Some("2026-11-01"), 8, "2026-11-12T00:00:00Z");
+        assert_eq!(next["first_observed"], "2026-11-10T00:00:00Z");
+        assert_eq!(next["calls_since_previous"], 3);
+        assert_eq!(next["previous_observation"], "2026-11-10T00:00:00Z");
+        // A reset in between: the first sighting stays, the delta is unknown, never negative.
+        let reset = carried(Some(&prev), Some("2026-11-11"), 2, "2026-11-12T00:00:00Z");
+        assert_eq!(reset["first_observed"], "2026-11-10T00:00:00Z");
+        assert!(reset["calls_since_previous"].is_null());
+    }
+
+    #[test]
+    fn the_clickhouse_query_log_is_read_for_the_named_databases_with_quotes_escaped() {
+        assert!(ch_statements(&[]).contains("has(databases, currentDatabase())"));
+        let q = ch_statements(&["shop".into(), "o'k".into()]);
+        assert!(q.contains("hasAny(databases, ['shop', 'o\\'k'])"), "{q}");
+        ekos_sqlgen::guard::single_select(&q, &sqlparser::dialect::ClickHouseDialect {}).unwrap();
+    }
+
+    #[test]
+    fn code_the_latest_compile_no_longer_holds_declares_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = EkosConfig::default();
+        let mut kept = KirObject::new("load.ktr:0", ObjectKind::Custom("TransformNode".into()));
+        kept.id = kid("kept");
+        let mut gone = KirObject::new("old.ktr:0", ObjectKind::Custom("TransformNode".into()));
+        gone.id = kid("gone");
+        let table = KirObject::new("customers", ObjectKind::Table);
+        let all = vec![kept.clone(), gone.clone(), table.clone()];
+        assert!(
+            current_code(&config, dir.path(), &all).is_none(),
+            "no model: everything counts"
+        );
+        let ckm = config.ekos_dir(dir.path()).join("ckm");
+        std::fs::create_dir_all(&ckm).unwrap();
+        let model = json!({"version": 1, "compiled_at": "2026-11-12T00:00:00Z", "relationships": [],
+            "evidence_index": {}, "objects": [{"id": kept.id, "name": kept.name, "kind": "TransformNode"}]});
+        std::fs::write(ckm.join("model.json"), serde_json::to_vec(&model).unwrap()).unwrap();
+        let names: Vec<String> = current_code(&config, dir.path(), &all)
+            .unwrap()
+            .into_iter()
+            .map(|o| o.name)
+            .collect();
+        assert_eq!(
+            names,
+            ["load.ktr:0", "customers"],
+            "the table is not code: kept"
+        );
+    }
+
+    #[test]
+    fn a_source_without_usage_statistics_is_said_so_on_every_surface() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = EkosConfig::default();
+        let path = current_path(&config, dir.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let why = no_usage_statistics(&ekos_compiler_core::DatabaseKind::Sqlserver).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::to_vec(
+                &json!({"databases": {"erp": {"ids": [], "at": "t", "unavailable": why}}}),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let none = unavailable(&config, dir.path());
+        assert_eq!(none["erp"], why);
+        // An observation exists (so findings run) but holds no fact: nothing is derived from it.
+        assert_eq!(current_ids(&config, dir.path()), Some(BTreeSet::new()));
+        let v = to_json(&Matrix::default(), 0, &none);
+        assert_eq!(v["no_usage_statistics"]["erp"], why);
+        let note = v["observed_note"].as_str().unwrap();
+        assert!(note.contains("provides no usage statistics") && note.contains("erp:"));
+        assert!(no_usage_statistics(&ekos_compiler_core::DatabaseKind::Postgres).is_none());
+    }
+
+    #[test]
+    fn the_engine_view_and_its_window_are_in_the_evidence_and_an_oracle_reading_is_partial() {
+        let reading = Reading {
+            view: "V$SQL",
+            window_note: "the instance's start-up",
+            always_partial: true,
+            ..Default::default()
+        };
+        let mut agg = Aggregate::default();
+        agg.cells
+            .insert(("ETL".into(), "c_order".into(), Op::Update), (2, 2));
+        let (objects, ev) = facts(
+            "idem",
+            &reading,
+            &agg,
+            &|r: &str| r.to_string(),
+            "2026-11-12T00:00:00Z",
+            &HashMap::new(),
+        );
+        assert_eq!(ev.location.path, "observe://idem/V$SQL");
+        assert!(objects.iter().all(|o| o.properties["truncated"] == true));
+        assert_eq!(
+            objects[0].properties["first_observed"],
+            "2026-11-12T00:00:00Z"
+        );
     }
 
     #[test]

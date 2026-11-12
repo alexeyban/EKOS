@@ -253,6 +253,11 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "channel + message ref — RFC 0253 §3.4, written only by `ekos testimony add`",
     },
     CustomKind {
+        name: "AppProcess",
+        structurally_keyed: true,
+        note: "database + owner + AD_Process.Value — RFC 0256 open question 4, an application process read from the opt-in dictionary",
+    },
+    CustomKind {
         name: "DbRole",
         structurally_keyed: true,
         note: "database + role name (or its salted hash) — RFC 0256 §3.1, written by `ekos interaction observe`",

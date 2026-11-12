@@ -94,4 +94,20 @@ mod tests {
             "SET ROWCOUNT 6; SELECT id FROM sales.orders ORDER BY id"
         );
     }
+
+    #[test]
+    fn the_usage_queries_pass_the_guard() {
+        use ekos_observation_sdk::usage::{TableName, UsageSource, available_sql, usage_sql};
+        let t = vec![TableName {
+            owner: "sales".into(),
+            table: "order_lines".into(),
+        }];
+        for src in [UsageSource::QueryStore, UsageSource::ExecQueryStats] {
+            let sql = usage_sql(src, &t).unwrap();
+            if let Err(e) = probe_text(&sql, 10) {
+                panic!("{src:?}: {e}\n{sql}");
+            }
+        }
+        assert!(probe_text(available_sql(UsageSource::QueryStore).unwrap(), 1).is_ok());
+    }
 }

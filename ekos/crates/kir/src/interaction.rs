@@ -28,6 +28,9 @@ pub enum ActorKind {
     Component,
     Routine,
     EtlJob,
+    /// RFC 0256 open question 4: an application process from the opt-in dictionary (iDempiere's
+    /// `AD_Process`), acting through the procedure or Java class it runs.
+    Process,
     DbRole,
 }
 
@@ -37,6 +40,7 @@ impl ActorKind {
             Self::Component => "component",
             Self::Routine => "routine",
             Self::EtlJob => "etl_job",
+            Self::Process => "process",
             Self::DbRole => "db_role",
         }
     }
@@ -111,6 +115,10 @@ pub struct Observed {
     /// The view evicted entries: the observation is incomplete.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub truncated: bool,
+    /// When EKOS first saw this role run this operation on this table (RFC 0256 open question 2):
+    /// the earliest observation that held it, carried from one observation to the next.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_observed: Option<String>,
 }
 
 /// What one actor does to one table.
@@ -133,6 +141,12 @@ impl Cell {
                 .observed
                 .keys()
                 .any(|o| o.is_write() && self.observed[o].calls > 0)
+    }
+
+    /// Whether code states a read, or a role was seen reading.
+    pub fn reads(&self) -> bool {
+        self.declared.contains(&Op::Read)
+            || self.observed.get(&Op::Read).is_some_and(|o| o.calls > 0)
     }
 }
 
@@ -266,24 +280,137 @@ pub struct DeclaredInput<'a> {
     pub component_depth: usize,
 }
 
+/// The declared matrix being built: the relations the ledger knows, and (RFC 0256 open question 4)
+/// what each routine and Java class touches, for the processes that run them.
+struct Declared<'a> {
+    known: BTreeSet<String>,
+    m: Matrix,
+    by_routine: BTreeMap<String, BTreeSet<(String, Op)>>,
+    by_class: BTreeMap<String, BTreeSet<(String, Op)>>,
+    input: &'a DeclaredInput<'a>,
+}
+
+impl Declared<'_> {
+    fn put(&mut self, table: String, actor: &Actor, op: Op, via: &str) {
+        if self.known.contains(&table) {
+            self.m.declare(table, actor, op, via);
+        }
+    }
+
+    /// A procedure, view or trigger: its footprint; a trigger also writes its own table.
+    fn routine(&mut self, kind: &str, o: &KirObject) {
+        let actor = Actor::new(ActorKind::Routine, &o.name);
+        let via = format!("{} {}", kind.to_lowercase(), o.name);
+        for (t, op) in footprint(|k| o.properties.get(k)) {
+            if kind == "Procedure" {
+                self.by_routine
+                    .entry(table_key(&o.name))
+                    .or_default()
+                    .insert((t.clone(), op));
+            }
+            self.put(t, &actor, op, &via);
+        }
+        if kind == "Trigger"
+            && let Some(t) = o.properties.get("table").and_then(Value::as_str)
+        {
+            self.put(table_key(t), &actor, Op::Write, &via);
+        }
+    }
+
+    /// A Java method's SQL, under its file's component.
+    fn method(&mut self, o: &KirObject) {
+        let Some(path) = self.input.method_paths.get(&o.id) else {
+            return;
+        };
+        let actor = Actor::new(
+            ActorKind::Component,
+            component_of(path, self.input.component_depth),
+        );
+        let via = format!("{path}: {}", o.name);
+        let class = o.properties.get("owner").and_then(Value::as_str);
+        let sql = o.properties.get("sql").and_then(Value::as_array);
+        for st in sql.into_iter().flatten().filter_map(Value::as_object) {
+            for (t, op) in footprint(|k| st.get(k)) {
+                if let Some(c) = class {
+                    self.by_class
+                        .entry(c.to_string())
+                        .or_default()
+                        .insert((t.clone(), op));
+                }
+                self.put(t, &actor, op, &via);
+            }
+        }
+    }
+
+    /// Kettle jobs: a `TransformNode` of a `.ktr`/`.kjb` reading or writing a table.
+    fn jobs(&mut self, objects: &[KirObject], relationships: &[KirRelationship]) {
+        let by_id: HashMap<KirId, &KirObject> = objects.iter().map(|o| (o.id, o)).collect();
+        for r in relationships {
+            let op = match &r.kind {
+                RelationshipKind::Custom(k) if k == "ReadsFrom" => Op::Read,
+                RelationshipKind::Custom(k) if k == "WritesTo" => Op::Write,
+                _ => continue,
+            };
+            let (Some(node), Some(table)) = (by_id.get(&r.from), by_id.get(&r.to)) else {
+                continue;
+            };
+            // A node is named `<file>:<index>`; only Kettle files are ETL jobs (a standalone
+            // SELECT's nodes are SQL, already covered by its routine or view).
+            let file = node.name.rsplit_once(':').map(|(f, _)| f);
+            let Some(file) = file.filter(|f| f.ends_with(".ktr") || f.ends_with(".kjb")) else {
+                continue;
+            };
+            if custom(node) == Some("TransformNode") {
+                let actor = Actor::new(ActorKind::EtlJob, file);
+                self.put(table_key(&table.name), &actor, op, &node.name);
+            }
+        }
+    }
+
+    /// RFC 0256 open question 4: an application process acts through the procedure (by name) or
+    /// the Java class it runs — that class's own SQL, not calls into other classes.
+    fn process(&mut self, o: &KirObject) {
+        let actor = Actor::new(ActorKind::Process, &o.name);
+        let text = |k: &str| o.properties.get(k).and_then(Value::as_str);
+        let mut runs: Vec<(String, BTreeSet<(String, Op)>)> = Vec::new();
+        if let Some(p) = text("procedure_name")
+            && let Some(f) = self.by_routine.get(&table_key(p))
+        {
+            runs.push((format!("procedure {p}"), f.clone()));
+        }
+        if let Some(c) = text("classname")
+            && let Some(f) = self.by_class.get(c)
+        {
+            runs.push((format!("class {c}"), f.clone()));
+        }
+        for (what, fp) in runs {
+            let via = format!("process {} runs {what}", o.name);
+            for (t, op) in fp {
+                self.put(t, &actor, op, &via);
+            }
+        }
+    }
+}
+
 /// The declared matrix: every access code states, to relations the ledger knows.
 pub fn declared(
     objects: &[KirObject],
     relationships: &[KirRelationship],
     input: &DeclaredInput,
 ) -> Matrix {
-    let known: BTreeSet<String> = objects
-        .iter()
-        .filter(|o| {
-            matches!(o.kind, ObjectKind::Table | ObjectKind::Dataset) || custom(o) == Some("View")
-        })
-        .map(|o| table_key(&o.name))
-        .collect();
-    let mut m = Matrix::default();
-    let mut put = |table: String, actor: &Actor, op: Op, via: &str| {
-        if known.contains(&table) {
-            m.declare(table, actor, op, via);
-        }
+    let mut d = Declared {
+        known: objects
+            .iter()
+            .filter(|o| {
+                matches!(o.kind, ObjectKind::Table | ObjectKind::Dataset)
+                    || custom(o) == Some("View")
+            })
+            .map(|o| table_key(&o.name))
+            .collect(),
+        m: Matrix::default(),
+        by_routine: BTreeMap::new(),
+        by_class: BTreeMap::new(),
+        input,
     };
     // RFC 0211: a routine read from a live catalog is used only when no file defines one of the
     // same name — the file's routine is the same code, and its footprint is the one cited.
@@ -296,70 +423,25 @@ pub fn declared(
         .filter_map(|o| {
             custom(o)
                 .filter(|k| routine_kinds.contains(k))
-                .map(|k| (k, o))
+                .map(|k| (k.to_string(), table_key(&o.name)))
         })
-        .map(|(k, o)| (k.to_string(), table_key(&o.name)))
         .collect();
     for o in objects {
         match custom(o) {
             Some(k @ ("Procedure" | "View" | "Trigger"))
-                if is_live(o) && from_files.contains(&(k.to_string(), table_key(&o.name))) => {}
-            Some(k @ ("Procedure" | "View" | "Trigger")) => {
-                let actor = Actor::new(ActorKind::Routine, &o.name);
-                let via = format!("{} {}", k.to_lowercase(), o.name);
-                for (t, op) in footprint(|k| o.properties.get(k)) {
-                    put(t, &actor, op, &via);
-                }
-                if k == "Trigger"
-                    && let Some(t) = o.properties.get("table").and_then(Value::as_str)
-                {
-                    put(table_key(t), &actor, Op::Write, &via);
-                }
+                if !(is_live(o) && from_files.contains(&(k.to_string(), table_key(&o.name)))) =>
+            {
+                d.routine(k, o);
             }
-            Some("JavaMethod") => {
-                let Some(path) = input.method_paths.get(&o.id) else {
-                    continue;
-                };
-                let actor = Actor::new(
-                    ActorKind::Component,
-                    component_of(path, input.component_depth),
-                );
-                let via = format!("{path}: {}", o.name);
-                let sql = o.properties.get("sql").and_then(Value::as_array);
-                for st in sql.into_iter().flatten().filter_map(Value::as_object) {
-                    for (t, op) in footprint(|k| st.get(k)) {
-                        put(t, &actor, op, &via);
-                    }
-                }
-            }
+            Some("JavaMethod") => d.method(o),
             _ => {}
         }
     }
-    let by_id: HashMap<KirId, &KirObject> = objects.iter().map(|o| (o.id, o)).collect();
-    for r in relationships {
-        let op = match &r.kind {
-            RelationshipKind::Custom(k) if k == "ReadsFrom" => Op::Read,
-            RelationshipKind::Custom(k) if k == "WritesTo" => Op::Write,
-            _ => continue,
-        };
-        let (Some(node), Some(table)) = (by_id.get(&r.from), by_id.get(&r.to)) else {
-            continue;
-        };
-        if custom(node) != Some("TransformNode") {
-            continue;
-        }
-        // A node is named `<file>:<index>`; only Kettle files are ETL jobs (a standalone SELECT's
-        // nodes are SQL, already covered by its routine or view).
-        let Some((file, _)) = node.name.rsplit_once(':') else {
-            continue;
-        };
-        if !(file.ends_with(".ktr") || file.ends_with(".kjb")) {
-            continue;
-        }
-        let actor = Actor::new(ActorKind::EtlJob, file);
-        put(table_key(&table.name), &actor, op, &node.name);
+    d.jobs(objects, relationships);
+    for o in objects.iter().filter(|o| custom(o) == Some("AppProcess")) {
+        d.process(o);
     }
-    m
+    d.m
 }
 
 // ── Links and findings (RFC 0256 §3.3–3.4) ────────────────────────────────────────────────────
@@ -383,6 +465,8 @@ pub enum FindingKind {
     UnattributedWrites,
     MultipleWritingSystems,
     DeclaredNotObserved,
+    /// Actors that only read a table: not a problem, the list of who a change breaks (§3.4).
+    ReadOnlyConsumers,
 }
 
 impl FindingKind {
@@ -392,6 +476,7 @@ impl FindingKind {
             Self::UnattributedWrites => "unattributed_writes",
             Self::MultipleWritingSystems => "multiple_writing_systems",
             Self::DeclaredNotObserved => "declared_not_observed",
+            Self::ReadOnlyConsumers => "read_only_consumers",
         }
     }
 }
@@ -421,7 +506,10 @@ impl Finding {
 }
 
 fn is_system(kind: ActorKind) -> bool {
-    matches!(kind, ActorKind::Component | ActorKind::EtlJob)
+    matches!(
+        kind,
+        ActorKind::Component | ActorKind::EtlJob | ActorKind::Process
+    )
 }
 
 /// Whether `declared` covers `op` (a bare `write` covers every write).
@@ -432,6 +520,71 @@ fn covers(declared: &BTreeSet<Op>, op: Op) -> bool {
 /// Role → the one component or ETL job whose tables contain every table the role touches
 /// (RFC 0256 §3.3). A role two actors could explain, or none, has no hypothesis.
 pub fn link_hypotheses(m: &Matrix) -> BTreeMap<String, Actor> {
+    link_hypotheses_with(m, &BTreeMap::new())
+        .into_iter()
+        .map(|(r, l)| (r, l.actor))
+        .collect()
+}
+
+/// Why a role is proposed as an actor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkBasis {
+    /// The role is the user of a connection the actor declares (a Kettle connection).
+    Connection,
+    /// The role's tables are contained in the actor's, and in no other's.
+    Tables,
+}
+
+impl LinkBasis {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Connection => "connection",
+            Self::Tables => "tables",
+        }
+    }
+}
+
+/// A proposed role → actor link and its basis.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Link {
+    pub actor: Actor,
+    pub basis: LinkBasis,
+}
+
+/// Connection user → the ETL jobs whose steps connect as that user (RFC 0256 §3.3): from a
+/// `TransformNode`'s `connection_user`, which the Kettle analyzer records from the transformation's
+/// `<connection>` (the user only; a password is never read). A user written as a variable
+/// (`${DB_USER}`) is not recorded there, so it links nothing.
+pub fn connection_users(objects: &[KirObject]) -> BTreeMap<String, BTreeSet<Actor>> {
+    let mut out: BTreeMap<String, BTreeSet<Actor>> = BTreeMap::new();
+    for o in objects
+        .iter()
+        .filter(|o| custom(o) == Some("TransformNode"))
+    {
+        let Some(user) = o.properties.get("connection_user").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some((file, _)) = o.name.rsplit_once(':') else {
+            continue;
+        };
+        if file.ends_with(".ktr") || file.ends_with(".kjb") {
+            out.entry(user.to_string())
+                .or_default()
+                .insert(Actor::new(ActorKind::EtlJob, file));
+        }
+    }
+    out
+}
+
+/// [`link_hypotheses`] with the connection rule first: a role that is the user of the connections
+/// of exactly one system is proposed as that system, whatever tables it touches; otherwise the
+/// containment rule. `users` is keyed as the matrix shows roles (a hashed label when roles are
+/// hashed). Every link stays a hypothesis for review.
+pub fn link_hypotheses_with(
+    m: &Matrix,
+    users: &BTreeMap<String, BTreeSet<Actor>>,
+) -> BTreeMap<String, Link> {
     let mut touched: BTreeMap<&Actor, BTreeSet<&String>> = BTreeMap::new();
     for (t, row) in &m.tables {
         for a in row.keys() {
@@ -445,13 +598,42 @@ pub fn link_hypotheses(m: &Matrix) -> BTreeMap<String, Actor> {
         .collect();
     let mut out = BTreeMap::new();
     for (role, tables) in touched.iter().filter(|(a, _)| a.kind == ActorKind::DbRole) {
+        // Oracle folds unquoted user names to upper case; a Kettle file may not.
+        let by_connection: Vec<&Actor> = users
+            .get(&role.name)
+            .or_else(|| {
+                users
+                    .iter()
+                    .find(|(u, _)| u.eq_ignore_ascii_case(&role.name))
+                    .map(|(_, a)| a)
+            })
+            .into_iter()
+            .flatten()
+            .filter(|a| is_system(a.kind))
+            .collect();
+        if let [one] = by_connection.as_slice() {
+            out.insert(
+                role.name.clone(),
+                Link {
+                    actor: (*one).clone(),
+                    basis: LinkBasis::Connection,
+                },
+            );
+            continue;
+        }
         let fits: Vec<&Actor> = systems
             .iter()
             .filter(|(_, t)| tables.is_subset(t))
             .map(|(a, _)| *a)
             .collect();
         if let [one] = fits.as_slice() {
-            out.insert(role.name.clone(), (*one).clone());
+            out.insert(
+                role.name.clone(),
+                Link {
+                    actor: (*one).clone(),
+                    basis: LinkBasis::Tables,
+                },
+            );
         }
     }
     out
@@ -493,10 +675,18 @@ fn explained(row: &BTreeMap<Actor, Cell>, role: &str, op: Op, input: &FindingInp
     let declares = |a: &Actor| row.get(a).is_some_and(|c| covers(&c.declared, op));
     match input.links.get(role) {
         Some(actor) => declares(actor),
-        None => row
-            .iter()
-            .any(|(a, c)| a.kind != ActorKind::DbRole && covers(&c.declared, op)),
+        None => row.iter().any(|(a, c)| {
+            a.kind != ActorKind::DbRole && !only_by_trigger(c) && covers(&c.declared, op)
+        }),
     }
+}
+
+/// A cell whose declared access is stated only by a trigger. A trigger runs because some
+/// statement wrote its table, so it explains no role's statement: an outside `UPDATE` that fires
+/// `touch_updated_at` is still an outside update. (Statements a trigger runs are not a role's
+/// statements either: `pg_stat_statements` tracks top-level statements by default.)
+fn only_by_trigger(c: &Cell) -> bool {
+    !c.via.is_empty() && c.via.iter().all(|v| v.starts_with("trigger "))
 }
 
 fn observed_writes(c: &Cell) -> impl Iterator<Item = (Op, &Observed)> {
@@ -523,6 +713,10 @@ fn row_findings(
             continue;
         }
         let calls: u64 = ops.iter().map(|op| c.observed[op].calls).sum();
+        let first_observed = ops
+            .iter()
+            .filter_map(|op| c.observed[op].first_observed.clone())
+            .min();
         let window = c.observed.values().next();
         out.push(Finding {
             kind: FindingKind::UnexplainedWriter,
@@ -534,6 +728,7 @@ fn row_findings(
                 "window_start": window.and_then(|w| w.window_start.clone()),
                 "window_end": window.map(|w| w.window_end.clone()),
                 "truncated": window.is_some_and(|w| w.truncated),
+                "first_observed": first_observed,
             }),
         });
         unexplained_roles.push(a.clone());
@@ -620,6 +815,30 @@ fn not_observed(window: &Window, m: &Matrix, quiet: u32, out: &mut Vec<Finding>)
             }
         }
     }
+}
+
+/// The actors that only read each table, declared or observed (§3.4): who a change to it breaks.
+/// Not a problem and no question, so it is kept apart from [`findings`]; pure, sorted by table.
+/// Unlike the problems, it needs no observation (declared readers are known from code), though
+/// observed readers join it once there is one.
+pub fn read_only_consumers(m: &Matrix) -> Vec<Finding> {
+    m.tables
+        .iter()
+        .filter_map(|(table, row)| {
+            let readers: Vec<String> = row
+                .iter()
+                .filter(|(_, c)| !c.writes() && c.reads())
+                .map(|(a, _)| a.key())
+                .collect();
+            (!readers.is_empty()).then(|| Finding {
+                kind: FindingKind::ReadOnlyConsumers,
+                table: table.clone(),
+                actor: None,
+                operations: BTreeSet::from([Op::Read]),
+                detail: serde_json::json!({ "readers": readers }),
+            })
+        })
+        .collect()
 }
 
 /// Every finding, sorted by key. Pure: the same inputs give the same findings in the same order.
@@ -802,6 +1021,7 @@ mod tests {
             window_start: Some("2026-11-01".into()),
             window_end: "2026-11-11".into(),
             truncated: false,
+            first_observed: None,
         }
     }
 
@@ -859,6 +1079,171 @@ mod tests {
             ..input
         };
         assert!(findings(&m, &input).is_empty());
+    }
+
+    #[test]
+    fn read_only_consumers_list_who_only_reads() {
+        let mut m = fixture();
+        m.declare(
+            "orders".into(),
+            &Actor::new(ActorKind::Component, "reports"),
+            Op::Read,
+            "r",
+        );
+        let f = read_only_consumers(&m);
+        let by: BTreeMap<&str, &Value> = f.iter().map(|x| (x.table.as_str(), &x.detail)).collect();
+        assert_eq!(by["customers"]["readers"], json!(["db_role:bi"]));
+        assert_eq!(by["orders"]["readers"], json!(["component:reports"]));
+        // A writer that also reads is not a read-only consumer.
+        assert!(f.iter().all(|x| x.kind == FindingKind::ReadOnlyConsumers));
+        assert!(!by["orders"]["readers"].to_string().contains("place_order"));
+    }
+
+    #[test]
+    fn a_role_that_is_a_connection_user_is_linked_to_that_job_first() {
+        let mut m = fixture();
+        let erp = Actor::new(ActorKind::Component, "erp");
+        let job = Actor::new(ActorKind::EtlJob, "nightly.ktr");
+        m.declare("customers".into(), &erp, Op::Update, "x");
+        // By tables alone `etl` would be erp's; the job connects as `etl`, so the job is proposed.
+        let mut node = obj(
+            "nightly.ktr:0",
+            "TransformNode",
+            json!({"connection_user": "etl"}),
+        );
+        node.name = "nightly.ktr:0".into();
+        let users = connection_users(&[node]);
+        assert_eq!(users["etl"], BTreeSet::from([job.clone()]));
+        let links = link_hypotheses_with(&m, &users);
+        assert_eq!(links["etl"].actor, job);
+        assert_eq!(links["etl"].basis, LinkBasis::Connection);
+        // Two jobs connecting as the same user: the connection says nothing, tables decide.
+        let mut two = users.clone();
+        two.get_mut("etl")
+            .unwrap()
+            .insert(Actor::new(ActorKind::EtlJob, "other.ktr"));
+        let links = link_hypotheses_with(&m, &two);
+        assert_eq!(links["etl"].actor, erp);
+        assert_eq!(links["etl"].basis, LinkBasis::Tables);
+        // A SQL file's node is no ETL job.
+        let sql = obj(
+            "q.sql:0",
+            "TransformNode",
+            json!({"connection_user": "etl"}),
+        );
+        assert!(connection_users(&[sql]).is_empty());
+    }
+
+    #[test]
+    fn a_dictionary_process_acts_through_the_procedure_or_class_it_runs() {
+        let mut proc_ = obj(
+            "C_INVOICE_POST",
+            "Procedure",
+            json!({"updates": ["C_Invoice"]}),
+        );
+        proc_.name = "C_Invoice_Post".into();
+        let mut method = obj(
+            "doIt",
+            "JavaMethod",
+            json!({
+                "owner": "org.compiere.process.InvoiceGenerate",
+                "sql": [{"inserts": ["C_Invoice"], "reads": ["C_Order"]}]
+            }),
+        );
+        method.id = KirId::new();
+        let by_sql = obj(
+            "Post_Invoice",
+            "AppProcess",
+            json!({"procedure_name": "C_INVOICE_POST"}),
+        );
+        let by_class = obj(
+            "C_Invoice_Generate",
+            "AppProcess",
+            json!({"classname": "org.compiere.process.InvoiceGenerate", "schedules": 1}),
+        );
+        let unknown = obj("Nothing", "AppProcess", json!({"classname": "x.Y"}));
+        let objects = vec![
+            table("C_Invoice"),
+            table("C_Order"),
+            proc_,
+            method.clone(),
+            by_sql,
+            by_class,
+            unknown,
+        ];
+        let paths = HashMap::from([(
+            method.id,
+            "org.adempiere.base/src/InvoiceGenerate.java".to_string(),
+        )]);
+        let m = declared(
+            &objects,
+            &[],
+            &DeclaredInput {
+                method_paths: &paths,
+                component_depth: 1,
+            },
+        );
+        let inv = m.row("c_invoice").unwrap();
+        let post = &inv[&Actor::new(ActorKind::Process, "Post_Invoice")];
+        assert!(post.declared.contains(&Op::Update));
+        assert!(
+            post.via
+                .iter()
+                .any(|v| v.contains("runs procedure C_INVOICE_POST"))
+        );
+        let gen_ = &inv[&Actor::new(ActorKind::Process, "C_Invoice_Generate")];
+        assert!(gen_.declared.contains(&Op::Insert));
+        assert!(
+            m.row("c_order").unwrap()[&Actor::new(ActorKind::Process, "C_Invoice_Generate")]
+                .declared
+                .contains(&Op::Read)
+        );
+        assert!(
+            !m.actors().keys().any(|a| a.name == "Nothing"),
+            "a process whose code is not read is no actor"
+        );
+        assert!(is_system(ActorKind::Process));
+    }
+
+    #[test]
+    fn a_trigger_on_the_table_does_not_explain_the_write_that_fires_it() {
+        let mut m = Matrix::default();
+        let trigger = Actor::new(ActorKind::Routine, "customers_touch");
+        m.declare(
+            "customers".into(),
+            &trigger,
+            Op::Write,
+            "trigger customers_touch",
+        );
+        m.add_observed("customers", "fixer", Op::Update, observed(4));
+        let windows = [window(3.0, &[])];
+        let none = BTreeSet::new();
+        let links = BTreeMap::new();
+        let input = FindingInput {
+            windows: &windows,
+            accounted: &none,
+            links: &links,
+            quiet_after_days: 30,
+        };
+        let f = findings(&m, &input);
+        assert!(
+            f.iter()
+                .any(|x| x.kind == FindingKind::UnexplainedWriter && x.table == "customers"),
+            "{f:?}"
+        );
+        // Code that states the update does explain it.
+        let proc_ = Actor::new(ActorKind::Routine, "fix_status");
+        m.declare(
+            "customers".into(),
+            &proc_,
+            Op::Update,
+            "procedure fix_status",
+        );
+        assert!(
+            !findings(&m, &input)
+                .iter()
+                .any(|x| x.kind == FindingKind::UnexplainedWriter)
+        );
     }
 
     #[test]

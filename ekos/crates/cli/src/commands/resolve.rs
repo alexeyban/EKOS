@@ -10,8 +10,11 @@ pub fn run(config: &EkosConfig, cwd: &Path, force: bool) -> Result<()> {
     let store = PackArtifactStore::open(&artifact_dir)
         .map_err(|e| anyhow::anyhow!("cannot open artifact store: {e}"))?;
 
-    // ── Collect all KnowledgeArtifact KirGraphs ───────────────────────────
-    let ids = match store.list() {
+    // ── Collect the KnowledgeArtifact KirGraphs compile will read ─────────
+    // The same selection as `compile`: what the latest recover stands behind, newest per target.
+    // Reading every artifact ever written doubled objects after a pass's cache key changed and
+    // kept deleted files' objects (proposing merges and conflicts that were not there).
+    let ids = match ekos_semantic::select_knowledge_artifact_ids(&store, &artifact_dir) {
         Ok(ids) => ids,
         Err(e) => anyhow::bail!("cannot list artifact store: {e}"),
     };

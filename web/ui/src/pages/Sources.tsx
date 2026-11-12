@@ -155,7 +155,9 @@ function AddDirectory({ workspace }: { workspace: string }) {
 }
 
 // RFC 0235: what each kind's form asks for. Every kind is profiled (RFC 0252); the application
-// dictionary is Oracle's.
+// dictionary (iDempiere's) is read where iDempiere runs: Oracle and, RFC 0256, PostgreSQL.
+const hasDictionary = (kind: string) => kind === "oracle" || kind === "postgres";
+
 const KINDS = {
   oracle: {
     label: "Oracle",
@@ -227,7 +229,7 @@ function AddDatabase({ workspace }: { workspace: string }) {
             .map((o) => o.trim())
             .filter(Boolean),
           profile: f.profile,
-          dictionary: f.kind === "oracle" ? f.dictionary || null : null,
+          dictionary: hasDictionary(f.kind) ? f.dictionary || null : null,
         },
       ),
     onSuccess: () => {
@@ -315,7 +317,7 @@ function AddDatabase({ workspace }: { workspace: string }) {
             </option>
           </select>
         </label>
-        {f.kind === "oracle" && (
+        {hasDictionary(f.kind) && (
           <label className="sem-field">
             <span>Application dictionary</span>
             <select

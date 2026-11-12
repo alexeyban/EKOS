@@ -5,20 +5,12 @@ use ekos_kir::ObjectKind;
 use ekos_semantic::{CkModel, SemanticCompilerPass};
 use std::{collections::HashSet, path::Path, sync::Arc};
 
-/// Ids of every knowledge artifact currently in the store — the semantic
-/// compiler's actual inputs, declared so the Phase 13 cache invalidates when
-/// recover output changes.
-fn knowledge_artifact_ids(store: &dyn ArtifactStore) -> Vec<String> {
-    let Ok(ids) = store.list() else {
-        return Vec::new();
-    };
-    ids.into_iter()
-        .filter(|id| {
-            matches!(
-                store.read(id),
-                Ok(Some(json)) if json["artifact_type"].as_str() == Some("knowledge")
-            )
-        })
+/// Ids of the knowledge artifacts the semantic compiler reads — its actual inputs, declared so
+/// the Phase 13 cache invalidates when recover output changes (a deleted file included).
+fn knowledge_artifact_ids(store: &dyn ArtifactStore, artifact_dir: &Path) -> Vec<String> {
+    ekos_semantic::select_knowledge_artifact_ids(store, artifact_dir)
+        .unwrap_or_default()
+        .into_iter()
         .map(|id| id.to_string())
         .collect()
 }
@@ -39,7 +31,8 @@ pub async fn run(config: &EkosConfig, cwd: &Path) -> Result<()> {
     );
     let mut pass_manager = ekos_compiler_core::pass::PassManager::new();
     pass_manager.register(Box::new(
-        SemanticCompilerPass::new(&ckm_dir).with_cache_inputs(knowledge_artifact_ids(&*store)),
+        SemanticCompilerPass::new(&ckm_dir)
+            .with_cache_inputs(knowledge_artifact_ids(&*store, &config.artifact_dir(cwd))),
     ));
 
     let mut ctx =

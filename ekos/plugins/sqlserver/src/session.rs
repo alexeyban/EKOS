@@ -21,7 +21,10 @@
 //!
 //! The session also never waits long on someone else's lock (`SET LOCK_TIMEOUT`), gives way in a
 //! deadlock (`SET DEADLOCK_PRIORITY LOW`), and bounds every server round trip (tiberius's
-//! command timeout). After a timeout tiberius leaves the connection mid-response, so a timed-out
+//! command timeout). It sets `DATEFIRST` to
+//! [`EKOS_DATEFIRST`](ekos_observation_sdk::usage::EKOS_DATEFIRST): Query Store and the plan cache
+//! record it per statement, so usage evidence (RFC 0252 §3.5) leaves EKOS's own queries out. No
+//! EKOS query depends on the first day of the week. After a timeout tiberius leaves the connection mid-response, so a timed-out
 //! session is reported lost and not reused.
 
 use crate::SqlServerConnection;
@@ -37,9 +40,11 @@ pub const LOCK_TIMEOUT_MS: u32 = 10_000;
 /// Seconds one server round trip may take.
 pub const COMMAND_TIMEOUT_SECS: u64 = 120;
 
-/// The settings sent once after login.
+/// The settings sent once after login (a batch of their own, so every later statement is compiled
+/// under them — `DATEFIRST` included).
 pub const SESSION_SETTINGS: &str = "SET LOCK_TIMEOUT 10000; SET DEADLOCK_PRIORITY LOW; \
-     SET XACT_ABORT ON; SET TRANSACTION ISOLATION LEVEL READ COMMITTED; SET NOCOUNT ON;";
+     SET XACT_ABORT ON; SET TRANSACTION ISOLATION LEVEL READ COMMITTED; SET NOCOUNT ON; \
+     SET DATEFIRST 5;";
 
 /// One connection on its own single-threaded runtime: blocking calls, like `ekos-pg-live`'s.
 /// Create and use it off any async runtime (a blocking thread or a plain one).
@@ -241,6 +246,15 @@ mod tests {
             cell_text(&ColumnData::Binary(Some(Cow::Borrowed(&[0xab, 0x01])))),
             Some("0xab01".into())
         );
+    }
+
+    #[test]
+    fn the_session_tags_itself_for_usage_evidence() {
+        let tag = format!(
+            "SET DATEFIRST {};",
+            ekos_observation_sdk::usage::EKOS_DATEFIRST
+        );
+        assert!(SESSION_SETTINGS.ends_with(&tag), "{SESSION_SETTINGS}");
     }
 
     #[test]

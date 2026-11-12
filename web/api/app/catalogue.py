@@ -8,7 +8,9 @@ and nothing else:
   home, config, read scope — the console sets those);
 * options as `--long=value`, positionals after `--`, so no value can pose as an option;
 * a path argument must resolve inside the project's directory or the tenant's source roots;
-* for a review, the reviewer (`by`) is the signed-in person, whatever the form said.
+* whoever a command names as acting (`by`, `--as`) is the signed-in person, whatever the form
+  said — a review's reviewer, and (RFC 0258) the person changing a dashboard, whose identity
+  decides between their own dashboard in place and someone else's as a copy.
 
 It is never a shell: the argv goes to `create_subprocess_exec` through the job runner.
 """
@@ -157,7 +159,7 @@ def build_argv(
     if unknown:
         raise ArgvError(f"{', '.join(unknown)}: not an argument of `{' '.join(entry['path'])}`")
     values = dict(args)
-    if entry["class"] == "review" and REVIEWER_ARG in specs:
+    if REVIEWER_ARG in specs:
         values[REVIEWER_ARG] = reviewer
 
     options, positionals = _options_and_positionals(entry, values, base, allowed)

@@ -17,6 +17,10 @@ struct PassManifest {
     version: String,
     config_hash: String,
     inputs: Vec<String>,
+    /// The knowledge artifacts the pass wrote in that run (`None`: a manifest from before they
+    /// were recorded). A cached pass still names its output this way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    outputs: Option<Vec<String>>,
 }
 
 fn manifest_path(manifest_dir: &Path, pass_name: &str) -> std::path::PathBuf {
@@ -53,12 +57,29 @@ pub fn should_recompute(pass: &dyn CompilerPass, config_hash: &str, manifest_dir
         || manifest.inputs != pass.cache_inputs()
 }
 
-/// Record this pass's recomputation identity after it has run successfully.
-pub fn record_manifest(pass: &dyn CompilerPass, config_hash: &str, manifest_dir: &Path) {
+/// The knowledge artifacts a cached pass wrote when it last ran, if its manifest recorded them.
+pub fn cached_outputs(
+    pass: &dyn CompilerPass,
+    manifest_dir: &Path,
+) -> Option<std::collections::BTreeSet<String>> {
+    let raw = std::fs::read_to_string(manifest_path(manifest_dir, pass.name())).ok()?;
+    let manifest = serde_json::from_str::<PassManifest>(&raw).ok()?;
+    manifest.outputs.map(|o| o.into_iter().collect())
+}
+
+/// Record this pass's recomputation identity, and the knowledge artifacts it wrote, after it has
+/// run successfully.
+pub fn record_manifest(
+    pass: &dyn CompilerPass,
+    config_hash: &str,
+    manifest_dir: &Path,
+    outputs: &std::collections::BTreeSet<String>,
+) {
     let manifest = PassManifest {
         version: pass.version().to_string(),
         config_hash: config_hash.to_string(),
         inputs: pass.cache_inputs(),
+        outputs: Some(outputs.iter().cloned().collect()),
     };
     if std::fs::create_dir_all(manifest_dir).is_err() {
         return;
@@ -115,7 +136,7 @@ mod tests {
             version: "v1",
             inputs: vec!["a".into()],
         };
-        record_manifest(&pass, "cfg1", dir.path());
+        record_manifest(&pass, "cfg1", dir.path(), &Default::default());
         assert!(!should_recompute(&pass, "cfg1", dir.path()));
     }
 
@@ -127,7 +148,7 @@ mod tests {
             version: "v1",
             inputs: vec!["a".into()],
         };
-        record_manifest(&pass, "cfg1", dir.path());
+        record_manifest(&pass, "cfg1", dir.path(), &Default::default());
         assert!(should_recompute(&pass, "cfg2", dir.path()));
     }
 
@@ -139,7 +160,7 @@ mod tests {
             version: "v1",
             inputs: vec!["a".into()],
         };
-        record_manifest(&pass, "cfg1", dir.path());
+        record_manifest(&pass, "cfg1", dir.path(), &Default::default());
         let changed = StubPass {
             name: "p",
             version: "v1",
@@ -156,7 +177,7 @@ mod tests {
             version: "v1",
             inputs: vec!["a".into()],
         };
-        record_manifest(&pass, "cfg1", dir.path());
+        record_manifest(&pass, "cfg1", dir.path(), &Default::default());
         let bumped = StubPass {
             name: "p",
             version: "v2",

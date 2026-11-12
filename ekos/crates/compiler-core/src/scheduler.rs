@@ -36,9 +36,12 @@ impl PassOutcome {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ExecutionReport {
     pub outcomes: Vec<PassOutcome>,
+    /// The knowledge artifacts the run stands behind: what each pass wrote, or (cached) what its
+    /// manifest says it wrote last. `recover` saves it for `compile` and `resolve`.
+    pub knowledge: crate::current_knowledge::CurrentKnowledge,
 }
 
 impl ExecutionReport {

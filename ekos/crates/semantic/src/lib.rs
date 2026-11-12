@@ -293,13 +293,25 @@ fn review_candidates_for(proposals: &[MergeProposal]) -> (Vec<KirEvidence>, Vec<
     (evidence, relationships)
 }
 
-/// Deduplicate relationships by `(from, to, kind)`, merging evidence lists.
+/// Deduplicate relationships by `(from, to, kind)`, merging evidence lists. A foreign key is also
+/// keyed by its constraint (or, without a name, its column description): two foreign keys between
+/// the same tables (`Match.home_player_1 → Player`, `… home_player_2 → Player`; iDempiere's
+/// `AD_Table.AD_Window_ID` beside `PO_Window_ID`) are two facts, and collapsing them hid 586 of
+/// iDempiere's 3,686 declared keys from every reader of `fk_desc`.
 pub fn dedup_relationships(rels: Vec<KirRelationship>) -> Vec<KirRelationship> {
-    let mut index: HashMap<(KirId, KirId, String), usize> = HashMap::new();
+    let mut index: HashMap<(KirId, KirId, String, String), usize> = HashMap::new();
     let mut result: Vec<KirRelationship> = Vec::new();
 
     for rel in rels {
-        let key = (rel.from, rel.to, format!("{:?}", rel.kind));
+        let which = match rel.kind {
+            RelationshipKind::ForeignKey => ["constraint", "fk_desc"]
+                .iter()
+                .find_map(|k| rel.properties.get(*k).and_then(serde_json::Value::as_str))
+                .unwrap_or_default()
+                .to_string(),
+            _ => String::new(),
+        };
+        let key = (rel.from, rel.to, format!("{:?}", rel.kind), which);
         if let Some(&idx) = index.get(&key) {
             for ev_id in &rel.evidence {
                 if !result[idx].evidence.contains(ev_id) {
@@ -537,6 +549,31 @@ impl SemanticCompilerPass {
 /// `sql/Pg-database.sql` and again in `sql/changes/1.9/transpose_user_prefs.sql`), which
 /// definition the ledger keeps flipped between runs — and with it the table's columns, CHECKs and
 /// seed rows (RFC 0170 counted 46 or 47 concepts on identical input).
+/// The knowledge artifacts `compile` (and `resolve`) read: those the latest `ekos recover` stands
+/// behind ([`ekos_compiler_core::current_knowledge`] — a deleted file's last output and a
+/// multi-input pass's earlier runs are left out), then the newest per logical target. Before the
+/// first recover that records it, every artifact is a candidate, as before.
+pub fn select_knowledge_artifact_ids(
+    store: &dyn ArtifactStore,
+    artifact_dir: &std::path::Path,
+) -> Result<Vec<ArtifactId>, ekos_artifact::StoreError> {
+    let all = store.list()?;
+    let candidates: Vec<ArtifactId> =
+        match ekos_compiler_core::current_knowledge::CurrentKnowledge::read(artifact_dir) {
+            Some(current) => all
+                .into_iter()
+                .filter(|id| match store.read(id) {
+                    Ok(Some(json)) if json["artifact_type"].as_str() == Some("knowledge") => {
+                        current.admits(&id.to_string(), json["pass_name"].as_str().unwrap_or(""))
+                    }
+                    _ => false,
+                })
+                .collect(),
+            None => all,
+        };
+    Ok(dedup_knowledge_artifact_ids(store, &candidates))
+}
+
 fn dedup_knowledge_artifact_ids(store: &dyn ArtifactStore, ids: &[ArtifactId]) -> Vec<ArtifactId> {
     #[derive(Hash, Eq, PartialEq)]
     enum Key {
@@ -692,7 +729,8 @@ impl CompilerPass for SemanticCompilerPass {
     /// `v3-identity3` = RFC 0224: the identity resolver this pass runs proposes different
     /// candidates; the suffix is `ekos_identity::SCORING_VERSION`.
     fn version(&self) -> &str {
-        "v3-identity3"
+        // v4: two foreign keys between the same tables are no longer merged into one.
+        "v4-identity3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -701,11 +739,9 @@ impl CompilerPass for SemanticCompilerPass {
 
     async fn run(&mut self, ctx: &mut PassContext) -> Result<(), PassError> {
         // ── Load all KnowledgeArtifacts, deduped to the newest per logical target ──────────
-        let all_ids = ctx
-            .artifact_store
-            .list()
-            .map_err(|e| PassError::failed(format!("artifact store list failed: {e}")))?;
-        let ids = dedup_knowledge_artifact_ids(&*ctx.artifact_store, &all_ids);
+        let ids =
+            select_knowledge_artifact_ids(&*ctx.artifact_store, &ctx.config.artifact_dir(&ctx.cwd))
+                .map_err(|e| PassError::failed(format!("artifact store list failed: {e}")))?;
 
         let (mut combined, ka_count, mut provenance) = load_knowledge(ctx, &ids);
 
@@ -1166,6 +1202,31 @@ mod tests {
             "two identical FK rels must deduplicate to one"
         );
         assert_eq!(deduped[0].evidence.len(), 2, "evidence must be merged");
+    }
+
+    #[test]
+    fn two_foreign_keys_between_the_same_tables_both_survive() {
+        let (a, b) = (KirId::new(), KirId::new());
+        let fk = |desc: &str| {
+            let mut r = KirRelationship::new(RelationshipKind::ForeignKey, a, b);
+            r.properties
+                .insert("fk_desc".into(), serde_json::json!(desc));
+            r
+        };
+        let deduped = dedup_relationships(vec![
+            fk("Match.home_player_1 → Player.id"),
+            fk("Match.home_player_2 → Player.id"),
+            fk("Match.home_player_1 → Player.id"),
+        ]);
+        assert_eq!(deduped.len(), 2, "one per key, a repeated one merged");
+        // A named constraint wins over the description.
+        let mut c1 = fk("x");
+        c1.properties
+            .insert("constraint".into(), serde_json::json!("FK_A"));
+        let mut c2 = fk("x");
+        c2.properties
+            .insert("constraint".into(), serde_json::json!("FK_B"));
+        assert_eq!(dedup_relationships(vec![c1, c2]).len(), 2);
     }
 
     #[test]
