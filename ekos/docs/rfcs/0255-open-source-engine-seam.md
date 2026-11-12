@@ -272,3 +272,140 @@ is not open.
    documents how another engine fills them. A neutral shape would break lock files and is deferred.
 5. Should `SourceCapabilities` be recorded by core for every `[[databases]]` entry, including ones the Lakehouse
    does not read (ClickHouse)? It would make the passport uniform, at the cost of a second producer of the fact.
+
+## 9. Implementation log
+
+### 2026-11-11 — phases 1–4, and phase 5's out-of-tree fixture
+
+Branches `rfc0255` in EKOS and in ekos-lakehouse. The lakehouse was built against this EKOS branch
+through a local, uncommitted `[patch]`; its committed `Cargo.lock` still pins an older EKOS revision
+and needs `cargo update -p ekos -p ekos-migrate-validate -p ekos-kir …` once EKOS is merged.
+
+**Phase 1 audit — every use of `SourceEngine`** (lakehouse, 54 mentions in 14 files before the change):
+
+| Where | Use | Now |
+|---|---|---|
+| `bronze/model.rs` | the enum | an open identifier, `bronze/engine.rs` |
+| `bronze/plan.rs` | `PlanSettings::source_engine` (the lock field); type map `match` | field kept, unwritten for PostgreSQL; `EngineSpec::map_column` via `plan_for` |
+| `bronze/mode.rs` | `orderable(engine, type)`; `choose*` thread the engine | `EngineSpec::orderable`; `choose_for/with` take `&dyn EngineSpec` |
+| `bronze/extraction.rs` | `orderable` when an operator makes a table incremental | `apply`/`apply_all` take the spec |
+| `lakehouse-ext/source.rs`, `source_oracle.rs` | `Source::engine()` | unchanged, returns the identifier |
+| `lakehouse-ext/plan_cmd.rs` | `connect_source` `match` | `Engines::get(..).connect` |
+| `lakehouse-ext/settings.rs` | `source-engine` key; `if Oracle { resolve_database }` | `load_with`: the provider's `check_settings` |
+| `lakehouse-ext/reconcile.rs` | `source_dialect` `match`; `digest_columns: src == Oracle` | the source reader's dialect; `Dialect::digest_columns()` |
+| `lakehouse-ext/doctor.rs` | the reachability address from `[[databases]]`; the Trino connector hint for PostgreSQL; the role name | `SourceProvider::{address, connector_hint, role, doctor}` |
+| `lakehouse-ext/extraction.rs` | — (via bronze) | `finalize` takes `&Engines` |
+| tests (`silver`, `extraction`, `oracle_live`) | constructors | `SourceEngine::ORACLE` |
+
+Deliberate exceptions, engine knowledge outside the type map and `orderable`, left where they are:
+
+- `silver::one_char` recognises the one-character text spellings of both built-in engines
+  (`CHAR(1`, `VARCHAR2(1`, `BPCHAR(1` …) for a **code-declared** `Y`/`N` flag. An out-of-tree engine
+  whose spelling it misses keeps that flag as text — the safe direction — and a **declared** flag
+  (a check constraint) does not depend on it.
+- `deletes.rs` caps an `IN (…)` list at 500 keys for every engine because Oracle takes at most
+  1,000: conservative for all, not a branch.
+- `gold` matches column names case-insensitively for Oracle's upper case — engine-neutral.
+
+**Open question 3 — answered: silver holds no engine-conditioned rule.** The `Y`/`N` → boolean rule is
+decided by evidence (a check constraint, or the application model), not by the engine; there is no
+empty-string rule in silver. Only the spelling exception above.
+
+**Phase 1 exit — byte-identical, measured.** `lakehouse-ext/tests/engine_identity.rs` digests, for a
+lock, every generated file (`render::files` + `silver::files`) and every reconciliation query
+(counts, aggregate pack, bucket checksum both sides, `digest_columns`, columns not compared). The
+digests were recorded on the commit before the seam (`b75120d`) from a Pagila lock (PostgreSQL, no
+engine field) and a slice of the published iDempiere demo lock (Oracle), and the test now compares:
+both locks re-serialize byte for byte and both digest files match after phases 1–4. The full
+published locks, outside the repository (`RFC0255_EXTRA_LOCK`), give the same digests before and
+after: `ekos-lakehouse-oracle/pipeline` (849 tables, 6,402 digest lines)
+`6e0196ce312386f704eb5f9c1545a6929ca30a5a70f5d6ed5afcc2051708bea7`, `pipeline-sales` (234 lines)
+`4773910414d9de0930b5e8b70b7cc7df48a513fadffeefd2474b9ac142a211de`.
+`migrate-validate`'s SQL snapshots for the four built-in dialects are unchanged.
+
+**Phase 2.** `lakehouse-ext/src/engines.rs`: `SourceProvider` (`spec`, `check_settings`, `connect`,
+`dialect`, `conformance_literals`, `address`, `role`, `connector_hint`, `doctor`, `provider_name`),
+`Engines` (a clone over `Arc<[Arc<dyn SourceProvider>]>`; `builtin`, `try_with`, `get`, `spec`),
+`LakehouseExtension::new().with_engine(..)` / `try_with_engine`. Deviations from §3.3:
+`check_settings(&self, &mut Settings, &[DatabaseConfig])` — Oracle fills in its `[[databases]]` entry,
+so the check needs the databases and may resolve; the extension type keeps its name
+`LakehouseExtension` (now a value, `LakehouseExtension::new()`); `Settings` carries the build's
+`Engines` (`#[serde(skip)]`, as the resolved `database` already was), so every command that loads
+settings connects through the registry without a second parameter. An engine the build lacks is
+refused by name in settings (`load_with`) and in a deployed lock (`plan_cmd::read_lock_for`, used by
+`generate --from-lock`, `reconcile`, `deletes`); `plan_with` (built-ins only) refuses every table of
+such an engine. Tests: `engine_seam.rs` (5), `engines.rs` (3), bronze `plan.rs` (2).
+Live: the PostgreSQL provider connects to the sandbox source; `bronze_live`, `changes_live` and
+Trino's planted-defect test fail before any engine code, on `CATALOG_NOT_FOUND` (`pagila`, `m3`,
+`postgresql`): the running Trino has no such catalogs. The sandbox was not reconfigured. Oracle's
+live suite needs the testbed, which was not running.
+
+**Open question 1 — decided: a fifth variant holding the dialect, not `&dyn` everywhere.** Counted at
+phase 3: 261 `Dialect::` references in 16 EKOS files plus the lakehouse, `Dialect` passed by value
+and compared with `==`. `Dialect::Registered(&'static dyn CanonDialect)` keeps `Dialect: Copy + Eq`
+(equality by name) and needs no lookup and no registry — the engine's crate declares
+`static CANON` — so every existing caller is unchanged; the free functions dispatch to the trait.
+`EngineReader::dialect()` keeps returning `Dialect`. `Dialect` does not implement `CanonDialect`
+itself: the variant makes that unnecessary. Three exhaustive matches in `migrate-logic/v5.rs` gained
+an arm (a registered dialect is not a V5 engine).
+
+**Phase 3.** `CanonDialect`: `canon_body`, `hash_hex_expr`, `prefix60_expr` required; null literal,
+identifier quoting, the NULL wrapper, separator, row hash, column digest, exact sum, modulo, byte
+length, `digest_columns` defaulted to portable SQL; bucket queries as a grouped subquery with a bare
+alias. `ekos_migrate_validate::conformance` (`KIT_VERSION` 1): `Literals` (hand-written by the engine,
+`None` + reason per uncovered case), `run(reader, literals) -> Report` (fixture cases, four hash and
+prefix texts, a 200-row bucket checksum; an id that digests the report), `coverage`, and the literal
+tables of the four built-in dialects (PostgreSQL/ClickHouse from `fixtures`, Trino and Oracle moved
+from the lakehouse live suites). Live runs: **PostgreSQL 31/31 and ClickHouse 29/29**
+(`migrate-validate/tests/conformance.rs`, sandboxes of `docker-compose.migrate.yml`), **Trino 31/31**
+(lakehouse `trino/tests/live.rs`), and a planted check — Trino's literals on PostgreSQL — fails.
+**Oracle not run** (testbed not up): the kit test is in `oracle_live.rs`. `reconcile.rs` has no engine
+`match`: the source side is the source reader's dialect, `unit_plan`/`evidence_queries` take it, the
+key separator comes from a registered dialect. The bronze type-map kit (`bronze/typemap_kit.rs`):
+mapped or refused, never dropped; `NarrowingSafe` only with a measurement; a refused column refuses
+its table, naming it; no compare rule on a refused column. Both built-in maps pass on their sample
+lists; a planted map that drops a column and narrows unmeasured fails with two findings.
+
+**Phase 4.** `ekos_kir::source_capabilities` holds the vocabulary so the fact has one schema for both
+producers: `Capability` (ten, `CAPABILITIES_VERSION` 1), `Support`, `Capabilities` (undeclared =
+absent "predates capability"), `checked` (the two downgrade rules), `SourceCapabilities` and its
+object, keyed by source (`id_of`; registry row `SourceCapabilities`, structurally keyed). `bronze`
+now depends on `ekos-kir`. `EngineSpec::capabilities` is required. Declared: PostgreSQL all provided
+except `value_lists` partial (enum types; `CHECK … IN` lists are not read); Oracle `column_identity`
+partial (`COLUMN_ID` is a position), `usage_stats` absent (the connector reads no workload
+statistics). `lakehouse plan` runs the kit on the connected source (read-only `SELECT`s), checks the
+declaration against the tables and keys read, and appends the fact (a failure to write is a warning);
+`lakehouse doctor` adds an `engine` check with the table; `lakehouse reconcile` turns a green result
+`unverified`, with the reason, when `reconcile` is not provided — RFC 0196's `unverified`, so
+`lakehouse status` never says healthy. Estate docs: a "Source engines" section on the home page, and a
+line under a table's "Keys and references" when the project's one source does not provide declared
+keys. Exit: the planted engine that declares `reconcile: provided` without a run is downgraded
+(`capabilities.rs` tests, `source_capabilities` tests), the estate test renders an iDempiere-shaped
+Oracle source's table. Live: PostgreSQL passes the kit through the provider's `PgSource` reader and
+keeps `reconcile` provided (`capabilities_live.rs`). Not done: the iDempiere passport on the published
+demo (needs the Oracle testbed and a re-plan); the source passport per table page beyond the keys
+line (a table does not yet say which source it came from).
+
+**Phase 5 (part).** `examples/fixture-engine` in ekos-lakehouse — its own Cargo workspace, path
+dependencies on the public crates, **no change to a public crate**: an engine named `fixture`
+(PostgreSQL-compatible; refuses `money`; declares no keys) with its own `EngineSpec`,
+`CanonDialect`, `Source`, `SourceProvider`, literals and binary. Offline it registers, refuses a
+foreign key by name and engine, plans, renders bronze, writes a lock the public build refuses by name,
+and passes the type-map kit; live, **its own dialect passes the conformance kit on PostgreSQL 18**
+(31 cases, hashes, buckets) and keeps `reconcile` provided. `scripts/out-of-tree-engine.sh` runs it
+and checks that `docs/writing-a-source-engine.md` names only items the fixture defines; the
+lakehouse repository has no CI workflow, so the script is the job.
+
+**Not done.**
+
+- §3.6 in core: `EkosExtension::live_sources` and registered `[[databases]]` kinds. RFC 0252 built no
+  `LiveProfiler`; its shared pure plan is the per-`Flavor` SQL builders run through
+  `commands/profile.rs` and `sql_check::ProbeWorker`, and `Flavor` is closed. The provider this RFC
+  needs is therefore `kind` + `check(&DatabaseConfig)` + a read-only `sql_dialect_sdk::Probe` + its
+  capabilities, with profiling `absent` until `Flavor` opens — and `DatabaseKind` would gain a
+  `Registered` unit variant plus the entry's kind name, with an arm in every `match` of
+  `build.rs`, `database.rs`, `profile.rs`, `relationships.rs` and `sql_check.rs`. Deferred: those five
+  files are being changed for SQL Server and Informix in parallel.
+- The fixture landing bronze and reconciling end to end: needs a Trino catalog for its source.
+- Open question 5 (core recording `SourceCapabilities` for every `[[databases]]` entry): unchanged; the
+  vocabulary now lives in `ekos-kir`, so a second producer needs no new schema.
