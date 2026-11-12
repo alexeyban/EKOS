@@ -168,6 +168,7 @@ fn as_text(flavor: Flavor, col: &str) -> String {
         Flavor::ClickHouse => format!("toString({col})"),
         Flavor::SqlServer => format!("CAST({col} AS nvarchar(4000))"),
         Flavor::Informix => format!("CAST({col} AS LVARCHAR(4000))"),
+        Flavor::Sqlite => format!("CAST({col} AS TEXT)"),
     }
 }
 
@@ -188,6 +189,8 @@ fn bucket(flavor: Flavor, col: &str, grain: &str) -> Result<String, String> {
         (Flavor::SqlServer, _) => format!("CONVERT(char(4), {col}, 126)"),
         (Flavor::Informix, "month") => format!("TO_CHAR({col}, '%Y-%m')"),
         (Flavor::Informix, _) => format!("TO_CHAR({col}, '%Y')"),
+        (Flavor::Sqlite, "month") => format!("strftime('%Y-%m', {col})"),
+        (Flavor::Sqlite, _) => format!("strftime('%Y', {col})"),
     })
 }
 

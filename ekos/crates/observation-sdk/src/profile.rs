@@ -62,6 +62,10 @@ pub enum Flavor {
     /// RFC 0252 §3.5: Informix SQL. Identifiers are quoted with `"…"`, which the session makes
     /// delimited identifiers (`DELIMIDENT=y`; always so over DRDA).
     Informix,
+    /// RFC 0252 §8: SQLite, for benchmark databases (BIRD) read in process. The owner is the
+    /// attached schema (`main`). SQLite has no MD5: a caller that computes overlap signatures
+    /// registers an `md5(text)` function returning lowercase hex on its connection.
+    Sqlite,
 }
 
 /// What a profile run did, for the summary line and the catalog object.
@@ -132,6 +136,7 @@ pub fn family(flavor: Flavor, data_type: &str) -> Family {
         Flavor::ClickHouse => clickhouse_family(data_type),
         Flavor::SqlServer => sqlserver_family(data_type),
         Flavor::Informix => informix_family(data_type),
+        Flavor::Sqlite => sqlite_family(data_type),
     }
 }
 
@@ -213,6 +218,27 @@ fn sqlserver_family(data_type: &str) -> Family {
     }
 }
 
+/// SQLite's declared types, read by its type-affinity rules (a declared type is free text):
+/// `INT` anywhere → whole number; `CHAR`, `CLOB`, `TEXT` → text; `REAL`, `FLOA`, `DOUB`,
+/// `NUMERIC`, `DECIMAL` → number; `DATE`, `TIME` → date (stored as text); the rest counted only.
+fn sqlite_family(data_type: &str) -> Family {
+    let t = data_type.trim().to_ascii_lowercase();
+    if t.contains("int") {
+        Family::Number
+    } else if t.contains("char") || t.contains("clob") || t.contains("text") {
+        Family::Text
+    } else if ["real", "floa", "doub", "numeric", "decimal"]
+        .iter()
+        .any(|k| t.contains(k))
+    {
+        Family::Number
+    } else if t.contains("date") || t.contains("time") {
+        Family::Date
+    } else {
+        Family::Other
+    }
+}
+
 /// Informix type names as the plugin decodes `syscolumns.coltype` (`decimal(12,2)`,
 /// `datetime year to second`, `lvarchar(2048)`). Only a `datetime` that starts at `year` is a date:
 /// `datetime hour to minute` has no day to compare. `text`, `byte`, `blob`, `clob`, `boolean`,
@@ -262,7 +288,7 @@ pub fn ident(flavor: Flavor, name: &str) -> Result<String, String> {
         // `QUOTENAME`'s rule: a `]` inside the name is doubled.
         Flavor::SqlServer => Ok(format!("[{}]", name.replace(']', "]]"))),
         // A delimited identifier (the session sets `DELIMIDENT`); `"` inside is doubled.
-        Flavor::Informix => Ok(format!("\"{}\"", name.replace('"', "\"\""))),
+        Flavor::Informix | Flavor::Sqlite => Ok(format!("\"{}\"", name.replace('"', "\"\""))),
     }
 }
 
@@ -342,6 +368,10 @@ impl Aggregate {
             (Flavor::Informix, Self::Max) => format!("CAST(MAX({col}) AS LVARCHAR(100))"),
             // `LENGTH` ignores a `CHAR`'s trailing blanks.
             (Flavor::Informix, Self::MaxLength) => format!("MAX(LENGTH({col}))"),
+            (Flavor::Sqlite, Self::NonNull) => format!("COUNT({col})"),
+            (Flavor::Sqlite, Self::Min) => format!("CAST(MIN({col}) AS TEXT)"),
+            (Flavor::Sqlite, Self::Max) => format!("CAST(MAX({col}) AS TEXT)"),
+            (Flavor::Sqlite, Self::MaxLength) => format!("MAX(LENGTH({col}))"),
         }
     }
 }
@@ -352,7 +382,7 @@ fn row_count(flavor: Flavor) -> &'static str {
         Flavor::Postgres => "count(*)",
         Flavor::ClickHouse => "count()",
         Flavor::SqlServer => "COUNT_BIG(*)",
-        Flavor::Informix => "COUNT(*)",
+        Flavor::Informix | Flavor::Sqlite => "COUNT(*)",
     }
 }
 

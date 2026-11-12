@@ -126,6 +126,12 @@ pub struct DbPack {
     pub tables: Vec<PackTable>,
     /// `a.x = b.y`, one per foreign key.
     pub joins: Vec<String>,
+    /// RFC 0252 §8: `a.x = b.y`, references found in the data and verified, not declared.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub data_joins: Vec<String>,
+    /// RFC 0252 §8: `(table, column)`, a measured single-column key of a table declaring none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub data_keys: Vec<(String, String)>,
 }
 
 impl DbPack {
@@ -158,7 +164,11 @@ impl DbPack {
             .collect();
         joins.sort();
         joins.dedup();
-        DbPack { tables, joins }
+        DbPack {
+            tables,
+            joins,
+            ..Default::default()
+        }
     }
 
     pub fn table_names(&self) -> BTreeSet<String> {
@@ -226,7 +236,26 @@ impl DbPack {
                 out.push_str(&format!("--   {j}\n"));
             }
         }
+        self.render_data_signals(&mut out);
         out
+    }
+
+    /// RFC 0252 §8: the references and keys found in the data, after the declared join paths.
+    fn render_data_signals(&self, out: &mut String) {
+        if !self.data_joins.is_empty() {
+            out.push_str(
+                "-- Join paths found in the data (not declared; every value checked against the parent):\n",
+            );
+            for j in &self.data_joins {
+                out.push_str(&format!("--   {j}\n"));
+            }
+        }
+        if !self.data_keys.is_empty() {
+            out.push_str("-- Keys measured in the data (unique, never null; not declared):\n");
+            for (t, c) in &self.data_keys {
+                out.push_str(&format!("--   {t}({c})\n"));
+            }
+        }
     }
 }
 
@@ -861,7 +890,11 @@ pub fn sqlgen_schema(
                     ..Default::default()
                 })
                 .collect(),
-            pack.joins.iter().filter_map(|j| parse_fk_desc(j)).collect(),
+            pack.joins
+                .iter()
+                .chain(&pack.data_joins)
+                .filter_map(|j| parse_fk_desc(j))
+                .collect(),
         ),
         None => {
             let mut fks = Vec::new();
@@ -1184,6 +1217,7 @@ mod tests {
                 }],
             }],
             joins: vec![],
+            ..Default::default()
         };
         let text = pack.render_with(Some(&p), Shown::default());
         assert!(text.contains("-- 6 rows"), "{text}");

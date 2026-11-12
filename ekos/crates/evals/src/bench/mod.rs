@@ -23,6 +23,7 @@
 
 pub mod bird;
 pub mod context;
+pub mod data_signals;
 pub mod fixture;
 pub mod leakage;
 pub mod report;
@@ -159,6 +160,10 @@ pub struct ExperimentConfig {
     /// what was asked (cell K2).
     #[serde(default, skip_serializing_if = "is_false")]
     pub verify: bool,
+    /// RFC 0252 §8: the pack also lists the references and keys found in the data
+    /// (`data/values/<db>.signals.json`, built by `prepare`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub data_signals: bool,
     /// RFC 0242: the finding codes in use (`L001`…, `P001`…, `E000`); empty means all.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checks: Vec<String>,

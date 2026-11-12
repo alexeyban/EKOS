@@ -243,6 +243,7 @@ fn cell(name: &str, context: ContextKind, evidence: bool, value_lookup: bool) ->
         strategy: super::Strategy::Single,
         max_turns: 6,
         verify: false,
+        data_signals: false,
         checks: Vec::new(),
         llm: serde_json::json!({"provider": "ollama", "model": "fixture"}),
     }

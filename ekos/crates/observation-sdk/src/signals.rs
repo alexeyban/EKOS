@@ -48,6 +48,7 @@ fn as_text(flavor: Flavor, col: &str) -> String {
         Flavor::SqlServer => format!("CAST({col} AS nvarchar(4000))"),
         Flavor::ClickHouse => format!("toString({col})"),
         Flavor::Informix => format!("CAST({col} AS LVARCHAR(4000))"),
+        Flavor::Sqlite => format!("CAST({col} AS TEXT)"),
     }
 }
 
@@ -60,6 +61,7 @@ fn month(flavor: Flavor, expr: &str) -> String {
         Flavor::ClickHouse => format!("formatDateTime({expr}, '%Y-%m')"),
         // GL_DATETIME directives; a `DATE` takes the date ones.
         Flavor::Informix => format!("TO_CHAR({expr}, '%Y-%m')"),
+        Flavor::Sqlite => format!("strftime('%Y-%m', {expr})"),
     }
 }
 
@@ -69,7 +71,7 @@ fn count(flavor: Flavor) -> &'static str {
         Flavor::Oracle => "COUNT(*)",
         Flavor::Postgres => "count(*)",
         Flavor::SqlServer => "COUNT_BIG(*)",
-        Flavor::Informix => "COUNT(*)",
+        Flavor::Informix | Flavor::Sqlite => "COUNT(*)",
     }
 }
 
@@ -851,6 +853,7 @@ mod tests {
             Flavor::ClickHouse,
             Flavor::SqlServer,
             Flavor::Informix,
+            Flavor::Sqlite,
         ] {
             let sql = literal_coverage_sql(
                 f,

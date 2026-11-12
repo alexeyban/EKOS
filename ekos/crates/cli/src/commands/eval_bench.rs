@@ -672,6 +672,24 @@ fn open_db(
     {
         eprintln!("warning: the {db_id} ledger changed since prepare");
     }
+    // RFC 0252 §8: the references and keys found in the data, beside the declared ones.
+    let pack = if cfg.data_signals {
+        let path = dirs.values().join(format!("{db_id}.signals.json"));
+        let text = std::fs::read_to_string(&path).map_err(|_| {
+            anyhow::anyhow!(
+                "no data signals {} — run `ekos eval bench prepare` first",
+                path.display()
+            )
+        })?;
+        let signals: ekos_evals::bench::data_signals::DataSignals = serde_json::from_str(&text)?;
+        pack.map(|mut p| {
+            p.data_joins = signals.join_lines();
+            p.data_keys = signals.keys.clone();
+            p
+        })
+    } else {
+        pack
+    };
     let values_path = dirs.values().join(format!("{db_id}.json"));
     let values = match std::fs::read_to_string(&values_path) {
         Ok(text) => Some(serde_json::from_str::<ValueIndex>(&text)?),

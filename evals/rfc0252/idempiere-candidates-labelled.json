@@ -1,0 +1,2122 @@
+[
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"ad_menu.ad_workflow_id -> ad_impformat_row.ad_impformat_row_id",
+0,
+22
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"ad_process.ad_form_id -> m_product_bom_old.m_product_bom_id",
+0,
+6
+],
+[
+"no_reference",
+"data",
+"clean_relationship",
+"ad_treenodebp.node_id -> ad_impformat_row.ad_impformat_row_id",
+0,
+18
+],
+[
+"no_reference",
+"data",
+"clean_relationship",
+"ad_treenodecmm.node_id -> ad_printcolor.ad_printcolor_id",
+0,
+3
+],
+[
+"no_reference",
+"data",
+"clean_relationship",
+"ad_treenodepr.node_id -> m_product.m_product_id",
+0,
+55
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"ad_tree_favorite_node.ad_tree_favorite_id -> c_location.c_location_id",
+0,
+24
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"ad_wf_node.s_resource_id -> c_location.c_location_id",
+0,
+9
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"ad_wf_node.s_resource_id -> pp_product_bomline.pp_product_bomline_id",
+0,
+9
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"a_asset_group_acct.a_accumdepreciation_acct -> c_year.c_year_id",
+0,
+6
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"a_asset_group_acct.a_accumdepreciation_acct -> m_product_bom_old.m_product_bom_id",
+0,
+6
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"a_asset_group_acct.a_accumdepreciation_acct -> ws_webservicefieldinput.ws_webservicefieldinput_id",
+0,
+6
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"a_asset_group_acct.a_asset_acct -> m_product_bom_old.m_product_bom_id",
+0,
+6
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"cm_media.ad_image_id -> ad_printcolor.ad_printcolor_id",
+0,
+2
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_bp_customer_acct.c_bpartner_id -> ad_impformat_row.ad_impformat_row_id",
+0,
+36
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_bp_employee_acct.c_bpartner_id -> ad_impformat_row.ad_impformat_row_id",
+0,
+17
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_bp_employee_acct.c_bpartner_id -> ad_workflow.ad_workflow_id",
+0,
+17
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_bp_vendor_acct.c_bpartner_id -> ad_impformat_row.ad_impformat_row_id",
+0,
+36
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_cyclephase.c_cyclestep_id -> ad_printcolor.ad_printcolor_id",
+0,
+10
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_cyclephase.c_phase_id -> ad_printcolor.ad_printcolor_id",
+0,
+10
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_doctype.c_doctypeinvoice_id -> ad_fieldgroup.ad_fieldgroup_id",
+0,
+8
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_doctype.c_doctypeinvoice_id -> ad_language.ad_language_id",
+0,
+8
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_doctype.c_doctypeinvoice_id -> ad_workflow.ad_workflow_id",
+0,
+8
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_doctype.c_doctypeinvoice_id -> c_orderline.c_orderline_id",
+0,
+8
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_doctype.c_doctypeinvoice_id -> m_matchpo.m_matchpo_id",
+0,
+8
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_invoiceline.c_tax_id -> ad_printcolor.ad_printcolor_id",
+0,
+24
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_invoiceline.c_tax_id -> ad_tree.ad_tree_id",
+0,
+24
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_invoiceline.m_product_id -> ad_language.ad_language_id",
+0,
+24
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_invoicetax.c_tax_id -> ad_printcolor.ad_printcolor_id",
+0,
+8
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_invoicetax.c_tax_id -> ad_tree.ad_tree_id",
+0,
+8
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_order.bill_location_id -> ad_printcolor.ad_printcolor_id",
+0,
+8
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_order.c_bpartner_location_id -> ad_printcolor.ad_printcolor_id",
+0,
+8
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_orderline.c_bpartner_location_id -> ad_printcolor.ad_printcolor_id",
+0,
+27
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_orderline.m_product_id -> ad_language.ad_language_id",
+0,
+27
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_tax_acct.c_tax_id -> ad_printcolor.ad_printcolor_id",
+0,
+12
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_tax_trl.c_tax_id -> ad_printcolor.ad_printcolor_id",
+0,
+6
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"exp_formatline.exp_embeddedformat_id -> c_location.c_location_id",
+0,
+17
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"exp_formatline.exp_embeddedformat_id -> pp_product_bomline.pp_product_bomline_id",
+0,
+17
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"exp_formatline.exp_format_id -> c_location.c_location_id",
+0,
+43
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"exp_formatline.exp_format_id -> pp_product_bomline.pp_product_bomline_id",
+0,
+43
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"gl_journalgeneratorsource.gl_journalgeneratorline_id -> c_year.c_year_id",
+0,
+8
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_discountschemaline.m_product_category_id -> ad_printcolor.ad_printcolor_id",
+0,
+6
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_forecastline.c_period_id -> ad_workflow.ad_workflow_id",
+0,
+50
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_inout.c_bpartner_location_id -> ad_printcolor.ad_printcolor_id",
+0,
+9
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_inoutline.m_product_id -> ad_language.ad_language_id",
+0,
+27
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_matchinv.m_product_id -> ad_language.ad_language_id",
+0,
+18
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_matchinv.m_product_id -> c_doctype.c_doctype_id",
+0,
+18
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_matchpo.m_inoutline_id -> ad_fieldgroup.ad_fieldgroup_id",
+0,
+21
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_matchpo.m_inoutline_id -> ad_language.ad_language_id",
+0,
+21
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_matchpo.m_product_id -> ad_language.ad_language_id",
+0,
+37
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_matchpo.m_product_id -> c_doctype.c_doctype_id",
+0,
+37
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_product.s_resource_id -> pp_product_bomline.pp_product_bomline_id",
+0,
+11
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_productprice.m_product_id -> ad_language.ad_language_id",
+0,
+114
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_product_po.m_product_id -> ad_language.ad_language_id",
+0,
+29
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_replenish.m_product_id -> ad_language.ad_language_id",
+0,
+19
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_replenish.m_product_id -> c_doctype.c_doctype_id",
+0,
+19
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_storageonhand.m_product_id -> ad_language.ad_language_id",
+0,
+20
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_storageonhand.m_product_id -> c_doctype.c_doctype_id",
+0,
+20
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_transaction.m_inoutline_id -> ad_language.ad_language_id",
+0,
+26
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_transaction.m_product_id -> ad_language.ad_language_id",
+0,
+28
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_transaction.m_product_id -> c_doctype.c_doctype_id",
+0,
+28
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"pa_documentstatus_trl.pa_documentstatus_id -> c_year.c_year_id",
+0,
+6
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"pa_reportcolumn.oper_2_id -> ad_printcolor.ad_printcolor_id",
+0,
+3
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"ws_webservicefieldinput.ws_webservicetype_id -> c_year.c_year_id",
+0,
+45
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"ws_webservicetypeaccess.ws_webservicetype_id -> ws_webservicefieldinput.ws_webservicefieldinput_id",
+0,
+16
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_orderline.m_product_id -> c_doctype.c_doctype_id",
+0,
+27
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_inoutline.m_product_id -> c_doctype.c_doctype_id",
+0,
+27
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"c_invoiceline.m_product_id -> c_doctype.c_doctype_id",
+0,
+24
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"ws_webservicetypeaccess.ws_webservicetype_id -> c_year.c_year_id",
+0,
+16
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"ws_webservice_para.ws_webservicetype_id -> ws_webservicefieldinput.ws_webservicefieldinput_id",
+0,
+46
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"ws_webservice_para.ws_webservicetype_id -> c_year.c_year_id",
+0,
+46
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"m_inoutline.c_orderline_id -> m_matchpo.m_matchpo_id",
+0,
+27
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"a_asset_group_trl.a_asset_group_id -> pp_product_bomline.pp_product_bomline_id",
+0,
+9
+],
+[
+"wrong_parent",
+"data",
+"clean_relationship",
+"ad_menu.ad_workflow_id -> ad_fieldgroup.ad_fieldgroup_id",
+0,
+22
+],
+[
+"wrong_parent",
+"data",
+"relationship_with_orphans",
+"ad_viewcolumn.ad_viewcomponent_id -> c_period.c_period_id",
+105,
+17638
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_column.ad_element_id -> ad_field.ad_field_id",
+7533,
+26006
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_document_action_access.c_doctype_id -> ad_impformat_row.ad_impformat_row_id",
+686,
+2156
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_document_action_access.c_doctype_id -> c_period.c_period_id",
+896,
+2156
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_element_trl.ad_element_id -> ad_field.ad_field_id",
+2248,
+5923
+],
+[
+"no_reference",
+"data",
+"unclear",
+"ad_impformat_row.startno -> ad_reference.ad_reference_id",
+60,
+163
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_menu.ad_process_id -> ad_process_para.ad_process_para_id",
+47,
+220
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_menu.ad_window_id -> ad_process_para.ad_process_para_id",
+104,
+443
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_menu.ad_workflow_id -> ad_language.ad_language_id",
+3,
+22
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_menu.ad_workflow_id -> ad_wf_nodenext.ad_wf_nodenext_id",
+5,
+22
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_menu_trl.ad_menu_id -> ad_message.ad_message_id",
+160,
+808
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_orginfo.m_warehouse_id -> c_location.c_location_id",
+2,
+8
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_printformatitem_trl.ad_printformatitem_id -> c_periodcontrol.c_periodcontrol_id",
+389,
+2737
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process.ad_form_id -> c_year.c_year_id",
+1,
+6
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process.ad_workflow_id -> ad_language.ad_language_id",
+9,
+29
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process.ad_workflow_id -> ad_printformat.ad_printformat_id",
+8,
+29
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process.ad_workflow_id -> ad_reportview.ad_reportview_id",
+14,
+29
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process_access.ad_process_id -> ad_process_para.ad_process_para_id",
+335,
+1297
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process_para.ad_process_id -> ad_menu.ad_menu_id",
+335,
+1187
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process_trl.ad_process_id -> ad_process_para.ad_process_para_id",
+128,
+472
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_statuslineusedin.ad_statusline_id -> ad_printcolor.ad_printcolor_id",
+2,
+14
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_statuslineusedin.ad_statusline_id -> c_location.c_location_id",
+1,
+14
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_tab.ad_table_id -> ad_message.ad_message_id",
+161,
+1137
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_tab.ad_window_id -> ad_menu.ad_menu_id",
+224,
+1137
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_tab.ad_window_id -> ad_process_para.ad_process_para_id",
+301,
+1137
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_table.ad_window_id -> ad_menu.ad_menu_id",
+149,
+866
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_tableindex.ad_table_id -> ad_message.ad_message_id",
+172,
+1181
+],
+[
+"no_reference",
+"data",
+"unclear",
+"ad_treenodebp.node_id -> ad_workflow.ad_workflow_id",
+1,
+18
+],
+[
+"no_reference",
+"data",
+"unclear",
+"ad_treenodemm.node_id -> ad_message.ad_message_id",
+160,
+809
+],
+[
+"no_reference",
+"data",
+"unclear",
+"ad_treenodemm.seqno -> ad_reference.ad_reference_id",
+237,
+809
+],
+[
+"no_reference",
+"data",
+"unclear",
+"ad_treenodepr.node_id -> c_period.c_period_id",
+14,
+55
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_tree_favorite_node.ad_tree_favorite_id -> ad_printcolor.ad_printcolor_id",
+1,
+24
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_wf_node.ad_window_id -> ad_menu.ad_menu_id",
+14,
+104
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_wf_node.ad_window_id -> ad_process.ad_process_id",
+15,
+104
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_wf_node.ad_window_id -> ad_replicationtable.ad_replicationtable_id",
+36,
+104
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_wf_node.ad_workflow_id -> ad_impformat_row.ad_impformat_row_id",
+4,
+262
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_wf_node.ad_workflow_id -> ad_language.ad_language_id",
+51,
+262
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_wf_nodenext.ad_wf_node_id -> c_region.c_region_id",
+26,
+207
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_window_access.ad_window_id -> ad_menu.ad_menu_id",
+231,
+1266
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_window_access.ad_window_id -> ad_process_para.ad_process_para_id",
+279,
+1266
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_window_trl.ad_window_id -> ad_menu.ad_menu_id",
+84,
+447
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_window_trl.ad_window_id -> ad_process_para.ad_process_para_id",
+102,
+447
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow.ad_wf_node_id -> ad_menu.ad_menu_id",
+25,
+54
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow.ad_wf_node_id -> ad_process.ad_process_id",
+23,
+54
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow.ad_wf_node_id -> ad_window.ad_window_id",
+24,
+54
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow.ad_wf_node_id -> c_region.c_region_id",
+8,
+54
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow_access.ad_workflow_id -> ad_impformat_row.ad_impformat_row_id",
+3,
+177
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow_access.ad_workflow_id -> ad_language.ad_language_id",
+44,
+177
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow_trl.ad_workflow_id -> ad_impformat_row.ad_impformat_row_id",
+1,
+58
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow_trl.ad_workflow_id -> ad_language.ad_language_id",
+14,
+58
+],
+[
+"no_reference",
+"data",
+"unclear",
+"a_depreciation_table_detail.a_period -> ad_reference.ad_reference_id",
+451,
+2579
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_bpartner_location.c_location_id -> ad_language.ad_language_id",
+3,
+16
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_bpartner_location.c_location_id -> ad_printformat.ad_printformat_id",
+4,
+16
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_bpartner_location.c_location_id -> c_doctype.c_doctype_id",
+1,
+16
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_bp_customer_acct.c_bpartner_id -> ad_workflow.ad_workflow_id",
+2,
+36
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_bp_employee_acct.c_bpartner_id -> ad_printformat.ad_printformat_id",
+4,
+17
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_bp_vendor_acct.c_bpartner_id -> ad_workflow.ad_workflow_id",
+2,
+36
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_country.c_currency_id -> ad_menu.ad_menu_id",
+17,
+233
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_country.c_currency_id -> ad_process.ad_process_id",
+30,
+233
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_country.c_currency_id -> ad_reference.ad_reference_id",
+11,
+233
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_country.c_currency_id -> ad_replicationtable.ad_replicationtable_id",
+18,
+233
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_country.c_currency_id -> ad_window.ad_window_id",
+19,
+233
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_country.c_currency_id -> c_region.c_region_id",
+74,
+233
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_country_trl.c_country_id -> ad_menu.ad_menu_id",
+34,
+251
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_country_trl.c_country_id -> ad_replicationtable.ad_replicationtable_id",
+36,
+251
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_country_trl.c_country_id -> ad_window.ad_window_id",
+27,
+251
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_currency_trl.c_currency_id -> ad_menu.ad_menu_id",
+19,
+175
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_currency_trl.c_currency_id -> ad_process.ad_process_id",
+6,
+175
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_currency_trl.c_currency_id -> ad_reference.ad_reference_id",
+12,
+175
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_currency_trl.c_currency_id -> ad_replicationtable.ad_replicationtable_id",
+19,
+175
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_currency_trl.c_currency_id -> ad_window.ad_window_id",
+14,
+175
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_currency_trl.c_currency_id -> c_region.c_region_id",
+60,
+175
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_doctype.c_doctypeinvoice_id -> c_location.c_location_id",
+2,
+8
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_doctype_trl.c_doctype_id -> ad_impformat_row.ad_impformat_row_id",
+17,
+52
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_doctype_trl.c_doctype_id -> c_period.c_period_id",
+22,
+52
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_invoice.c_paymentterm_id -> ad_tree.ad_tree_id",
+4,
+8
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_invoiceline.m_inoutline_id -> ad_form.ad_form_id",
+2,
+23
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_invoiceline.m_product_id -> ad_fieldgroup.ad_fieldgroup_id",
+9,
+24
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_poskey.m_product_id -> c_period.c_period_id",
+21,
+69
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"gl_category_trl.gl_category_id -> c_year.c_year_id",
+3,
+10
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"gl_journalgeneratorsource.gl_journalgeneratorline_id -> ad_form.ad_form_id",
+3,
+8
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"gl_journalgeneratorsource.gl_journalgeneratorline_id -> ad_printformat.ad_printformat_id",
+3,
+8
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_cost.m_product_id -> c_period.c_period_id",
+70,
+267
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_inout.c_order_id -> ad_tree.ad_tree_id",
+1,
+7
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_inoutline.c_orderline_id -> ad_language.ad_language_id",
+2,
+27
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_inoutline.c_orderline_id -> ad_printformat.ad_printformat_id",
+10,
+27
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_matchinv.c_invoiceline_id -> ad_form.ad_form_id",
+2,
+18
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_matchinv.m_inoutline_id -> ad_form.ad_form_id",
+2,
+18
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_matchinv.m_product_id -> ad_fieldgroup.ad_fieldgroup_id",
+9,
+18
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_matchpo.c_invoiceline_id -> ad_form.ad_form_id",
+2,
+18
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_matchpo.c_orderline_id -> ad_form.ad_form_id",
+4,
+37
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_matchpo.m_inoutline_id -> ad_form.ad_form_id",
+5,
+21
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_matchpo.m_inoutline_id -> ad_printformat.ad_printformat_id",
+9,
+21
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_matchpo.m_product_id -> ad_fieldgroup.ad_fieldgroup_id",
+18,
+37
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_product_acct.m_product_id -> c_period.c_period_id",
+28,
+110
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_product_category_acct.m_product_category_id -> c_year.c_year_id",
+4,
+28
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_product_category_trl.m_product_category_id -> c_year.c_year_id",
+2,
+14
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_product_trl.m_product_id -> c_period.c_period_id",
+14,
+55
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_replenish.m_product_id -> ad_fieldgroup.ad_fieldgroup_id",
+9,
+19
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_storageonhand.m_product_id -> ad_fieldgroup.ad_fieldgroup_id",
+9,
+20
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_transaction.m_inoutline_id -> ad_printformat.ad_printformat_id",
+9,
+26
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_transaction.m_product_id -> ad_fieldgroup.ad_fieldgroup_id",
+9,
+28
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_dashboardcontent_trl.pa_dashboardcontent_id -> ad_form.ad_form_id",
+6,
+12
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_dashboardcontent_trl.pa_dashboardcontent_id -> ad_printformat.ad_printformat_id",
+3,
+12
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_documentstatus_trl.pa_documentstatus_id -> ad_form.ad_form_id",
+2,
+6
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_documentstatus_trl.pa_documentstatus_id -> ad_printformat.ad_printformat_id",
+2,
+6
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportline_trl.pa_reportline_id -> ad_replicationtable.ad_replicationtable_id",
+20,
+113
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportline_trl.pa_reportline_id -> ad_val_rule.ad_val_rule_id",
+11,
+113
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportline_trl.pa_reportline_id -> ad_window.ad_window_id",
+20,
+113
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportline_trl.pa_reportline_id -> c_region.c_region_id",
+6,
+113
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportsource.pa_reportline_id -> ad_menu.ad_menu_id",
+12,
+93
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportsource.pa_reportline_id -> ad_replicationtable.ad_replicationtable_id",
+17,
+93
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportsource.pa_reportline_id -> ad_val_rule.ad_val_rule_id",
+9,
+93
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportsource.pa_reportline_id -> ad_window.ad_window_id",
+19,
+93
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportsource.pa_reportline_id -> c_region.c_region_id",
+4,
+93
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pp_product_planning.m_product_id -> c_period.c_period_id",
+56,
+219
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pp_product_planning.m_warehouse_id -> c_location.c_location_id",
+53,
+219
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ws_webservicefieldinput.ws_webservicetype_id -> m_product_bom_old.m_product_bom_id",
+8,
+45
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process.ad_workflow_id -> ad_fieldgroup.ad_fieldgroup_id",
+7,
+29
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_invoiceline.c_orderline_id -> ad_form.ad_form_id",
+1,
+22
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_field.ad_fieldgroup_id -> ad_impformat_row.ad_impformat_row_id",
+91,
+1291
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_currency_trl.c_currency_id -> c_country.c_country_id",
+7,
+175
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_menu.ad_form_id -> ad_reportview.ad_reportview_id",
+3,
+39
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_column.ad_process_id -> ad_window.ad_window_id",
+66,
+218
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_matchpo.m_inoutline_id -> c_orderline.c_orderline_id",
+1,
+21
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process.ad_workflow_id -> pa_reportline.pa_reportline_id",
+13,
+29
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_menu.ad_process_id -> ad_tab.ad_tab_id",
+52,
+220
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_product.s_resource_id -> c_location.c_location_id",
+1,
+11
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_orderline.m_product_id -> ad_fieldgroup.ad_fieldgroup_id",
+9,
+27
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_inoutline.m_product_id -> ad_fieldgroup.ad_fieldgroup_id",
+9,
+27
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_tax_acct.c_tax_id -> ad_tree.ad_tree_id",
+4,
+12
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_tax_trl.c_tax_id -> ad_tree.ad_tree_id",
+2,
+6
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_document_action_access.c_doctype_id -> pa_reportline.pa_reportline_id",
+602,
+2156
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_doctype_trl.c_doctype_id -> pa_reportline.pa_reportline_id",
+15,
+52
+],
+[
+"no_reference",
+"data",
+"unclear",
+"ad_treenodebp.node_id -> ad_printformat.ad_printformat_id",
+4,
+18
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_bp_customer_acct.c_bpartner_id -> ad_printformat.ad_printformat_id",
+8,
+36
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_bp_vendor_acct.c_bpartner_id -> ad_printformat.ad_printformat_id",
+8,
+36
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_bpartner.po_pricelist_id -> ad_printcolor.ad_printcolor_id",
+3,
+8
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportcolumn_trl.pa_reportcolumn_id -> ad_printcolor.ad_printcolor_id",
+1,
+17
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportsource.pa_reportline_id -> ad_process.ad_process_id",
+7,
+93
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"a_asset_group_trl.a_asset_group_id -> c_location.c_location_id",
+1,
+9
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_productprice.m_product_id -> c_doctype.c_doctype_id",
+7,
+114
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pp_product_planning.m_warehouse_id -> pp_product_bomline.pp_product_bomline_id",
+53,
+219
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_inoutline.c_orderline_id -> ad_form.ad_form_id",
+5,
+27
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_product_category_acct.m_product_category_id -> ad_printcolor.ad_printcolor_id",
+8,
+28
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_product_category_trl.m_product_category_id -> ad_printcolor.ad_printcolor_id",
+4,
+14
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_fieldgroup_trl.ad_fieldgroup_id -> ad_impformat_row.ad_impformat_row_id",
+19,
+77
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_transaction.m_inoutline_id -> ad_fieldgroup.ad_fieldgroup_id",
+1,
+26
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_document_action_access.c_doctype_id -> ad_language.ad_language_id",
+434,
+2156
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_doctype_trl.c_doctype_id -> ad_language.ad_language_id",
+11,
+52
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ws_webservicetypeaccess.ws_webservicetype_id -> m_product_bom_old.m_product_bom_id",
+3,
+16
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_wf_node.ad_workflow_id -> ad_printformat.ad_printformat_id",
+64,
+262
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_productprice.m_product_id -> ad_reportview.ad_reportview_id",
+19,
+114
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow_access.ad_workflow_id -> ad_printformat.ad_printformat_id",
+46,
+177
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow_trl.ad_workflow_id -> ad_printformat.ad_printformat_id",
+15,
+58
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_poskey.m_product_id -> ad_language.ad_language_id",
+14,
+69
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pp_product_planning.m_product_id -> ad_language.ad_language_id",
+56,
+219
+],
+[
+"no_reference",
+"data",
+"unclear",
+"m_product_bom_old.m_productbom_id -> pp_product_bomline.pp_product_bomline_id",
+3,
+21
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_column.ad_table_id -> ad_message.ad_message_id",
+3563,
+26006
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process_para.ad_process_id -> ad_tab.ad_tab_id",
+280,
+1187
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_wf_node.ad_workflow_id -> ad_wf_nodenext.ad_wf_nodenext_id",
+72,
+262
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_bpartner_location.c_location_id -> ad_workflow.ad_workflow_id",
+2,
+16
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_matchinv.m_product_id -> ad_workflow.ad_workflow_id",
+9,
+18
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pp_product_bomline.pp_product_bom_id -> c_location.c_location_id",
+3,
+21
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pp_product_bom_trl.pp_product_bom_id -> c_location.c_location_id",
+1,
+7
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pp_product_planning.ad_org_id -> c_location.c_location_id",
+53,
+219
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_menu.ad_process_id -> ad_window.ad_window_id",
+65,
+220
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_invoiceline.c_invoice_id -> ad_tree.ad_tree_id",
+6,
+24
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_invoicetax.c_invoice_id -> ad_tree.ad_tree_id",
+1,
+8
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_orderline.c_order_id -> ad_printcolor.ad_printcolor_id",
+1,
+27
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_ordertax.c_order_id -> ad_printcolor.ad_printcolor_id",
+1,
+8
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_bpartner_location.c_location_id -> ad_fieldgroup.ad_fieldgroup_id",
+3,
+16
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_scheduler_para.ad_scheduler_id -> pp_product_bomline.pp_product_bomline_id",
+3,
+14
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_inoutline.c_orderline_id -> ad_fieldgroup.ad_fieldgroup_id",
+2,
+27
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow_access.ad_workflow_id -> ad_wf_nodenext.ad_wf_nodenext_id",
+41,
+177
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_workflow_trl.ad_workflow_id -> ad_wf_nodenext.ad_wf_nodenext_id",
+14,
+58
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_transaction.m_inoutline_id -> c_orderline.c_orderline_id",
+2,
+26
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_country_trl.c_country_id -> ad_reference.ad_reference_id",
+19,
+251
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportsource.pa_reportline_id -> ad_wf_node.ad_wf_node_id",
+11,
+93
+],
+[
+"no_reference",
+"data",
+"unclear",
+"ad_treenodepr.node_id -> ad_language.ad_language_id",
+16,
+55
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_wf_node_trl.ad_wf_node_id -> c_region.c_region_id",
+35,
+262
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_cost.m_product_id -> ad_language.ad_language_id",
+72,
+267
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_product_acct.m_product_id -> ad_language.ad_language_id",
+32,
+110
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"m_product_trl.m_product_id -> ad_language.ad_language_id",
+16,
+55
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_country.c_currency_id -> ad_tab.ad_tab_id",
+41,
+233
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"pa_reportline_trl.pa_reportline_id -> ad_menu.ad_menu_id",
+15,
+113
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process_access.ad_process_id -> ad_menu.ad_menu_id",
+322,
+1297
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_process_trl.ad_process_id -> ad_menu.ad_menu_id",
+126,
+472
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"ad_wf_node.ad_workflow_id -> ad_fieldgroup.ad_fieldgroup_id",
+44,
+262
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"c_doctype.gl_category_id -> ad_printcolor.ad_printcolor_id",
+19,
+52
+],
+[
+"wrong_parent",
+"data",
+"unclear",
+"gl_category_trl.gl_category_id -> ad_printcolor.ad_printcolor_id",
+4,
+10
+],
+[
+"no_reference",
+"code",
+"relationship_with_orphans",
+"ad_language.countrycode -> c_country.countrycode",
+1,
+109
+]
+]

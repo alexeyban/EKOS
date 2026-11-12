@@ -19,6 +19,7 @@
 use crate::profile::{self, Family, Flavor};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Salted digests per value.
 pub const SEEDS: usize = 4;
@@ -64,6 +65,8 @@ fn md5_hex(flavor: Flavor, expr: &str) -> Option<String> {
         Flavor::Oracle => format!("LOWER(RAWTOHEX(STANDARD_HASH({expr}, 'MD5')))"),
         // Informix has no MD5 (its `ifx_checksum` is a CRC no other engine computes).
         Flavor::Informix => return None,
+        // SQLite has none built in; the caller registers `md5(text)` (see `Flavor::Sqlite`).
+        Flavor::Sqlite => format!("md5({expr})"),
     })
 }
 
@@ -74,6 +77,7 @@ fn substr(flavor: Flavor, expr: &str, from: usize, len: usize) -> String {
         Flavor::Postgres => format!("substr({expr}, {from}, {len})"),
         Flavor::SqlServer => format!("SUBSTRING({expr}, {from}, {len})"),
         Flavor::Informix => format!("SUBSTR({expr}, {from}, {len})"),
+        Flavor::Sqlite => format!("substr({expr}, {from}, {len})"),
     }
 }
 
@@ -91,6 +95,7 @@ fn as_text(flavor: Flavor, col: &str) -> String {
         Flavor::SqlServer => format!("CAST({col} AS nvarchar(4000))"),
         Flavor::ClickHouse => format!("toString({col})"),
         Flavor::Informix => format!("CAST({col} AS LVARCHAR(4000))"),
+        Flavor::Sqlite => format!("CAST({col} AS TEXT)"),
     }
 }
 
@@ -210,6 +215,114 @@ pub fn bands(sig: &Signature) -> Vec<String> {
         .collect()
 }
 
+/// One signed column, as [`data_pairs`] compares it.
+#[derive(Debug, Clone)]
+pub struct SignedColumn {
+    /// The table's identity (two owners may share a table name).
+    pub table_key: String,
+    pub table: String,
+    pub column: String,
+    /// A single-column key: declared, or measured (distinct = rows, no null).
+    pub unique: bool,
+    /// Whole number (as opposed to text): only the same kind is compared.
+    pub numeric: bool,
+    pub sig: Signature,
+}
+
+/// The thresholds of a data-seeded proposal (`[relationships]`).
+#[derive(Debug, Clone, Copy)]
+pub struct DataPairRules {
+    pub min_containment: f64,
+    pub min_parent_distinct: i64,
+}
+
+/// The table a column's name points at (`parts_id` → `parts`), when that table is in `tables`.
+pub fn named_table<'a>(column: &str, tables: &'a BTreeSet<String>) -> Option<&'a String> {
+    let c = column.to_ascii_lowercase();
+    let stem = ["_id", "_no", "_ref", "_code", "_key"]
+        .iter()
+        .find_map(|suf| c.strip_suffix(suf))?;
+    tables
+        .iter()
+        .find(|t| *t == stem || **t == format!("{stem}s") || t.trim_end_matches('s') == stem)
+}
+
+/// Whether a data-seeded `child → parent` is worth checking. `declared` says whether the schema
+/// already declares the pair.
+fn plausible(
+    child: &SignedColumn,
+    parent: &SignedColumn,
+    rules: DataPairRules,
+    declared: &dyn Fn(&SignedColumn, &SignedColumn) -> bool,
+) -> bool {
+    if child.table_key == parent.table_key
+        || child.sig.distinct > parent.sig.distinct
+        || child.numeric != parent.numeric
+        || declared(child, parent)
+    {
+        return false;
+    }
+    // Names break ties the data cannot: a key column pointing at another key, or any column
+    // inside a dense id sequence (every small whole number is "contained" in one).
+    let affinity = name_affinity(&child.column, &parent.table, &parent.column);
+    if (child.unique || parent.sig.dense()) && !affinity {
+        return false;
+    }
+    containment(&child.sig, &parent.sig) >= rules.min_containment
+}
+
+/// Data-seeded pairs `(child, parent, estimated containment)`, as indices into `cols`: LSH bands
+/// propose, containment decides. A parent whose own name points at another table
+/// (`partstax.parts_id`) is itself a reference, not a parent; and when a child has a parent its
+/// name points at, the others are dropped.
+pub fn data_pairs(
+    cols: &[SignedColumn],
+    rules: DataPairRules,
+    declared: &dyn Fn(&SignedColumn, &SignedColumn) -> bool,
+) -> Vec<(usize, usize, f64)> {
+    let tables: BTreeSet<String> = cols.iter().map(|c| c.table.to_lowercase()).collect();
+    let mut by_band: HashMap<String, Vec<usize>> = HashMap::new();
+    for (i, c) in cols.iter().enumerate() {
+        for b in bands(&c.sig) {
+            by_band.entry(b).or_default().push(i);
+        }
+    }
+    let mut found: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (p, parent) in cols.iter().enumerate() {
+        if !parent.unique || parent.sig.distinct < rules.min_parent_distinct {
+            continue;
+        }
+        if named_table(&parent.column, &tables).is_some_and(|t| *t != parent.table.to_lowercase()) {
+            continue;
+        }
+        let near: BTreeSet<usize> = bands(&parent.sig)
+            .iter()
+            .filter_map(|b| by_band.get(b))
+            .flatten()
+            .copied()
+            .collect();
+        for c in near
+            .into_iter()
+            .filter(|&c| plausible(&cols[c], parent, rules, declared))
+        {
+            found.entry(c).or_default().push(p);
+        }
+    }
+    let mut out = Vec::new();
+    for (c, parents) in found {
+        let affine: Vec<usize> = parents
+            .iter()
+            .copied()
+            .filter(|&p| name_affinity(&cols[c].column, &cols[p].table, &cols[p].column))
+            .collect();
+        let keep = if affine.is_empty() { parents } else { affine };
+        for p in keep {
+            out.push((c, p, containment(&cols[c].sig, &cols[p].sig)));
+        }
+    }
+    out
+}
+
 /// The exact inclusion check for one pair in one database: `population, orphans` — non-null child
 /// values, and those with no parent row.
 pub fn inclusion_sql(
@@ -312,12 +425,60 @@ mod tests {
     }
 
     #[test]
+    fn sqlite_types_are_read_by_affinity() {
+        use crate::profile::family;
+        assert_eq!(family(Flavor::Sqlite, "INTEGER"), Family::Number);
+        assert_eq!(family(Flavor::Sqlite, "varchar(20)"), Family::Text);
+        assert_eq!(family(Flavor::Sqlite, "REAL"), Family::Number);
+        assert_eq!(family(Flavor::Sqlite, "DATE"), Family::Date);
+        assert_eq!(family(Flavor::Sqlite, "BLOB"), Family::Other);
+        assert!(comparable(Flavor::Sqlite, "INTEGER"));
+        assert!(!comparable(Flavor::Sqlite, "REAL"));
+    }
+
+    fn signed(table: &str, column: &str, unique: bool, sig: Signature) -> SignedColumn {
+        SignedColumn {
+            table_key: table.into(),
+            table: table.into(),
+            column: column.into(),
+            unique,
+            numeric: false,
+            sig,
+        }
+    }
+
+    #[test]
+    fn data_pairs_propose_a_contained_child_and_skip_a_declared_one() {
+        let parent = sig(40, &["a1"; K]);
+        let child = sig(30, &["a1"; K]);
+        let cols = vec![
+            signed("customer", "code", true, parent),
+            signed("invoice", "cust_ref", false, child),
+        ];
+        let rules = DataPairRules {
+            min_containment: 0.9,
+            min_parent_distinct: 20,
+        };
+        let found = data_pairs(&cols, rules, &|_, _| false);
+        assert_eq!(found.len(), 1);
+        assert_eq!((found[0].0, found[0].1), (1, 0));
+        assert!(data_pairs(&cols, rules, &|_, _| true).is_empty());
+        // Too few distinct parent values: no proposal.
+        let strict = DataPairRules {
+            min_parent_distinct: 50,
+            ..rules
+        };
+        assert!(data_pairs(&cols, strict, &|_, _| false).is_empty());
+    }
+
+    #[test]
     fn signature_sql_never_returns_a_value_in_any_dialect() {
         for f in [
             Flavor::Postgres,
             Flavor::Oracle,
             Flavor::ClickHouse,
             Flavor::SqlServer,
+            Flavor::Sqlite,
         ] {
             let sql = signature_sql(f, "s", "t", "c", "Ab12", true).unwrap();
             // The outer SELECT is aggregates only: COUNT, the span and MIN over digest slices.

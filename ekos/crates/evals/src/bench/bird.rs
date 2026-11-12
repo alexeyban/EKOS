@@ -613,7 +613,7 @@ fn set_context(
             let pack = required(h.pack.as_ref(), "EKOS pack", db_id)?;
             p.context_tables = pack.table_names();
             p.context_columns = pack.column_names();
-            p.context_joins = pack.joins.clone();
+            p.context_joins = pack.joins.iter().chain(&pack.data_joins).cloned().collect();
         }
     }
     Ok(())
@@ -944,6 +944,18 @@ impl BenchAdapter for BirdAdapter {
                 let schema = SchemaInfo::read(&db)?;
                 let profile = Profile::build(&db, &schema)?;
                 std::fs::write(&profile_path, serde_json::to_string(&profile)?)?;
+            }
+            // RFC 0252 §8: the references and keys found in the data.
+            let signals_path = self.dirs.values().join(format!("{db_id}.signals.json"));
+            let current = std::fs::read_to_string(&signals_path)
+                .ok()
+                .and_then(|t| serde_json::from_str::<super::data_signals::DataSignals>(&t).ok())
+                .is_some_and(|s| s.version >= super::data_signals::SIGNALS_VERSION);
+            if ctx.force || !current {
+                let schema = SchemaInfo::read(&db)?;
+                let salt = super::data_signals::salt(&self.dirs.values())?;
+                let signals = super::data_signals::discover(&db, &schema, &salt)?;
+                std::fs::write(&signals_path, serde_json::to_string_pretty(&signals)?)?;
             }
             specs.push(ProjectSpec {
                 name: db_id.clone(),

@@ -16,6 +16,10 @@ ekos-recovery.workspace = true
 ekos-sqlgen.workspace = true
 ekos-sql-dialect-sdk.workspace = true
 ekos-plugin-sql-dialect-sqlite.workspace = true
+# RFC 0252 §8 — the data-seeded signals on a benchmark database (overlap rules, inclusion verdict).
+ekos-observation-sdk.workspace = true
+ekos-migrate-dq.workspace = true
+md5 = { package = "md-5", version = "0.10" }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

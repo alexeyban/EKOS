@@ -462,3 +462,136 @@ database `SameAs` overlaps, 28 of them the same table on both engines, plus `ar 
 *SQL Server* (own SQL Server 2022 with the repo's `shop` fixture; Query Store capture mode `ALL`): as `ekos_ro` without rights both sources reported "unavailable" with the server's message; with `VIEW DATABASE PERFORMANCE STATE`, Query Store gave all 6 tables (e.g. `sales.orders` select 4 statements / 6 executions, update 1 / 3), and the 5 statements EKOS ran on `hr.employees` were all left out (`date_first = 5` in Query Store); `orders.status` per month by `placed_at`: 4 months of 1 row, each shown withheld.
 
 *Informix* (own Informix 15.0.1.0.3, `shop` fixture, DRDA): `sysptprof` per table (e.g. `sales.orders` 4 inserts from the fixture load, reads including EKOS's own); `syssqltrace` "unavailable" (-272) until the DBA granted `SELECT` on it, then `sales.orders` select 5 / update 5 — equal to a direct count of uid 200's traced statements, while the 6 traced statements of `ekos_ro` (uid 1001) were left out. The conditional profile, which failed (-201) before the fix, now runs.
+
+### 2026-11-12 — §8 measurements: iDempiere precision, BIRD Mini-Dev ceiling
+
+Scripts and the labelled candidate list are in `evals/rfc0252/` (they read the Oracle seed through
+`python-oracledb`'s thin mode as `EKOS_RO`, password from `EKOS_RO_PASSWORD`).
+
+**Foreign keys between the same two tables were merged (fixed during this measurement).**
+`semantic::dedup_relationships` keyed relationships by (from, to, kind), so the second foreign key between
+two tables disappeared. On the iDempiere seed, 3,686 constraints became **3,100** `ForeignKey` relationships,
+which is exactly the number of distinct table pairs. It now keys a `ForeignKey` by its `constraint` /
+`fk_desc` (`SemanticCompilerPass` `v4-identity3`), and after a recompile the ledger holds **3,686**. Numbers
+below are given before → after the fix where it changed them.
+
+**Setup.** A scratch home project: iDempiere `release-13` @ `3355eb5fc9`, `db/` only (Oracle/PostgreSQL
+functions and procedures), plus the Oracle XE seed as `[[databases]] kind = "oracle"`, `profile = "p1"`,
+`dictionary = "idempiere"`, `[semantics] enabled = true`. Release build with `--features oracle`. Times on a
+machine shared with other agents' jobs (load 20–38): build 28 s, recover 15 s, compile 3 s, first commit
+1,172 s (re-commit after the fix 59 s), `profile run` 318 s / 117 s, `relationships discover` 281 s / 117 s.
+
+**Truth for references.** The application dictionary:
+- every active `AD_Column` whose reference is Table Direct (19), Table (18) or Search (30) through
+  `AD_Ref_Table`, or a fixed-target type (Location, Account, Locator, Attribute Set Instance, Assignment,
+  Image, Chart);
+- resolved to the parent table and key, with both ends base tables (`DBA_TABLES`, not views).
+
+That gives 6,793 pairs. The 3,687 declared foreign-key column pairs are added to them. 3,244 dictionary
+references are not declared in the database. A candidate counts as correct when it is in either set.
+Everything else was labelled:
+- `wrong_parent`: the child is a dictionary reference, but to a different table;
+- `no_reference`: the 13 of these were checked by hand.
+
+**Relationships (§3.3).** 7,148 columns signed. Before the fix: 281 pairs checked, 267 candidates. After:
+279 pairs checked, **265 candidates** (264 data-seeded, 1 code-seeded — the code is `db/` functions only,
+which join little).
+
+| Label | Before → after the fix |
+|---|---|
+| declared FK proposed again | 4 → **0** (`AD_TABLE.AD_WINDOW_ID → AD_WINDOW`, hidden behind `PO_WINDOW_ID`, and three like it) |
+| `wrong_parent` | 250 → 252 (two children that had lost a declared parent now get a wrong one: `AD_TABLE.AD_WINDOW_ID → AD_MENU`, `AD_WF_NODENEXT.AD_WF_NODE_ID → C_REGION`) |
+| `no_reference`, true by hand | 2: `AD_TreeNodePR.Node_ID → M_Product` (data, 55 of 55; a product tree's nodes are products), `AD_Language.CountryCode → C_Country.CountryCode` (code seed, 1 orphan in 109) |
+| `no_reference`, false by hand | 11: other tree nodes into unrelated id ranges (true parents `C_BPartner`, `AD_Menu`, …), `SeqNo`/`StartNo`/`A_Period` into `AD_Reference` |
+
+- **Precision after the fix: 2 / 265 = 0.75 %** (data seed alone 1 / 264). Before the fix it was 6 / 267 = 2.2 %
+  only because the 4 re-proposed declared keys counted as correct. Restricted to `clean_relationship`:
+  1 / 73.
+- **Why so low:** 252 of the 265 children already have a declared foreign key. Their real parent is
+  excluded as declared, so the shared rule (`overlap::data_pairs`) offers any other sparse id range that
+  contains the values (the demo seed's ids overlap across tables). A rule "never propose a second parent for a
+  child with a declared or code reference" would leave 13 candidates, 2 of them true (15 %).
+- **Recall: 0 / 0.** Of the 3,244 undeclared dictionary references, 1,618 have a child column holding data,
+  and **every one** points at a parent with fewer than 20 distinct values in this seed (`AD_User` has 9 rows;
+  `AD_Org`, `AD_Client`, `C_BPartner`, …). That is below `min_parent_distinct = 20`, so the reachable set is
+  empty: the threshold that protects against tiny parents also hides every real undeclared reference here.
+  Measuring recall needs a populated iDempiere (or data the size of LedgerSMB's).
+- The §8 criterion "finds relationships the code-seeded pass did not" is met only literally (one:
+  `AD_TreeNodePR.Node_ID → M_Product`), at a precision no reviewer would accept.
+
+**Other signals** (same run; the fix did not change them):
+
+| Signal | Measured | Checked against | Result |
+|---|---|---|---|
+| Literal coverage (a) | 1,966 coded columns, 4,150 code values; 2,653 never seen; 49 columns with unexplained values | 40 random columns re-counted directly (121 literal and unexplained counts) | **121 / 121 equal** |
+| Unexplained values (a) | 49 columns | `AD_Ref_List` (the dictionary's own value lists) | 22 real: every extra value is a dictionary list entry the code never names; **20 false**: measures (`QtyEntered`, `PriceActual`, `LineNetAmt`, `FieldLength`, …) made "coded" by a comparison with `0`; 7 other |
+| Dead codes (b) | 199 | 10 sampled by hand | 0 of 10 is a retired code. Flags set by **update** (`IsActive='N'`, `IsTranslated='Y'`) last appear at *creation* years ago, and the dictionary rows were created once at install. The creation-time axis does not fit a flag that is updated later |
+| Implications (c) | 860 | each re-counted directly | **860 / 860 exact**, but 596 (69 %) imply a state that already holds for ≥ 95 % of the table (`IsActive='N' ⇒ AD_Chart_ID IS NULL`). 157 move the base rate below 95 %, 72 below 80 %, 35 below 50 % (e.g. `AD_Menu.Action='F' ⇒ AD_Workflow_ID IS NOT NULL` against a base of 2.7 % — a real meaning) |
+| Keys (d) | 892 declared, 3 found, 8 without | `DBA_INDEXES` / `DBA_CONSTRAINTS` | `CREATE$JAVA$LOB$TABLE.NAME` and `JAVA$CLASS$MD5$TABLE.NAME` are correct, but are in fact **declared unique** constraints the grain does not count as declared; `DBREPLICASYNCVERIFIER.LASTUPDATE` is on a one-row table, so it says nothing |
+| History (e) | 932 patterns (885 flags, 47 validity pairs) | not checked | — |
+
+Suggested follow-ups (not built):
+- skip a second parent for a child that already has a declared or code reference;
+- let a person lower `min_parent_distinct` for a run on a small seed;
+- do not treat a measure column (a number compared only with 0) as a coded column;
+- give an update-set flag an update-time axis, or no dead-code verdict;
+- rank implications by how far they move the base rate;
+- count declared unique constraints as declared grain.
+
+**BIRD Mini-Dev (§8, last criterion): bounded at ≈ 2 % of the tune questions; not measured with a model.**
+
+RFC 0252's discovery reads live `[[databases]]`; BIRD is SQLite read in process. Built for this measurement:
+- `Flavor::Sqlite` in `observation-sdk`, with arms in `profile` (affinity families, `"…"` identifiers,
+  aggregates), `signals`, `probe` and `overlap`. Overlap uses an `md5(text)` function that the caller
+  registers on the connection.
+- The data-seeded proposal rule moved from the CLI into `overlap::data_pairs`, so the CLI and the bench
+  share it. On iDempiere, `discover`'s 267 candidates were identical before and after the move.
+- `ekos_evals::bench::data_signals`: signatures in SQLite, the shared rule, the exact inclusion check, and
+  measured single-column keys of tables that declare none. `prepare` writes the result to
+  `data/values/<db>.signals.json` (names and counts only).
+- The cell option `data-signals = true`, which lists the references and keys found after the declared join
+  paths. Cell `c-prime-sig` is `c-prime` plus the signals.
+
+Discovery on the 11 databases (`prepare`, all of them: 3 min): 597 columns signed, 9 candidates, **1 true**
+(`cards.setCode → sets.code`, clean over 56,822 rows) — precision 1 / 9. The 8 false ones are integer
+columns contained in a sparse integer key with no name affinity (`formula_1`: `results.raceId →
+constructorResults.constructorResultsId`, …; `financial`: `order.account_id → client.client_id`, unclear,
+1,119 orphans). No keys were found: every table declares one, except three junction tables whose keys are
+composite.
+
+**Model-free ceiling**, tune split: 198 questions, gold SQL parsed with `sqlglot`, base-table equality joins,
+199 join pairs in 147 questions. The table is the share of gold join pairs the pack offers.
+
+| | Without signals | With signals |
+|---|---|---|
+| Before the FK fix | 179 / 199 (90.0 %); all joins offered in 128 / 147 questions | 182 / 199 (91.5 %); 131 / 147 |
+| After the FK fix | **190 / 199 (95.5 %)**; 138 / 147 | **193 / 199 (97.0 %)**; 141 / 147 |
+
+- The fix brought back 11 declared join paths, for example `connected.atom_id`/`atom_id2` → `atom` ×5 and
+  `match.home_player_*` → `player`. european_football_2's pack went from 7 FKs to 31, codebase_community's from
+  11 to 13. That is worth almost four times what the signals add.
+- The signals add one line that matters, `cards.setCode = sets.code`. Gold uses it in tune questions 60,
+  102 and 112: **3 of 198 questions (1.5 %)**. That is the upper bound on what any model could gain from
+  the signals here.
+- The 6 still missing:
+  - 1 is BIRD's own wrong foreign key (`Match.league_id REFERENCES League(league_id)`; the key is `id`);
+  - 5 are sibling joins (`disp.account_id = trans.account_id`) that no FK states and discovery rightly
+    does not propose.
+- All BIRD tables declare a key except three junction tables, and there is no code, so literal coverage,
+  dead codes and grain do not apply.
+
+**Why no model measurement.** A model would have to resolve an effect of at most 3 questions in 198. The
+only allowed model is the local `qwen2.5-coder:3b`, which scored 2–5 % EX in RFC 0240 and executes about 60 %
+of its answers, and the GPU is shared. A local-model run of `c-prime` against `c-prime-sig` (80 tune questions
+on the four databases whose pack changes, on the pre-fix packs) finished before it was called off. Its result
+is noise and is recorded only so nobody reads it as evidence: EX 1 vs 4 of 80, exact McNemar p = 0.25. None of
+the 3 gains used a join found in the data, and on questions 60, 102 and 112 the model wrote `cards.setCode =
+sets.code` without the signals anyway. Its reports are in `evals/reports/bench/bird-mini-dev/20261112T*`.
+Those numbers are **not comparable** with the published RFC 0240/0241/0243 results, which used paid models.
+No hold run was made.
+
+**Verdict for §8.**
+- iDempiere: precision is measured (0.75 % after the FK fix). The data-seeded rule needs the "child already
+  has a reference" filter before it is worth a reviewer's time, and recall needs a populated database.
+- BIRD: the signals add 1 correct and 8 wrong join lines, and their effect is bounded at 3 of 198 tune
+  questions. The FK fix, not the signals, is what moves the pack.

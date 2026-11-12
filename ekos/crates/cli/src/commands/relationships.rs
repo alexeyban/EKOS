@@ -65,17 +65,6 @@ impl Col {
     }
 }
 
-/// The table a column's name points at (`parts_id` → `parts`), when that table is in `tables`.
-fn named_table<'a>(column: &str, tables: &'a BTreeSet<String>) -> Option<&'a String> {
-    let c = column.to_ascii_lowercase();
-    let stem = ["_id", "_no", "_ref", "_code", "_key"]
-        .iter()
-        .find_map(|suf| c.strip_suffix(suf))?;
-    tables
-        .iter()
-        .find(|t| *t == stem || **t == format!("{stem}s") || t.trim_end_matches('s') == stem)
-}
-
 impl Col {
     fn label(&self) -> String {
         format!("{}.{}.{}", self.owner, self.table, self.column)
@@ -356,79 +345,42 @@ impl Ctx<'_> {
         out
     }
 
-    /// Whether a data-seeded `child → parent` is worth checking.
-    fn plausible(&self, child: &Col, parent: &Col) -> bool {
-        if child.table_id == parent.table_id
-            || child.sig.distinct > parent.sig.distinct
-            || child.numeric != parent.numeric
-            || self.is_declared(child, parent)
-        {
-            return false;
-        }
-        // Names break ties the data cannot: a key column pointing at another key, or any column
-        // inside a dense id sequence (every small whole number is "contained" in one).
-        let affinity = overlap::name_affinity(&child.column, &parent.table, &parent.column);
-        if (child.unique || parent.sig.dense()) && !affinity {
-            return false;
-        }
-        overlap::containment(&child.sig, &parent.sig) >= self.opts.min_containment
-    }
-
-    /// Data-seeded pairs: LSH bands propose, containment decides. A parent whose own name points
-    /// at another table (`partstax.parts_id`) is itself a reference, not a parent; and when a child
-    /// has a parent its name points at, the others are dropped.
+    /// Data-seeded pairs (`overlap::data_pairs`, the rule shared with the benchmark adapter).
     fn data_pairs(&self, cols: &[Col], pairs: &mut BTreeMap<(usize, usize), Pair>) {
-        let tables: BTreeSet<String> = cols.iter().map(|c| c.table.to_lowercase()).collect();
-        let mut by_band: HashMap<String, Vec<usize>> = HashMap::new();
-        for (i, c) in cols.iter().enumerate() {
-            for b in overlap::bands(&c.sig) {
-                by_band.entry(b).or_default().push(i);
-            }
-        }
-        let mut found: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-        for (p, parent) in cols.iter().enumerate() {
-            if !parent.unique || parent.sig.distinct < self.opts.min_parent_distinct {
-                continue;
-            }
-            if named_table(&parent.column, &tables)
-                .is_some_and(|t| *t != parent.table.to_lowercase())
-            {
-                continue;
-            }
-            let near: BTreeSet<usize> = overlap::bands(&parent.sig)
-                .iter()
-                .filter_map(|b| by_band.get(b))
-                .flatten()
-                .copied()
-                .collect();
-            for c in near
-                .into_iter()
-                .filter(|&c| self.plausible(&cols[c], parent))
-            {
-                found.entry(c).or_default().push(p);
-            }
-        }
-        for (c, parents) in found {
-            let affine: Vec<usize> = parents
-                .iter()
-                .copied()
-                .filter(|&p| {
-                    overlap::name_affinity(&cols[c].column, &cols[p].table, &cols[p].column)
-                })
-                .collect();
-            let keep = if affine.is_empty() { parents } else { affine };
-            for p in keep {
-                pairs.insert(
-                    (c, p),
-                    Pair {
-                        child: c,
-                        parent: p,
-                        data: true,
-                        code_sources: vec![],
-                        containment: Some(overlap::containment(&cols[c].sig, &cols[p].sig)),
-                    },
-                );
-            }
+        let signed: Vec<overlap::SignedColumn> = cols
+            .iter()
+            .map(|c| overlap::SignedColumn {
+                table_key: c.table_id.to_string(),
+                table: c.table.clone(),
+                column: c.column.clone(),
+                unique: c.unique,
+                numeric: c.numeric,
+                sig: c.sig.clone(),
+            })
+            .collect();
+        let rules = overlap::DataPairRules {
+            min_containment: self.opts.min_containment,
+            min_parent_distinct: self.opts.min_parent_distinct,
+        };
+        let declared = |c: &overlap::SignedColumn, p: &overlap::SignedColumn| {
+            self.declared.contains(&(
+                c.table.to_lowercase(),
+                c.column.to_lowercase(),
+                p.table.to_lowercase(),
+                p.column.to_lowercase(),
+            ))
+        };
+        for (c, p, containment) in overlap::data_pairs(&signed, rules, &declared) {
+            pairs.insert(
+                (c, p),
+                Pair {
+                    child: c,
+                    parent: p,
+                    data: true,
+                    code_sources: vec![],
+                    containment: Some(containment),
+                },
+            );
         }
     }
 
