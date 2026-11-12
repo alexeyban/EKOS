@@ -1415,6 +1415,7 @@ dependencies = [
  "ekos-migrate",
  "ekos-migrate-dq",
  "ekos-migrate-validate",
+ "ekos-observation-sdk",
  "postgres",
  "serde",
  "serde_json",
