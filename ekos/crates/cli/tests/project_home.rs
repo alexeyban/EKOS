@@ -249,7 +249,11 @@ fn what_cannot_be_combined_with_a_project_is_refused() {
 }
 
 fn git(dir: &Path, args: &[&str]) {
+    // No background auto-maintenance: a `git commit` here can leave a detached
+    // `git maintenance run --auto` that writes `.git/objects/maintenance.lock` while
+    // the project run is being checked, which reads as EKOS writing to its sources.
     let out = Command::new("git")
+        .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
         .args(args)
         .current_dir(dir)
         .env("GIT_AUTHOR_NAME", "Test")
