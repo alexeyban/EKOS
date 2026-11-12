@@ -284,7 +284,7 @@ step only applies if you clicked the link in a browser.
 #### Windows
 
 ```powershell
-$Version = "v1.1.0"
+$Version = "v1.5.0"
 $Asset   = "ekos-$($Version -replace '^v','')-x86_64-pc-windows-msvc.zip"
 $Base    = "https://github.com/alexeyban/EKOS/releases/download/$Version"
 
@@ -303,11 +303,15 @@ Expand-Archive $Asset -DestinationPath .
 
 `ekos.exe` is inside the extracted folder. Move it somewhere on your `PATH`, or add that folder
 to `PATH`. SmartScreen may warn the first time you run it, for the same reason as macOS: the
-binary is unsigned.
+binary is unsigned. Since v1.5.0 `ekos.exe` is linked with the static C runtime, so it needs no
+Visual C++ Redistributable (no "VCRUNTIME140.dll was not found"); the `-full.zip` package also
+carries the console's own Python and its runtime DLLs.
 
 (The Linux/macOS block above was run verbatim against the real v1.0.3 release. This PowerShell
-one was not — no Windows machine was available — so treat it as carefully written rather than
-proven, and please open an issue if it misbehaves.)
+block was not run as written. Since v1.5.0 the Release workflow unpacks the Windows `-full.zip` on
+a Windows Server runner, runs `ekos setup` with answers, checks that the console answers, and runs
+`ekos uninstall`, so the package is exercised on every release. Please open an issue if this block
+misbehaves.)
 
 ### Offline, from an install package
 

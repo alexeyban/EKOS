@@ -7119,3 +7119,29 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
       "_unknown_" where the licence gate withheld a meaning; `[questions] owners` take effect only at
       the next derivation; estate pages for a table in two databases show the ClickHouse copy's
       (empty) foreign keys.
+
+## RFC 0255–0258 — source-engine seam, interaction map, transformation chain, dashboard health (2026-11-11/12, devlog_332)
+- [x] RFC 0255 phases 1–5: `SourceEngine` an open identifier, `SourceProvider` + `Engines` registry
+      (lakehouse), `CanonDialect` / `Dialect::Registered` + conformance kit (`migrate-validate`),
+      `SourceCapabilities` recorded at plan and shown in the estate docs, an out-of-tree fixture engine
+      and the guide; byte-identical locks and reconciliation SQL measured before/after (849-table lock)
+- [ ] RFC 0255: live suites re-run once the Trino sandbox has the `pagila`/`m3`/`postgresql` catalogs
+      and the Oracle testbed is up
+- [x] RFC 0256 phases 1–3 and phase 4 EKOS side: matrix, PostgreSQL observed access, findings, role
+      review, questions, console Interaction page, MCP `ekos_interaction`
+- [x] RFC 0256 phase 4 lakehouse side: extraction-plan writer warnings with advice; decision recorded
+      in the RFC 0226 changes (`--keep`); open question 1 decided (ekos-lakehouse ba1ebf6)
+- [ ] RFC 0256: phase 4 exit browser run on the testbed; Oracle observed access
+- [x] RFC 0257 phases 1–2, EKOS side: `ekos transformation graph|list`, MCP
+      `ekos_transformation_graph`, console Transformations tab, notes on a step
+- [ ] RFC 0257: the mart side (`lakehouse marts graph`, term → node), phases 3–5
+- [x] RFC 0258 phase 3: dashboard health in ekos-lakehouse (`lakehouse dashboards sync|status|publish-health`,
+      alert rule, `ekos_dashboard_health`)
+- [ ] RFC 0258: phases 1, 2, 4 (need RFC 0248's bundle)
+- [x] `scripts/sonar-local.sh`: SonarCloud's gate rules locally on the changed lines (Rust, TS/TSX, Python, shell)
+- [x] v1.5.0 released: Windows full package installed and its console started in the Release workflow;
+      setup/uninstall hangs on Windows fixed; local chat gets an Ollama context that holds its tools;
+      MSIX for the Microsoft Store built as a workflow artifact
+- [ ] Microsoft Store submission of the MSIX (Partner Center, by the owner); confirm the display name
+- [ ] `ekos.toml`: an unknown key (e.g. `pattern` for `path-glob`) silently falls back to defaults in
+      `from_file_or_default` — warn or refuse
