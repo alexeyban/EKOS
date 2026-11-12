@@ -264,3 +264,108 @@ annotation.
   Transformation IR (RFC 0164). Drawing routines from it is the obvious next step.
 - Columns linked to their lineage down to the source column (§3.2) — columns are shown, not linked.
 - The console page was verified by its vitest suite, not in a browser.
+
+### 2026-11-12 — Phases 1–5, mart side (ekos-lakehouse, worktree `work-0257`, uncommitted)
+
+**Scope.** Everything above that lives in ekos-lakehouse: the mart's chain (phase 1), instructions on a mart's
+step (phase 2), row counts (phase 3), structured edits with preview and gates (phase 4), the assistant (phase 5).
+No EKOS source changed: the console's existing RFC 0207 `graph`/`table` views and RFC 0226 action inputs were
+enough, and a mart's document is the `ekos.transformation-graph/1` built by `transform_chain::build` itself.
+
+#### What was built
+
+| Piece | Where (ekos-lakehouse) | What |
+|---|---|---|
+| Term → clause map (open question 1) | `gold/src/lib.rs` `Clause`, `Compiled::clauses` | `compile` records, from the inputs it writes the SQL from, every clause and the terms it serves: each `source` (a table read for the terms on it and for those reached through it), each `join`, each `filter`, each `dimension`/`measure` expression with its output name. RFC 0195 did **not** keep this before; the drafter now does |
+| The mart's chain | `lakehouse-ext/src/mart_graph.rs`, `marts.rs::chain` | the committed dbt model (else the proposal branch's), refs replaced by model names, parsed by the `sql-select` front end, lowered and drawn by `transform_chain`; `recovered = false`, `kind = mart`, `key = <model path>@committed\|proposed\|preview`; each step joined to its terms **by what it says** (normalised SQL text, never position); `status: unmapped` and the reason in the sentence for a step no term produced; a `badge` (fidelity, else status) and `defects` added for the console |
+| Two IR changes before drawing | `mart_graph.rs` | a `WHERE` of `AND`ed predicates is one `Filter` step per predicate (one term each; each removes its own rows); the mart is the last step, a `Sink` mapped to the grain |
+| CLI | `lakehouse marts graph --mart <m> [--proposed] [--json]` (*read*), `marts rows` (*external*), `marts edit` (*review*), `marts suggest` (*external*, may call a model) | catalogue rows in `command_classes` |
+| Console | `console.rs` Marts page | panels **Steps** (RFC 0207 `graph` view over `/nodes`, `/edges`, badge `/badge`) and **What each step does** (table: step, kind, sentence, term, rule, fidelity); actions **Count rows per step**, **Preview an edit**, **Make the edit** (with a consent sentence), **Ask the assistant** |
+| Instructions on a step (phase 2) | `gold::Instruction`, `gold::resolve_with`, `marts.rs::notes` | RFC 0247 annotations on a silver `Table` object of the project's ledger; a **shared, approved, still-valid** `default_filter`/`exclude` becomes filter terms of the description's own grammar on every mart reading that table, so it resolves, compiles, is checked for invention and reconciles like a written filter (`how` says `instruction by <author> (annotation <id>)`). Comments, personal and stale instructions are shown on the steps reading the table, never applied. Used by `graph`, `show`, `propose` (`gold_cmd::draft`) and `reconcile` |
+| Row counts (phase 3) | `lakehouse-ext/src/mart_rows.rs` | one aggregate per count over the chain up to the step (a join: rows out, matched → unmatched left, unmatched right; fan-out flagged); RFC 0254's rules: counts only, budget 60 queries per request, cells under `[probe] min-cell` (5) hidden, a filter removing a small cell shown as `<in> − <5` and that display carried to every later step, a step reading a personal column (plan `pii_candidate` or the shared `ekos_common::pii` name rules) withheld with everything after it, nothing stored |
+| Structured edits (phase 4) | `gold/src/edits.rs` (pure), `lakehouse-ext/src/mart_edit.rs` | the closed set `add_filter`, `change_filter`, `drop_filter`, `change_join`, `add_dimension`, `drop_dimension`, `add_measure`, `drop_measure` (JSON with `deny_unknown_fields`); the step must be of the kind §3.5 names; classified additive (a new column) or modifying, a grain change reclassifies; static gates (resolution, the edit's constraint, invention), engine gates (Trino plans it, grain unique, every additive measure reconciles — over the edited SQL, never a stored table); preview = the chain before and after with counts; recorded only when every gate passes, and a modifying edit only with `--confirm`, as a requirement-log line naming the step — which lapses the approval |
+| The assistant (phase 5) | `gold/src/assist.rs` (pure), `lakehouse-ext/src/mart_assist.rs` | prompt = requirement, the step, the mart's tables' columns with value lists (codes only) and foreign keys, annotations in force and the request as delimited data; the answer must be one JSON object (`edit` / `question` / `not_expressible`) or it is dropped and reported; columns and values are grounded (a value no list has, or a column the tables lack = invented → asked back; a listed code the person did not write = a meaning chosen by the model → asked back); the edit is then run through `apply` and the static gates and shown as an edit only if they would pass. Local Ollama only: a non-loopback URL is refused |
+| Fixture | `lakehouse-ext/tests/fixtures/rfc0257_change_requests.json` | the 20 written change requests with expected answers |
+
+#### Decisions
+
+- **Open question 1** — the drafter did not keep the map; it does now (`Compiled::clauses`), and steps are joined to
+  it by text, so a hand edit of the committed model shows as `unmapped`, never silently mapped.
+- **Open question 2** — all steps at once behind one button (`marts rows`, the *Count rows per step* action), with a
+  stated budget of 60 queries; on selection would hide the join counts the button exists for.
+- **The graph view.** The extension page uses the existing RFC 0207 `graph` view; the step panel is a table beside
+  it. The EKOS Transformations page (span highlighting, notes form) reads `ekos transformation graph` only, so a
+  mart is not drawn there.
+- **Where an instruction on a mart's step lives.** On the silver table's `Table` object in the project ledger: RFC
+  0247 type-checks a rule against its target's columns, and a term is not a ledger entity. Only predicate rules
+  apply to marts (`default_filter`, `exclude`); `unit`, `fiscal_year_start` and `preferred_join` are shown, not
+  applied (`unit` would also have to change reconciliation).
+- **Gates of a preview** reconcile the edited SQL against silver under its own joins and filters (RFC 0228's query,
+  its gold table replaced by the SQL). A failing gate, or a modifying edit without confirmation, records nothing;
+  so a failing modifying edit never reaches approve, propose or merge.
+- **Calculated columns (§3.5 row 5) are not in the set**: gold has no arithmetic term kind outside model-drafted
+  prose, and an edit must not depend on a model. Refused with the reason, like anything outside the set.
+- **The assistant never shows an edit the gates would refuse**: llama3 answered "a 3-month moving average" with
+  `add_measure` "avg of count of c_order over 3 months"; it is now turned into a question / not-expressible before
+  the person sees it.
+
+#### Measured (iDempiere marts from `ekos-lakehouse-oracle`, copied into scratch projects)
+
+- **Phase 1.** All 11 committed marts render (7 iDempiere: `pipeline/` 4, `pipeline-sales/` 3; Pagila 4): 3–18 steps,
+  **0 steps mapped to no term**, every step with a span except the added `Sink`. Planted on `sales_by_month` (a
+  committed hand edit): a predicate (`ISACTIVE = true`) and a column (`max(DOCUMENTNO)`) → `2 mapped to no term`,
+  both named in the sentence. Unit tests: `mart_graph::tests::{every_step_of_a_generated_mart_maps_to_a_term,
+  a_planted_step_no_term_produced_is_flagged}`, `gold every_clause_of_a_compiled_mart_names_its_terms`.
+- **Phase 2.** On the scratch project's ledger (1,836 `Table` objects after build → commit, debug, ~45 min):
+  `ekos annotate add <C_INVOICE> instruction … --rule {default_filter POSTED eq true} --shared` → shown on the
+  `Source` step of `invoices_by_month`, not applied; after `ekos annotate approve` the next resolution (`marts
+  graph --proposed`) has a new step 3 `Filter C_INVOICE.POSTED = true`, mapped, with the instruction shown on it.
+  Found: a dbt-recovered silver `Table` lists only the columns its `bronze_sources.yml` tests name, so a rule on
+  `DOCSTATUS` was refused by RFC 0247's type check ("has no column DOCSTATUS"). Tests:
+  `marts::note_tests::*`, `gold an_instruction_on_a_table_adds_its_filter_terms_to_the_marts_reading_it`.
+- **Phase 3.** Own Trino (`ekos-0257-trino`, memory catalog with the 9 silver tables built from the silver dbt models
+  over the shared Oracle XE through a read-only `oracle` catalog): hand-written aggregates for `sales_by_month` and
+  `category_region_sales` vs `marts rows`: **13/13 consistent** (8 exact equal; 5 hidden, each hand count inside
+  the shown range). The seed is small (8 orders), so most counts after the filters are `<5`. A planted filter on
+  `C_LOCATION.ADDRESS1` withholds that step and the four after it. Tests: `mart_rows::tests::*`.
+- **Phase 4.** Browser run (Playwright, the console from this worktree, `EKOS_BIN` = the lakehouse binary): all 8
+  kinds on `sales_by_month`, each preview → edit → approve (Requirements page) → propose → merge → build → reconcile:
+  **8/8 reached a reconciled mart** (every measure `equal`), every gate passed. A modifying `change_join` via
+  `c_order.docstatus` (not a key) was refused, nothing recorded, and Merge then failed (no proposal). **Build ran
+  through dbt-trino against the scratch Trino, not Dagster** (no Dagster here), so the marts' state shows `merged`,
+  not `reconciled` (no `run-report`). Screenshots: `.local-0257/shots/` (52). The preview is the run's text output
+  (gates, both chains with counts), not two drawn chains. Tests: `gold step_edits::*` (incl. RFC §5's
+  undeclared-key and grain-reclassification tests), `mart_edit::tests::*`.
+- **Phase 5.** The 20 written requests (13 edits, 4 questions, 3 not expressible), local Ollama only, an isolated
+  copy of the pipeline (`.local-0257/assist_eval.py`; a first run shared its project with the browser run and is
+  discarded as contaminated). One call 40–175 s on this machine (GTX 1650, 4 GB).
+
+  | | llama3 (8B) | qwen2.5-coder:3b |
+  |---|---|---|
+  | correct edit | 9/13 | 7/13 |
+  | question when the request names a meaning no list states | 4/4 | 4/4 |
+  | "not expressible" when it is not | 0/3 (2 asked back, 1 dropped) | 0/3 |
+  | all | **13/20** | **11/20** |
+  | answers outside the schema, dropped and reported | 1 | 1 |
+  | atoms the model invented | 5 | 4 |
+  | invented atoms shown to the person | **0** | **0** |
+  | model guesses turned into questions by grounding | 7 | 9 |
+  | wrong edits shown | 1 | 2 |
+
+  Of the 3 wrong edits shown, 2 were on the wrong kind of step (a filter removal answered on the aggregate step);
+  after the runs these are turned into a question as well (`mart_assist::suggest`: `marts edit` would refuse them),
+  which leaves 1 (qwen: "drop the sales-transaction condition" → drop the `docstatus` filter, a valid edit of the
+  wrong filter, which the preview and the person must catch). Not re-run after that change. Neither model ever says
+  "not expressible"; the grounding turns their attempts into questions instead, so the share of correct edits is
+  the number that matters and it is modest on small local models. Tests: `gold assistant::*` (schema drop, the
+  "cancelled" question, gate-refused edits), `mart_assist::tests::only_a_local_model_is_called`.
+
+#### Not done
+
+- The preview drawn as two chains side by side; the step's annotations form on the Marts page (an instruction is
+  written with `ekos annotate add` or the Notes tab on the table).
+- Marking a committed mart that an approved instruction would now change (the committed chain shows the note on the
+  source step but no "pending" flag).
+- Calculated-column edits; `unit` / `fiscal_year_start` / `preferred_join` applied to marts.
+- A dbt-recovered silver table's columns beyond those its YAML tests name (limits RFC 0247 rules, phase 2 above).
+- Open question 3 (legacy and mart side by side).
