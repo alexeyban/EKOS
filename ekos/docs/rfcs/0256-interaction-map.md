@@ -178,8 +178,9 @@ table).
 ## 6. Open questions
 
 1. *Decided (owner, 2026-11-11):* an `unexplained_writer` never changes a table's load mode by itself. EKOS
-   advises; the operator gives an explicit instruction (§3.6). Still open: where that instruction is stored — an
-   existing per-table decision of RFC 0226, or a new per-table override.
+   advises; the operator gives an explicit instruction (§3.6). *Decided (2026-11-12):* the instruction is an
+   RFC 0226 per-table change (`changes.json`, with who, when and why), which now records the evidence of the
+   warnings it answers; keeping the mode is a new change of the same kind, `--keep`. No second store.
 2. Statement statistics are cumulative. Reading them at every build gives a series of windows; should EKOS keep
    deltas between builds to answer "since when"? It is cheap, and moves toward monitoring, which RFC 0252 keeps
    out of profiling.
@@ -312,3 +313,40 @@ table).
   merges. Open question 1 (where the decision is stored) is still open.
 - Oracle observed access.
 - The browser run of the exit.
+
+### Phase 4, lakehouse side (2026-11-12)
+
+**Built** (ekos-lakehouse `ba1ebf6`, `crates/lakehouse-ext/src/writer_warnings.rs`, pure):
+- `lakehouse plan` reads the current findings through `ekos::commands::interaction::current_findings` and keeps
+  the `unexplained_writer` / `unattributed_writes` ones in the proposal, with the source's row estimates
+  (`plan_cmd::build_plan_checked` now returns them).
+- `extraction::finalize` derives the warnings against the proposal's modes. Only an **incremental** table
+  warns: a full table reads every row on every run. A finding's table (EKOS's bare lower-case key) matches every
+  planned table of that name.
+- The advice, never applied:
+  - full load when the table's row estimate is within `full-refresh-max-rows`, costed in rows;
+  - otherwise, when the outside writer deletes and the table's deletes are audited, look for deletes every run;
+  - otherwise keep the mode and reconcile after each run.
+- `extraction show` (JSON and text) and the console's Extraction page show them: a summary count of open and
+  answered warnings, a column on the tables list, a "Written outside the code" panel, and a section in the
+  table's evidence.
+- The decision: any `extraction change` to the table records `answers`, the evidence of the warnings on it at
+  that moment. `--keep` (console action "Keep the planned mode") is a change of kind `mode` that alters
+  nothing and is refused when there is nothing to answer.
+- Evidence is a hash of finding, table, role and operations: never counts. More calls by the same role stay
+  answered; another role or another operation is open again. `--undo` removes the answer with the change.
+
+**Decisions.**
+- Warnings are outside the plan and its digest. Keeping the mode leaves an approval valid; following the advice
+  changes the plan as any change does and needs approving again.
+- An open warning does not block approval. The RFC asks for a warning and a recorded decision, not a gate.
+
+**Measured.** Unit tests only (`writer_warnings` 7, `extraction` 1):
+- a warning appears on an incremental table and not on a full one;
+- the plan is identical with and without findings;
+- `--keep` leaves the digest unchanged;
+- a new role reopens the warning.
+
+**Not yet.**
+- The phase 4 exit: a browser run on the testbed with the planted writer. Not run: the testbed was not up.
+- Oracle observed access.
