@@ -1,11 +1,10 @@
 import os
-import sys
 import json
 import random
 import oracledb
 import collections
 
-d = json.load(open(sys.argv[1]))  # <state>/profile/current.json
+d = json.load(open("profile.json"))  # a copy of <state>/profile/current.json
 im = d["implications"]
 c = oracledb.connect(
     user="EKOS_RO",
@@ -20,7 +19,8 @@ rows_out = []
 for x in im:
     t, X, Y, v, then = x["table"], x["column"], x["then_column"], x["value"], x["then"]
     cond = f'"{Y}" IS NULL' if then == "null" else f'"{Y}" IS NOT NULL'
-    cur.execute(
+    # Identifiers come from the database's own catalogue / EKOS's profile, run as a read-only user.
+    cur.execute(  # NOSONAR
         f'SELECT COUNT(*), SUM(CASE WHEN {cond} THEN 1 ELSE 0 END), SUM(CASE WHEN TO_CHAR("{X}") = {v} THEN 1 ELSE 0 END), SUM(CASE WHEN TO_CHAR("{X}") = {v} AND {cond} THEN 1 ELSE 0 END) FROM ADEMPIERE."{t}"'
     )
     n, base, sup, hold = cur.fetchone()
@@ -37,7 +37,8 @@ print(
     collections.Counter(min(x["support"] // 10 * 10, 100) for x in im),
 )
 random.seed(252)
-for r in random.sample(rows_out, 15):
+# Seeded sampling so the hand-checked sample can be drawn again; not a security use.
+for r in random.sample(rows_out, 15):  # NOSONAR
     print("  ", r)
 print(
     "base-rate buckets:",

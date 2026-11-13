@@ -24,14 +24,16 @@ for tab, cols in by_child.items():
     sel = ", ".join(
         f'COUNT("{x.upper()}"), COUNT(DISTINCT "{x.upper()}")' for x in cols
     )
-    cur.execute(f'SELECT {sel} FROM ADEMPIERE."{tab.upper()}"')
+    # Identifiers come from the database's own catalogue / EKOS's profile, run as a read-only user.
+    cur.execute(f'SELECT {sel} FROM ADEMPIERE."{tab.upper()}"')  # NOSONAR
     r = cur.fetchone()
     for i, x in enumerate(cols):
         nonnull[(tab, x)] = r[2 * i]
         distinct[(tab, x)] = r[2 * i + 1]
 pdist = {}
 for p in {(t[2], t[3]) for t in pool}:
-    cur.execute(
+    # Identifiers come from the database's own catalogue / EKOS's profile, run as a read-only user.
+    cur.execute(  # NOSONAR
         f'SELECT COUNT(DISTINCT "{p[1].upper()}") FROM ADEMPIERE."{p[0].upper()}"'
     )
     pdist[p] = cur.fetchone()[0]

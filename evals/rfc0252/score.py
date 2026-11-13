@@ -1,13 +1,14 @@
 import os
 import json
-import sys
 import re
 import collections
 import random
 import oracledb
 
-truth = json.load(open(sys.argv[1]))
-disc = json.load(open(sys.argv[2]))
+truth = json.load(open("truth.json"))
+disc = json.load(
+    open("relationships.json")
+)  # a copy of <state>/profile/relationships.json
 declared = {tuple(x) for x in truth["declared"]}
 dic = {tuple(x) for x in truth["dictionary"]}
 c = oracledb.connect(
@@ -80,10 +81,11 @@ print(
     "  ... and parent distinct >= 20:", len(pool20), "found", len(found & set(pool20))
 )
 # single-column dictionary refs where the child column is the parent's name (same-name) to see what blocks recall
-json.dump(rows, open(sys.argv[3], "w"), indent=0)
+json.dump(rows, open("idempiere-candidates-labelled.json", "w"), indent=0)
 random.seed(252)
 for l in ("no_reference", "wrong_parent"):
     sample = [r for r in rows if r[0] == l]
     print(f"--- sample of {l} ({len(sample)}):")
-    for r in random.sample(sample, min(12, len(sample))):
+    # Seeded sampling so the hand-checked sample can be drawn again; not a security use.
+    for r in random.sample(sample, min(12, len(sample))):  # NOSONAR
         print("   ", r)

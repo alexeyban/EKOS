@@ -115,7 +115,9 @@ pub fn register_md5(db: &Db) -> Result<()> {
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
         |ctx| {
             let v: Option<String> = ctx.get(0)?;
-            Ok(v.map(|s| hex::encode(Md5::digest(s.as_bytes()))))
+            // A salted column fingerprint, the same MD5 the other engines compute in SQL so the
+            // signatures compare across engines; not a security hash.
+            Ok(v.map(|s| hex::encode(Md5::digest(s.as_bytes())))) // NOSONAR
         },
     )?;
     Ok(())

@@ -1,9 +1,8 @@
 import os
-import sys
 import json
 import oracledb
 
-d = json.load(open(sys.argv[1]))  # <state>/profile/current.json
+d = json.load(open("profile.json"))  # a copy of <state>/profile/current.json
 c = oracledb.connect(
     user="EKOS_RO",
     password=os.environ["EKOS_RO_PASSWORD"],
@@ -16,7 +15,8 @@ for x in d["columns"]:
     if x["coverage"]["unexplained"]["rows"] == 0:
         continue
     lits = {l[1:-1] if l.startswith("'") else l for l in x["coverage"]["literals"]}
-    cur.execute(
+    # Identifiers come from the database's own catalogue / EKOS's profile, run as a read-only user.
+    cur.execute(  # NOSONAR
         f'SELECT DISTINCT TO_CHAR("{x["column"]}") FROM ADEMPIERE."{x["table"]}" WHERE "{x["column"]}" IS NOT NULL'
     )
     vals = {r[0] for r in cur} - lits

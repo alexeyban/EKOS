@@ -1,6 +1,6 @@
 """RFC 0252 §8: paired comparison of two BIRD cells over the questions both answered.
 
-Usage: python3 bird_compare.py <reports dir> <cell A> <cell B>
+Usage: python3 bird_compare.py, from a folder holding `reports/` (cells c-prime vs c-prime-sig)
 Reads every `<stamp>-<cell>-tune.json` report (chunked runs) and pairs questions by id.
 """
 
@@ -8,7 +8,6 @@ import collections
 import glob
 import json
 import math
-import sys
 
 
 def load(reports, cell):
@@ -30,7 +29,7 @@ def mcnemar_exact(b, c):
 
 
 def main():
-    reports, a_cell, b_cell = sys.argv[1:4]
+    reports, a_cell, b_cell = "reports", "c-prime", "c-prime-sig"
     a, b = load(reports, a_cell), load(reports, b_cell)
     ids = sorted(set(a) & set(b), key=int)
     stats = collections.Counter()

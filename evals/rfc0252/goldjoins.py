@@ -2,14 +2,16 @@
 
 import json
 import sqlite3
-import sys
 import collections
 import sqlglot
 from sqlglot import exp
 
-qs = {str(json.loads(l)["question_id"]): json.loads(l) for l in open(sys.argv[1])}
-tune = [q["id"] for q in json.load(open(sys.argv[2]))["questions"]]
-dbdir = sys.argv[3]
+qs = {
+    str(json.loads(l)["question_id"]): json.loads(l)
+    for l in open("mini_dev_sqlite.jsonl")
+}
+tune = [q["id"] for q in json.load(open("split.json"))["questions"]]
+dbdir = "databases"
 decl = {}
 real = {}
 

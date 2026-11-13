@@ -1,10 +1,9 @@
 import os
-import sys
 import json
 import random
 import oracledb
 
-d = json.load(open(sys.argv[1]))  # <state>/profile/current.json
+d = json.load(open("profile.json"))  # a copy of <state>/profile/current.json
 c = oracledb.connect(
     user="EKOS_RO",
     password=os.environ["EKOS_RO_PASSWORD"],
@@ -13,13 +12,15 @@ c = oracledb.connect(
 cur = c.cursor()
 cols = [x for x in d["columns"] if x["coverage"]["non_null"] > 0]
 random.seed(252)
-sample = random.sample(cols, 40)
+# Seeded sampling so the hand-checked sample can be drawn again; not a security use.
+sample = random.sample(cols, 40)  # NOSONAR
 ok = bad = 0
 dead = 0
 for x in sample:
     t, col, cov = x["table"], x["column"], x["coverage"]
     lits = cov["literals"]
-    cur.execute(
+    # Identifiers come from the database's own catalogue / EKOS's profile, run as a read-only user.
+    cur.execute(  # NOSONAR
         f'SELECT TO_CHAR("{col}"), COUNT(*) FROM ADEMPIERE."{t}" WHERE "{col}" IS NOT NULL GROUP BY TO_CHAR("{col}")'
     )
     data = dict(cur.fetchall())
@@ -48,5 +49,6 @@ dd = [
     if v.get("dead")
 ]
 print("dead codes", len(dd))
-for r in random.sample(dd, 8):
+# Seeded sampling so the hand-checked sample can be drawn again; not a security use.
+for r in random.sample(dd, 8):  # NOSONAR
     print("  ", r)

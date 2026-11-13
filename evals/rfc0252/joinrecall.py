@@ -1,15 +1,17 @@
 """Model-free: share of gold base-table join pairs (tune split) offered by each cell's pack."""
 
 import json
-import sys
 import re
 import collections
 import sqlglot
 from sqlglot import exp
 
-qs = {str(json.loads(l)["question_id"]): json.loads(l) for l in open(sys.argv[1])}
-tune = [q["id"] for q in json.load(open(sys.argv[2]))["questions"]]
-ctx = sys.argv[3]
+qs = {
+    str(json.loads(l)["question_id"]): json.loads(l)
+    for l in open("mini_dev_sqlite.jsonl")
+}
+tune = [q["id"] for q in json.load(open("split.json"))["questions"]]
+ctx = "packs"
 
 
 def offered(db, cell):

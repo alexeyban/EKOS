@@ -2,7 +2,6 @@
 
 import os
 import json
-import sys
 import oracledb
 
 c = oracledb.connect(
@@ -61,7 +60,7 @@ out = {
     "unresolved": unresolved,
     "tables": len(tables),
 }
-json.dump(out, open(sys.argv[1], "w"))
+json.dump(out, open("truth.json", "w"))
 d = dictionary - declared
 print(
     f"declared {len(declared)}, dictionary {len(dictionary)}, dictionary not declared {len(d)}, unresolved {unresolved}"

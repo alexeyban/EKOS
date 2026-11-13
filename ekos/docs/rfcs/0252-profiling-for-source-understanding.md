@@ -466,7 +466,10 @@ database `SameAs` overlaps, 28 of them the same table on both engines, plus `ar 
 ### 2026-11-12 — §8 measurements: iDempiere precision, BIRD Mini-Dev ceiling
 
 Scripts and the labelled candidate list are in `evals/rfc0252/` (they read the Oracle seed through
-`python-oracledb`'s thin mode as `EKOS_RO`, password from `EKOS_RO_PASSWORD`).
+`python-oracledb`'s thin mode as `EKOS_RO`, password from `EKOS_RO_PASSWORD`). They take no paths:
+each reads and writes fixed names in the folder it runs from — `profile.json` and `relationships.json`
+(copies of `<state>/profile/`), `truth.json`, `idempiere-candidates-labelled.json`; for BIRD
+`mini_dev_sqlite.jsonl`, `split.json`, `databases/`, `packs/` and `reports/`.
 
 **Foreign keys between the same two tables were merged (fixed during this measurement).**
 `semantic::dedup_relationships` keyed relationships by (from, to, kind), so the second foreign key between
