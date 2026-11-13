@@ -37,7 +37,7 @@
     <Property Id="ARPPRODUCTICON" Value="ekos.ico" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/alexeyban/EKOS" />
     <Property Id="ARPHELPLINK" Value="https://github.com/alexeyban/EKOS#install" />
-    <Property Id="ARPNOMODIFY" Value="1" />
+    <!-- ARPNOMODIFY is set by WixUI_Minimal itself (a second definition is WIX0091). -->
 
     <!-- Where an earlier install put the program, for removing the whole directory on uninstall. -->
     <Property Id="EKOSDIR">
