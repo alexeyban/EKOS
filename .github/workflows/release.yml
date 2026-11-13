@@ -577,9 +577,16 @@ jobs:
             $p = Start-Process msiexec.exe -ArgumentList @($verb, "`"$file`"", '/qn', '/norestart', '/l*v', "`"$log`"") -Wait -PassThru
             if ($p.ExitCode -notin 0, 3010) { Get-Content $log -Tail 80; throw "msiexec $verb failed ($($p.ExitCode))" }
           }
+          # Installed EKOS products, asked of Windows Installer by the package's UpgradeCode. A per-user
+          # MSI writes no HKCU ...\Uninstall key, so the registry is not the place to look.
           function Entries {
-            @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
-              Where-Object { $_.DisplayName -eq 'EKOS' })
+            $wi = New-Object -ComObject WindowsInstaller.Installer
+            @($wi.RelatedProducts('{17DD203C-261D-4817-8E1D-848A945A66B9}') | ForEach-Object {
+              [pscustomobject]@{
+                DisplayName    = $wi.ProductInfo($_, 'ProductName')
+                DisplayVersion = $wi.ProductInfo($_, 'VersionString')
+              }
+            })
           }
           $new = (Get-ChildItem new/*.msi | Select-Object -First 1).FullName
           $old = (Get-ChildItem old/*.msi | Select-Object -First 1).FullName
