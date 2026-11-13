@@ -22,4 +22,5 @@ sha2.workspace = true
 hex.workspace = true
 
 [dev-dependencies]
+regex.workspace = true
 tempfile = "3"

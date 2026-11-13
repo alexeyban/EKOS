@@ -47,6 +47,7 @@ pub mod profile;
 pub mod project;
 pub mod query;
 pub mod query_log;
+pub mod questionnaire;
 pub mod questions;
 pub mod recover;
 pub mod relationships;

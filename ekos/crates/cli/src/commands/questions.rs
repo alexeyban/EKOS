@@ -16,6 +16,7 @@ use ekos_ledger::{KnowledgeReader, KnowledgeStore};
 use ekos_semantic::questions::{self, Origins, Owners, Reading, Status};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 fn dir(config: &EkosConfig, cwd: &Path) -> PathBuf {
@@ -186,6 +187,19 @@ pub fn summary_line(s: &QuestionStats) -> String {
     )
 }
 
+/// Writes `text` to stdout. A reader that closed the pipe early (`ekos questions show … | head`)
+/// is not an error: the command stops writing and succeeds.
+pub(crate) fn emit(text: &str) -> Result<()> {
+    emit_to(&mut std::io::stdout().lock(), text)
+}
+
+fn emit_to(w: &mut dyn std::io::Write, text: &str) -> Result<()> {
+    match w.write_all(text.as_bytes()).and_then(|()| w.flush()) {
+        Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        r => Ok(r?),
+    }
+}
+
 // ── Routing state ────────────────────────────────────────────────────────────────────────────
 
 /// `<state>/questions/routing.json`.
@@ -229,31 +243,33 @@ fn glob(pattern: &str, text: &str) -> bool {
 
 /// Who a question is with now: the person it was handed to, else the first addressee who did not
 /// decline it and has not muted its table.
-fn current_addressee(q: &KirObject, r: &Routing) -> Option<String> {
+/// The addressees are computed now from `[questions]` (`questions::addressees_now`), so an owner
+/// added to the configuration routes existing questions without waiting for a derivation.
+fn current_addressee(q: &KirObject, r: &Routing, owners: &Owners) -> Option<String> {
     let id = q.id.to_string();
     if let Some(p) = r.assigned.get(&id) {
         return Some(p.clone());
     }
     let declined = r.declined.get(&id).cloned().unwrap_or_default();
-    q.properties
-        .get("addressees")
-        .and_then(Value::as_array)?
-        .iter()
-        .filter_map(Value::as_str)
-        .find(|p| {
-            !declined.iter().any(|d| d.eq_ignore_ascii_case(p))
-                && !r
-                    .muted
-                    .get(*p)
-                    .is_some_and(|pats| pats.iter().any(|pat| glob(pat, s(q, "table"))))
-        })
-        .map(str::to_string)
+    questions::addressees_now(q, owners).into_iter().find(|p| {
+        !declined.iter().any(|d| d.eq_ignore_ascii_case(p))
+            && !r
+                .muted
+                .get(p.as_str())
+                .is_some_and(|pats| pats.iter().any(|pat| glob(pat, s(q, "table"))))
+    })
 }
 
 // ── Reading ──────────────────────────────────────────────────────────────────────────────────
 
 /// One question as shown: id, type, status, priority, addressee, text, context.
-fn view(q: &KirObject, st: Status, addressee: Option<String>, answers: &[&KirObject]) -> Value {
+fn view(
+    q: &KirObject,
+    st: Status,
+    addressee: Option<String>,
+    addressees: Vec<String>,
+    answers: &[&KirObject],
+) -> Value {
     json!({
         "id": q.id.to_string(),
         "type": s(q, "question_type"),
@@ -264,7 +280,7 @@ fn view(q: &KirObject, st: Status, addressee: Option<String>, answers: &[&KirObj
         "column": s(q, "column"),
         "text": s(q, "text"),
         "addressee": addressee,
-        "addressees": q.properties.get("addressees"),
+        "addressees": addressees,
         "context": q.properties.get("context"),
         "origin": {"kind": s(q, "origin_kind"), "id": s(q, "origin_id")},
         "answers": answers.iter().map(|t| json!({
@@ -298,6 +314,7 @@ pub fn read(
     let decisions = ekos_semantic::review::decisions(&objects);
     let answers = questions::answers_index(&objects);
     let routing = load_routing(config, cwd);
+    let owners = owners(config);
     let reading = Reading {
         by_id: &by_id,
         questions_current: current.as_ref(),
@@ -320,14 +337,20 @@ pub fn read(
         {
             continue;
         }
-        let who = current_addressee(q, &routing);
+        let who = current_addressee(q, &routing, &owners);
         if f.addressee
             .is_some_and(|a| who.as_deref().is_none_or(|w| !w.eq_ignore_ascii_case(a)))
         {
             continue;
         }
         let ans = answers.get(&q.id.to_string()).cloned().unwrap_or_default();
-        out.push(view(q, st, who, &ans));
+        out.push(view(
+            q,
+            st,
+            who,
+            questions::addressees_now(q, &owners),
+            &ans,
+        ));
         if f.limit > 0 && out.len() >= f.limit {
             break;
         }
@@ -348,6 +371,7 @@ pub fn states(
     let decisions = ekos_semantic::review::decisions(objects);
     let answers = questions::answers_index(objects);
     let routing = load_routing(config, cwd);
+    let owners = owners(config);
     let reading = Reading {
         by_id: &by_id,
         questions_current: current.as_ref(),
@@ -362,7 +386,7 @@ pub fn states(
                 q.id.to_string(),
                 (
                     questions::status(q, &reading).as_str().to_string(),
-                    current_addressee(q, &routing),
+                    current_addressee(q, &routing, &owners),
                 ),
             )
         })
@@ -371,18 +395,20 @@ pub fn states(
 
 /// `ekos questions list`.
 pub fn list(config: &EkosConfig, cwd: &Path, f: &Filter<'_>, json_out: bool) -> Result<()> {
+    let mut out = String::new();
     let ledger = super::store::open_store_read_only(config, cwd)?;
     let qs = read(config, cwd, &*ledger, f)?;
     if json_out {
-        println!("{}", serde_json::to_string_pretty(&qs)?);
-        return Ok(());
+        writeln!(out, "{}", serde_json::to_string_pretty(&qs)?)?;
+        return emit(&out);
     }
     if qs.is_empty() {
-        println!("No {} questions.", f.status.unwrap_or("open"));
-        return Ok(());
+        writeln!(out, "No {} questions.", f.status.unwrap_or("open"))?;
+        return emit(&out);
     }
     for q in &qs {
-        println!(
+        writeln!(
+            out,
             "{} [{}{}] {} — {}",
             &q["id"].as_str().unwrap_or("")[..8],
             q["type"].as_str().unwrap_or(""),
@@ -395,10 +421,10 @@ pub fn list(config: &EkosConfig, cwd: &Path, f: &Filter<'_>, json_out: bool) -> 
             q["addressee"]
                 .as_str()
                 .map_or("no addressee".to_string(), |a| format!("ask {a}"))
-        );
+        )?;
     }
-    println!("{} question(s).", qs.len());
-    Ok(())
+    writeln!(out, "{} question(s).", qs.len())?;
+    emit(&out)
 }
 
 fn find<'a>(qs: &'a [Value], id: &str) -> Result<&'a Value> {
@@ -415,6 +441,7 @@ fn find<'a>(qs: &'a [Value], id: &str) -> Result<&'a Value> {
 
 /// `ekos questions show <id> [--reveal]`.
 pub fn show(config: &EkosConfig, cwd: &Path, id: &str, reveal: bool, json_out: bool) -> Result<()> {
+    let mut out = String::new();
     let ledger = super::store::open_store_read_only(config, cwd)?;
     let all = read(
         config,
@@ -430,34 +457,37 @@ pub fn show(config: &EkosConfig, cwd: &Path, id: &str, reveal: bool, json_out: b
         q["revealed"] = reveal_values(config, cwd, &*ledger, &q)?;
     }
     if json_out {
-        println!("{}", serde_json::to_string_pretty(&q)?);
-        return Ok(());
+        writeln!(out, "{}", serde_json::to_string_pretty(&q)?)?;
+        return emit(&out);
     }
-    println!(
+    writeln!(
+        out,
         "{} ({}, {})",
         q["text"].as_str().unwrap_or(""),
         q["type"].as_str().unwrap_or(""),
         q["status"].as_str().unwrap_or("")
-    );
-    println!("  id: {}", q["id"].as_str().unwrap_or(""));
-    println!(
+    )?;
+    writeln!(out, "  id: {}", q["id"].as_str().unwrap_or(""))?;
+    writeln!(
+        out,
         "  with: {} (candidates {})",
         q["addressee"].as_str().unwrap_or("nobody"),
         q["addressees"]
-    );
-    println!("  context: {}", q["context"]);
+    )?;
+    writeln!(out, "  context: {}", q["context"])?;
     for a in q["answers"].as_array().into_iter().flatten() {
-        println!(
+        writeln!(
+            out,
             "  answered by {} ({}): {}",
             a["author"].as_str().unwrap_or(""),
             a["channel"].as_str().unwrap_or(""),
             a["text"].as_str().unwrap_or("")
-        );
+        )?;
     }
     if let Some(r) = q.get("revealed") {
-        println!("  values (live, not stored): {r}");
+        writeln!(out, "  values (live, not stored): {r}")?;
     }
-    Ok(())
+    emit(&out)
 }
 
 /// RFC 0254 §3.2: the top values of a column no code names, live, for the person reading.
@@ -556,7 +586,7 @@ fn reveal_values(
     )))
 }
 
-/// `ekos questions export --format md|csv|json`: a questionnaire grouped by table.
+/// `ekos questions export --format md|csv|json|docx|xlsx`: a questionnaire grouped by table.
 pub fn export(
     config: &EkosConfig,
     cwd: &Path,
@@ -566,6 +596,19 @@ pub fn export(
 ) -> Result<()> {
     let ledger = super::store::open_store_read_only(config, cwd)?;
     let qs = read(config, cwd, &*ledger, f)?;
+    if matches!(format, "docx" | "xlsx") {
+        let Some(p) = out else {
+            bail!("--format {format} writes a file: give --out <path>.{format}");
+        };
+        let bytes = if format == "docx" {
+            super::questionnaire::docx(&qs)?
+        } else {
+            super::questionnaire::xlsx(&qs)?
+        };
+        std::fs::write(p, bytes).with_context(|| format!("writing {}", p.display()))?;
+        eprintln!("{} question(s) written to {}", qs.len(), p.display());
+        return Ok(());
+    }
     let text = match format {
         "json" => serde_json::to_string_pretty(&qs)?,
         "csv" => {
@@ -585,11 +628,11 @@ pub fn export(
             w
         }
         "md" => markdown(&qs),
-        other => bail!("--format {other}: md, csv or json"),
+        other => bail!("--format {other}: md, csv, json, docx or xlsx"),
     };
     match out {
         Some(p) => std::fs::write(p, text).with_context(|| format!("writing {}", p.display()))?,
-        None => print!("{text}"),
+        None => emit(&text)?,
     }
     Ok(())
 }
@@ -626,6 +669,7 @@ fn markdown(qs: &[Value]) -> String {
 /// `ekos questions digest`: per person, at most `per-person-per-day` open questions, highest
 /// priority first. Delivery through channels is RFC 0253's; this prints (or emits JSON for them).
 pub fn digest(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
+    let mut out = String::new();
     let ledger = super::store::open_store_read_only(config, cwd)?;
     let qs = read(
         config,
@@ -651,30 +695,33 @@ pub fn digest(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
         }
     }
     if json_out {
-        println!(
+        writeln!(
+            out,
             "{}",
             serde_json::to_string_pretty(
                 &json!({"per_person": per, "unrouted": unrouted, "cap": cap})
             )?
-        );
-        return Ok(());
+        )?;
+        return emit(&out);
     }
     for (p, items) in &per {
-        println!("{p}: {} question(s)", items.len());
+        writeln!(out, "{p}: {} question(s)", items.len())?;
         for q in items {
-            println!(
+            writeln!(
+                out,
                 "  - {} ({})",
                 q["text"].as_str().unwrap_or(""),
                 &q["id"].as_str().unwrap_or("")[..8]
-            );
+            )?;
         }
     }
     if unrouted > 0 {
-        println!(
+        writeln!(
+            out,
             "{unrouted} open question(s) have nobody to ask: set [questions] owners or reviewers."
-        );
+        )?;
     }
-    Ok(())
+    emit(&out)
 }
 
 /// `ekos questions reassign <id> --to <person>`.
@@ -698,7 +745,7 @@ pub fn decline(config: &EkosConfig, cwd: &Path, id: &str, by: &str) -> Result<()
         .iter()
         .find(|o| o.id.to_string() == full)
         .ok_or_else(|| anyhow!("no question {id}"))?;
-    match current_addressee(q, &r) {
+    match current_addressee(q, &r, &owners(config)) {
         Some(who) if who.eq_ignore_ascii_case(by) => {}
         Some(who) => bail!("{} is with {who}, not {by}", &full[..8]),
         None => bail!("{} is with nobody", &full[..8]),
@@ -749,6 +796,7 @@ fn resolve_id(config: &EkosConfig, cwd: &Path, id: &str) -> Result<String> {
 
 /// `ekos check code-vs-data`: recompute from the ledger and the latest profile, and print.
 pub fn check(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
+    let mut out = String::new();
     let ledger = super::store::open_store_read_only(config, cwd)?;
     let Some(signals) = super::profile::load(config, cwd) else {
         bail!(
@@ -773,8 +821,8 @@ pub fn check(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
                         "claims": o.properties.get("claims"), "measured": o.properties.get("measured")}))
         .collect();
     if json_out {
-        println!("{}", serde_json::to_string_pretty(&rows)?);
-        return Ok(());
+        writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
+        return emit(&out);
     }
     for r in &rows {
         let claims: Vec<String> = r["claims"]
@@ -783,17 +831,60 @@ pub fn check(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
             .flatten()
             .map(|c| c["value"].as_str().unwrap_or("").to_string())
             .collect();
-        println!(
+        writeln!(
+            out,
             "[{}] {} ({}): {}",
             r["check"].as_str().unwrap_or(""),
             r["table"].as_str().unwrap_or(""),
             r["database"].as_str().unwrap_or("?"),
             claims.join(" / ")
-        );
-        println!("    measured: {}", r["measured"]);
+        )?;
+        writeln!(out, "    measured: {}", r["measured"])?;
     }
-    println!("{} finding(s).", rows.len());
-    Ok(())
+    writeln!(out, "{} finding(s).", rows.len())?;
+    emit(&out)
+}
+
+/// `ekos check code-vs-data [--expectations]`.
+pub fn check_code_vs_data(
+    config: &EkosConfig,
+    cwd: &Path,
+    json_out: bool,
+    expectations: bool,
+) -> Result<()> {
+    if expectations {
+        check_expectations(config, cwd, json_out)
+    } else {
+        check(config, cwd, json_out)
+    }
+}
+
+/// `ekos check code-vs-data --expectations`: RFC 0254 §3.4 → RFC 0228, the rows decided findings
+/// say the source logic drops on purpose (also in `<state>/conflicts/expectations.json`).
+pub fn check_expectations(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
+    let ledger = super::store::open_store_read_only(config, cwd)?;
+    let items = super::conflicts::items_in(config, cwd, &*ledger)?;
+    let e = super::conflicts::expectations(&items);
+    let mut text = String::new();
+    if json_out {
+        text = serde_json::to_string_pretty(&e)? + "\n";
+    } else {
+        for x in &e {
+            text.push_str(&format!(
+                "{}.{}.{} ({}): {} row(s) dropped on purpose by {} [{}], decided by {}\n",
+                x.owner,
+                x.table,
+                x.column,
+                x.database,
+                x.expected_missing_rows,
+                x.code,
+                x.check,
+                x.decided_by
+            ));
+        }
+        text.push_str(&format!("{} expectation(s).\n", e.len()));
+    }
+    emit(&text)
 }
 
 /// The database a code-vs-data finding measured (from its data claim's `profile://<db>/…`).
@@ -837,4 +928,34 @@ pub fn agent_list(
         "questions": qs,
         "note": "Derived from what code, data and people have not explained yet. Answering one is a person's act (RFC 0253 testimony); an agent may not answer for them.",
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// QA: `ekos questions show … | head` — the reader closing the pipe is not an error.
+    #[test]
+    fn a_closed_pipe_ends_the_output_quietly() {
+        struct Closed;
+        impl std::io::Write for Closed {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        assert!(emit_to(&mut Closed, "a long answer\n").is_ok());
+        struct Full;
+        impl std::io::Write for Full {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::StorageFull.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        assert!(emit_to(&mut Full, "x").is_err(), "other errors still fail");
+    }
 }

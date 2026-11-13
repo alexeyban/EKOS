@@ -433,6 +433,7 @@ fn condition_sites(
         subquery: false,
         label: None,
         case_else: None,
+        null_handled: None,
         line,
     });
 }

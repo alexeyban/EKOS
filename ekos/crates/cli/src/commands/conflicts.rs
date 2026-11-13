@@ -204,9 +204,43 @@ pub fn replace_code_vs_data(
     ids.retain(|i| !previous.contains(i));
     append_conflicts(ledger, g, &mut ids)?;
     write_manifest(config, cwd, &ids, ConflictStats::default())?;
-    let stats = count(&items_in(config, cwd, ledger)?);
-    write_manifest(config, cwd, &ids, stats)?;
+    let items = items_in(config, cwd, ledger)?;
+    write_manifest(config, cwd, &ids, count(&items))?;
+    write_expectations(config, cwd, &items)?;
     Ok(g.objects.len())
+}
+
+/// `<state>/conflicts/expectations.json`: RFC 0254 §3.4 → RFC 0228.
+pub fn expectations_path(config: &EkosConfig, cwd: &Path) -> PathBuf {
+    config
+        .ekos_dir(cwd)
+        .join("conflicts")
+        .join("expectations.json")
+}
+
+/// The expected row-count deltas the current, decided `code_vs_data` conflicts give (a person
+/// picked the code's claim: the rows it drops are dropped on purpose), from `items` (the current
+/// conflicts, as [`items_in`] reads them).
+pub fn expectations(items: &[KirObject]) -> Vec<ekos_semantic::code_vs_data::Expectation> {
+    ekos_semantic::code_vs_data::expectations(items, None)
+}
+
+/// Rewrites [`expectations_path`] — after every change to the conflicts (a commit, a profile run,
+/// a decision), so RFC 0228's reconciliation reads what people decided without running EKOS.
+pub fn write_expectations(config: &EkosConfig, cwd: &Path, items: &[KirObject]) -> Result<()> {
+    let path = expectations_path(config, cwd);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&json!({
+            "rfc": "0254",
+            "for": "RFC 0228 reconciliation: rows the source logic drops on purpose",
+            "expectations": expectations(items),
+        }))?,
+    )?;
+    Ok(())
 }
 
 /// Append a detector's conflicts, keeping review decisions; returns how many records were new.
@@ -687,8 +721,14 @@ pub fn show(config: &EkosConfig, cwd: &Path, target: &str, json_out: bool) -> Re
     // RFC 0172 Phase 3 — the measurement behind a doc-vs-data conflict, so it can be re-run.
     // RFC 0211 — or a profile's null count behind a mandatory-but-nullable one.
     if let Some(m) = o.properties.get("measured") {
-        println!("  measured:  {}", measured_line(m));
-        println!("  query:     {}", m["sql"].as_str().unwrap_or(""));
+        // RFC 0254 §3.4: a code-vs-data finding's measurement is its own (counts and shares).
+        if s(o, "conflict_type") == ekos_semantic::code_vs_data::CODE_VS_DATA {
+            println!("  check:     {}", s(o, "check"));
+            println!("  measured:  {m}");
+        } else {
+            println!("  measured:  {}", measured_line(m));
+            println!("  query:     {}", m["sql"].as_str().unwrap_or(""));
+        }
     }
     if let Some(p) = o.properties.get("picked_claim") {
         println!(
@@ -745,7 +785,9 @@ pub fn resolve(
     }));
     ledger.append_object(&next)?;
     let ids = commit_ids(config, cwd).unwrap_or_default();
-    write_manifest(config, cwd, &ids, count(&items_in(config, cwd, &*ledger)?))?;
+    let items = items_in(config, cwd, &*ledger)?;
+    write_manifest(config, cwd, &ids, count(&items))?;
+    write_expectations(config, cwd, &items)?;
     println!(
         "{} — {} by {by}{}",
         next.name,
@@ -763,7 +805,9 @@ pub(super) fn refresh_manifest(
     ledger: &dyn KnowledgeStore,
 ) -> Result<()> {
     let ids = commit_ids(config, cwd).unwrap_or_default();
-    write_manifest(config, cwd, &ids, count(&items_in(config, cwd, ledger)?))
+    let items = items_in(config, cwd, ledger)?;
+    write_manifest(config, cwd, &ids, count(&items))?;
+    write_expectations(config, cwd, &items)
 }
 
 /// A measurement in words: how many rows contradict what, and how it was counted.

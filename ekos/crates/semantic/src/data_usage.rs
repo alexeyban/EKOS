@@ -55,6 +55,9 @@ pub struct DataSignals {
     /// §3.5: which statements touch which tables, from the database's own workload statistics.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub usage: Vec<UsageSignal>,
+    /// RFC 0254 §3.4: how many values of a text column code converts would fail the conversion.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conformance: Vec<ConformanceSignal>,
 }
 
 /// One table's usage evidence from one source on one live database (counts only).
@@ -68,6 +71,24 @@ pub struct UsageSignal {
     pub includes_own_reads: bool,
     #[serde(flatten)]
     pub table: TableUsage,
+}
+
+/// RFC 0254 §3.4 (`cast_will_fail`): one text column code converts to a date or a number, and how
+/// many of its non-null values would not convert. Counts only.
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ConformanceSignal {
+    pub database: String,
+    pub owner: String,
+    pub table: String,
+    pub column: String,
+    /// `date` or `number`.
+    pub class: String,
+    /// The format code passes to the conversion, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    pub non_null: i64,
+    /// Non-null values that do not match the class (and format).
+    pub failing: i64,
 }
 
 /// One implication on one live table.

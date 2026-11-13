@@ -12,15 +12,18 @@
 //! | `dead_branch` | a branch's value is in no row, or is `dead` (not seen for `dead_after` months) |
 //! | `range_assumption` | a comparison constant lies outside the column's measured min/max |
 //! | `lookup_not_unique` | code joins a column to one that is not unique on the looked-up side (the join fans out) |
+//! | `null_not_handled` | code equates a column with another relation's in an inner join (or a `WHERE`), nothing in the statement handles NULL, and the column's profile counts NULLs: those rows vanish |
+//! | `cast_will_fail` | code converts a text column to a date or a number, and the profile counts values that would not convert ([`ConformanceSignal`]) |
 //!
 //! Claim texts carry no counts (a re-profile must not reopen a decided conflict); the counts are
 //! in `measured`.
 
 use crate::conflicts::{self, Claim};
-use crate::data_usage::{ColumnSignal, DataSignals};
-use ekos_kir::predicates::{Clause, PredicateSite};
+use crate::data_usage::{ColumnSignal, ConformanceSignal, DataSignals};
+use ekos_kir::predicates::{CAST_OP, Clause, PredicateSite};
 use ekos_kir::{KirGraph, KirObject, ObjectKind};
 use ekos_observation_sdk::signals::{literal_text, months_between};
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -113,6 +116,9 @@ fn hits<'a>(objects: &'a [KirObject], signals: &'a DataSignals) -> Vec<Hit<'a>> 
             let Ok(site) = serde_json::from_value::<PredicateSite>(v.clone()) else {
                 continue;
             };
+            if site.clause.is_structural() {
+                continue;
+            }
             for signal in resolve(&site, &by_col) {
                 out.push(Hit {
                     carrier: o,
@@ -502,6 +508,422 @@ fn lookups(
     }
 }
 
+// ── Structural sites: joins and conversions ──────────────────────────────────────────────────
+
+/// A structural site (RFC 0254 [`Clause::Join`] / [`Clause::Cast`]) with its carrier and the live
+/// table + column it resolves to.
+struct Structural<'a> {
+    carrier: &'a KirObject,
+    site: PredicateSite,
+    table: &'a KirObject,
+    column: &'a Value,
+}
+
+fn column_named<'a>(t: &'a KirObject, column: &str) -> Option<&'a Value> {
+    t.properties
+        .get("columns")
+        .and_then(Value::as_array)?
+        .iter()
+        .find(|c| {
+            c["name"]
+                .as_str()
+                .is_some_and(|n| n.eq_ignore_ascii_case(column))
+        })
+}
+
+/// Live tables by lowercase bare name.
+fn live_by_name(objects: &[KirObject]) -> BTreeMap<String, Vec<&KirObject>> {
+    let mut m: BTreeMap<String, Vec<&KirObject>> = BTreeMap::new();
+    for o in objects
+        .iter()
+        .filter(|o| o.kind == ObjectKind::Table && s(o, "origin") == "live")
+    {
+        let v = m.entry(tail(&o.name)).or_default();
+        if !v.iter().any(|x| x.id == o.id) {
+            v.push(o);
+        }
+    }
+    m
+}
+
+/// Every live copy of the table a site names (every database that has it) holding the column; for
+/// an unqualified column, the one in-scope relation that has it — none when several do.
+fn live_columns<'a>(
+    site: &PredicateSite,
+    live: &BTreeMap<String, Vec<&'a KirObject>>,
+) -> Vec<(&'a KirObject, &'a Value)> {
+    let names: Vec<String> = match &site.relation {
+        Some(r) => vec![tail(r)],
+        None => site.scope.iter().map(|r| tail(r)).collect(),
+    };
+    let per_name: Vec<Vec<(&KirObject, &Value)>> = names
+        .iter()
+        .map(|n| {
+            live.get(n)
+                .into_iter()
+                .flatten()
+                .filter_map(|t| Some((*t, column_named(t, &site.column)?)))
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| !v.is_empty())
+        .collect();
+    match per_name.as_slice() {
+        [one] => one.clone(),
+        _ => Vec::new(),
+    }
+}
+
+fn structural<'a>(objects: &'a [KirObject], clause: Clause) -> Vec<Structural<'a>> {
+    let live = live_by_name(objects);
+    let mut out = Vec::new();
+    for o in objects
+        .iter()
+        .filter(|o| custom(o).is_some_and(|k| CARRIERS.contains(&k)))
+    {
+        let Some(Value::Array(preds)) = o.properties.get("predicates") else {
+            continue;
+        };
+        for v in preds {
+            let Ok(site) = serde_json::from_value::<PredicateSite>(v.clone()) else {
+                continue;
+            };
+            if site.clause != clause {
+                continue;
+            }
+            for (table, column) in live_columns(&site, &live) {
+                out.push(Structural {
+                    carrier: o,
+                    site: site.clone(),
+                    table,
+                    column,
+                });
+            }
+        }
+    }
+    out
+}
+
+fn table_rows(t: &KirObject) -> Option<i64> {
+    t.properties
+        .get("profile")
+        .and_then(|p| p["row_count"].as_i64())
+        .or_else(|| t.properties.get("num_rows").and_then(Value::as_i64))
+}
+
+fn live_claim(t: &KirObject, column: &str, what: String) -> Claim {
+    Claim {
+        value: json!(what),
+        path: format!(
+            "profile://{}/{}.{}.{}",
+            s(t, "database"),
+            s(t, "owner"),
+            t.name,
+            column
+        ),
+        line: None,
+        source: "profile".into(),
+    }
+}
+
+/// (routine, database, owner, table, column).
+type ColumnKey = (String, String, String, String, String);
+
+/// `null_not_handled`: per routine and column, an inner-join equality on a column the profile
+/// counts NULLs in, with nothing in the statement handling NULL there.
+fn unhandled_nulls(objects: &[KirObject], out: &mut Vec<KirGraph>) {
+    let mut groups: BTreeMap<ColumnKey, (&Structural<'_>, BTreeSet<String>)> = BTreeMap::new();
+    let found = structural(objects, Clause::Join);
+    for h in &found {
+        // A join inside a subquery (`EXISTS`, a scalar subquery) drops no row of the statement.
+        if h.site.null_handled != Some(false) || h.site.subquery {
+            continue;
+        }
+        let nulls = h.column["profile"]["nulls"].as_i64().unwrap_or(0);
+        if nulls <= 0 {
+            continue;
+        }
+        let name = h.column["name"]
+            .as_str()
+            .unwrap_or(&h.site.column)
+            .to_string();
+        // A routine read from a file and the same routine read from the catalog differ in case.
+        let key = (
+            short(h.carrier).to_lowercase(),
+            s(h.table, "database").to_string(),
+            s(h.table, "owner").to_string(),
+            h.table.name.clone(),
+            name,
+        );
+        groups
+            .entry(key)
+            .or_insert((h, BTreeSet::new()))
+            .1
+            .extend(h.site.values.iter().cloned());
+    }
+    for ((routine, _, _, table, column), (h, joined)) in groups {
+        let p = &h.column["profile"];
+        let nulls = p["nulls"].as_i64().unwrap_or(0);
+        let rows = table_rows(h.table);
+        let others = joined.iter().cloned().collect::<Vec<_>>().join(", ");
+        out.push(finding(
+            h.table,
+            &column,
+            &format!("code_vs_data:null_not_handled:{routine}:{column}"),
+            "null_not_handled",
+            vec![
+                code_claim(
+                    h.carrier,
+                    h.site.line,
+                    format!("{routine} joins {table}.{column} = {others} and does not handle NULL"),
+                ),
+                live_claim(
+                    h.table,
+                    &column,
+                    format!("{table}.{column} holds NULL: those rows drop out of the join"),
+                ),
+            ],
+            json!({"nulls": nulls, "rows": rows, "share": rows.map(|r| share(nulls, r)),
+                   "nulls_exact": p["nulls_exact"].as_bool().unwrap_or(false),
+                   "joined_to": joined}),
+        ));
+    }
+}
+
+/// Whether a catalog type holds text.
+fn is_text_type(data_type: &str) -> bool {
+    let t = data_type.to_ascii_lowercase();
+    ["char", "text", "string", "clob"]
+        .iter()
+        .any(|w| t.contains(w))
+}
+
+/// One text column code converts: what `ekos profile run` measures for `cast_will_fail`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CastTarget {
+    pub database: String,
+    pub owner: String,
+    pub table: String,
+    pub column: String,
+    /// `date` or `number`.
+    pub class: String,
+    pub format: Option<String>,
+}
+
+/// Every live text column code converts to a date or a number, once per (class, format).
+pub fn cast_targets(objects: &[KirObject]) -> BTreeSet<CastTarget> {
+    structural(objects, Clause::Cast)
+        .into_iter()
+        .filter(|h| h.site.op == CAST_OP)
+        .filter(|h| h.column["data_type"].as_str().is_some_and(is_text_type))
+        .filter_map(|h| {
+            Some(CastTarget {
+                database: s(h.table, "database").to_string(),
+                owner: s(h.table, "owner").to_string(),
+                table: h.table.name.clone(),
+                column: h.column["name"].as_str()?.to_string(),
+                class: h.site.values.first()?.clone(),
+                format: h.site.values.get(1).cloned(),
+            })
+        })
+        .collect()
+}
+
+/// (routine, database, owner, table, column, class, format).
+type CastKey = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+);
+
+/// `cast_will_fail`: per routine and conversion, a text column whose measured values do not all
+/// convert.
+fn failing_casts(objects: &[KirObject], measured: &[ConformanceSignal], out: &mut Vec<KirGraph>) {
+    let mut groups: BTreeMap<CastKey, (&Structural<'_>, &ConformanceSignal)> = BTreeMap::new();
+    let found = structural(objects, Clause::Cast);
+    for h in &found {
+        let (Some(class), format) = (h.site.values.first(), h.site.values.get(1)) else {
+            continue;
+        };
+        let Some(name) = h.column["name"].as_str() else {
+            continue;
+        };
+        let Some(m) = measured.iter().find(|m| {
+            m.database == s(h.table, "database")
+                && m.owner == s(h.table, "owner")
+                && m.table == h.table.name
+                && m.column == name
+                && &m.class == class
+                && m.format.as_ref() == format
+        }) else {
+            continue;
+        };
+        if m.failing <= 0 {
+            continue;
+        }
+        let key = (
+            short(h.carrier).to_lowercase(),
+            m.database.clone(),
+            m.owner.clone(),
+            m.table.clone(),
+            m.column.clone(),
+            m.class.clone(),
+            m.format.clone(),
+        );
+        groups.entry(key).or_insert((h, m));
+    }
+    for ((routine, _, _, table, column, class, format), (h, m)) in groups {
+        let how = match &format {
+            Some(f) => format!("a {class} (format {f})"),
+            None => format!("a {class}"),
+        };
+        out.push(finding(
+            h.table,
+            &column,
+            &format!(
+                "code_vs_data:cast_will_fail:{routine}:{column}:{class}{}",
+                format
+                    .as_deref()
+                    .map(|f| format!(":{f}"))
+                    .unwrap_or_default()
+            ),
+            "cast_will_fail",
+            vec![
+                code_claim(
+                    h.carrier,
+                    h.site.line,
+                    format!("{routine} converts {table}.{column} to {how}"),
+                ),
+                live_claim(
+                    h.table,
+                    &column,
+                    format!("{table}.{column} holds values that do not convert to {how}"),
+                ),
+            ],
+            json!({"rows_failing": m.failing, "column_rows": m.non_null,
+                   "share": share(m.failing, m.non_null), "class": class, "format": format}),
+        ));
+    }
+}
+
+// ── RFC 0228 hand-off: expected row-count deltas ────────────────────────────────────────────────
+
+/// RFC 0254 §3.4 → RFC 0228: a finding a person resolved by picking the **code's** claim says the
+/// rows the code drops are dropped on purpose. A mart built from that logic is then expected to
+/// lack those rows, and reconciliation must not flag the difference again.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Expectation {
+    /// The conflict that records the decision.
+    pub conflict: String,
+    /// `predicate_misses_values` (rows holding values no branch handles) or `null_not_handled`
+    /// (rows holding NULL in a join column).
+    pub check: String,
+    pub database: String,
+    pub owner: String,
+    pub table: String,
+    pub column: String,
+    /// Where the code is (`path:line` of the code claim).
+    pub code: String,
+    /// What the code handles: the enumerated values, or the columns it joins to.
+    pub handled: Vec<String>,
+    /// Rows the latest profile counted as dropped by the code, and their share of the column.
+    pub expected_missing_rows: i64,
+    pub share: Option<f64>,
+    pub decided_by: String,
+    pub decided_at: String,
+    pub note: Option<String>,
+}
+
+fn strings_of(v: &Value) -> Vec<String> {
+    v.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|x| x.as_str().map(str::to_string))
+        .collect()
+}
+
+/// The expectations RFC 0228 reconciliation reads, from the current `code_vs_data` conflicts
+/// (`current`: the conflicts manifest; `None` = all). Pure; ordered by conflict id.
+pub fn expectations(objects: &[KirObject], current: Option<&BTreeSet<String>>) -> Vec<Expectation> {
+    let mut newest: BTreeMap<String, &KirObject> = BTreeMap::new();
+    for o in objects.iter().filter(|o| conflicts::is_conflict(o)) {
+        if s(o, "conflict_type") == CODE_VS_DATA
+            && current.is_none_or(|c| c.contains(&o.id.to_string()))
+        {
+            // Later versions of one conflict (a decision) come later in the ledger.
+            newest.insert(o.id.to_string(), o);
+        }
+    }
+    let mut out = Vec::new();
+    for (id, o) in newest {
+        let check = s(o, "check");
+        if !matches!(check, "predicate_misses_values" | "null_not_handled")
+            || s(o, "status") != conflicts::RESOLVED
+        {
+            continue;
+        }
+        let Some(picked) = o.properties.get("picked_claim") else {
+            continue;
+        };
+        if picked["source"].as_str() == Some("profile") {
+            continue; // the data is right: the code must change, nothing is expected to drop.
+        }
+        let claims = o.properties.get("claims").and_then(Value::as_array);
+        let data_path = claims
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c["path"].as_str())
+            .find_map(|p| p.strip_prefix("profile://"))
+            .unwrap_or("");
+        let (database, rest) = data_path.split_once('/').unwrap_or(("", ""));
+        let mut parts = rest.splitn(3, '.');
+        let (owner, table, column) = (
+            parts.next().unwrap_or("").to_string(),
+            parts.next().unwrap_or("").to_string(),
+            parts.next().unwrap_or("").to_string(),
+        );
+        let measured = o.properties.get("measured").cloned().unwrap_or_default();
+        let (rows, handled) = match check {
+            "predicate_misses_values" => (
+                measured["rows_unhandled"].as_i64(),
+                strings_of(&measured["handled"]),
+            ),
+            _ => (
+                measured["nulls"].as_i64(),
+                strings_of(&measured["joined_to"]),
+            ),
+        };
+        let code = match (picked["path"].as_str(), picked["line"].as_u64()) {
+            (Some(p), Some(l)) => format!("{p}:{l}"),
+            (Some(p), None) => p.to_string(),
+            _ => String::new(),
+        };
+        out.push(Expectation {
+            conflict: id,
+            check: check.to_string(),
+            database: database.to_string(),
+            owner,
+            table,
+            column,
+            code,
+            handled,
+            expected_missing_rows: rows.unwrap_or(0),
+            share: measured["share"].as_f64(),
+            decided_by: s(o, "reviewed_by").to_string(),
+            decided_at: s(o, "reviewed_at").to_string(),
+            note: o
+                .properties
+                .get("review_note")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        });
+    }
+    out
+}
+
 /// Every `code_vs_data` finding. `current_refs` are the latest discovery's `FkCandidate` ids.
 pub fn detect(
     objects: &[KirObject],
@@ -515,6 +937,8 @@ pub fn detect(
     dead_branches(objects, &hits, signals.dead_after_months, &mut parts);
     ranges(objects, &hits, &mut parts);
     lookups(objects, current_refs, &mut parts);
+    unhandled_nulls(objects, &mut parts);
+    failing_casts(objects, &signals.conformance, &mut parts);
     let mut g = KirGraph::new();
     let mut ids = BTreeSet::new();
     for p in parts {
@@ -708,5 +1132,230 @@ mod tests {
         let objects = vec![table(), fk];
         let g = detect(&objects, &DataSignals::default(), None, Settings::default());
         assert_eq!(checks(&g), ["lookup_not_unique"]);
+    }
+
+    fn live(name: &str, database: &str, columns: Value, rows: i64) -> KirObject {
+        let mut t = KirObject::new(name, ObjectKind::Table);
+        t.id = ekos_kir::KirId(uuid::Uuid::new_v5(
+            &uuid::Uuid::NAMESPACE_URL,
+            format!("{database}:{name}").as_bytes(),
+        ));
+        for (k, v) in [
+            ("origin", "live"),
+            ("database", database),
+            ("owner", "public"),
+        ] {
+            t.properties.insert(k.into(), json!(v));
+        }
+        t.properties.insert("columns".into(), columns);
+        t.properties
+            .insert("profile".into(), json!({"row_count": rows}));
+        t
+    }
+
+    fn join_site(rel: &str, col: &str, other: &str, handled: bool) -> Value {
+        json!({"relation": rel, "column": col, "op": "=", "values": [other], "clause": "join",
+               "top_level": true, "null_handled": handled, "line": 12})
+    }
+
+    #[test]
+    fn an_inner_join_on_a_column_holding_nulls_drops_rows() {
+        let invoice = live(
+            "invoice",
+            "erp",
+            json!([{"name": "customer_id", "data_type": "integer", "profile": {"nulls": 42, "nulls_exact": true}},
+                   {"name": "id", "data_type": "integer", "profile": {"nulls": 0}}]),
+            1000,
+        );
+        let customer = live(
+            "customer",
+            "erp",
+            json!([{"name": "id", "data_type": "integer", "profile": {"nulls": 0}}]),
+            50,
+        );
+        let objects = vec![
+            invoice,
+            customer,
+            carrier(vec![
+                join_site("invoice", "customer_id", "customer.id", false),
+                join_site("customer", "id", "invoice.customer_id", false),
+            ]),
+        ];
+        let g = detect(&objects, &DataSignals::default(), None, Settings::default());
+        assert_eq!(checks(&g), ["null_not_handled"]);
+        let f = &g.objects[0];
+        assert_eq!(f.properties["column"], "customer_id");
+        assert_eq!(f.properties["measured"]["nulls"], 42);
+        assert_eq!(f.properties["measured"]["share"], 0.042);
+        assert!(!f.properties["claims"].to_string().contains("42"));
+
+        // Handled in the statement (an `IS NOT NULL`, a `COALESCE`): nothing to say.
+        let mut handled = objects.clone();
+        handled[2] = carrier(vec![join_site(
+            "invoice",
+            "customer_id",
+            "customer.id",
+            true,
+        )]);
+        assert!(
+            detect(&handled, &DataSignals::default(), None, Settings::default())
+                .objects
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_text_column_converted_to_a_date_with_values_that_do_not_convert() {
+        let t = live(
+            "import_row",
+            "erp",
+            json!([{"name": "posted", "data_type": "character varying"},
+                   {"name": "amount", "data_type": "numeric"}]),
+            500,
+        );
+        let cast = |col: &str, values: Value| {
+            json!({"relation": "import_row", "column": col, "op": "cast", "values": values,
+                   "clause": "cast", "line": 4})
+        };
+        let objects = vec![
+            t,
+            carrier(vec![
+                cast("posted", json!(["date", "DD.MM.YYYY"])),
+                cast("amount", json!(["number"])),
+            ]),
+        ];
+        // Only the text column is a target for measurement.
+        let targets: Vec<CastTarget> = cast_targets(&objects).into_iter().collect();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(
+            (targets[0].column.as_str(), targets[0].format.as_deref()),
+            ("posted", Some("DD.MM.YYYY"))
+        );
+        let mut sig = DataSignals::default();
+        sig.conformance.push(ConformanceSignal {
+            database: "erp".into(),
+            owner: "public".into(),
+            table: "import_row".into(),
+            column: "posted".into(),
+            class: "date".into(),
+            format: Some("DD.MM.YYYY".into()),
+            non_null: 500,
+            failing: 10,
+        });
+        let g = detect(&objects, &sig, None, Settings::default());
+        assert_eq!(checks(&g), ["cast_will_fail"]);
+        assert_eq!(g.objects[0].properties["measured"]["share"], 0.02);
+        sig.conformance[0].failing = 0;
+        assert!(
+            detect(&objects, &sig, None, Settings::default())
+                .objects
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_table_in_two_databases_is_checked_in_each() {
+        let cols =
+            json!([{"name": "customer_id", "data_type": "integer", "profile": {"nulls": 3}}]);
+        let objects = vec![
+            live("invoice", "erp", cols.clone(), 10),
+            live("invoice", "ch", cols, 10),
+            carrier(vec![join_site(
+                "invoice",
+                "customer_id",
+                "customer.id",
+                false,
+            )]),
+        ];
+        let g = detect(&objects, &DataSignals::default(), None, Settings::default());
+        assert_eq!(g.objects.len(), 2);
+    }
+
+    #[test]
+    fn a_decision_that_the_code_is_right_becomes_an_expected_delta() {
+        let objects = vec![
+            table(),
+            carrier(vec![
+                site("case", "in", &["1"], Some("'open'")),
+                site("case", "in", &["2"], Some("'shipped'")),
+            ]),
+        ];
+        let g = detect(&objects, &signals(), None, Settings::default());
+        let open = g.objects[0].clone();
+        assert!(
+            expectations(std::slice::from_ref(&open), None).is_empty(),
+            "open: nothing expected"
+        );
+        let claims = open.properties["claims"].as_array().unwrap();
+        let code_at = 1 + claims
+            .iter()
+            .position(|c| c["source"] != "profile")
+            .unwrap();
+        let data_at = 1 + claims
+            .iter()
+            .position(|c| c["source"] == "profile")
+            .unwrap();
+        let code_right = conflicts::resolve(
+            &open,
+            &conflicts::Resolution::Pick(code_at),
+            "ana",
+            "2026-11-12",
+            Some("drop on purpose"),
+        )
+        .unwrap();
+        let data_right = conflicts::resolve(
+            &open,
+            &conflicts::Resolution::Pick(data_at),
+            "ana",
+            "2026-11-12",
+            None,
+        )
+        .unwrap();
+        let e = expectations(&[open.clone(), code_right], None);
+        assert_eq!(e.len(), 1);
+        assert_eq!(
+            (
+                e[0].table.as_str(),
+                e[0].column.as_str(),
+                e[0].expected_missing_rows
+            ),
+            ("orders", "status", 14)
+        );
+        assert_eq!(e[0].handled, ["1", "2"]);
+        assert_eq!(e[0].code, "sql/views.sql:7");
+        assert_eq!(e[0].decided_by, "ana");
+        assert!(expectations(&[open.clone(), data_right], None).is_empty());
+        let other = BTreeSet::from(["x".to_string()]);
+        assert!(expectations(&[open], Some(&other)).is_empty());
+    }
+
+    #[test]
+    fn a_join_in_a_subquery_and_a_second_spelling_of_one_view_add_nothing() {
+        let cols =
+            json!([{"name": "customer_id", "data_type": "integer", "profile": {"nulls": 3}}]);
+        let mut sub = join_site("invoice", "customer_id", "customer.id", false);
+        sub["subquery"] = json!(true);
+        let mut upper = carrier(vec![join_site(
+            "invoice",
+            "customer_id",
+            "customer.id",
+            false,
+        )]);
+        upper.name = "V_ORDERS".into();
+        upper.id = ekos_kir::KirId(uuid::Uuid::nil());
+        let objects = vec![
+            live("invoice", "erp", cols, 10),
+            carrier(vec![
+                join_site("invoice", "customer_id", "customer.id", false),
+                sub,
+            ]),
+            upper,
+        ];
+        let g = detect(&objects, &DataSignals::default(), None, Settings::default());
+        assert_eq!(
+            g.objects.len(),
+            1,
+            "one finding: the subquery's join and the upper-case copy add none"
+        );
     }
 }

@@ -379,6 +379,10 @@ fn collect_sites(
             let Ok(p) = serde_json::from_value::<PredicateSite>(v.clone()) else {
                 continue;
             };
+            // RFC 0254: join equalities and casts are how code handles a column, not a meaning.
+            if p.clause.is_structural() {
+                continue;
+            }
             stats.sites += 1;
             let table = match &p.relation {
                 Some(r) if r == NEW_ROW || r == OLD_ROW => {
@@ -2117,6 +2121,7 @@ fn dbt_check_site(t: &TableInfo, col: &str, op: &str, values: Vec<String>) -> Va
         subquery: false,
         label: None,
         case_else: None,
+        null_handled: None,
         line: 0,
     })
     .unwrap_or_default()

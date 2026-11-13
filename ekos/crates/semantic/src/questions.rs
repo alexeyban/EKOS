@@ -486,6 +486,46 @@ fn addressees(
     out
 }
 
+/// RFC 0254 §3.3, on read: a question's ranked addressees under the owners configured **now** —
+/// matching `[[questions.owners]]`, then the git-blame authors recorded at derivation, then the
+/// reviewers configured now. A change to `[questions]` takes effect at once, not at the next
+/// derivation. A question derived before `authors` was recorded keeps its stored addressees after
+/// the owners.
+pub fn addressees_now(q: &KirObject, owners: &Owners) -> Vec<String> {
+    let (table, column) = (s(q, "table"), s(q, "column"));
+    let target = if column.is_empty() {
+        table.to_string()
+    } else {
+        format!("{table}.{column}")
+    };
+    let mut out: Vec<String> = Vec::new();
+    for (pattern, people) in &owners.rules {
+        if glob(pattern, &target) || glob(pattern, table) {
+            out.extend(people.iter().cloned());
+        }
+    }
+    let list = |k: &str| -> Option<Vec<String>> {
+        q.properties.get(k)?.as_array().map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+    };
+    match list("authors") {
+        Some(authors) => {
+            out.extend(authors);
+            out.extend(owners.reviewers.iter().cloned());
+        }
+        None => {
+            out.extend(list("addressees").unwrap_or_default());
+            out.extend(owners.reviewers.iter().cloned());
+        }
+    }
+    let mut seen = BTreeSet::new();
+    out.retain(|p| seen.insert(p.to_lowercase()));
+    out
+}
+
 /// Git-blame authors per item (RFC 0170 `RationaleLink`s an item is `ExplainedBy`).
 fn blame_authors(o: &Origins<'_>) -> HashMap<KirId, Vec<String>> {
     let rationale: HashMap<KirId, &KirObject> = o
@@ -618,6 +658,11 @@ pub fn derive(o: &Origins<'_>) -> Vec<KirObject> {
                 ("dependents", json!(deps)),
                 ("blocking", json!(d.blocking)),
                 ("addressees", json!(addressees(d, o, &authors))),
+                // What routing on read needs beside the configuration (`addressees_now`).
+                (
+                    "authors",
+                    json!(authors.get(&d.origin.id).cloned().unwrap_or_default()),
+                ),
             ] {
                 q.properties.insert(k.into(), v);
             }
@@ -985,5 +1030,29 @@ mod tests {
             .find(|q| s(q, "question_type") == "who_is_this_writer")
             .unwrap();
         assert!(s(writer, "text").contains("The database role etl writes customers (update)"));
+    }
+
+    #[test]
+    fn owners_configured_after_derivation_route_at_once() {
+        let mut q = KirObject::new("q", ObjectKind::Custom(KIND.into()));
+        for (k, v) in [
+            ("table", json!("orders")),
+            ("column", json!("status")),
+            ("addressees", json!(["blame@x", "old-reviewer"])),
+            ("authors", json!(["blame@x"])),
+        ] {
+            q.properties.insert(k.into(), v);
+        }
+        let now = Owners {
+            rules: vec![("orders.*".into(), vec!["owner@x".into()])],
+            reviewers: vec!["rev@x".into()],
+        };
+        assert_eq!(addressees_now(&q, &now), ["owner@x", "blame@x", "rev@x"]);
+        // An older question without `authors` keeps what it stored, after the owners.
+        q.properties.remove("authors");
+        assert_eq!(
+            addressees_now(&q, &now),
+            ["owner@x", "blame@x", "old-reviewer", "rev@x"]
+        );
     }
 }

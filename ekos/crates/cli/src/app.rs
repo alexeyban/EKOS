@@ -1558,7 +1558,8 @@ enum QuestionsCommands {
         #[arg(long)]
         json: bool,
     },
-    /// A questionnaire for a workshop, grouped by table: md, csv or json
+    /// A questionnaire for a workshop, grouped by table: md, csv, json, docx or xlsx (docx and
+    /// xlsx are written to --out)
     Export {
         #[arg(long, default_value = "md")]
         format: String,
@@ -1670,7 +1671,7 @@ enum ProfileCommands {
         /// Only this database
         #[arg(long)]
         database: Option<String>,
-        /// literal, temporal, monthly, conditional, keys, history, usage (comma-separated;
+        /// literal, temporal, monthly, conditional, keys, history, usage, cast (comma-separated;
         /// default all)
         #[arg(long, value_delimiter = ',')]
         signals: Vec<String>,
@@ -2182,10 +2183,15 @@ enum SqlCommands {
 enum CheckCommands {
     /// Where recovered logic assumes something the data contradicts (RFC 0254 §3.4): CASE
     /// branches that miss values, dead branches, constants outside the data's range, lookups on a
-    /// non-unique key. Recomputed from the ledger and the latest `ekos profile run`
+    /// non-unique key, joins that drop NULL rows, conversions that fail on some values.
+    /// Recomputed from the ledger and the latest `ekos profile run`
     CodeVsData {
         #[arg(long)]
         json: bool,
+        /// Print the expected row-count deltas instead (RFC 0228's reconciliation input): the
+        /// decided findings where a person said the code drops those rows on purpose
+        #[arg(long)]
+        expectations: bool,
     },
     /// References that resolve to nothing or to several objects — code, ETL and dbt into a
     /// schema, SQL routines and views to tables — with evidence, confidence and a fingerprint
@@ -2782,7 +2788,7 @@ fn emits_machine_output(command: &Commands) -> bool {
             subcommand: CheckCommands::Refs { format, .. },
         } => *format != crate::commands::check::Format::Table,
         Commands::Check {
-            subcommand: CheckCommands::Explain { json, .. } | CheckCommands::CodeVsData { json },
+            subcommand: CheckCommands::Explain { json, .. } | CheckCommands::CodeVsData { json, .. },
         } => *json,
         Commands::Sql {
             subcommand: SqlCommands::Check { json, .. } | SqlCommands::Generate { json, .. },
@@ -3058,8 +3064,8 @@ where
             crate::commands::coverage::run(&config, &cwd, json, strict, all)
         }
         Commands::Check { subcommand } => match subcommand {
-            CheckCommands::CodeVsData { json } => {
-                crate::commands::questions::check(&config, &cwd, json)
+            CheckCommands::CodeVsData { json, expectations } => {
+                crate::commands::questions::check_code_vs_data(&config, &cwd, json, expectations)
             }
             CheckCommands::Explain {
                 fingerprint,

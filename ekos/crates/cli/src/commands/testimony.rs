@@ -80,12 +80,43 @@ fn resolve<'a>(objects: &'a [KirObject], what: &str) -> Result<&'a KirObject> {
     if let Some(o) = objects.iter().find(|o| o.id.to_string() == what) {
         return Ok(o);
     }
-    let m: Vec<&KirObject> = objects.iter().filter(|o| o.name == what).collect();
+    let mut m: Vec<&KirObject> = objects.iter().filter(|o| o.name == what).collect();
+    // Versions of one object are one object.
+    m.sort_by_key(|o| o.id.to_string());
+    m.dedup_by_key(|o| o.id);
     match m.as_slice() {
         [one] => Ok(one),
         [] => bail!("nothing named {what:?} (give an id)"),
-        _ => bail!("{what:?} names {} objects; give an id", m.len()),
+        _ => bail!(
+            "{what:?} names {} objects; give one of these ids:\n{}",
+            m.len(),
+            m.iter()
+                .map(|o| candidate_line(o))
+                .collect::<Vec<_>>()
+                .join("\n")
+        ),
     }
+}
+
+/// One line per candidate: id, kind and where it is from (database, file or table).
+fn candidate_line(o: &KirObject) -> String {
+    let kind = match &o.kind {
+        ObjectKind::Custom(k) => k.clone(),
+        k => format!("{k:?}"),
+    };
+    let wherefrom = ["database", "source_path", "table", "dialect"]
+        .iter()
+        .find_map(|k| {
+            o.properties
+                .get(*k)
+                .and_then(Value::as_str)
+                .filter(|v| !v.is_empty())
+                .map(|v| format!("{k} {v}"))
+        })
+        .unwrap_or_default();
+    format!("  {}  {kind}  {wherefrom}", o.id)
+        .trim_end()
+        .to_string()
 }
 
 /// The testimony object, its evidence, and its links. Pure.
@@ -257,6 +288,11 @@ fn attach_probes(
     o: &mut KirObject,
     st: &Statement<'_>,
 ) -> Result<()> {
+    let items = if st.probes.is_empty() {
+        Vec::new()
+    } else {
+        super::semantics::items_in(config, cwd, ledger)?
+    };
     for (i, spec) in st.probes.iter().enumerate() {
         let args: Value =
             serde_json::from_str(spec).map_err(|e| anyhow!("--probe is not JSON: {e}"))?;
@@ -271,7 +307,7 @@ fn attach_probes(
                 line: None,
                 column: None,
             },
-            super::probe::evidence_text(&r),
+            super::probe::evidence_text(&r, &super::probe::code_values_of(&items, &r)),
         );
         pe.id = kid(&format!("{}:probe:{i}", o.id));
         ledger.append_evidence(&pe)?;
@@ -637,5 +673,26 @@ mod tests {
         a.properties.insert("updated_at".into(), json!("0001"));
         let objs = vec![b.clone(), a];
         assert_eq!(s(current(&objs)[0], "status"), "withdrawn");
+    }
+
+    /// QA: an ambiguous `--about` lists the ids to choose from.
+    #[test]
+    fn an_ambiguous_name_lists_its_candidates() {
+        let mut a = KirObject::new("orders", ObjectKind::Table);
+        a.properties.insert("database".into(), json!("erp"));
+        let mut b = KirObject::new("orders", ObjectKind::Table);
+        b.properties.insert("database".into(), json!("ch"));
+        let objects = vec![a.clone(), b.clone(), a.clone()];
+        let e = resolve(&objects, "orders").unwrap_err().to_string();
+        assert!(e.contains("names 2 objects"), "{e}");
+        assert!(
+            e.contains(&a.id.to_string()) && e.contains(&b.id.to_string()),
+            "{e}"
+        );
+        assert!(
+            e.contains("database erp") && e.contains("database ch"),
+            "{e}"
+        );
+        assert_eq!(resolve(&objects, &b.id.to_string()).unwrap().id, b.id);
     }
 }

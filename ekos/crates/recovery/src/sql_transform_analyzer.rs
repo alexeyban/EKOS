@@ -126,7 +126,7 @@ impl CompilerPass for SqlTransformAnalyzerPass {
     /// `v4` = RFC 0257: nodes of a view/routine record their `owner` and body `statement`.
     fn version(&self) -> &str {
         // Includes `PREDICATES_VERSION`: a top-level SELECT's graph carries `predicates`.
-        "v4+predicates/4"
+        "v4+predicates/8"
     }
 
     fn cache_inputs(&self) -> Vec<String> {

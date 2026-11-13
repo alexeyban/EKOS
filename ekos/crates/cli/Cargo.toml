@@ -88,6 +88,7 @@ ekos-plugin-postgres.workspace = true
 ekos-plugin-sqlserver.workspace = true
 ekos-plugin-informix.workspace = true
 ekos-plugin-localdocs.workspace = true
+zip = { version = "9", default-features = false, features = ["deflate"] }
 ekos-plugin-pentaho.workspace = true
 ekos-plugin-python.workspace = true
 ekos-plugin-rust.workspace = true

@@ -31,8 +31,10 @@ use ekos_observation_sdk::profile::Flavor;
 use ekos_observation_sdk::signals::{self, Coverage};
 use ekos_observation_sdk::usage::{self, TableName};
 use ekos_semantic::business_semantics::{self, ENUM_MEANING, GAP};
+use ekos_semantic::code_vs_data::CastTarget;
 use ekos_semantic::data_usage::{
-    ColumnSignal, DataSignals, GrainSignal, HistorySignal, ImplicationSignal, UsageSignal,
+    ColumnSignal, ConformanceSignal, DataSignals, GrainSignal, HistorySignal, ImplicationSignal,
+    UsageSignal,
 };
 use ekos_sqlgen::probe::Probe;
 use serde_json::{Value, json};
@@ -390,6 +392,7 @@ struct Measured {
     implications: Vec<ImplicationSignal>,
     history: Vec<HistorySignal>,
     usage: Vec<UsageSignal>,
+    conformance: Vec<ConformanceSignal>,
     errors: Vec<Value>,
 }
 
@@ -443,6 +446,38 @@ impl Measure<'_> {
         }
     }
 
+    /// RFC 0254 §3.4: per text column code converts, the values that would not convert. Counts.
+    fn conformance(&mut self, target: &CastTarget) -> Option<ConformanceSignal> {
+        let sql = signals::conformance_sql(
+            self.flavor,
+            &target.owner,
+            &target.table,
+            &target.column,
+            &target.class,
+            target.format.as_deref(),
+        );
+        let r = sql
+            .and_then(|q| self.probe.preview(&q, 1))
+            .and_then(|r| r.single_number().ok_or_else(|| "no counts".to_string()));
+        match r {
+            Ok(n) if n.len() == 2 => Some(ConformanceSignal {
+                database: target.database.clone(),
+                owner: target.owner.clone(),
+                table: target.table.clone(),
+                column: target.column.clone(),
+                class: target.class.clone(),
+                format: target.format.clone(),
+                non_null: n[0],
+                failing: n[1],
+            }),
+            Ok(_) => None,
+            Err(e) => {
+                self.fail(&target.owner, &target.table, "cast", &e);
+                None
+            }
+        }
+    }
+
     fn history(&mut self, t: &KirObject) -> Vec<HistorySignal> {
         let (owner, table) = (s(t, "owner"), t.name.as_str());
         let mut out = Vec::new();
@@ -466,6 +501,43 @@ impl Measure<'_> {
         }
         out
     }
+}
+
+/// RFC 0254 §3.4: the conversions code applies to `database`'s text columns, measured into
+/// `out`. Returns how many could not be measured.
+fn measure_conversions(
+    m: &mut Measure<'_>,
+    objects: &[KirObject],
+    database: &str,
+    max_rows: i64,
+    out: &mut Vec<ConformanceSignal>,
+) -> usize {
+    let mut not_measurable = 0usize;
+    for target in ekos_semantic::code_vs_data::cast_targets(objects)
+        .iter()
+        .filter(|c| c.database == database)
+    {
+        // A conversion whose rules EKOS cannot state as a pattern (a number format: engines
+        // read `to_number(x, '999.99')` each their own way; Informix) is left unmeasured.
+        let measurable = match m.flavor {
+            Flavor::SqlServer => target.format.is_none(),
+            Flavor::Informix => false,
+            _ => signals::conformance_pattern(&target.class, target.format.as_deref()).is_some(),
+        };
+        if !measurable {
+            not_measurable += 1;
+            continue;
+        }
+        let rows = live_tables(objects, database)
+            .into_iter()
+            .find(|t| t.name == target.table && s(t, "owner") == target.owner)
+            .and_then(known_rows);
+        if max_rows > 0 && rows.is_some_and(|n| n > max_rows) {
+            continue;
+        }
+        out.extend(m.conformance(target));
+    }
+    not_measurable
 }
 
 /// One database: coverage and implications per coded column, grain and history per table.
@@ -540,10 +612,22 @@ fn measure_database(
             out.history.extend(m.history(t));
         }
     }
+    let not_measurable = if wants(opts, "cast") {
+        measure_conversions(
+            &mut m,
+            objects,
+            &db.name,
+            opts.max_rows,
+            &mut out.conformance,
+        )
+    } else {
+        0
+    };
     report.push(json!({
         "database": db.name, "tier": tier, "columns": out.columns.len(), "tables": out.grain.len(),
         "implications": out.implications.len(), "history_patterns": out.history.len(),
         "usage_tables": out.usage.len(), "usage_sources": usage_report,
+        "conversions": out.conformance.len(), "conversions_not_measurable": not_measurable,
         "skipped_large": skipped, "errors": m.errors.len(),
     }));
     out.errors = m.errors;
@@ -646,6 +730,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
         all.implications.extend(m.implications);
         all.history.extend(m.history);
         all.usage.extend(m.usage);
+        all.conformance.extend(m.conformance);
         all.errors.extend(m.errors);
     }
     // M5 (QA): a column following a declared foreign key (in any database: a copy keeps the
@@ -689,6 +774,12 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
             .extend(prev.history.iter().filter(|h| keep(&h.database)).cloned());
         all.usage
             .extend(prev.usage.iter().filter(|u| keep(&u.database)).cloned());
+        all.conformance.extend(
+            prev.conformance
+                .iter()
+                .filter(|c| keep(&c.database))
+                .cloned(),
+        );
         let prev_ids = grain_ids(config, cwd).unwrap_or_default();
         kept_ids = objects
             .iter()
@@ -705,6 +796,7 @@ pub async fn run(config: &EkosConfig, cwd: &Path, opts: RunOpts<'_>) -> Result<(
         implications: all.implications,
         history: all.history,
         usage: all.usage,
+        conformance: all.conformance,
     };
     let mut grain_ids = write_grain(&*ledger, &objects, &signals)?;
     for id in kept_ids {

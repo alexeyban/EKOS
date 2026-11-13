@@ -608,7 +608,11 @@ fn code_row(m: &Model, o: &KirObject, t: &KirObject) -> Vec<String> {
     vec![
         code(prop(o, "column").unwrap_or("")),
         code(prop(o, "value").unwrap_or("")),
-        meaning.unwrap_or_else(|| "_unknown_".into()),
+        meaning.unwrap_or_else(|| match label {
+            // QA: a meaning exists but its source's licence does not let its text be shown.
+            Some(_) => "_withheld: source licence unknown_".into(),
+            None => "_unknown_".into(),
+        }),
         cell(stated_by),
         share,
         first,

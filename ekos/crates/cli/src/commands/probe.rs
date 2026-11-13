@@ -16,6 +16,7 @@ use ekos_kir::{KirObject, ObjectKind};
 use ekos_ledger::KnowledgeReader;
 use ekos_observation_sdk::probe::{self, Probe};
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -231,19 +232,55 @@ pub fn run(
 
 /// The aggregate of a probe as stored evidence when a person saves a proposal that cited it: the
 /// counts only — every value cell is dropped, so a stored measurement holds no source value.
-pub fn evidence_text(result: &Value) -> String {
-    let counts: Vec<Value> = result["rows"]
+pub fn evidence_text(result: &Value, code_values: &[BTreeSet<String>]) -> String {
+    let rows: Vec<Value> = result["rows"]
         .as_array()
         .into_iter()
         .flatten()
-        .map(|r| r["counts"].clone())
+        .map(|r| {
+            // A value cell survives only when it is a value code names for that column (RFC 0252:
+            // no data value but a code literal leaves the database); everything else is dropped.
+            let labels: Vec<Value> = r["values"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(i, v)| match v.as_str() {
+                    Some(t) if code_values.get(i).is_some_and(|c| c.contains(t)) => json!(t),
+                    _ => Value::Null,
+                })
+                .collect();
+            if labels.iter().any(|l| !l.is_null()) {
+                json!({"code_values": labels, "counts": r["counts"]})
+            } else {
+                r["counts"].clone()
+            }
+        })
         .collect();
     json!({
         "measured": "ekos_probe (RFC 0254 §3.5), re-run on save",
         "database": result["database"], "table": result["table"], "probe": result["probe"],
-        "counts": counts,
+        "counts": rows,
     })
     .to_string()
+}
+
+/// For each value column of the probe in `result`, the values code names for it (normalized as a
+/// database renders them) — what [`evidence_text`] may keep beside a count.
+pub fn code_values_of(items: &[KirObject], result: &Value) -> Vec<BTreeSet<String>> {
+    let Ok(p) = serde_json::from_value::<Probe>(result["probe"].clone()) else {
+        return Vec::new();
+    };
+    let table = result["table"].as_str().unwrap_or("");
+    probe::value_columns(&p)
+        .iter()
+        .map(|c| {
+            super::profile::code_literals_for(items, table, c)
+                .iter()
+                .map(|l| ekos_observation_sdk::signals::literal_text(l))
+                .collect()
+        })
+        .collect()
 }
 
 /// `ekos probe --spec '<json>'`.
@@ -263,8 +300,43 @@ mod tests {
     fn stored_evidence_keeps_counts_and_drops_values() {
         let r = json!({"database": "erp", "table": "public.orders", "probe": {"template": "distribution"},
                        "rows": [{"values": ["SECRET-VALUE"], "counts": [12]}]});
-        let e = evidence_text(&r);
+        let e = evidence_text(&r, &[]);
         assert!(e.contains("12") && !e.contains("SECRET-VALUE"), "{e}");
+    }
+
+    /// QA: a count is kept with its code label — a value code names is not a data value.
+    #[test]
+    fn stored_evidence_keeps_the_code_label_of_a_count() {
+        let r = json!({"database": "erp", "table": "public.orders",
+                       "probe": {"template": "distribution", "column": "status"},
+                       "rows": [{"values": ["3"], "counts": [40]},
+                                {"values": ["SECRET-VALUE"], "counts": [12]},
+                                {"values": ["<5 rows"], "counts": ["<5"]}]});
+        let codes = vec![BTreeSet::from(["3".to_string(), "7".to_string()])];
+        let e: Value = serde_json::from_str(&evidence_text(&r, &codes)).unwrap();
+        assert_eq!(
+            e["counts"][0],
+            json!({"code_values": ["3"], "counts": [40]})
+        );
+        assert_eq!(e["counts"][1], json!([12]));
+        assert_eq!(e["counts"][2], json!(["<5"]));
+        assert!(!e.to_string().contains("SECRET-VALUE"));
+    }
+
+    #[test]
+    fn the_code_values_of_a_probe_are_the_literals_code_names_for_its_columns() {
+        let mut m = KirObject::new(
+            "orders.status = 3",
+            ObjectKind::Custom("EnumMeaning".into()),
+        );
+        for (k, v) in [("table", "orders"), ("column", "status"), ("value", "'A'")] {
+            m.properties.insert(k.into(), json!(v));
+        }
+        let r = json!({"table": "public.orders", "probe": {"template": "distribution", "column": "status"}});
+        assert_eq!(
+            code_values_of(&[m], &r),
+            vec![BTreeSet::from(["A".to_string()])]
+        );
     }
 
     /// RFC 0254 §3.5: the `source-explorer` agent has no write tool.

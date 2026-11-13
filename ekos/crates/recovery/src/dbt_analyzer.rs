@@ -669,7 +669,7 @@ impl CompilerPass for DbtAnalyzerPass {
     /// `v2` = documented columns carry description, type and dbt tests.
     fn version(&self) -> &str {
         // Includes `PREDICATES_VERSION`: a model carries `predicates`.
-        "v5+predicates/4"
+        "v5+predicates/8"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -884,6 +884,7 @@ where o.oe_class_id = 1 and a.account_number = '{{ var(\"acc_ar\") }}'\n  and o.
         assert_eq!(used.get("'1200'"), Some(&"acc_ar".to_string()));
         let c: Vec<(String, u64)> = model_predicates(&rendered)
             .iter()
+            .filter(|p| !p.clause.is_structural())
             .map(|p| (p.canonical(), p.line))
             .collect();
         assert_eq!(

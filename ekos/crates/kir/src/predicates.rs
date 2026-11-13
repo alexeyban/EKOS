@@ -24,7 +24,34 @@ pub enum Clause {
     /// columns carry the placeholder relations [`NEW_ROW`]/[`OLD_ROW`] until synthesis maps them to
     /// the table of the trigger that runs the routine.
     Condition,
+    /// RFC 0254 §3.4: an equality between two columns of different relations that drops a row
+    /// when either side is NULL — an inner `JOIN … ON a.x = b.y`, or the same equality as a
+    /// top-level `WHERE` conjunct. One site per side: `column` is this side, `values` holds the
+    /// other side (`relation.column`, or the bare column when unresolved), `op` is `=`, and
+    /// `null_handled` says whether the statement deals with NULL in this column. Not a business
+    /// rule: meaning synthesis skips it ([`Clause::is_structural`]).
+    Join,
+    /// RFC 0254 §3.4: a column converted to a non-text type — `CAST(c AS date)`, `c::numeric`,
+    /// `to_date(c, 'YYYY-MM-DD')`, `to_number(c)`. `op` is `cast`; `values` holds the target class
+    /// (`date` or `number`) and, for a conversion with a format literal, that format. A `TRY_CAST`
+    /// or a conversion inside a `CASE` whose condition tests the same column is guarded and not
+    /// recorded. Not a business rule ([`Clause::is_structural`]).
+    Cast,
 }
+
+impl Clause {
+    /// A structural site (a join equality, a cast): a fact about how code handles a column, not a
+    /// comparison with a literal. Meaning synthesis reads only the others.
+    pub fn is_structural(self) -> bool {
+        matches!(self, Clause::Join | Clause::Cast)
+    }
+}
+
+/// `op` of a [`Clause::Cast`] site.
+pub const CAST_OP: &str = "cast";
+/// Target classes of a [`Clause::Cast`] site.
+pub const CAST_DATE: &str = "date";
+pub const CAST_NUMBER: &str = "number";
 
 /// Placeholder relation of `NEW.col` in a routine's condition (resolved via its trigger).
 pub const NEW_ROW: &str = "$new";
@@ -66,6 +93,11 @@ pub struct PredicateSite {
     /// no branch matches becomes NULL). `None` when not recorded (older extractions).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub case_else: Option<bool>,
+    /// For a [`Clause::Join`] site: whether the statement handles NULL in this column (an
+    /// `IS [NOT] NULL` test, `COALESCE`/`NVL`/`IFNULL`/`ISNULL` over it, or `IS [NOT] DISTINCT
+    /// FROM`). `None` for every other site.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub null_handled: Option<bool>,
     /// 1-based line within the parsed text (0 when the parser recorded none).
     pub line: u64,
 }

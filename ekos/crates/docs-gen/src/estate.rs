@@ -303,9 +303,18 @@ struct Model<'a> {
 /// Which table object documents a name: live first, then a DDL table with a dialect (never a
 /// table recovered from a PDF), the `oracle` dialect before others, then the lowest id.
 fn better(a: &KirObject, b: &KirObject) -> bool {
+    // Of two live copies of one table (the source and a ClickHouse copy), the one that declares a
+    // primary key: an engine without declared keys (QA) would show the page with none.
+    let declares_keys = |o: &KirObject| {
+        o.properties
+            .get("primary_key")
+            .and_then(Value::as_array)
+            .is_some_and(|a| !a.is_empty())
+    };
     let rank = |o: &KirObject| {
         (
             prop(o, "origin") != Some("live"),
+            !declares_keys(o),
             prop(o, "dialect") != Some("oracle"),
             o.id.to_string(),
         )
@@ -361,8 +370,16 @@ impl<'a> Model<'a> {
         }
         m.tables = tables.into_iter().collect();
         let by_id: HashMap<KirId, &KirObject> = input.objects.iter().map(|o| (o.id, o)).collect();
-        let chosen: HashMap<KirId, String> =
-            m.tables.iter().map(|(k, o)| (o.id, k.clone())).collect();
+        // Every copy of a documented table maps to its page: a foreign key the source declares
+        // is shown even when another database's copy is the one documented (QA).
+        let chosen: HashMap<KirId, String> = input
+            .objects
+            .iter()
+            .filter(|o| o.kind == ObjectKind::Table)
+            .filter(|o| prop(o, "origin") == Some("live") || prop(o, "dialect").is_some())
+            .map(|o| (o.id, table_key(&o.name)))
+            .filter(|(_, k)| m.tables.contains_key(k))
+            .collect();
         let mut seen = BTreeSet::new();
         for r in input.relationships {
             m.add_relationship(r, &by_id, &chosen, &mut seen);
@@ -2026,6 +2043,32 @@ mod tests {
         assert!(body(&pages, "logic/documentno.md").contains("**Reads:**"));
     }
 
+    /// QA: a table in two databases (the source and a ClickHouse copy, which declares no keys)
+    /// keeps the source's foreign keys and primary key on its page, whichever id sorts first.
+    #[test]
+    fn a_copy_without_keys_does_not_hide_the_sources_keys() {
+        for copy_id in [uuid::Uuid::nil(), uuid::Uuid::max()] {
+            let (mut o, r) = fixture();
+            // Two engines neither of which is Oracle (PostgreSQL and ClickHouse): no dialect
+            // preference decides between them.
+            for x in o.iter_mut().filter(|x| x.name == "C_ORDER") {
+                x.properties.insert("dialect".into(), json!("postgres"));
+            }
+            let mut copy = obj(
+                ObjectKind::Table,
+                "C_ORDER",
+                json!({"origin": "live", "database": "ch", "owner": "default",
+                       "columns": [{"name": "C_ORDER_ID", "data_type": "Int64"}]}),
+            );
+            copy.id = KirId(copy_id);
+            o.push(copy);
+            let pages = render(&o, &r);
+            let order = body(&pages, "data-model/c/c_order.md");
+            assert!(order.contains("C_BPARTNER ||--o{ C_ORDER"), "{order}");
+            assert!(order.contains("read from database `db`"), "{order}");
+        }
+    }
+
     #[test]
     fn nested_statements_are_listed_in_source_order() {
         let (mut o, mut r) = fixture();
@@ -2581,7 +2624,11 @@ mod tests {
         }
         let pages = render_passport(&o, &r, &p);
         let page = body(&pages, "data-model/c/c_order.md");
-        assert!(page.contains("| `CO` | _unknown_ |"), "{page}");
+        // QA: withheld by the licence gate, not unknown.
+        assert!(
+            page.contains("| `CO` | _withheld: source licence unknown_ |"),
+            "{page}"
+        );
         assert!(!page.contains("Completed"), "{page}");
     }
 

@@ -463,6 +463,119 @@ pub fn suppress_small(
         .collect()
 }
 
+// ── Conformance to a conversion (RFC 0254 §3.4 `cast_will_fail`) ──────────────────────────────
+
+/// The class of a conversion code applies to a text column: to a date, or to a number.
+pub const CONVERT_DATE: &str = "date";
+pub const CONVERT_NUMBER: &str = "number";
+
+const SPACE: &str = "[[:space:]]*";
+
+/// The extended regular expression a text must match to convert to `class` — in the subset
+/// PostgreSQL, Oracle and ClickHouse (RE2) read alike: no backslash, `[[:space:]]`, bounded
+/// repeats. Without a format a date is ISO 8601 (`2024-01-31`, with an optional time); with one,
+/// each Oracle/PostgreSQL format token becomes its digits. `None` when the class or a format token
+/// is not understood — then nothing is measured, never a guess.
+pub fn conformance_pattern(class: &str, format: Option<&str>) -> Option<String> {
+    match (class, format) {
+        (CONVERT_NUMBER, None) => Some(format!(
+            "^{SPACE}[-+]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][-+]?[0-9]+)?{SPACE}$"
+        )),
+        (CONVERT_DATE, None) => Some(format!(
+            "^{SPACE}[0-9]{{4}}-[0-9]{{1,2}}-[0-9]{{1,2}}([ T][0-9]{{1,2}}:[0-9]{{2}}(:[0-9]{{2}}([.][0-9]+)?)?)?{SPACE}$"
+        )),
+        (CONVERT_DATE, Some(f)) => date_format_pattern(f).map(|p| format!("^{SPACE}{p}{SPACE}$")),
+        _ => None,
+    }
+}
+
+/// An Oracle/PostgreSQL date format (`DD.MM.YYYY HH24:MI`) as a regular expression.
+fn date_format_pattern(format: &str) -> Option<String> {
+    // Longest tokens first, so `YYYY` is not read as two `YY`s and `HH24` not as `HH` + `24`.
+    const TOKENS: &[(&str, &str)] = &[
+        ("YYYY", "[0-9]{4}"),
+        ("HH24", "[0-9]{1,2}"),
+        ("HH12", "[0-9]{1,2}"),
+        ("MONTH", "[A-Za-z]{3,9}"),
+        ("YY", "[0-9]{2}"),
+        ("RR", "[0-9]{2}"),
+        ("MM", "[0-9]{1,2}"),
+        ("DD", "[0-9]{1,2}"),
+        ("HH", "[0-9]{1,2}"),
+        ("MI", "[0-9]{1,2}"),
+        ("SS", "[0-9]{1,2}"),
+        ("FF", "[0-9]+"),
+        ("MON", "[A-Za-z]{3}"),
+        ("AM", "([AaPp][Mm])"),
+        ("PM", "([AaPp][Mm])"),
+    ];
+    let upper = format.to_ascii_uppercase();
+    let mut rest = upper.as_str();
+    let mut out = String::new();
+    'outer: while !rest.is_empty() {
+        for (tok, re) in TOKENS {
+            if let Some(r) = rest.strip_prefix(tok) {
+                out.push_str(re);
+                rest = r;
+                continue 'outer;
+            }
+        }
+        let c = rest.chars().next()?;
+        match c {
+            '-' | '/' | ':' | ',' | ';' => out.push(c),
+            '.' => out.push_str("[.]"),
+            ' ' => out.push_str("[[:space:]]+"),
+            _ => return None,
+        }
+        rest = &rest[c.len_utf8()..];
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// `non-null rows, rows that do not convert` of a text column, for a conversion to `class`
+/// (with `format`, if code gives one). Counts only: no value leaves the database. SQL Server has
+/// no regular expressions: it is asked whether its own `TRY_CONVERT` would succeed (no format).
+/// Informix is not measured.
+pub fn conformance_sql(
+    flavor: Flavor,
+    owner: &str,
+    table: &str,
+    column: &str,
+    class: &str,
+    format: Option<&str>,
+) -> Result<String, String> {
+    let tbl = profile::table_ref(flavor, owner, table)?;
+    let col = profile::ident(flavor, column)?;
+    let fails = match flavor {
+        Flavor::SqlServer => {
+            if format.is_some() {
+                return Err("a conversion with a format is not measured on SQL Server".into());
+            }
+            let target = match class {
+                CONVERT_NUMBER => "float",
+                CONVERT_DATE => "datetime2",
+                other => return Err(format!("no conversion class {other:?}")),
+            };
+            format!("TRY_CONVERT({target}, {col}) IS NULL")
+        }
+        Flavor::Informix => return Err("conformance is not measured on Informix".into()),
+        _ => {
+            let re = conformance_pattern(class, format)
+                .ok_or_else(|| format!("the conversion {class} {format:?} is not understood"))?;
+            let re = sql_string(flavor, &re);
+            match flavor {
+                Flavor::Postgres => format!("NOT ({} ~ {re})", as_text(flavor, &col)),
+                Flavor::Oracle => format!("NOT REGEXP_LIKE({col}, {re})"),
+                _ => format!("NOT match({}, {re})", as_text(flavor, &col)),
+            }
+        }
+    };
+    let n = count(flavor);
+    Ok(format!(
+        "SELECT {n}, SUM(CASE WHEN {fails} THEN 1 ELSE 0 END) FROM {tbl} WHERE {col} IS NOT NULL"
+    ))
+}
+
 // ── Conditional profile (c) ────────────────────────────────────────────────────────────────
 
 /// Rows a value needs before an implication about it is reported.
@@ -1206,5 +1319,44 @@ mod tests {
             "SELECT COUNT(*) FROM (SELECT DISTINCT \"C_ORDER_ID\", \"LINE\" FROM \"ADEMPIERE\".\"C_ORDERLINE\" \
              WHERE \"C_ORDER_ID\" IS NOT NULL AND \"LINE\" IS NOT NULL) d"
         );
+    }
+
+    #[test]
+    fn conformance_patterns_and_queries_return_counts_only() {
+        let re = regex_lite_match;
+        let num = conformance_pattern(CONVERT_NUMBER, None).unwrap();
+        for ok in ["12", " -3.5 ", "1e9", ".5"] {
+            assert!(re(&num)(ok), "{ok}");
+        }
+        for bad in ["12a", "1,5", "", "N/A"] {
+            assert!(!re(&num)(bad), "{bad}");
+        }
+        let iso = conformance_pattern(CONVERT_DATE, None).unwrap();
+        assert!(re(&iso)("2024-01-31") && re(&iso)("2024-1-3 10:15:00"));
+        assert!(!re(&iso)("31.01.2024") && !re(&iso)("tomorrow"));
+        let de = conformance_pattern(CONVERT_DATE, Some("DD.MM.YYYY")).unwrap();
+        assert!(re(&de)("31.01.2024") && !re(&de)("2024-01-31"));
+        assert!(conformance_pattern(CONVERT_DATE, Some("\"Q\"YYYY")).is_none());
+        let pg = conformance_sql(Flavor::Postgres, "public", "t", "d", CONVERT_DATE, None).unwrap();
+        assert!(
+            pg.starts_with("SELECT count(*), SUM(CASE WHEN NOT (\"d\"::text ~ '^"),
+            "{pg}"
+        );
+        assert!(pg.ends_with("WHERE \"d\" IS NOT NULL"), "{pg}");
+        let ora = conformance_sql(Flavor::Oracle, "ERP", "T", "D", CONVERT_NUMBER, None).unwrap();
+        assert!(ora.contains("NOT REGEXP_LIKE("), "{ora}");
+        let ms = conformance_sql(Flavor::SqlServer, "dbo", "t", "d", CONVERT_NUMBER, None).unwrap();
+        assert!(ms.contains("TRY_CONVERT(float, "), "{ms}");
+        assert!(conformance_sql(Flavor::Informix, "o", "t", "d", CONVERT_NUMBER, None).is_err());
+        for f in [Flavor::Postgres, Flavor::Oracle, Flavor::ClickHouse] {
+            let q = conformance_sql(f, "o", "t", "d", CONVERT_DATE, Some("YYYY-MM-DD")).unwrap();
+            assert!(!q.contains('\\'), "no backslash in a pattern: {q}");
+        }
+    }
+
+    /// The patterns read the same in the `regex` crate (RE2 syntax, as ClickHouse's).
+    fn regex_lite_match(pattern: &str) -> impl Fn(&str) -> bool + use<> {
+        let re = regex::Regex::new(pattern).expect("a valid pattern");
+        move |text: &str| re.is_match(text)
     }
 }

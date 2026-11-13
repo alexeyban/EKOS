@@ -6,8 +6,12 @@
 //! `sqlparser` AST — never from regexes over text — and **normalizes** them, so `status IN (1,3)`,
 //! `status = 1 OR status = 3` and `3 = status OR status = 1` are one predicate.
 //!
-//! Only column-vs-literal comparisons are kept. A comparison against a column, a PL/pgSQL variable
-//! or a parameter (`id = in_id`) is plumbing, not a business rule, and contributes nothing.
+//! Only column-vs-literal comparisons are kept as business rules. A comparison against a PL/pgSQL
+//! variable or a parameter (`id = in_id`) is plumbing and contributes nothing. Two kinds of
+//! *structural* site are recorded beside them for RFC 0254's code-vs-data checks (never read as a
+//! meaning, [`Clause::is_structural`]): an equality between columns of two relations that drops
+//! rows holding NULL ([`Clause::Join`]), and a column converted to a date or a number
+//! ([`Clause::Cast`]).
 //!
 //! Columns are resolved to the relation they belong to through the enclosing `SELECT`'s `FROM`
 //! aliases (or the `UPDATE`/`DELETE` target). An unqualified column resolves only when exactly one
@@ -25,9 +29,15 @@ use std::ops::ControlFlow;
 /// `2` = RFC 0170: filters through CTEs and derived tables restated on base tables.
 /// `3` = a `CASE` result labels a code only when it depends on that code alone and the `CASE` does
 /// not rewrite the column into its own codes (RFC 0172 found `'A'` → `'L'` read as a label).
-pub const PREDICATES_VERSION: &str = "predicates/4";
+/// `4` = a `CASE` branch records whether its `CASE` has an `ELSE` (RFC 0254).
+/// `5`–`8` = RFC 0254 §3.4: structural sites — equality joins between two of the statement's own
+/// resolved relations (with `null_handled`) and casts (not of a relation its `WHERE` filters by a
+/// literal); `5`–`7` were intermediate versions of the same change, never released.
+pub const PREDICATES_VERSION: &str = "predicates/8";
 
-pub use ekos_kir::predicates::{Clause, NEW_ROW, OLD_ROW, PredicateSite, canonical_text};
+pub use ekos_kir::predicates::{
+    CAST_DATE, CAST_NUMBER, CAST_OP, Clause, NEW_ROW, OLD_ROW, PredicateSite, canonical_text,
+};
 
 /// Every predicate in a parsed statement (nested queries included).
 pub fn statement_predicates(stmt: &Statement) -> Vec<PredicateSite> {
@@ -296,6 +306,7 @@ fn site(col: Col, op: &str, values: Vec<String>, clause: Clause) -> PredicateSit
         subquery: false,
         label: None,
         case_else: None,
+        null_handled: None,
         line,
     }
 }
@@ -689,6 +700,14 @@ struct Collector {
     /// subquery's.
     depth: usize,
     out: Vec<PredicateSite>,
+    /// Columns tested by the conditions of the `CASE`s currently open: a cast in such a `CASE`'s
+    /// branch is guarded by that test (`CASE WHEN c ~ '^[0-9]+$' THEN c::int END`).
+    guards: Vec<BTreeSet<(Option<String>, String)>>,
+    /// Per open query (or `UPDATE`/`DELETE`): the relations its `WHERE` filters by a literal at the
+    /// top level. A conversion of such a relation's column applies to the filtered rows only
+    /// (`SELECT value::int FROM defaults WHERE setting_key = 'x'`), which a whole-column
+    /// measurement cannot speak for, so it is not recorded.
+    filtered: Vec<BTreeSet<String>>,
 }
 
 impl Collector {
@@ -702,6 +721,7 @@ impl Collector {
         let found: Vec<PredicateSite> = found
             .into_iter()
             .map(|s| self.through_derived(PredicateSite { subquery, ..s }))
+            .map(unmark_structural)
             .collect();
         self.out.extend(found);
     }
@@ -777,10 +797,18 @@ impl Collector {
         if let Some(h) = &s.having {
             conjuncts(h, scope, Clause::Having, &mut found);
         }
+        let handled = null_handled_columns(s, scope);
+        if let Some(w) = &s.selection {
+            join_sites(w, scope, &handled, &mut found);
+        }
         for t in &s.from {
             for j in &t.joins {
                 if let Some(JoinConstraint::On(on)) = join_constraint(&j.join_operator) {
                     conjuncts(on, scope, Clause::JoinOn, &mut found);
+                    // An outer join keeps the rows a NULL fails to match; an inner one drops them.
+                    if matches!(j.join_operator, JoinOperator::Inner(_)) {
+                        join_sites(on, scope, &handled, &mut found);
+                    }
                 }
             }
         }
@@ -828,19 +856,23 @@ impl Visitor for Collector {
         let mut found = Vec::new();
         selects(&q.body, &mut found);
         let mut scope = Scope::default();
+        let mut filtered = BTreeSet::new();
         for s in &found {
             let mut own = Scope::default();
             own.add_from(&s.from);
             self.select(s, &own);
+            filtered.extend(literal_filtered(s.selection.as_ref(), &own));
             scope.add_from(&s.from);
         }
         self.scopes.push(scope);
+        self.filtered.push(filtered);
         self.depth += 1;
         ControlFlow::Continue(())
     }
 
     fn post_visit_query(&mut self, _q: &Query) -> ControlFlow<()> {
         self.scopes.pop();
+        self.filtered.pop();
         self.depth -= 1;
         ControlFlow::Continue(())
     }
@@ -873,17 +905,23 @@ impl Visitor for Collector {
         if let Some(w) = selection {
             let mut found = Vec::new();
             conjuncts(w, &scope, Clause::Where, &mut found);
+            // `UPDATE … FROM` / `DELETE … USING`: a column equality in the WHERE is an inner join.
+            let mut handled = BTreeSet::new();
+            null_tests(w, &scope, &mut handled);
+            join_sites(w, &scope, &handled, &mut found);
             self.take(found);
         }
         if is_filtered_dml(s) {
             self.depth += 1;
         }
+        self.filtered.push(literal_filtered(selection, &scope));
         self.scopes.push(scope);
         ControlFlow::Continue(())
     }
 
     fn post_visit_statement(&mut self, s: &Statement) -> ControlFlow<()> {
         self.scopes.pop();
+        self.filtered.pop();
         if is_filtered_dml(s) {
             self.depth -= 1;
         }
@@ -891,7 +929,7 @@ impl Visitor for Collector {
     }
 
     fn pre_visit_expr(&mut self, e: &Expr) -> ControlFlow<()> {
-        if matches!(e, Expr::Case { .. }) {
+        if let Expr::Case { conditions, .. } = e {
             let scope = self.scopes.last().cloned().unwrap_or_default();
             let mut found = Vec::new();
             case_sites(e, &scope, &mut found);
@@ -899,8 +937,243 @@ impl Visitor for Collector {
             let subquery = self.depth > 1;
             self.out
                 .extend(found.into_iter().map(|s| PredicateSite { subquery, ..s }));
+            let mut tested = BTreeSet::new();
+            for c in conditions {
+                let _ = sqlparser::ast::visit_expressions(c, |x| {
+                    if let Some(col) = scope.resolve(x) {
+                        tested.insert((col.relation, col.column));
+                    }
+                    ControlFlow::<()>::Continue(())
+                });
+            }
+            self.guards.push(tested);
+        }
+        if let Some((col, target)) = self
+            .scopes
+            .last()
+            .and_then(|scope| cast_target(e).and_then(|(x, t)| Some((scope.resolve(x)?, t))))
+        {
+            let key = (col.relation.clone(), col.column.clone());
+            let on_filtered_rows = col
+                .relation
+                .as_ref()
+                .is_some_and(|r| self.filtered.last().is_some_and(|f| f.contains(r)));
+            if !on_filtered_rows && !self.guards.iter().any(|g| g.contains(&key)) {
+                let subquery = self.depth > 1;
+                let s = PredicateSite {
+                    subquery,
+                    ..site(col, CAST_OP, target, Clause::Cast)
+                };
+                let s = unmark_structural(self.through_derived(s));
+                self.out.push(s);
+            }
         }
         ControlFlow::Continue(())
+    }
+
+    fn post_visit_expr(&mut self, e: &Expr) -> ControlFlow<()> {
+        if matches!(e, Expr::Case { .. }) {
+            self.guards.pop();
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+// ── Structural sites (RFC 0254 §3.4) ────────────────────────────────────────────────────────
+
+type ColKey = (Option<String>, String);
+
+/// Columns `e` tests for NULL or replaces when NULL: `IS [NOT] NULL`, `IS [NOT] DISTINCT FROM`,
+/// and the arguments of `COALESCE`/`NVL`/`NVL2`/`IFNULL`/`ISNULL`. Subqueries are walked too: a
+/// column handled anywhere in the statement counts as handled (a finding must not be a guess).
+fn null_tests(e: &Expr, scope: &Scope, out: &mut BTreeSet<ColKey>) {
+    let mut add = |x: &Expr| {
+        if let Some(c) = scope.resolve(x) {
+            out.insert((c.relation, c.column));
+        }
+    };
+    let _ = sqlparser::ast::visit_expressions(e, |x| {
+        match x {
+            Expr::IsNull(a) | Expr::IsNotNull(a) => add(a),
+            Expr::IsDistinctFrom(a, b) | Expr::IsNotDistinctFrom(a, b) => {
+                add(a);
+                add(b);
+            }
+            Expr::Function(f) => {
+                let name = object_name(&f.name);
+                let short = name.rsplit('.').next().unwrap_or(&name);
+                if matches!(short, "coalesce" | "nvl" | "nvl2" | "ifnull" | "isnull") {
+                    for a in function_args(f) {
+                        add(a);
+                    }
+                }
+            }
+            _ => {}
+        }
+        ControlFlow::<()>::Continue(())
+    });
+}
+
+/// [`null_tests`] over every expression of a `SELECT`.
+fn null_handled_columns(s: &Select, scope: &Scope) -> BTreeSet<ColKey> {
+    let mut out = BTreeSet::new();
+    let _ = sqlparser::ast::visit_expressions(s, |x| {
+        if matches!(
+            x,
+            Expr::IsNull(_)
+                | Expr::IsNotNull(_)
+                | Expr::IsDistinctFrom(..)
+                | Expr::IsNotDistinctFrom(..)
+                | Expr::Function(_)
+        ) {
+            null_tests(x, scope, &mut out);
+        }
+        ControlFlow::<()>::Continue(())
+    });
+    out
+}
+
+/// A structural site on a derived table whose column could not be traced to a base relation
+/// keeps no relation (its marker names no table).
+fn unmark_structural(mut s: PredicateSite) -> PredicateSite {
+    if s.clause.is_structural()
+        && s.relation
+            .as_deref()
+            .is_some_and(|r| r.starts_with('\u{1}'))
+    {
+        s.relation = None;
+    }
+    s
+}
+
+/// The relations a `WHERE` filters by a literal in a top-level conjunct.
+fn literal_filtered(selection: Option<&Expr>, scope: &Scope) -> BTreeSet<String> {
+    let mut found = Vec::new();
+    if let Some(w) = selection {
+        conjuncts(w, scope, Clause::Where, &mut found);
+    }
+    found
+        .into_iter()
+        .filter(|s| s.top_level)
+        .filter_map(|s| s.relation)
+        .collect()
+}
+
+/// The plain expression arguments of a function call.
+fn function_args(f: &sqlparser::ast::Function) -> Vec<&Expr> {
+    use sqlparser::ast::{FunctionArg, FunctionArgExpr, FunctionArguments};
+    let FunctionArguments::List(list) = &f.args else {
+        return Vec::new();
+    };
+    list.args
+        .iter()
+        .filter_map(|a| match a {
+            FunctionArg::Unnamed(FunctionArgExpr::Expr(e))
+            | FunctionArg::Named {
+                arg: FunctionArgExpr::Expr(e),
+                ..
+            } => Some(e),
+            _ => None,
+        })
+        .collect()
+}
+
+/// `relation.column`, or the bare column when the relation is unknown.
+fn col_text(c: &Col) -> String {
+    match &c.relation {
+        // A derived table's marker is not a name: show its alias.
+        Some(r) => format!("{}.{}", r.trim_start_matches('\u{1}'), c.column),
+        None => c.column.clone(),
+    }
+}
+
+/// The top-level conjuncts of `e` that equate a column of one relation with a column of another:
+/// one [`Clause::Join`] site per side. A side whose qualifier names no relation in scope (an outer
+/// query's alias) records nothing.
+fn join_sites(e: &Expr, scope: &Scope, handled: &BTreeSet<ColKey>, out: &mut Vec<PredicateSite>) {
+    let mut parts = Vec::new();
+    flatten(e, &BinaryOperator::And, &mut parts);
+    for p in parts {
+        let mut p = p;
+        while let Expr::Nested(inner) = p {
+            p = inner;
+        }
+        let Expr::BinaryOp {
+            left,
+            op: BinaryOperator::Eq,
+            right,
+        } = p
+        else {
+            continue;
+        };
+        let (Some(a), Some(b)) = (scope.resolve(left), scope.resolve(right)) else {
+            continue;
+        };
+        // Both sides must resolve to one of this statement's relations: a correlated equality
+        // with an outer query's alias (`i.x = outer.x`) filters, it does not join, and an
+        // unqualified name among several relations may be a routine's variable (`batch_id =
+        // in_batch_id`), so it is not guessed.
+        if a.relation.is_none() || b.relation.is_none() || a.relation == b.relation {
+            continue;
+        }
+        let (ta, tb) = (col_text(&a), col_text(&b));
+        for (c, other) in [(a, tb), (b, ta)] {
+            let h = handled.contains(&(c.relation.clone(), c.column.clone()));
+            out.push(PredicateSite {
+                top_level: true,
+                null_handled: Some(h),
+                ..site(c, "=", vec![other], Clause::Join)
+            });
+        }
+    }
+}
+
+/// The target class of a type name: `date` for dates and timestamps, `number` for numeric types.
+fn cast_class(data_type: &str) -> Option<&'static str> {
+    let t = data_type.to_ascii_lowercase();
+    let head = t
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .find(|w| !w.is_empty())
+        .unwrap_or("");
+    match head {
+        "date" | "timestamp" | "timestamptz" | "datetime" | "datetime2" | "smalldatetime"
+        | "date32" | "datetime64" => Some(CAST_DATE),
+        "int" | "integer" | "bigint" | "smallint" | "tinyint" | "int2" | "int4" | "int8"
+        | "numeric" | "decimal" | "number" | "float" | "float4" | "float8" | "real" | "double"
+        | "money" | "int16" | "int32" | "int64" | "uint8" | "uint16" | "uint32" | "uint64"
+        | "float32" | "float64" | "decimal32" | "decimal64" | "decimal128" => Some(CAST_NUMBER),
+        _ => None,
+    }
+}
+
+/// A conversion of an expression to a date or a number, with what `values` records: the target
+/// class, and the format literal when one is given. `TRY_CAST`/`SAFE_CAST` cannot fail and are not
+/// conversions here.
+fn cast_target(e: &Expr) -> Option<(&Expr, Vec<String>)> {
+    use sqlparser::ast::CastKind;
+    match e {
+        Expr::Cast {
+            kind: CastKind::Cast | CastKind::DoubleColon,
+            expr,
+            data_type,
+            ..
+        } => Some((expr, vec![cast_class(&data_type.to_string())?.to_string()])),
+        Expr::Function(f) => {
+            let name = object_name(&f.name);
+            let class = match name.rsplit('.').next().unwrap_or(&name) {
+                "to_date" | "to_timestamp" | "to_timestamp_tz" => CAST_DATE,
+                "to_number" => CAST_NUMBER,
+                _ => return None,
+            };
+            let args = function_args(f);
+            let first = *args.first()?;
+            let mut values = vec![class.to_string()];
+            if let Some(Expr::Value(Value::SingleQuotedString(fmt))) = args.get(1) {
+                values.push(fmt.clone());
+            }
+            Some((first, values))
+        }
+        _ => None,
     }
 }
 
@@ -910,9 +1183,129 @@ mod tests {
     use sqlparser::dialect::PostgreSqlDialect;
     use sqlparser::parser::Parser;
 
-    fn preds(sql: &str) -> Vec<PredicateSite> {
+    fn all_sites(sql: &str) -> Vec<PredicateSite> {
         let stmts = Parser::parse_sql(&PostgreSqlDialect {}, sql).expect("parses");
         stmts.iter().flat_map(statement_predicates).collect()
+    }
+
+    /// The literal predicates (the business-meaning traces) only.
+    fn preds(sql: &str) -> Vec<PredicateSite> {
+        all_sites(sql)
+            .into_iter()
+            .filter(|s| !s.clause.is_structural())
+            .collect()
+    }
+
+    /// The structural sites as `clause relation.column op values handled`.
+    fn structural(sql: &str) -> Vec<String> {
+        all_sites(sql)
+            .into_iter()
+            .filter(|s| s.clause.is_structural())
+            .map(|s| {
+                format!(
+                    "{:?} {} {} {}{}",
+                    s.clause,
+                    s.relation
+                        .clone()
+                        .unwrap_or_else(|| format!("?{:?}", s.scope))
+                        + "."
+                        + &s.column,
+                    s.op,
+                    s.values.join("|"),
+                    match s.null_handled {
+                        Some(true) => " handled",
+                        Some(false) => " unhandled",
+                        None => "",
+                    }
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn inner_equality_joins_are_recorded_per_side_with_their_null_handling() {
+        let s = structural(
+            "SELECT * FROM ar a JOIN entity_credit_account eca ON a.entity_credit_account = eca.id \
+             LEFT JOIN country c ON c.id = eca.country_id \
+             WHERE eca.entity_id = 5",
+        );
+        assert_eq!(
+            s,
+            vec![
+                "Join ar.entity_credit_account = entity_credit_account.id unhandled",
+                "Join entity_credit_account.id = ar.entity_credit_account unhandled",
+            ],
+            "the LEFT JOIN keeps its rows and the literal filter is not a join"
+        );
+        let s = structural(
+            "SELECT * FROM ar a, entity e WHERE a.entity_id = e.id AND a.entity_id IS NOT NULL",
+        );
+        assert_eq!(
+            s,
+            vec![
+                "Join ar.entity_id = entity.id handled",
+                "Join entity.id = ar.entity_id unhandled",
+            ]
+        );
+        let s = structural(
+            "SELECT * FROM ar a JOIN entity e ON coalesce(a.entity_id, 0) = e.id \
+             JOIN x ON x.k = a.k WHERE coalesce(x.k, -1) > 0",
+        );
+        assert_eq!(
+            s,
+            vec!["Join x.k = ar.k handled", "Join ar.k = x.k unhandled"],
+            "a COALESCE'd side is not a plain column; a COALESCE elsewhere handles it"
+        );
+        assert!(
+            structural("SELECT * FROM a, b WHERE a.k = b.k AND batch_id = in_batch_id")
+                == vec!["Join a.k = b.k unhandled", "Join b.k = a.k unhandled"],
+            "two unqualified names among several relations may be a variable: not a join"
+        );
+        assert!(
+            structural("SELECT * FROM t WHERE t.a = t.b").is_empty(),
+            "one relation's two columns are not a join"
+        );
+        assert!(
+            structural("SELECT * FROM rma WHERE EXISTS (SELECT 1 FROM inv i WHERE i.m_rma_id = rma.m_rma_id)")
+                .is_empty(),
+            "a correlated equality with the outer query's alias is a filter"
+        );
+    }
+
+    #[test]
+    fn casts_to_dates_and_numbers_are_recorded_unless_guarded() {
+        let s = structural(
+            "SELECT CAST(t.posted AS date), t.amount::numeric(12,2), to_date(t.d, 'DD.MM.YYYY'), \
+                    to_number(t.n), t.code::text, TRY_CAST(t.x AS int), \
+                    CASE WHEN t.v ~ '^[0-9]+$' THEN t.v::int END, '2020-01-01'::date \
+             FROM t",
+        );
+        assert_eq!(
+            s,
+            vec![
+                "Cast t.posted cast date",
+                "Cast t.amount cast number",
+                "Cast t.d cast date|DD.MM.YYYY",
+                "Cast t.n cast number",
+            ]
+        );
+        // A key-value lookup converts one key's value, not the column.
+        assert!(
+            structural("SELECT value::int FROM defaults WHERE setting_key = 'fifo'").is_empty()
+        );
+    }
+
+    #[test]
+    fn structural_sites_never_reach_the_literal_predicates() {
+        let all = all_sites("SELECT b.t::int FROM a JOIN b ON a.x = b.y WHERE a.s = 'Q'");
+        let literal: Vec<String> = all
+            .iter()
+            .filter(|s| !s.clause.is_structural())
+            .map(PredicateSite::canonical)
+            .collect();
+        assert_eq!(literal, vec!["a.s IN ('Q')"]);
+        assert!(all.iter().any(|s| s.clause == Clause::Join));
+        assert!(all.iter().any(|s| s.clause == Clause::Cast));
     }
 
     fn canon(sql: &str) -> Vec<String> {

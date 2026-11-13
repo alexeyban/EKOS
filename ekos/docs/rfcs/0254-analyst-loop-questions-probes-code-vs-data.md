@@ -366,3 +366,65 @@ from a public deployment), `web/ui/src/pages/People.test.tsx`.
 **Not done.** Question badges on entity pages and the step bar's "blocking questions" item; the
 console does not decide who an unmatched author is (the CLI's routing does); the per-person cap
 is the CLI's `[questions] per-person-per-day`, applied by `questions digest`.
+
+### 2026-11-12 — `null_not_handled`, `cast_will_fail`, the RFC 0228 hand-off, Office questionnaires, QA leftovers
+
+| Part | What |
+|---|---|
+| `kir::predicates` | two *structural* clauses beside the literal ones: `Clause::Join` (an equality between columns of two of the statement's own relations — an inner `JOIN … ON` or a top-level `WHERE` conjunct — one site per side, `values` = the other side, `null_handled`) and `Clause::Cast` (`CAST`/`::` to a date or number type, `to_date`/`to_timestamp`/`to_number`; `values` = class and the format literal). `Clause::is_structural`; meaning synthesis skips them |
+| `recovery::sql_predicates` | `predicates/7`. NULL handling = `IS [NOT] NULL`, `IS [NOT] DISTINCT FROM` or `COALESCE`/`NVL`/`NVL2`/`IFNULL`/`ISNULL` over the column anywhere in the statement. Not recorded: outer joins, a correlated equality with an outer query's alias, `TRY_CAST`/`SAFE_CAST`, a cast inside a `CASE` whose condition tests the same column, and a cast of a relation its `WHERE` filters by a literal (`SELECT value::int FROM defaults WHERE setting_key = 'x'` converts one key's value, which a whole-column count cannot speak for) |
+| `observation-sdk::signals` | `conformance_pattern` / `conformance_sql`: `non-null, failing` counts of a text column against an ISO date, a number, or an Oracle/PostgreSQL date format turned into a POSIX class pattern (no backslash: PostgreSQL `~`, Oracle `REGEXP_LIKE`, ClickHouse `match`); SQL Server asks `TRY_CONVERT`; Informix and number formats (`to_number(x, '999.99')`: engines read them each their own way) are not measured |
+| `ekos profile run` | signal `cast`: measures every live **text** column code converts (`code_vs_data::cast_targets`) into `DataSignals.conformance`; unmeasurable conversions are counted in the report, not as errors |
+| `semantic::code_vs_data` | `null_not_handled` (a join site with `null_handled: false`, not in a subquery, on a column whose profile counts NULLs; `measured`: nulls, rows, share, whether exact, joined-to) and `cast_will_fail` (a conversion with failing values; `measured`: rows failing, share, class, format). One finding per routine (case-folded: a file view and the catalog's copy are one) and column, in every database holding the table. `expectations` — the RFC 0228 hand-off |
+| RFC 0228 hand-off | a `predicate_misses_values` or `null_not_handled` finding resolved by picking the **code's** claim = those rows are dropped on purpose → `Expectation { table, column, check, code, handled, expected_missing_rows, share, decided_by/at, note }`. Written to `<state>/conflicts/expectations.json` after every commit, profile run and decision; `ekos check code-vs-data --expectations [--json]` |
+| `ekos questions export --format docx\|xlsx --out <file>` | `commands/questionnaire.rs`: a minimal Office Open XML package written with the `zip` crate already in the tree (no new dependency; audit unchanged): Word — a heading per table, per question its text, id, type, addressee, context and an empty answer box; Excel — one row per question, frozen header, an empty `answer` column. Byte-identical for the same questions |
+
+QA leftovers (each with a regression test):
+
+- Probe evidence on Save kept counts without their code labels: a value cell now survives when it is a value code
+  names for that column (`probe::code_values_of`), otherwise only the count is stored.
+- `testimony add --about <name>` naming several objects now lists each candidate's id, kind and database / file.
+- `ekos questions list|show|export|digest`, `check code-vs-data` write through `questions::emit`: a reader that
+  closes the pipe (`| head`) ends the output quietly.
+- The passport shows `_withheld: source licence unknown_` where the licence gate dropped a meaning (`_unknown_` only
+  when no meaning exists).
+- `[questions] owners` / `reviewers` apply on read (`questions::addressees_now`); a question records its git-blame
+  `authors` so routing needs nothing else from the derivation.
+- Estate pages: of two live copies of a table, the one declaring a primary key is documented, and every copy's
+  declared foreign keys map to the page (a ClickHouse copy no longer hides PostgreSQL's keys).
+
+Also: `ekos conflicts show` prints a code-vs-data finding's own measurement (it printed the doc-vs-data sentence).
+
+**Departures.** Kettle steps (Database lookup, Stream lookup, Merge join, Select values type changes) carry no
+join or cast sites yet: only SQL (views, routines, Perl-embedded SQL, transformation SQL) does. A join inside a
+subquery or a derived table is not checked (conservative: a NULL there may drop no row of the statement).
+Conformance is a whole-column count; a cast guarded by a `WHERE` on another column is still compared with the
+whole column.
+
+**Measured** (scratch projects, live databases):
+
+- *Fixture `castfix`* (PostgreSQL 16; 500 import rows, 25 without a customer, 10 dates as `DD.MM.YYYY`): one
+  `null_not_handled` (`posted_sales` joins `import_row.customer_id`: 25 of 500, exact) and one `cast_will_fail`
+  (`posted` → date: 10 of 500, 2%); the `LEFT JOIN … coalesce` view raised nothing. Both equal the seeded counts.
+  Resolving the null finding with the code's claim produced one expectation (25 rows, `sql/schema.sql:14`) in
+  `expectations.json` and `check code-vs-data --expectations`.
+- *LedgerSMB* (its own schema loaded from source into a scratch PostgreSQL, a small synthetic book: 400
+  transactions, 600 invoice lines of which 30 have no part): 17 `null_not_handled` + 5 `dead_branch`, 0
+  `cast_will_fail` (no code converts a text column of the whole table; the 96 `defaults.value::int` lookups filter
+  by `setting_key` and are not recorded). `invoice.parts_id`: 30 of 600 by the finding and by hand. Columns the
+  synthetic book leaves empty (`acc_trans.open_item_id`, `entity_credit_account.taxform_id`) are findings at 100%
+  — the data's fault, not the check's.
+- *iDempiere* (subset: `db/oracle`, 165 Oracle migration scripts with views, 1,413 `X_`/`I_` model classes;
+  GardenWorld on Oracle XE, p1): before the last two precision fixes 41 `null_not_handled` (counts confirmed by
+  `ekos probe`: `AD_PRINTFORMATITEM.AD_COLUMN_ID` 65 of 2,737, `AD_MENU.AD_WINDOW_ID` 365 of 808), 28
+  `dead_branch`, 10 `lookup_not_unique`, 0 `cast_will_fail` (no text column is converted). That run found the
+  false positives fixed since: joins inside `EXISTS`/scalar subqueries, correlated equalities with an outer alias,
+  a file view and its catalog copy counted twice (case), a derived table's marker shown as a name; LedgerSMB then
+  showed unqualified variable comparisons (`batch_id = in_batch_id`) read as joins — both sides must now resolve
+  to a relation of the statement. LedgerSMB went 30 → 17 with them.
+
+**Acceptance (§8, first criterion) — prepared, not judged.** Top-20 sheets with evidence, EKOS status and empty
+verdict columns, and the full questionnaires (`.docx`, `.xlsx`), for LedgerSMB and iDempiere; the verdicts are
+an operator's. Both top-20s are dominated by one origin kind (LedgerSMB: 19 `logic_vs_data`; iDempiere: 16
+`which_is_right` catalog-vs-code nullability conflicts, 4 `logic_vs_data`): priority = blocking, dependents, row
+share, so a finding at 100% outranks every meaning question.
