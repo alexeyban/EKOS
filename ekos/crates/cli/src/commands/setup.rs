@@ -1056,6 +1056,39 @@ struct ApplyCx<'a> {
     fx: &'a dyn Effects,
 }
 
+/// [`Action::RemoveOldProgram`]: the console stopped, the old PATH entries and copy gone.
+fn remove_old_program(
+    cx: &ApplyCx<'_>,
+    dir: &Path,
+    path_files: &[PathBuf],
+    windows_path: Option<&Path>,
+    manifest: &mut Manifest,
+) -> Result<String> {
+    // The old console may run from the old copy; on Windows its files are in use.
+    super::console::stop(&cx.layout.home)?;
+    remove_path_lines(path_files)?;
+    manifest.path_files.retain(|f| !path_files.contains(f));
+    if let Some(bin) = windows_path {
+        cx.fx.run(
+            Path::new("powershell"),
+            &[
+                "-NoProfile".into(),
+                "-Command".into(),
+                windows_path_removal(bin),
+            ],
+            None,
+        )?;
+        manifest.windows_path = None;
+    }
+    for part in ["console", "bin"] {
+        let old = dir.join(part);
+        if old.is_dir() {
+            std::fs::remove_dir_all(&old).with_context(|| format!("removing {}", old.display()))?;
+        }
+    }
+    Ok(String::new())
+}
+
 /// Perform one action, recording in `manifest` what `uninstall` will have to undo. Returns the
 /// message shown for the step.
 fn apply_one(cx: &ApplyCx<'_>, action: &Action, manifest: &mut Manifest) -> Result<String> {
@@ -1064,32 +1097,7 @@ fn apply_one(cx: &ApplyCx<'_>, action: &Action, manifest: &mut Manifest) -> Resu
             dir,
             path_files,
             windows_path,
-        } => {
-            // The old console may run from the old copy; on Windows its files are in use.
-            super::console::stop(&cx.layout.home)?;
-            remove_path_lines(path_files)?;
-            manifest.path_files.retain(|f| !path_files.contains(f));
-            if let Some(bin) = windows_path {
-                cx.fx.run(
-                    Path::new("powershell"),
-                    &[
-                        "-NoProfile".into(),
-                        "-Command".into(),
-                        windows_path_removal(bin),
-                    ],
-                    None,
-                )?;
-                manifest.windows_path = None;
-            }
-            for part in ["console", "bin"] {
-                let old = dir.join(part);
-                if old.is_dir() {
-                    std::fs::remove_dir_all(&old)
-                        .with_context(|| format!("removing {}", old.display()))?;
-                }
-            }
-            Ok(String::new())
-        }
+        } => remove_old_program(cx, dir, path_files, windows_path.as_deref(), manifest),
         Action::CopyPackage { from, to } => {
             for part in ["bin", "console"] {
                 if from.join(part).is_dir() {
