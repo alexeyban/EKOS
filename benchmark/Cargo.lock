@@ -512,7 +512,7 @@ checksum = "252afb9ae5eaa683babdc6a068b3f5726eb19e05070c731f9b2a23a7c3e8ed34"
 
 [[package]]
 name = "ekos-artifact"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "chrono",
  "ekos-common",
@@ -552,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-common"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "chrono",
  "glob",
@@ -569,7 +569,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-compiler-core"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -592,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-identity"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "chrono",
  "ekos-kir",
@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-kir"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "chrono",
  "ekos-common",
@@ -615,7 +615,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-ledger"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "chrono",
  "ekos-artifact",
@@ -639,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-observation-sdk"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "async-trait",
  "chrono",
@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-ossie"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "ekos-kir",
  "serde",
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-plpgsql"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -676,14 +676,14 @@ dependencies = [
 
 [[package]]
 name = "ekos-plsql"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "ekos-plpgsql",
 ]
 
 [[package]]
 name = "ekos-plugin-git"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "async-trait",
  "chrono",
@@ -698,7 +698,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-plugin-sql-dialect-clickhouse"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "ekos-sql-dialect-sdk",
  "sqlparser",
@@ -706,7 +706,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-plugin-sql-dialect-databricks"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "ekos-sql-dialect-sdk",
  "sqlparser",
@@ -714,7 +714,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-plugin-sql-dialect-mssql"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "ekos-sql-dialect-sdk",
  "sqlparser",
@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-plugin-sql-dialect-mysql"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "ekos-sql-dialect-sdk",
  "sqlparser",
@@ -730,7 +730,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-plugin-sql-dialect-oracle"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "ekos-plsql",
  "ekos-sql-dialect-sdk",
@@ -739,7 +739,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-plugin-sql-dialect-postgres"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "ekos-sql-dialect-sdk",
  "sqlparser",
@@ -747,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-plugin-sql-dialect-snowflake"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "ekos-sql-dialect-sdk",
  "sqlparser",
@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-plugin-sql-dialect-sqlite"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "ekos-sql-dialect-sdk",
  "sqlparser",
@@ -763,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-plugin-sql-dialect-trino"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "ekos-sql-dialect-sdk",
  "sqlparser",
@@ -771,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-recovery"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-runtime"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "async-trait",
  "chrono",
@@ -841,7 +841,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-segment-backend"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "thiserror",
  "tracing",
@@ -849,7 +849,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-semantic"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "async-trait",
  "chrono",
@@ -870,7 +870,7 @@ dependencies = [
 
 [[package]]
 name = "ekos-sql-dialect-sdk"
-version = "1.5.0"
+version = "1.5.5"
 dependencies = [
  "sqlparser",
 ]

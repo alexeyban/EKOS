@@ -318,7 +318,7 @@ step only applies if you clicked the link in a browser.
 #### Windows
 
 ```powershell
-$Version = "v1.5.0"
+$Version = "v1.5.5"
 $Asset   = "ekos-$($Version -replace '^v','')-x86_64-pc-windows-msvc.zip"
 $Base    = "https://github.com/alexeyban/EKOS/releases/download/$Version"
 

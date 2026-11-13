@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.5.5 — 2026-11-12
+## v1.5.5 — 2026-11-13
 
 **Installers**
 - **A native installer for every system**, built from the full package and installed, set up and
@@ -40,6 +40,11 @@
   per-month usage (a sparkline in the CLI, a chart in the console) and usage evidence from SQL
   Server Query Store, Informix `sysmaster` and PostgreSQL statistics; EKOS's own sessions are left
   out.
+- **Fewer, better references found in the data** (RFC 0252 §8). `ekos relationships discover`
+  proposes no second parent: a column that is the child of a declared foreign key gets no
+  candidate, and a column the code joins keeps only its code-seeded parents. On iDempiere 265
+  candidates (2 true) became 13 (the same 2). Discovery and profiling also run on SQLite
+  (`Flavor::Sqlite`; no usage statistics), and `ekos eval bench` gains a `data-signals` cell option.
 - **An open source-engine seam** (RFC 0255, phases 3–5): `CanonDialect` and
   `Dialect::Registered` with a conformance kit in `migrate-validate`; each source's
   `SourceCapabilities` is recorded at plan time and shown in the estate docs ("Source engines", an

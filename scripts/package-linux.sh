@@ -106,7 +106,7 @@ Priority: optional
 Homepage: https://github.com/alexeyban/EKOS
 Description: EKOS, a compiler for enterprise knowledge
  The ekos command, its web console with the Python it runs on, and the
- EKOS Setup wizard. Run `ekos setup` as yourself after installing.
+ EKOS Setup wizard. Run "ekos setup" as yourself after installing.
 EOF
   {
     echo '#!/bin/sh'
@@ -142,7 +142,7 @@ Requires:       glibc >= 2.34
 
 %description
 The ekos command, its web console with the Python it runs on, and the
-EKOS Setup wizard. Run \`ekos setup\` as yourself after installing.
+EKOS Setup wizard. Run "ekos setup" as yourself after installing.
 
 %install
 cp -a ${root}/. %{buildroot}/
