@@ -47,14 +47,13 @@ try {
 
   New-Item -ItemType Directory -Force $Out | Out-Null
   $msi = Join-Path (Resolve-Path $Out) "ekos-$Version-x86_64-pc-windows-msvc.msi"
-  # ICE38 / ICE64 are suppressed on purpose: in a per-user package the console's harvested files keep
-  # file key paths and their directories have no RemoveFolder rows each; uninstall removes the
-  # whole program directory with util:RemoveFolderEx instead (packaging/wix/ekos.wxs).
+  # `wix build` runs no ICE validation (that is `wix msi validate`), so ICE38 / ICE64, which a
+  # per-user package with harvested files fails, are not run here; uninstall removes the whole
+  # program directory with util:RemoveFolderEx (packaging/wix/ekos.wxs).
   # wix's own messages go to the host, not the pipeline: callers keep only this script's last line.
   & wix build (Join-Path $assets 'ekos.wxs') -arch x64 `
       -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
       -d "Version=$MsiVersion" -d "Source=$($src.FullName)" -d "Assets=$work" `
-      -sice ICE38 -sice ICE64 `
       -o $msi | Out-Host
   if ($LASTEXITCODE -ne 0) { throw "wix build failed ($LASTEXITCODE)" }
   Write-Output $msi
