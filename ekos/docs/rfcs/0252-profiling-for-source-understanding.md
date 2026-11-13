@@ -534,7 +534,7 @@ which join little).
 | History (e) | 932 patterns (885 flags, 47 validity pairs) | not checked | — |
 
 Suggested follow-ups (not built):
-- skip a second parent for a child that already has a declared or code reference;
+- skip a second parent for a child that already has a declared or code reference (built 2026-11-13, below);
 - let a person lower `min_parent_distinct` for a run on a small seed;
 - do not treat a measure column (a number compared only with 0) as a coded column;
 - give an update-set flag an update-time axis, or no dead-code verdict;
@@ -598,3 +598,22 @@ No hold run was made.
   has a reference" filter before it is worth a reviewer's time, and recall needs a populated database.
 - BIRD: the signals add 1 correct and 8 wrong join lines, and their effect is bounded at 3 of 198 tune
   questions. The FK fix, not the signals, is what moves the pack.
+
+### 2026-11-13 — one parent per child in discovery
+
+Decided by the maintainer after the §8 measurement: `ekos relationships discover` no longer proposes a
+parent for a column that already has one.
+- A column that is the child of a declared foreign key gets no candidate at all, data- or code-seeded
+  (`relationships.rs::declared_children`). Before, only the declared pair itself was excluded.
+- A column the code joins keeps its code-seeded pairs; a data-only pair for the same column is dropped
+  (`drop_second_parents`).
+- The shared rule `overlap::data_pairs` is unchanged, so the BIRD adapter (`bench::data_signals`) and its
+  measured numbers are unchanged; the CLI passes the declared-child test through the rule's exclusion
+  callback. Cross-database overlaps (`--cross-database`) are not affected.
+
+Re-run on the same iDempiere (Oracle XE, 7,148 columns signed, 2 min 10 s): 14 pairs checked,
+**13 candidates** (12 data-seeded, 1 code-seeded), of which **2 are true** by the §8 hand labels
+(`AD_TreeNodePR.Node_ID → M_Product`, `AD_Language.CountryCode → C_Country.CountryCode`) — precision
+**15 %**, up from 0.75 % (2 / 265). The 11 false ones are tree nodes in unrelated id ranges, `SeqNo` /
+`StartNo` / `A_Period` into `AD_Reference`, and `PP_Product_Planning.AD_Org_ID → C_Location`. Recall is
+still unmeasurable on this seed (`min_parent_distinct`, §8).

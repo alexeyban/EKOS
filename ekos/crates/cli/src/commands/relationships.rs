@@ -246,6 +246,32 @@ pub(crate) fn declared(
     out
 }
 
+/// The child columns of declared foreign keys, (table, column) lowercase. Discovery never proposes
+/// another parent for one: its parent is known, and on iDempiere 252 of 265 data-seeded candidates
+/// were such second parents, all wrong (RFC 0252 §8).
+pub(crate) fn declared_children(
+    declared: &BTreeSet<(String, String, String, String)>,
+) -> BTreeSet<(String, String)> {
+    declared
+        .iter()
+        .map(|(t, c, _, _)| (t.clone(), c.clone()))
+        .collect()
+}
+
+/// Drops a data-only pair whose child also has a code-seeded pair: the code names the child's
+/// parent, so a second one found by overlap alone is a guess (RFC 0252 §8).
+fn drop_second_parents(pairs: BTreeMap<(usize, usize), Pair>) -> Vec<Pair> {
+    let coded: BTreeSet<usize> = pairs
+        .values()
+        .filter(|p| !p.code_sources.is_empty())
+        .map(|p| p.child)
+        .collect();
+    pairs
+        .into_values()
+        .filter(|p| !p.code_sources.is_empty() || !coded.contains(&p.child))
+        .collect()
+}
+
 /// Code joins, lowercased, with their sources: (left table, left column, right table, right
 /// column) → sources.
 type Joins = BTreeMap<(String, String, String, String), Vec<String>>;
@@ -258,7 +284,8 @@ fn col_key(c: &Col) -> (String, String) {
 /// What one discovery shares across databases.
 struct Ctx<'a> {
     code: &'a Joins,
-    declared: &'a BTreeSet<(String, String, String, String)>,
+    /// `declared_children` of the declared foreign keys.
+    declared_children: &'a BTreeSet<(String, String)>,
     grain: &'a HashMap<(String, String, String), Vec<String>>,
     salt: &'a str,
     redaction: &'a RedactionConfig,
@@ -267,10 +294,9 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    fn is_declared(&self, child: &Col, parent: &Col) -> bool {
-        let (ct, cc) = col_key(child);
-        let (pt, pc) = col_key(parent);
-        self.declared.contains(&(ct, cc, pt, pc))
+    /// The column is the child of a declared foreign key.
+    fn has_declared_parent(&self, child: &Col) -> bool {
+        self.declared_children.contains(&col_key(child))
     }
 
     /// One column's signature, or `None` (an error is recorded).
@@ -362,15 +388,12 @@ impl Ctx<'_> {
             min_containment: self.opts.min_containment,
             min_parent_distinct: self.opts.min_parent_distinct,
         };
-        let declared = |c: &overlap::SignedColumn, p: &overlap::SignedColumn| {
-            self.declared.contains(&(
-                c.table.to_lowercase(),
-                c.column.to_lowercase(),
-                p.table.to_lowercase(),
-                p.column.to_lowercase(),
-            ))
+        // A declared pair, or any parent for a declared child, is never proposed.
+        let excluded = |c: &overlap::SignedColumn, _: &overlap::SignedColumn| {
+            self.declared_children
+                .contains(&(c.table.to_lowercase(), c.column.to_lowercase()))
         };
-        for (c, p, containment) in overlap::data_pairs(&signed, rules, &declared) {
+        for (c, p, containment) in overlap::data_pairs(&signed, rules, &excluded) {
             pairs.insert(
                 (c, p),
                 Pair {
@@ -399,7 +422,7 @@ impl Ctx<'_> {
             };
             for (&l, &r) in ls.iter().flat_map(|l| rs.iter().map(move |r| (l, r))) {
                 let (c, p) = code_direction(cols, l, r);
-                if cols[c].table_id == cols[p].table_id || self.is_declared(&cols[c], &cols[p]) {
+                if cols[c].table_id == cols[p].table_id || self.has_declared_parent(&cols[c]) {
                     continue;
                 }
                 let e = pairs.entry((c, p)).or_insert(Pair {
@@ -416,12 +439,13 @@ impl Ctx<'_> {
         }
     }
 
-    /// Pairs within one database: data-seeded and code-seeded.
+    /// Pairs within one database: data-seeded and code-seeded, at most the code's parents for a
+    /// child the code joins, none for a child with a declared foreign key.
     fn propose(&self, cols: &[Col]) -> Vec<Pair> {
         let mut pairs = BTreeMap::new();
         self.data_pairs(cols, &mut pairs);
         self.code_pairs(cols, &mut pairs);
-        pairs.into_values().collect()
+        drop_second_parents(pairs)
     }
 
     /// The exact inclusion check of one pair.
@@ -650,6 +674,7 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
     let objects = ledger.all_objects()?;
     let relationships = ledger.all_relationships()?;
     let declared = declared(&objects, &relationships);
+    let declared_children = declared_children(&declared);
     let code = code_joins(&*ledger)?;
     let grain = measured_keys(config, cwd);
     let salt = salt(config, cwd)?;
@@ -657,7 +682,7 @@ pub async fn discover(config: &EkosConfig, cwd: &Path, opts: DiscoverOpts<'_>) -
     let measured_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let ctx = Ctx {
         code: &code,
-        declared: &declared,
+        declared_children: &declared_children,
         grain: &grain,
         salt: &salt,
         redaction: &redaction,
@@ -999,4 +1024,51 @@ pub fn agent_list(
         })
         .collect();
     Ok(json!({ "references": out }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pair(child: usize, parent: usize, code: bool) -> ((usize, usize), Pair) {
+        (
+            (child, parent),
+            Pair {
+                child,
+                parent,
+                data: !code,
+                code_sources: if code {
+                    vec!["db/x.sql".into()]
+                } else {
+                    vec![]
+                },
+                containment: None,
+            },
+        )
+    }
+
+    #[test]
+    fn a_declared_child_is_listed_once_whatever_its_parents() {
+        let declared: BTreeSet<_> = [
+            ("c_order", "c_bpartner_id", "c_bpartner", "c_bpartner_id"),
+            ("c_order", "c_bpartner_id", "c_bpartner_x", "id"),
+        ]
+        .into_iter()
+        .map(|(a, b, c, d)| (a.into(), b.into(), c.into(), d.into()))
+        .collect();
+        let children = declared_children(&declared);
+        assert_eq!(children.len(), 1);
+        assert!(children.contains(&("c_order".into(), "c_bpartner_id".into())));
+    }
+
+    #[test]
+    fn a_child_the_code_joins_gets_no_data_only_parent() {
+        // Child 0: a code pair to 1 and a data-only pair to 2. Child 3: data only, kept.
+        let pairs = BTreeMap::from([pair(0, 1, true), pair(0, 2, false), pair(3, 2, false)]);
+        let kept: Vec<(usize, usize)> = drop_second_parents(pairs)
+            .iter()
+            .map(|p| (p.child, p.parent))
+            .collect();
+        assert_eq!(kept, vec![(0, 1), (3, 2)]);
+    }
 }
