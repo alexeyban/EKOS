@@ -57,7 +57,9 @@
     </StandardDirectory>
 
     <Feature Id="Main" Title="EKOS" Level="1">
-      <Component Id="Root" Directory="INSTALLFOLDER">
+      <!-- A fixed Guid: a component holding files with a registry key path cannot get a generated
+           one (WIX0230). Never change it. -->
+      <Component Id="Root" Directory="INSTALLFOLDER" Guid="6a0f3a52-5d0e-4c8e-9a3e-2f1b7c4d9e10">
         <RegistryValue Root="HKCU" Key="Software\EKOS" Name="InstallDir" Type="string"
                        Value="[INSTALLFOLDER]" KeyPath="yes" />
         <File Id="InstallerToml" Source="$(var.Assets)\installer.toml" />
