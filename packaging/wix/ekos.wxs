@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Windows installer (.msi), WiX v5. Built by the `msi` job of .github/workflows/release.yml:
+
+    wix build packaging/wix/ekos.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext
+      -d Version=<X.Y.Z> -d Source=<the full Windows package, unpacked> -d Assets=packaging/wix
+
+  Per user, no administrator: everything goes under %LOCALAPPDATA%\Programs\EKOS (bin\, console\
+  with its own Python, LICENSE, INSTALL.md and installer.toml), `bin\` is appended to the user Path,
+  and the Start menu gets "EKOS Setup" (`ekos setup`, the setup wizard) and "EKOS Console"
+  (`ekos console open` with its start flag). The last page offers to open EKOS Setup.
+
+  installer.toml tells `ekos setup` and `ekos uninstall` that this installer owns the program:
+  setup copies nothing and does not touch the Path, uninstall removes the person's EKOS home only.
+  Removing EKOS from Apps & features removes the whole program directory (Python writes
+  __pycache__ files there, which no component lists) and leaves the EKOS home (%USERPROFILE%\.ekos).
+
+  UpgradeCode never changes: a newer .msi replaces an older one in place.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="EKOS"
+           Manufacturer="EKOS"
+           Version="$(var.Version)"
+           UpgradeCode="17dd203c-261d-4817-8e1d-848a945a66b9"
+           Scope="perUser"
+           Language="1033"
+           Compressed="yes">
+    <SummaryInformation Description="EKOS, a compiler for enterprise knowledge" />
+
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  DowngradeErrorMessage="A newer EKOS is already installed. Remove it first to install this one." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="ekos.ico" SourceFile="$(var.Assets)\ekos.ico" />
+    <Property Id="ARPPRODUCTICON" Value="ekos.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/alexeyban/EKOS" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/alexeyban/EKOS#install" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!-- Where an earlier install put the program, for removing the whole directory on uninstall. -->
+    <Property Id="EKOSDIR">
+      <RegistrySearch Id="FindInstallDir" Root="HKCU" Key="Software\EKOS" Name="InstallDir" Type="raw" />
+    </Property>
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsDir" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="EKOS">
+          <Directory Id="BinDir" Name="bin" />
+          <Directory Id="ConsoleDir" Name="console" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="MenuDir" Name="EKOS" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="EKOS" Level="1">
+      <Component Id="Root" Directory="INSTALLFOLDER">
+        <RegistryValue Root="HKCU" Key="Software\EKOS" Name="InstallDir" Type="string"
+                       Value="[INSTALLFOLDER]" KeyPath="yes" />
+        <File Id="InstallerToml" Source="$(var.Assets)\installer.toml" />
+        <File Id="License" Source="$(var.Source)\LICENSE" />
+        <File Id="InstallMd" Source="$(var.Source)\INSTALL.md" />
+        <RemoveFolder Id="RemoveProgramsDir" Directory="ProgramsDir" On="uninstall" />
+        <RemoveFolder Id="RemoveInstallDir" On="uninstall" />
+        <util:RemoveFolderEx Id="RemoveEverything" On="uninstall" Property="EKOSDIR" />
+      </Component>
+
+      <Component Id="Program" Directory="BinDir">
+        <File Id="EkosExe" Source="$(var.Source)\bin\ekos.exe" KeyPath="yes" />
+        <Environment Id="UserPath" Name="PATH" Value="[BinDir]" Part="last" Action="set"
+                     System="no" Permanent="no" />
+      </Component>
+
+      <Files Directory="ConsoleDir" Include="$(var.Source)\console\**" />
+
+      <Component Id="StartMenu" Directory="MenuDir">
+        <Shortcut Id="SetupShortcut" Name="EKOS Setup"
+                  Description="Set up EKOS: its home, the web console, a first project and your AI agents"
+                  Target="[#EkosExe]" Arguments="setup" WorkingDirectory="INSTALLFOLDER" Icon="ekos.ico" />
+        <Shortcut Id="ConsoleShortcut" Name="EKOS Console"
+                  Description="Open the EKOS web console, starting it when it is not running"
+                  Target="[#EkosExe]" Arguments="console open --start" WorkingDirectory="INSTALLFOLDER"
+                  Icon="ekos.ico" />
+        <RemoveFolder Id="RemoveMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\EKOS" Name="StartMenu" Type="integer" Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </Feature>
+
+    <!-- A console started from this program holds its files open: stop it before removing them.
+         `console stop` returns at once when none runs; a failure never stops the uninstall. -->
+    <CustomAction Id="StopConsole" FileRef="EkosExe" ExeCommand="console stop" Execute="immediate"
+                  Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="StopConsole" Before="InstallValidate" Condition='REMOVE="ALL"' />
+    </InstallExecuteSequence>
+
+    <!-- The last page: "Open EKOS Setup now", ticked. It runs as the person installing (this is a
+         per-user package; nothing is elevated). -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Open EKOS Setup now" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <CustomAction Id="LaunchSetup" FileRef="EkosExe" ExeCommand="setup" Return="asyncNoWait" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.Assets)\license.rtf" />
+    <UI>
+      <ui:WixUI Id="WixUI_Minimal" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchSetup"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+    </UI>
+  </Package>
+</Wix>

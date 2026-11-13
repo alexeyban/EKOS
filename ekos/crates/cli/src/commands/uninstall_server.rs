@@ -108,8 +108,8 @@ async fn plan(State(p): State<UninstallPage>, headers: HeaderMap) -> Response {
     if !p.allowed(&headers, None) {
         return refused();
     }
-    let keep = setup::uninstall_plan(&p.home, false);
-    let purge = setup::uninstall_plan(&p.home, true);
+    let keep = setup::uninstall_plan(&p.home, false, &p.machine);
+    let purge = setup::uninstall_plan(&p.home, true, &p.machine);
     Json(serde_json::json!({
         "home": keep.home,
         "program_dir": keep.program_dir,
@@ -229,6 +229,7 @@ mod tests {
             package: home.join("package"),
             program: "ekos".into(),
             shell: None,
+            installer: None,
         };
         UninstallPage::new(
             "tok".into(),

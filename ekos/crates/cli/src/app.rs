@@ -1826,6 +1826,9 @@ enum ConsoleCommands {
         /// Print the address (and code) instead of opening a browser
         #[arg(long)]
         no_browser: bool,
+        /// Start the console first when it is not running (the "EKOS Console" shortcut)
+        #[arg(long)]
+        start: bool,
     },
     /// The end of the console's log
     Logs {
@@ -3428,7 +3431,8 @@ async fn run_uninstall(
         if detach {
             return crate::commands::console::detach_uninstall_page(&home, port);
         }
-        let machine = crate::commands::setup::Machine::detect(&std::env::current_exe()?)?;
+        let machine =
+            crate::commands::setup::Machine::detect(&crate::commands::console::program_exe()?)?;
         let page = crate::commands::uninstall_server::UninstallPage::new(
             crate::commands::setup_server::new_token(),
             home,
@@ -3440,7 +3444,8 @@ async fn run_uninstall(
     if purge && !yes {
         bail!("--purge deletes every project in the home; add --yes to confirm");
     }
-    let machine = crate::commands::setup::Machine::detect(&std::env::current_exe()?)?;
+    let machine =
+        crate::commands::setup::Machine::detect(&crate::commands::console::program_exe()?)?;
     let steps = crate::commands::setup::uninstall(
         &home,
         purge,
@@ -3460,7 +3465,12 @@ fn run_console(home: &std::path::Path, subcommand: ConsoleCommands) -> Result<()
         ConsoleCommands::Stop => console::stop(home),
         ConsoleCommands::Restart => console::restart(home),
         ConsoleCommands::Status => console::status(home),
-        ConsoleCommands::Open { no_browser } => console::open(home, no_browser),
+        ConsoleCommands::Open { no_browser, start } => {
+            if start {
+                console::start(home)?;
+            }
+            console::open(home, no_browser)
+        }
         ConsoleCommands::Logs { lines } => console::logs(home, lines),
     }
 }
@@ -3496,7 +3506,7 @@ async fn run_setup(
     port: u16,
 ) -> Result<()> {
     use crate::commands::{setup, setup_server};
-    let machine = setup::Machine::detect(&std::env::current_exe()?)?;
+    let machine = setup::Machine::detect(&crate::commands::console::program_exe()?)?;
     let Some(file) = answers else {
         let wizard = setup_server::Wizard::new(setup_server::new_token(), machine, home);
         return setup_server::serve(wizard, port, !no_browser).await;

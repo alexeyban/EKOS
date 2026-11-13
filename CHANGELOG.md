@@ -1,5 +1,62 @@
 # Changelog
 
+## v1.5.5 — 2026-11-12
+
+**Installers**
+- **A native installer for every system**, built from the full package and installed, set up and
+  uninstalled on a fresh machine by the Release workflow before it is attached to a release:
+  - **Windows `.msi`** (x86_64, WiX 5): per user, no administrator — `%LOCALAPPDATA%\Programs\EKOS`,
+    `bin\` on the user Path, Start menu **EKOS Setup** and **EKOS Console**, an Apps & features
+    entry, and "Open EKOS Setup now" on the last page. A newer .msi upgrades an older one in place;
+    removing it removes the whole program directory and keeps the EKOS home.
+  - **macOS `.pkg`** (Apple silicon): `/usr/local/ekos`, `ekos` in `/usr/local/bin`, **EKOS
+    Setup** and **EKOS Console** in Applications. When it finishes it opens EKOS Setup as the
+    person at the screen, never as root; `sudo /usr/local/ekos/uninstall.sh` removes it.
+  - **Linux `.deb` and `.rpm`** (x86_64 and aarch64, glibc 2.34+): `/opt/ekos`, `/usr/bin/ekos`,
+    menu entries **EKOS Setup** and **EKOS Console**. No service and nothing started as root; the
+    install message says to run `ekos setup`.
+  - All are unsigned: the README says what SmartScreen and Gatekeeper ask the first time. They are
+    in `SHA256SUMS` and carry signed build provenance like the archives.
+- **`ekos setup` and `ekos uninstall` know an installer placed the program** (`installer.toml`
+  beside `bin/`): setup copies nothing and adds no `PATH` line or user Path entry, and the wizard
+  shows the program directory as fixed. A copy an earlier setup made from an archive, and its `PATH`
+  entries, are removed once, so the installed program is the one that runs; projects stay.
+  `ekos uninstall` (and its page, and the console's **Uninstall EKOS**) removes what setup did and
+  the home with `--purge`, leaves the program to the OS uninstaller and names it.
+- **`ekos console open --start`** starts the console first when it is not running (the "EKOS
+  Console" entries use it).
+- The console and setup find the package beside the real program file when `ekos` is reached
+  through a link (`/usr/bin/ekos`, `/usr/local/bin/ekos`); macOS reported the link's path.
+
+**Features**
+- **The interaction map is complete** (RFC 0256). Observed access is read on PostgreSQL, Oracle
+  (`V$SQL`, always partial) and ClickHouse (`system.query_log`); SQL Server and Informix say they
+  provide no usage statistics, on every surface. Each observed cell carries `first_observed` and
+  `calls_since_previous`. Kettle connections link roles to jobs by connection user, and Kettle
+  `Update`/`InsertUpdate`/`Delete`/`SynchronizeAfterMerge` steps write their lookup table.
+  iDempiere's dictionary processes (`AD_Process`, `AD_Scheduler`) are actors. The Interaction page
+  gains a system-level graph.
+- **Codes over time and usage** (RFC 0252). `code_history`, `new` for values only the data has,
+  per-month usage (a sparkline in the CLI, a chart in the console) and usage evidence from SQL
+  Server Query Store, Informix `sysmaster` and PostgreSQL statistics; EKOS's own sessions are left
+  out.
+- **An open source-engine seam** (RFC 0255, phases 3–5): `CanonDialect` and
+  `Dialect::Registered` with a conformance kit in `migrate-validate`; each source's
+  `SourceCapabilities` is recorded at plan time and shown in the estate docs ("Source engines", an
+  `engine_limit` line). Reconciliation SQL and lock files are byte-identical before and after.
+
+**Fixes**
+- **Deleted code no longer counts.** Recover picked a deleted file's last observation, and compile
+  and resolve read the knowledge of passes that no longer run and of earlier runs (resolve read 510
+  artifacts instead of 248). `recover` now writes `current-knowledge.json` and the later stages
+  read only that; the interaction map counts only code the latest model holds.
+- **A broken `ekos.toml` is an error naming the file**, instead of running on defaults with a
+  warning nobody saw (a missing `owners` dropped every database). Unknown keys are reported;
+  `config validate`, `doctor` and `init` still run.
+- **Two foreign keys between the same tables stay two.** They were merged by (from, to, kind): on
+  iDempiere 3,686 declared keys became 3,100. The key now includes the constraint.
+- `migrate-validate` aliases a registered dialect's bucket subquery.
+
 ## v1.5.0 — 2026-11-11
 
 **Windows**

@@ -2,9 +2,10 @@
 //! runs another program or opens a browser: `Fake` records what would have run.
 
 use super::setup::{
-    Action, AgentAnswers, Answers, ChatAnswers, ConsoleAnswers, Effects, Layout, Machine, Os,
-    PATH_MARKER, ProjectAnswers, StartAnswers, apply, check, merge_agent_config, plan,
-    read_manifest, service_file, uninstall, uninstall_plan,
+    Action, AgentAnswers, Answers, ChatAnswers, ConsoleAnswers, Effects, INSTALLER_FILE, Installer,
+    Layout, Machine, Os, PATH_MARKER, ProjectAnswers, StartAnswers, apply, check,
+    merge_agent_config, plan, read_installer, read_manifest, service_file, uninstall,
+    uninstall_plan,
 };
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -69,6 +70,7 @@ fn machine(root: &Path, os: Os) -> Machine {
         package,
         program: "ekos".into(),
         shell: Some("/bin/bash".into()),
+        installer: None,
     }
 }
 
@@ -447,7 +449,7 @@ fn the_uninstall_plan_lists_exactly_what_uninstall_does() {
         std::fs::create_dir_all(home.join("data/default/shop/state")).unwrap();
         std::fs::write(home.join("data/default/shop/state/x"), "12345").unwrap();
 
-        let planned = uninstall_plan(&home, purge);
+        let planned = uninstall_plan(&home, purge, &m);
         assert!(planned.installed);
         assert_eq!(planned.projects.len(), 1);
         assert_eq!(planned.projects[0].name, "shop");
@@ -471,7 +473,8 @@ fn the_uninstall_plan_lists_exactly_what_uninstall_does() {
 #[test]
 fn an_uninstall_plan_without_setup_says_so() {
     let dir = tempfile::tempdir().unwrap();
-    let planned = uninstall_plan(dir.path(), false);
+    let m = machine(dir.path(), Os::Linux);
+    let planned = uninstall_plan(&dir.path().join("home"), false, &m);
     assert!(!planned.installed);
     assert!(planned.projects.is_empty());
 }
@@ -561,4 +564,200 @@ fn an_extension_binary_installs_under_its_own_name() {
     let (_, unit) = service_file(Os::Linux, &m, &layout);
     assert!(unit.contains("bin/ekos-lakehouse"), "{unit}");
     assert!(!unit.contains("bin/ekos "), "{unit}");
+}
+
+// ── a program placed by an OS installer (MSI, .pkg, .deb, .rpm) ──────────────
+
+/// `machine`, run from a package an OS installer placed: `installer.toml` beside `bin/`.
+fn installed_machine(root: &Path, os: Os, kind: &str) -> Machine {
+    let mut m = machine(root, os);
+    let remove = format!("remove with the {kind} uninstaller");
+    std::fs::write(
+        m.package.join(INSTALLER_FILE),
+        format!("kind = \"{kind}\"\nremove = \"{remove}\"\n"),
+    )
+    .unwrap();
+    m.installer = read_installer(&m.package);
+    assert_eq!(
+        m.installer,
+        Some(Installer {
+            kind: kind.into(),
+            remove
+        })
+    );
+    m
+}
+
+#[test]
+fn an_installed_program_is_neither_copied_nor_put_on_path_again() {
+    for (os, kind) in [
+        (Os::Windows, "msi"),
+        (Os::Macos, "pkg"),
+        (Os::Linux, "deb"),
+        (Os::Linux, "rpm"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let m = installed_machine(dir.path(), os, kind);
+        // Even an answer naming another program directory: the installer decided where it is.
+        let answers = Answers {
+            program_dir: dir.path().join("elsewhere").display().to_string(),
+            ..local_answers()
+        };
+        let actions = plan(&answers, &m).unwrap();
+        let k = kinds(&actions);
+        for refused in [
+            "copy_package",
+            "add_to_path",
+            "add_to_windows_path",
+            "remove_old_program",
+        ] {
+            assert!(!k.contains(&refused.to_string()), "{kind}: {k:?}");
+        }
+        let layout = Layout::of(&answers, &m);
+        assert_eq!(layout.program_dir, m.package, "{kind}");
+
+        let fake = Fake::default();
+        let steps = apply(&actions, &answers, &m, &fake).unwrap();
+        assert!(steps.iter().all(|s| s.ok), "{kind}: {steps:#?}");
+        assert!(
+            !fake.programs().contains(&"powershell".to_string()),
+            "{kind}: no Path change on Windows"
+        );
+        assert!(!dir.path().join("elsewhere").exists(), "{kind}");
+        let manifest = read_manifest(&layout.home);
+        assert_eq!(manifest.installer.as_deref(), Some(kind));
+        assert_eq!(manifest.program_dir, m.package);
+        assert!(manifest.path_files.is_empty() && manifest.windows_path.is_none());
+        if os != Os::Windows {
+            let profile = std::fs::read_to_string(m.user_home.join(".profile")).unwrap_or_default();
+            assert!(!profile.contains(PATH_MARKER), "{kind}: {profile}");
+        }
+        // Agents run the installed program.
+        let desktop = std::fs::read_to_string(m.claude_desktop_config()).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(&desktop).unwrap();
+        let command = doc["mcpServers"]["ekos-shop"]["command"].as_str().unwrap();
+        assert!(
+            Path::new(command).starts_with(&m.package),
+            "{kind}: {command}"
+        );
+    }
+}
+
+#[test]
+fn uninstall_leaves_an_installed_program_to_its_package_manager() {
+    for purge in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let m = installed_machine(dir.path(), Os::Linux, "deb");
+        let answers = local_answers();
+        let home = m.user_home.join(".ekos");
+        apply(&plan(&answers, &m).unwrap(), &answers, &m, &Fake::default()).unwrap();
+        std::fs::create_dir_all(home.join("data/default/shop")).unwrap();
+
+        let planned = uninstall_plan(&home, purge, &m);
+        let fake = Fake::default();
+        let steps = uninstall(&home, purge, &m, &fake).unwrap();
+        assert!(steps.iter().all(|s| s.ok), "{steps:#?}");
+        let done: Vec<String> = steps.iter().map(|s| s.action.clone()).collect();
+        assert_eq!(planned.steps, done, "purge={purge}");
+        let kept = done
+            .iter()
+            .find(|s| s.starts_with("keep the program"))
+            .expect("a step says the program stays");
+        assert!(kept.contains("remove with the deb uninstaller"), "{kept}");
+        assert!(
+            !done
+                .iter()
+                .any(|s| s.starts_with("remove ") && s.contains("bin"))
+        );
+        assert!(m.package.join("bin/ekos").is_file(), "the program stays");
+        assert!(m.package.join("console/app/main.py").is_file());
+        assert_eq!(home.exists(), !purge);
+    }
+}
+
+#[test]
+fn uninstall_without_setup_still_names_the_os_uninstaller() {
+    let dir = tempfile::tempdir().unwrap();
+    let m = installed_machine(dir.path(), Os::Windows, "msi");
+    let home = m.user_home.join(".ekos");
+    let planned = uninstall_plan(&home, false, &m);
+    assert!(!planned.installed);
+    assert_eq!(planned.program_dir, m.package);
+    assert!(
+        planned
+            .steps
+            .iter()
+            .any(|s| s.contains("installed by the msi package")),
+        "{:#?}",
+        planned.steps
+    );
+    let fake = Fake::default();
+    uninstall(&home, false, &m, &fake).unwrap();
+    assert!(
+        !fake.programs().contains(&"cmd".to_string()),
+        "bin is not removed"
+    );
+    assert!(m.package.join("bin/ekos.exe").is_file());
+}
+
+#[test]
+fn an_earlier_archive_install_gives_way_to_the_installed_program() {
+    for os in [Os::Linux, Os::Windows] {
+        let dir = tempfile::tempdir().unwrap();
+        // First: the archive's setup copied the program into the home and put it on PATH.
+        let zip = machine(dir.path(), os);
+        let answers = local_answers();
+        let home = zip.user_home.join(".ekos");
+        apply(
+            &plan(&answers, &zip).unwrap(),
+            &answers,
+            &zip,
+            &Fake::default(),
+        )
+        .unwrap();
+        assert!(home.join("bin/ekos").is_file());
+        std::fs::create_dir_all(home.join("data/default/shop")).unwrap();
+
+        // Then: an OS installer put the program elsewhere, and EKOS Setup runs from there.
+        let pkg_root = dir.path().join("installed");
+        let mut m = installed_machine(&pkg_root, os, if os == Os::Windows { "msi" } else { "deb" });
+        m.user_home = zip.user_home.clone();
+        m.appdata = zip.appdata.clone();
+        let actions = plan(&answers, &m).unwrap();
+        assert_eq!(kinds(&actions)[0], "remove_old_program", "{os:?}");
+        let fake = Fake::default();
+        let steps = apply(&actions, &answers, &m, &fake).unwrap();
+        assert!(steps.iter().all(|s| s.ok), "{os:?}: {steps:#?}");
+        assert!(!home.join("bin").exists() && !home.join("console").exists());
+        assert!(home.join("data/default/shop").is_dir(), "the projects stay");
+        let manifest = read_manifest(&home);
+        assert_eq!(manifest.program_dir, m.package);
+        assert!(manifest.path_files.is_empty() && manifest.windows_path.is_none());
+        if os == Os::Windows {
+            let ran = fake.ran.borrow();
+            let ps = ran
+                .iter()
+                .find(|r| r.0 == "powershell")
+                .expect("Path edited");
+            assert!(ps.1[2].contains("Where-Object"), "{:?}", ps.1);
+            assert!(ps.1[2].contains(&home.join("bin").display().to_string()));
+        } else {
+            let profile = std::fs::read_to_string(m.user_home.join(".profile")).unwrap();
+            assert!(!profile.contains(PATH_MARKER), "{profile}");
+        }
+        // Done once: the next run has nothing old to remove.
+        assert!(!kinds(&plan(&answers, &m).unwrap()).contains(&"remove_old_program".to_string()));
+    }
+}
+
+#[test]
+fn path_lines_are_added_once_however_often_setup_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let m = machine(dir.path(), Os::Linux);
+    let answers = local_answers();
+    for _ in 0..2 {
+        apply(&plan(&answers, &m).unwrap(), &answers, &m, &Fake::default()).unwrap();
+    }
+    let profile = std::fs::read_to_string(m.user_home.join(".profile")).unwrap();
+    assert_eq!(profile.matches(PATH_MARKER).count(), 1, "{profile}");
 }

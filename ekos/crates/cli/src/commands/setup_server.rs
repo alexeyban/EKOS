@@ -191,9 +191,16 @@ async fn state(State(w): State<Wizard>, headers: HeaderMap) -> Response {
     let runtime = super::console::find_runtime(&m.package.join("bin").join("ekos"), &|_| None)
         .is_ok()
         || m.package.join("console").join("app").is_dir();
+    let mut answers = current_answers(&w.home);
+    if m.installer.is_some() {
+        // The OS installer decided where the program is and put it on PATH.
+        answers.program_dir = m.package.display().to_string();
+        answers.add_to_path = false;
+    }
     Json(serde_json::json!({
         "os": m.os,
-        "answers": current_answers(&w.home),
+        "answers": answers,
+        "installer": m.installer,
         "installed": w.home.join("control").join("console.toml").is_file(),
         "package": m.package,
         "console_runtime": runtime,
@@ -536,6 +543,7 @@ mod tests {
             package: dir.join("package"),
             program: "ekos".into(),
             shell: None,
+            installer: None,
         };
         Wizard::new("tok".into(), m, dir.join("home"))
     }
@@ -705,6 +713,33 @@ mod tests {
         assert_eq!(v["projects"], serde_json::json!(["shop"]));
         assert!(v["agents"]["claude_code"].is_boolean());
         assert!(v["paths"]["claude_desktop"].is_string());
+    }
+
+    #[tokio::test]
+    async fn the_state_says_when_an_os_installer_placed_the_program() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut w = wizard(dir.path());
+        let req = || {
+            Request::get("/api/state")
+                .header("x-setup-token", "tok")
+                .body(Body::empty())
+                .unwrap()
+        };
+        let (_, v) = json_of(&w, req()).await;
+        assert!(v["installer"].is_null());
+        assert_eq!(v["answers"]["add_to_path"], true);
+
+        w.machine.installer = Some(setup::Installer {
+            kind: "msi".into(),
+            remove: "Settings → Apps".into(),
+        });
+        let (_, v) = json_of(&w, req()).await;
+        assert_eq!(v["installer"]["kind"], "msi");
+        assert_eq!(v["answers"]["add_to_path"], false);
+        assert_eq!(
+            v["answers"]["program_dir"],
+            w.machine.package.display().to_string()
+        );
     }
 
     #[tokio::test]

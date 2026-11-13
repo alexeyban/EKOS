@@ -1,0 +1,2 @@
+kind = "msi"
+remove = "Settings > Apps > Installed apps > EKOS > Uninstall (or msiexec /x with the .msi)"

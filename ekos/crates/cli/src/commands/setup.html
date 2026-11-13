@@ -51,6 +51,7 @@ code { font-family: ui-monospace, monospace; font-size:.9em; }
     <p class="help">Where <code>bin/</code> and the console go. Empty: inside the home.</p>
     <p class="note" id="program_dir-check"></p>
     <label class="check"><input type="checkbox" id="add_to_path"> <span>Put <code>ekos</code> on my PATH<span class="help" id="path-help"></span></span></label>
+    <p class="note ok hidden" id="installed-by"></p>
   </section>
 
   <section class="card" data-step="Console">
@@ -263,6 +264,13 @@ async function load() {
   $("claude_code").checked = false;
   if (!state.console_runtime) {
     $("no-runtime").textContent = "This package has no web console (it is the command-line package). Starting it will fail; use the full package or the container image.";
+  }
+  if (state.installer) {
+    // An OS installer placed the program and put it on PATH; it stays where it is.
+    $("program_dir").readOnly = true;
+    $("add_to_path").disabled = true;
+    $("installed-by").textContent = `Installed by the ${state.installer.kind} package in ${a.program_dir}, already on your PATH. To remove the program later: ${state.installer.remove}.`;
+    $("installed-by").classList.remove("hidden");
   }
   if (state.installed) document.querySelector(".lede").textContent = "EKOS is installed here. Change what you need; the rest stays as it is.";
   refreshProjects();

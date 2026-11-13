@@ -17,6 +17,26 @@ pub const PATH_MARKER: &str = "# added by ekos setup";
 pub const SERVICE_NAME: &str = "ekos-console";
 pub const LAUNCHD_LABEL: &str = "com.ekos.console";
 pub const WINDOWS_TASK: &str = "EKOS Console";
+/// Written by an OS installer (MSI, macOS .pkg, .deb, .rpm) beside `bin/`: that installer owns
+/// the program directory and has put the program on `PATH`, so setup neither copies the program
+/// nor adds `PATH` lines, and uninstall leaves the program to the OS uninstaller.
+pub const INSTALLER_FILE: &str = "installer.toml";
+
+/// What `installer.toml` says.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Installer {
+    /// `msi`, `pkg`, `deb` or `rpm`.
+    pub kind: String,
+    /// How a person removes the program, in words or as a command.
+    pub remove: String,
+}
+
+/// The installer that placed the program in `program_dir`, if one did.
+pub fn read_installer(program_dir: &Path) -> Option<Installer> {
+    let text = std::fs::read_to_string(program_dir.join(INSTALLER_FILE)).ok()?;
+    let i: Installer = toml::from_str(&text).ok()?;
+    (!i.kind.trim().is_empty()).then_some(i)
+}
 
 // ── answers ──────────────────────────────────────────────────────────────────
 
@@ -164,6 +184,8 @@ pub struct Machine {
     /// RFC 0199: the binary's name without extension — `ekos`, or an extension's own binary
     /// (`ekos-lakehouse`), which installs and starts the console under its own name.
     pub program: String,
+    /// The OS installer that placed `package`, when one did ([`INSTALLER_FILE`]).
+    pub installer: Option<Installer>,
 }
 
 impl Machine {
@@ -175,6 +197,7 @@ impl Machine {
             .context("cannot locate the package around the ekos binary")?
             .to_path_buf();
         Ok(Self {
+            installer: read_installer(&package),
             os: Os::current(),
             user_home,
             appdata: std::env::var_os("APPDATA").map(PathBuf::from),
@@ -241,6 +264,13 @@ impl Machine {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Action {
+    /// An OS installer now owns the program: the copy an earlier `ekos setup` made from an
+    /// archive, and its `PATH` entries (which would run the old copy first), go.
+    RemoveOldProgram {
+        dir: PathBuf,
+        path_files: Vec<PathBuf>,
+        windows_path: Option<PathBuf>,
+    },
     CopyPackage {
         from: PathBuf,
         to: PathBuf,
@@ -292,6 +322,10 @@ impl Action {
     /// One line for a person.
     pub fn describe(&self) -> String {
         match self {
+            Action::RemoveOldProgram { dir, .. } => format!(
+                "remove the earlier copy of EKOS in {} and its PATH entries",
+                dir.display()
+            ),
             Action::CopyPackage { from, to } => {
                 format!("copy EKOS from {} to {}", from.display(), to.display())
             }
@@ -343,9 +377,14 @@ pub struct Layout {
 }
 
 impl Layout {
+    /// With an OS installer the program stays where it put it, whatever the answers say.
     pub fn of(answers: &Answers, m: &Machine) -> Self {
         let home = non_empty(&answers.home).unwrap_or_else(|| m.default_home());
-        let program_dir = non_empty(&answers.program_dir).unwrap_or_else(|| home.clone());
+        let program_dir = if m.installer.is_some() {
+            m.package.clone()
+        } else {
+            non_empty(&answers.program_dir).unwrap_or_else(|| home.clone())
+        };
         Self {
             program_dir,
             home,
@@ -554,7 +593,12 @@ pub fn plan(answers: &Answers, m: &Machine) -> Result<Vec<Action>> {
     let os = m.os;
     let mut actions = Vec::new();
 
-    if m.package != layout.program_dir && m.package.join("bin").join(m.exe_name()).is_file() {
+    if m.installer.is_some() {
+        if let Some(old) = old_program(&layout, m) {
+            actions.push(old);
+        }
+    } else if m.package != layout.program_dir && m.package.join("bin").join(m.exe_name()).is_file()
+    {
         actions.push(Action::CopyPackage {
             from: m.package.clone(),
             to: layout.program_dir.clone(),
@@ -574,7 +618,8 @@ pub fn plan(answers: &Answers, m: &Machine) -> Result<Vec<Action>> {
             field: "oidc_client_secret".into(),
         });
     }
-    if answers.add_to_path {
+    // An OS installer has put the program on PATH already.
+    if answers.add_to_path && m.installer.is_none() {
         actions.push(match os {
             Os::Windows => Action::AddToWindowsPath {
                 bin: layout.bin_dir(),
@@ -635,6 +680,25 @@ pub fn plan(answers: &Answers, m: &Machine) -> Result<Vec<Action>> {
     Ok(actions)
 }
 
+/// The copy of the program an earlier setup made from an archive, when an OS installer now
+/// provides it: a `bin/` of its own in a directory no installer owns, or `PATH` entries.
+fn old_program(layout: &Layout, m: &Machine) -> Option<Action> {
+    let before = read_manifest(&layout.home);
+    let dir = program_dir_of(&layout.home, &before);
+    if dir == layout.program_dir || read_installer(&dir).is_some() {
+        return None;
+    }
+    let has_copy = dir.join("bin").join(m.exe_name()).is_file();
+    if !has_copy && before.path_files.is_empty() && before.windows_path.is_none() {
+        return None;
+    }
+    Some(Action::RemoveOldProgram {
+        dir,
+        path_files: before.path_files,
+        windows_path: before.windows_path,
+    })
+}
+
 // ── the manifest ─────────────────────────────────────────────────────────────
 
 /// What setup did, so `uninstall` undoes exactly that.
@@ -648,6 +712,8 @@ pub struct Manifest {
     pub service_file: Option<PathBuf>,
     pub agent_configs: Vec<(PathBuf, String, String)>,
     pub claude_code: Vec<String>,
+    /// The OS installer that placed the program (`msi`, `pkg`, `deb`, `rpm`), if one did.
+    pub installer: Option<String>,
 }
 
 fn manifest_path(home: &Path) -> PathBuf {
@@ -954,6 +1020,7 @@ pub fn apply(
     let layout = Layout::of(answers, m);
     let mut manifest = read_manifest(&layout.home);
     manifest.program_dir = layout.program_dir.clone();
+    manifest.installer = m.installer.as_ref().map(|i| i.kind.clone());
     std::fs::create_dir_all(layout.home.join("data"))?;
     let mut steps = Vec::new();
     let cx = ApplyCx {
@@ -993,6 +1060,36 @@ struct ApplyCx<'a> {
 /// message shown for the step.
 fn apply_one(cx: &ApplyCx<'_>, action: &Action, manifest: &mut Manifest) -> Result<String> {
     match action {
+        Action::RemoveOldProgram {
+            dir,
+            path_files,
+            windows_path,
+        } => {
+            // The old console may run from the old copy; on Windows its files are in use.
+            super::console::stop(&cx.layout.home)?;
+            remove_path_lines(path_files)?;
+            manifest.path_files.retain(|f| !path_files.contains(f));
+            if let Some(bin) = windows_path {
+                cx.fx.run(
+                    Path::new("powershell"),
+                    &[
+                        "-NoProfile".into(),
+                        "-Command".into(),
+                        windows_path_removal(bin),
+                    ],
+                    None,
+                )?;
+                manifest.windows_path = None;
+            }
+            for part in ["console", "bin"] {
+                let old = dir.join(part);
+                if old.is_dir() {
+                    std::fs::remove_dir_all(&old)
+                        .with_context(|| format!("removing {}", old.display()))?;
+                }
+            }
+            Ok(String::new())
+        }
         Action::CopyPackage { from, to } => {
             for part in ["bin", "console"] {
                 if from.join(part).is_dir() {
@@ -1292,7 +1389,36 @@ pub fn home_projects(home: &Path) -> Vec<ProjectSize> {
     out
 }
 
-pub fn uninstall_plan(home: &Path, purge: bool) -> UninstallPlan {
+/// The program directory uninstall looks at: what setup recorded, else the directory of an
+/// OS-installed program that runs this, else the home.
+fn uninstall_program_dir(home: &Path, manifest: &Manifest, m: &Machine) -> PathBuf {
+    if manifest.program_dir.as_os_str().is_empty() && m.installer.is_some() {
+        m.package.clone()
+    } else {
+        program_dir_of(home, manifest)
+    }
+}
+
+/// The step that says an OS installer's program stays, and how to remove it.
+fn kept_program_step(dir: &Path, installer: &Installer) -> String {
+    format!(
+        "keep the program in {} (installed by the {} package; to remove it: {})",
+        dir.display(),
+        installer.kind,
+        installer.remove
+    )
+}
+
+/// PowerShell that takes `bin` out of the user `Path`.
+fn windows_path_removal(bin: &Path) -> String {
+    format!(
+        "$p=[Environment]::GetEnvironmentVariable('Path','User'); \
+         [Environment]::SetEnvironmentVariable('Path', (($p -split ';') | Where-Object {{ $_ -ne '{}' }}) -join ';', 'User')",
+        bin.display()
+    )
+}
+
+pub fn uninstall_plan(home: &Path, purge: bool, m: &Machine) -> UninstallPlan {
     let manifest = read_manifest(home);
     let mut steps = vec!["stop the console".to_string()];
     if manifest.service.is_some() {
@@ -1308,11 +1434,15 @@ pub fn uninstall_plan(home: &Path, purge: bool) -> UninstallPlan {
     for name in &manifest.claude_code {
         steps.push(format!("remove {name} from Claude Code"));
     }
-    let program = program_dir_of(home, &manifest);
-    for part in ["console", "bin"] {
-        let dir = program.join(part);
-        if dir.is_dir() {
-            steps.push(format!("remove {}", dir.display()));
+    let program = uninstall_program_dir(home, &manifest, m);
+    if let Some(installer) = read_installer(&program) {
+        steps.push(kept_program_step(&program, &installer));
+    } else {
+        for part in ["console", "bin"] {
+            let dir = program.join(part);
+            if dir.is_dir() {
+                steps.push(format!("remove {}", dir.display()));
+            }
         }
     }
     if purge {
@@ -1388,16 +1518,15 @@ pub fn uninstall(home: &Path, purge: bool, m: &Machine, fx: &dyn Effects) -> Res
         remove_path_lines(&manifest.path_files),
     );
     if let Some(bin) = &manifest.windows_path {
-        let script = format!(
-            "$p=[Environment]::GetEnvironmentVariable('Path','User'); \
-             [Environment]::SetEnvironmentVariable('Path', (($p -split ';') | Where-Object {{ $_ -ne '{}' }}) -join ';', 'User')",
-            bin.display()
-        );
         step(
             "remove EKOS from the user Path",
             fx.run(
                 Path::new("powershell"),
-                &["-NoProfile".into(), "-Command".into(), script],
+                &[
+                    "-NoProfile".into(),
+                    "-Command".into(),
+                    windows_path_removal(bin),
+                ],
                 None,
             )
             .map(|_| ()),
@@ -1426,10 +1555,16 @@ pub fn uninstall(home: &Path, purge: bool, m: &Machine, fx: &dyn Effects) -> Res
             .map(|_| ()),
         );
     }
-    let program = program_dir_of(home, &manifest);
+    let program = uninstall_program_dir(home, &manifest, m);
+    // What an OS installer placed belongs to its package manager: removing it here would leave
+    // that package installed with its files gone.
+    let installer = read_installer(&program);
+    if let Some(i) = &installer {
+        step(&kept_program_step(&program, i), Ok(()));
+    }
     for part in ["console", "bin"] {
         let dir = program.join(part);
-        if dir.is_dir() {
+        if installer.is_none() && dir.is_dir() {
             let r = if part == "bin" && m.os == Os::Windows {
                 // A running .exe cannot be deleted on Windows: remove it once this exits.
                 fx.remove_after_exit(&dir)

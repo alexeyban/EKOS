@@ -342,6 +342,19 @@ pub fn open_browser(url: &str) -> bool {
 
 // ── the commands ─────────────────────────────────────────────────────────────
 
+/// This program's own file, with links resolved: an OS package links `/usr/bin/ekos` or
+/// `/usr/local/bin/ekos` to the program in its install directory, and the console and setup
+/// find the package (`console/`, `installer.toml`) beside the real file, not beside the link.
+/// macOS reports the path as started; Linux has resolved it already. Not on Windows, where
+/// resolving gives a `\\?\` path and nothing links the program.
+pub fn program_exe() -> Result<PathBuf> {
+    let exe = std::env::current_exe().context("locating the ekos binary")?;
+    if cfg!(windows) {
+        return Ok(exe);
+    }
+    Ok(std::fs::canonicalize(&exe).unwrap_or(exe))
+}
+
 fn std_env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }
@@ -357,7 +370,7 @@ fn log_file(home: &Path) -> Result<std::fs::File> {
 
 /// `ekos console run`: the console in the foreground, started again when it asks.
 pub fn run(home: &Path) -> Result<()> {
-    let exe = std::env::current_exe()?;
+    let exe = program_exe()?;
     let rt = find_runtime(&exe, &std_env)?;
     let conf = server_conf(home, &std_env)?;
     std::fs::create_dir_all(control(home))?;
@@ -431,7 +444,7 @@ pub fn run(home: &Path) -> Result<()> {
 
 /// `ekos console start`: `run` in the background; returns once the console answers.
 pub fn start(home: &Path) -> Result<()> {
-    let exe = std::env::current_exe()?;
+    let exe = program_exe()?;
     find_runtime(&exe, &std_env)?;
     let conf = server_conf(home, &std_env)?;
     std::fs::create_dir_all(control(home))?;
@@ -470,7 +483,7 @@ pub fn start(home: &Path) -> Result<()> {
 /// cgroup and is ended when the unit stops, which uninstalling does. `systemd-run --user`
 /// starts the page in a unit of its own.
 pub fn detach_uninstall_page(home: &Path, port: u16) -> Result<()> {
-    let exe = std::env::current_exe()?;
+    let exe = program_exe()?;
     // Not in the home: a purge removes it.
     let log_path = std::env::temp_dir().join(format!("ekos-uninstall-{}.log", std::process::id()));
     let page_args: Vec<std::ffi::OsString> = vec![

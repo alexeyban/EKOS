@@ -69,7 +69,14 @@ none does. The identity provider must still be reachable from the server.
 
 ### A server without Docker
 
-The full package (RFC 0185) runs the same console from its own bundled Python. On the server,
+The full package (RFC 0185) runs the same console from its own bundled Python. On a Debian/Ubuntu
+or RHEL-family server, the release's `.deb` or `.rpm` installs it in `/opt/ekos` with `ekos` in
+`/usr/bin` (`sudo apt install ./ekos-<version>-<arch>-unknown-linux-gnu.deb`, or `dnf install` the
+`.rpm`). It starts nothing as root and installs no service: run `ekos setup --answers` as the user
+that will own the home, as below, and `at_login = true` gives that user a systemd user unit.
+Upgrade by installing the newer package; `ekos uninstall` then removes the home's setup but leaves
+`/opt/ekos` to the package manager (`apt remove ekos` / `dnf remove ekos`). Without the
+packages, unpack the full archive and run its `bin/ekos`. On the server,
 as the user that will own the home:
 
 ```bash
@@ -97,7 +104,7 @@ its owner only, so sessions survive a restart. Settings changed later on the con
 apply after **Restart now**, which works here because `ekos console run` starts it again.
 
 To remove a server installed this way, run `bin/ekos uninstall` on it (`--purge --yes` also
-deletes the home). The console's **Settings → Uninstall EKOS** page is offered in local mode
+deletes the home), then the package manager's remove when it came from a `.deb` or `.rpm`. The console's **Settings → Uninstall EKOS** page is offered in local mode
 only: it opens a page on the console's own machine, which a team's owner reaches from elsewhere.
 
 People who want the `ekos` command on their own machine (for a project of their own, or for
@@ -523,6 +530,8 @@ docker compose -f deploy/docker-compose.yml up -d --build
 - From RFC 0229 (tantivy 0.27) the search index is written in a newer format. A newer EKOS reads
   an older index as it is; an older EKOS cannot read an index a newer one wrote, and runs without
   search (it says so) until the index is rebuilt. Restore the backup to go back.
+- Without the image: install the newer `.deb`/`.rpm` (or `.msi`, `.pkg`) over the old one, then
+  `ekos console restart`. An archive install is upgraded by running the newer package's setup.
 - Re-running the pipeline is never needed for an upgrade. It is how new compiler features reach
   an existing project, and for a project with model-backed passes it costs money.
 

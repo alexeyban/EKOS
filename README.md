@@ -147,7 +147,41 @@ parsed from files (RFC 0031); live Oracle, PostgreSQL, ClickHouse, SQL Server an
 
 ## Installation
 
-### With the web console: the setup wizard (Linux, Windows 11, macOS — RFC 0185)
+### Installers: Windows .msi, macOS .pkg, Linux .deb and .rpm (from v1.5.5)
+
+Each release carries a native installer per system, built from the full package (the `ekos`
+command, the web console and the Python that runs it). The installer puts the program in place and
+on your `PATH`; **EKOS Setup** then opens the setup wizard in your browser for the EKOS home, the
+console, a first project and your agents — the same wizard as below.
+
+| Your machine | Asset | What it does |
+|---|---|---|
+| Windows 10/11, 64-bit | `ekos-<version>-x86_64-pc-windows-msvc.msi` | Per user, no administrator: `%LOCALAPPDATA%\Programs\EKOS`, `bin\` on your user Path, Start menu **EKOS Setup** and **EKOS Console**, an Apps & features entry. The last page's "Open EKOS Setup now" starts the wizard. A newer .msi upgrades an older one in place. |
+| macOS, Apple silicon | `ekos-<version>-aarch64-apple-darwin.pkg` | `/usr/local/ekos`, `ekos` in `/usr/local/bin`, **EKOS Setup** and **EKOS Console** in Applications (needs an administrator's password). EKOS Setup opens when the installer finishes, as you, never as root. |
+| Linux x86_64 / ARM 64-bit, Debian or Ubuntu | `ekos-<version>-<arch>-unknown-linux-gnu.deb` | `sudo apt install ./ekos-….deb`: `/opt/ekos`, `/usr/bin/ekos`, menu entries **EKOS Setup** and **EKOS Console**. Then run `ekos setup` as yourself. |
+| Linux x86_64 / ARM 64-bit, RHEL 9, Rocky, Alma, Fedora | `ekos-<version>-<arch>-unknown-linux-gnu.rpm` | `sudo dnf install ./ekos-….rpm`: the same as the .deb. |
+
+The Linux packages need glibc 2.34 or newer (Ubuntu 22.04, Debian 12, RHEL 9); on older systems
+use the command-only `musl` archive below. Nothing is started as root, and no service is installed:
+the console is started by `ekos setup` (or at login, if you ask it to) as the person who runs it.
+
+**Unsigned, so the first open needs one extra click.** Windows SmartScreen: **More info → Run
+anyway**. macOS Gatekeeper refuses a downloaded unsigned .pkg ("cannot be opened because Apple
+cannot check it"): right-click the .pkg → **Open** → **Open**, or System Settings → Privacy &
+Security → **Open Anyway**. The checksums in `SHA256SUMS` and the signed build provenance below
+cover the installers too.
+
+**Removing.** First `ekos uninstall` if you want to undo what setup did for you (the login entry,
+agent entries; `--purge --yes` also deletes your projects) — it leaves the program to the OS
+uninstaller and says how to run it. Then: Windows — Settings → Apps → Installed apps → EKOS →
+Uninstall; macOS — `sudo /usr/local/ekos/uninstall.sh`; Linux — `sudo apt remove ekos` or
+`sudo dnf remove ekos`. The OS uninstaller never touches your EKOS home (`~/.ekos`).
+
+If you set EKOS up from an archive before, run **EKOS Setup** once after installing: it removes the
+earlier copy from the home and its `PATH` lines, so the installed program is the one that runs.
+Your projects stay.
+
+### With the web console: the full package and the setup wizard (Linux, Windows 11, macOS — RFC 0185)
 
 The full package holds the `ekos` command, the web console and the Python that runs it; nothing
 else is needed. Installing it opens a setup page in your browser:
@@ -443,7 +477,9 @@ check.
 
 ### Upgrading and removing
 
-Re-running the install command (or installing a newer package) replaces the binary in place with the latest release; there is no
+With an installer (above), install the newer .msi, .pkg, .deb or .rpm over the old one, and
+remove EKOS with the system's own uninstaller. Otherwise:
+re-running the install command (or installing a newer package) replaces the binary in place with the latest release; there is no
 package database and nothing else to update. To remove it, delete the binary
 (`rm ~/.ekos/bin/ekos`, or `~/.local/bin/ekos` for an install made before RFC 0179). EKOS keeps
 files in two places only: the `.ekos/` directory inside each workspace you compiled in place,

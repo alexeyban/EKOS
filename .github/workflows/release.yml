@@ -488,9 +488,395 @@ jobs:
           path: dist/*.msix
           if-no-files-found: error
 
+  # ── Native installers ─────────────────────────────────────────────────────────
+  # Each is built from the full package of its target and installed on a fresh machine by the
+  # test job that follows it, as a person would: the program from the installer, then `ekos setup`
+  # from answers (what the wizard writes), the console, `ekos uninstall`, then the OS uninstaller.
+  # Every installer drops `installer.toml` beside `bin/`; setup then copies nothing and adds no
+  # PATH entry, and `ekos uninstall` leaves the program to the OS uninstaller.
+
+  # Windows .msi (WiX v5, per user, no administrator). packaging/wix/ekos.wxs says what it installs.
+  msi:
+    name: Windows installer (MSI)
+    needs: package
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download the full Windows package
+        uses: actions/download-artifact@v7
+        with:
+          name: ekos-full-x86_64-pc-windows-msvc
+          path: full
+
+      # Pinned: WiX 5.0.2 and its extensions of the same version, from nuget.org.
+      - name: Install WiX
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          wix extension add -g WixToolset.UI.wixext/5.0.2 WixToolset.Util.wixext/5.0.2
+          wix --version
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v','' } else { 'dev' }
+          $zip = Get-ChildItem full/*-full.zip | Select-Object -First 1
+          $msi = & ./scripts/package-msi.ps1 -Full $zip.FullName -Out dist -Version $version | Select-Object -Last 1
+          $hash = (Get-FileHash $msi -Algorithm SHA256).Hash.ToLower()
+          "$hash  $(Split-Path -Leaf $msi)" | Out-File -Encoding ascii "$msi.sha256"
+          # An older version of the same package, only for the upgrade test below.
+          & ./scripts/package-msi.ps1 -Full $zip.FullName -Out old -Version old -MsiVersion 1.0.0 | Out-Null
+          Get-ChildItem dist, old | Format-Table Name, Length
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ekos-installer-x86_64-pc-windows-msvc
+          path: |
+            dist/*.msi
+            dist/*.sha256
+          if-no-files-found: error
+
+      # Not `ekos-*`: never a release asset.
+      - name: Upload the older package for the upgrade test
+        uses: actions/upload-artifact@v7
+        with:
+          name: upgrade-test-msi
+          path: old/*.msi
+          if-no-files-found: error
+
+  test-msi:
+    name: Install the MSI on Windows
+    needs: msi
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: ekos-installer-x86_64-pc-windows-msvc
+          path: new
+      - uses: actions/download-artifact@v7
+        with:
+          name: upgrade-test-msi
+          path: old
+
+      - name: Install over an older version, set up, uninstall
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Check($what, [scriptblock]$ok) {
+            if (& $ok) { Write-Host "ok   $what" } else { throw "FAIL $what" }
+          }
+          function Msi($verb, $file, $log) {
+            $p = Start-Process msiexec.exe -ArgumentList @($verb, "`"$file`"", '/qn', '/norestart', '/l*v', "`"$log`"") -Wait -PassThru
+            if ($p.ExitCode -notin 0, 3010) { Get-Content $log -Tail 80; throw "msiexec $verb failed ($($p.ExitCode))" }
+          }
+          function Entries {
+            @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
+              Where-Object { $_.DisplayName -eq 'EKOS' })
+          }
+          $new = (Get-ChildItem new/*.msi | Select-Object -First 1).FullName
+          $old = (Get-ChildItem old/*.msi | Select-Object -First 1).FullName
+          $prog = "$env:LOCALAPPDATA\Programs\EKOS"
+          $menu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\EKOS"
+
+          # 1. An older version first, then this one over it: one entry, the new version.
+          Msi '/i' $old "$env:RUNNER_TEMP\old.log"
+          Check "the older version is installed" { (Entries).Count -eq 1 -and (Entries)[0].DisplayVersion -eq '1.0.0' }
+          Msi '/i' $new "$env:RUNNER_TEMP\install.log"
+          $e = Entries
+          Write-Host "Apps & features: $($e.DisplayName) $($e.DisplayVersion)"
+          Check "an upgrade in place leaves one Apps & features entry" { $e.Count -eq 1 -and $e[0].DisplayVersion -ne '1.0.0' }
+
+          # 2. What the installer put in place, without an administrator.
+          Check "ekos.exe is in $prog\bin" { Test-Path "$prog\bin\ekos.exe" }
+          Check "the console and its Python are there" { (Test-Path "$prog\console\python\python.exe") -and (Test-Path "$prog\console\app\main.py") }
+          Check "installer.toml says msi" { (Get-Content "$prog\installer.toml" -Raw) -match 'kind = "msi"' }
+          & "$prog\bin\ekos.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw "ekos --version failed" }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          Check "bin is on the user Path" { ($userPath -split ';') -contains "$prog\bin\" -or ($userPath -split ';') -contains "$prog\bin" }
+          $shell = New-Object -ComObject WScript.Shell
+          foreach ($s in @(@('EKOS Setup', 'setup'), @('EKOS Console', 'console open --start'))) {
+            $lnk = "$menu\$($s[0]).lnk"
+            Check "Start menu: $($s[0])" { Test-Path $lnk }
+            $l = $shell.CreateShortcut($lnk)
+            Check "$($s[0]) runs ekos.exe $($s[1])" { $l.TargetPath -eq "$prog\bin\ekos.exe" -and $l.Arguments -eq $s[1] }
+          }
+
+          # 3. Setup from answers, run from the installed program: nothing copied, Path untouched.
+          $src = "$env:RUNNER_TEMP\src\shop"
+          New-Item -ItemType Directory -Force "$src\db" | Out-Null
+          Set-Content "$src\db\schema.sql" "CREATE TABLE customers (id INT PRIMARY KEY, email TEXT);"
+          $home2 = "$env:RUNNER_TEMP\ekos-home"
+          $port = 18766
+          $answers = "$env:RUNNER_TEMP\answers.toml"
+          @"
+          home = '$home2'
+          add_to_path = true
+          [console]
+          mode = "local"
+          port = $port
+          [project]
+          name = "shop"
+          sources = ['$src']
+          detect = true
+          [start]
+          now = true
+          open = false
+          "@ -replace '(?m)^\s+', '' | Set-Content $answers
+          $p = Start-Process "$prog\bin\ekos.exe" -ArgumentList @('setup', '--answers', "`"$answers`"") `
+            -NoNewWindow -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\setup.txt" -RedirectStandardError "$env:RUNNER_TEMP\setup-err.txt"
+          $null = $p.Handle
+          if (-not $p.WaitForExit(600000)) { throw "ekos setup did not finish within 10 minutes" }
+          Get-Content "$env:RUNNER_TEMP\setup.txt", "$env:RUNNER_TEMP\setup-err.txt"
+          if ($p.ExitCode -ne 0) { throw "ekos setup failed ($($p.ExitCode))" }
+          $out = Get-Content "$env:RUNNER_TEMP\setup.txt" -Raw
+          Check "setup reports every step ok" { $out -notmatch '(?m)^FAIL' }
+          Check "setup copied nothing" { $out -notmatch 'copy EKOS' -and -not (Test-Path "$home2\bin") }
+          Check "setup left the Path to the installer" { $out -notmatch 'user Path' }
+          Check "the project exists" { Test-Path "$home2\data\default\shop\ekos.toml" }
+          Check "the manifest names the installer" { (Get-Content "$home2\control\install.json" -Raw) -match '"installer":\s*"msi"' }
+          $up = $false
+          for ($i = 0; $i -lt 90 -and -not $up; $i++) {
+            try { $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/api/health" -TimeoutSec 5; $up = $r.StatusCode -eq 200 } catch { Start-Sleep 2 }
+          }
+          Check "the console answers /api/health" { $up }
+
+          # 4. ekos uninstall: the home goes, the program stays for the OS uninstaller.
+          & "$prog\bin\ekos.exe" --home $home2 console stop
+          $u = & "$prog\bin\ekos.exe" --home $home2 uninstall --purge --yes | Out-String
+          Write-Host $u
+          if ($LASTEXITCODE -ne 0) { throw "ekos uninstall failed ($LASTEXITCODE)" }
+          Check "uninstall keeps the program and names the OS uninstaller" { $u -match 'keep the program' -and $u -match 'installed by the msi package' }
+          Start-Sleep 5
+          Check "the program is still there" { Test-Path "$prog\bin\ekos.exe" }
+          Check "the home is gone" { -not (Test-Path $home2) }
+
+          # 5. The OS uninstaller removes the program, its Start menu entries, Path entry and
+          #    Apps & features entry, and nothing of the source tree.
+          Msi '/x' $new "$env:RUNNER_TEMP\uninstall.log"
+          Check "the program directory is gone" { -not (Test-Path $prog) }
+          Check "the Start menu entries are gone" { -not (Test-Path $menu) }
+          $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+          Check "bin is off the user Path" { -not ($userPath -match [regex]::Escape("$prog\bin")) }
+          Check "no Apps & features entry" { (Entries).Count -eq 0 }
+          Check "the source tree was not written to" { (Get-ChildItem $src -Recurse -File).Count -eq 1 }
+
+  # macOS .pkg (Apple silicon; Intel Macs have no full package — see `package`). Built on macOS:
+  # pkgbuild and productbuild exist nowhere else.
+  pkg-macos:
+    name: macOS installer (pkg)
+    needs: package
+    runs-on: macos-15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download the full macOS package
+        uses: actions/download-artifact@v7
+        with:
+          name: ekos-full-aarch64-apple-darwin
+          path: full
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [ "${GITHUB_REF_TYPE}" = "tag" ] || version="dev"
+          pkg="$(scripts/package-macos.sh full/ekos-"${version}"-aarch64-apple-darwin-full.tar.gz dist "$version" | tail -1)"
+          (cd dist && shasum -a 256 "$(basename "$pkg")" > "$(basename "$pkg").sha256")
+          ls -la dist
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ekos-installer-aarch64-apple-darwin
+          path: |
+            dist/*.pkg
+            dist/*.sha256
+          if-no-files-found: error
+
+  test-pkg:
+    name: Install the pkg on macOS
+    needs: pkg-macos
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: ekos-installer-aarch64-apple-darwin
+          path: inst
+      - name: Install, set up, uninstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok() { echo "ok   $1"; }
+          fail() { echo "::error::FAIL $1"; exit 1; }
+          pkg="$(ls inst/*.pkg)"
+          sudo installer -pkg "$pkg" -target /
+          [ -x /usr/local/ekos/bin/ekos ] && ok "the program is in /usr/local/ekos" || fail "no /usr/local/ekos/bin/ekos"
+          [ "$(readlink /usr/local/bin/ekos)" = /usr/local/ekos/bin/ekos ] && ok "ekos is in /usr/local/bin" || fail "/usr/local/bin/ekos"
+          [ -d "/Applications/EKOS Setup.app" ] && [ -d "/Applications/EKOS Console.app" ] && ok "the apps" || fail "the apps"
+          grep -q 'kind = "pkg"' /usr/local/ekos/installer.toml && ok "installer.toml" || fail "installer.toml"
+          pkgutil --pkg-info com.ekos.cli
+          [ "$(stat -f%Su /usr/local/ekos/bin/ekos)" = root ] && ok "owned by root" || fail "owner"
+          ekos --version
+
+          # Setup from answers as this (non-root) user, through the /usr/local/bin link.
+          src="$RUNNER_TEMP/src/shop"; mkdir -p "$src/db"
+          echo 'CREATE TABLE customers (id INT PRIMARY KEY, email TEXT);' > "$src/db/schema.sql"
+          home="$RUNNER_TEMP/ekos-home"; port=18767
+          printf 'home = "%s"\nadd_to_path = true\n[console]\nmode = "local"\nport = %s\n[project]\nname = "shop"\nsources = ["%s"]\ndetect = true\n[start]\nnow = true\nopen = false\n' \
+            "$home" "$port" "$src" > "$RUNNER_TEMP/answers.toml"
+          ekos setup --answers "$RUNNER_TEMP/answers.toml" | tee "$RUNNER_TEMP/setup.txt"
+          ! grep -q '^FAIL' "$RUNNER_TEMP/setup.txt" && ok "every step ok" || fail "a setup step"
+          ! grep -qE 'copy EKOS|on PATH' "$RUNNER_TEMP/setup.txt" && ok "nothing copied, no PATH lines" || fail "copied or PATH"
+          ! grep -q 'added by ekos setup' ~/.zprofile ~/.profile 2>/dev/null && ok "profiles untouched" || fail "a PATH line"
+          [ -f "$home/data/default/shop/ekos.toml" ] && ok "the project" || fail "the project"
+          curl -fsS "http://127.0.0.1:$port/api/health" || fail "the console does not answer"
+          echo; ok "the console answers"
+          ekos --home "$home" console stop
+
+          ekos --home "$home" uninstall --purge --yes | tee "$RUNNER_TEMP/uninstall.txt"
+          grep -q 'installed by the pkg package' "$RUNNER_TEMP/uninstall.txt" && ok "uninstall names the OS uninstaller" || fail "uninstall message"
+          [ -x /usr/local/ekos/bin/ekos ] && ok "the program stays" || fail "the program was removed"
+          [ ! -e "$home" ] && ok "the home is gone" || fail "the home"
+
+          sudo /usr/local/ekos/uninstall.sh
+          [ ! -e /usr/local/ekos ] && [ ! -e /usr/local/bin/ekos ] && [ ! -e "/Applications/EKOS Setup.app" ] \
+            && ok "uninstall.sh removed the program" || fail "uninstall.sh"
+          ! pkgutil --pkg-info com.ekos.cli >/dev/null 2>&1 && ok "the receipt is gone" || fail "receipt"
+
+  # Linux .deb and .rpm, each on its own architecture's runner (the package's architecture is the
+  # target's; rpmbuild builds for the machine it runs on).
+  linux-packages:
+    name: Linux installers ${{ matrix.target }}
+    needs: package
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download the full package
+        uses: actions/download-artifact@v7
+        with:
+          name: ekos-full-${{ matrix.target }}
+          path: full
+      - name: Install rpmbuild
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq rpm
+      - name: Build
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [ "${GITHUB_REF_TYPE}" = "tag" ] || version="dev"
+          scripts/package-linux.sh "full/ekos-${version}-${{ matrix.target }}-full.tar.gz" dist "$version" both
+          cd dist
+          for f in ./*.deb ./*.rpm; do sha256sum "${f#./}" > "${f#./}.sha256"; done
+          dpkg-deb --info ./*.deb
+          rpm -qip ./*.rpm
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: ekos-installer-${{ matrix.target }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.sha256
+          if-no-files-found: error
+
+  test-linux-packages:
+    name: Install the ${{ matrix.format }} on ${{ matrix.image }} (${{ matrix.target }})
+    needs: linux-packages
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-latest, image: "ubuntu:24.04", format: deb }
+          - { target: x86_64-unknown-linux-gnu, runner: ubuntu-latest, image: "rockylinux:9", format: rpm }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm, image: "ubuntu:24.04", format: deb }
+          - { target: aarch64-unknown-linux-gnu, runner: ubuntu-24.04-arm, image: "rockylinux:9", format: rpm }
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: ekos-installer-${{ matrix.target }}
+          path: inst
+      - name: Install, set up as a person, uninstall
+        env:
+          FORMAT: ${{ matrix.format }}
+        run: |
+          set -eu
+          ok() { echo "ok   $1"; }
+          fail() { echo "::error::FAIL $1"; exit 1; }
+          if [ "$FORMAT" = deb ]; then
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq --no-install-recommends curl ca-certificates "./$(ls inst/*.deb)"
+          else
+            dnf install -y -q "./$(ls inst/*.rpm)"
+          fi
+          ekos --version
+          [ "$(readlink -f /usr/bin/ekos)" = /opt/ekos/bin/ekos ] && ok "/usr/bin/ekos" || fail "/usr/bin/ekos"
+          for d in ekos-setup ekos-console; do
+            [ -f "/usr/share/applications/$d.desktop" ] && ok "$d.desktop" || fail "$d.desktop"
+          done
+          grep -q "kind = \"$FORMAT\"" /opt/ekos/installer.toml && ok "installer.toml" || fail "installer.toml"
+          [ "$(stat -c %U /opt/ekos/bin/ekos)" = root ] && ok "owned by root" || fail "owner"
+
+          # The person: not root, the program from PATH, the default home.
+          useradd -m tester
+          cat > /tmp/as-user.sh <<'EOF'
+          set -eu
+          ok() { echo "ok   $1"; }
+          fail() { echo "::error::FAIL $1"; exit 1; }
+          src="$HOME/src/shop"; mkdir -p "$src/db"
+          echo 'CREATE TABLE customers (id INT PRIMARY KEY, email TEXT);' > "$src/db/schema.sql"
+          printf 'add_to_path = true\n[console]\nmode = "local"\nport = 18768\n[project]\nname = "shop"\nsources = ["%s"]\ndetect = true\n[start]\nnow = true\nopen = false\n' "$src" > answers.toml
+          ekos setup --answers answers.toml | tee setup.txt
+          ! grep -q '^FAIL' setup.txt && ok "every step ok" || fail "a setup step"
+          ! grep -qE 'copy EKOS|on PATH' setup.txt && ok "nothing copied, no PATH lines" || fail "copied or PATH"
+          ! grep -qs 'added by ekos setup' ~/.profile ~/.bashrc && ok "profiles untouched" || fail "a PATH line"
+          [ ! -e ~/.ekos/bin ] && ok "no copy in the home" || fail "a copy in the home"
+          [ -f ~/.ekos/data/default/shop/ekos.toml ] && ok "the project" || fail "the project"
+          curl -fsS http://127.0.0.1:18768/api/health || fail "the console does not answer"
+          echo; ok "the console answers"
+          ekos console stop
+          ekos uninstall --purge --yes | tee uninstall.txt
+          grep -q "installed by the $FORMAT package" uninstall.txt && ok "uninstall names the OS uninstaller" || fail "uninstall message"
+          [ -x /opt/ekos/bin/ekos ] && ok "the program stays" || fail "the program was removed"
+          [ ! -e ~/.ekos ] && ok "the home is gone" || fail "the home"
+          EOF
+          su - tester -c "FORMAT=$FORMAT sh /tmp/as-user.sh"
+
+          if [ "$FORMAT" = deb ]; then apt-get remove -y -qq ekos; else dnf remove -y -q ekos; fi
+          [ ! -e /opt/ekos ] && [ ! -e /usr/bin/ekos ] && [ ! -e /usr/share/applications/ekos-setup.desktop ] \
+            && ok "the package manager removed the program" || { ls -laR /opt/ekos | head -40; fail "left behind"; }
+          [ -d /home/tester/src/shop ] && ok "the person's files stay"
+
   release:
     name: Publish release
-    needs: [build, package, install-windows]
+    needs: [build, package, install-windows, test-msi, test-pkg, test-linux-packages]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     # The only job in this workflow that writes anything: `gh release create` creates the release
@@ -524,7 +910,7 @@ jobs:
           # otherwise be handed to cat/rm as an option (ShellCheck SC2035). Collected into arrays
           # and quoted so a name containing whitespace cannot split either.
           sums=(./*.sha256)
-          archives=(./*.tar.gz ./*.zip)
+          archives=(./*.tar.gz ./*.zip ./*.msi ./*.pkg ./*.deb ./*.rpm)
 
           # Every archive must have contributed a checksum. Without this check a target whose
           # upload half-failed would still be attached to the release, and `install.sh` would
@@ -558,6 +944,10 @@ jobs:
           subject-path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/*.msi
+            dist/*.pkg
+            dist/*.deb
+            dist/*.rpm
             dist/SHA256SUMS
 
       - name: Create the release

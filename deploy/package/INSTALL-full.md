@@ -6,6 +6,12 @@ and the Python that runs it. Nothing else has to be installed. It was built from
 
 ## 1. Start the setup
 
+The release also has a native installer for each system — `.msi` (Windows), `.pkg` (macOS),
+`.deb` and `.rpm` (Linux) — that puts this same program in place and on your `PATH`, adds
+**EKOS Setup** and **EKOS Console** to the Start menu, Applications or the applications menu,
+and is removed with the system's own uninstaller. Prefer it when you can; this archive is for a
+machine where you would rather install nothing system-wide.
+
 Unpack the archive anywhere (your Downloads folder is fine), then:
 
 | System | Do this |
