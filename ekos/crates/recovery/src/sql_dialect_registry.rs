@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 use ekos_plugin_sql_dialect_clickhouse::ClickHouseDialectParser;
 use ekos_plugin_sql_dialect_databricks::DatabricksDialectParser;
+use ekos_plugin_sql_dialect_duckdb::DuckDbDialectParser;
 use ekos_plugin_sql_dialect_mssql::MsSqlDialectParser;
 use ekos_plugin_sql_dialect_mysql::MySqlDialectParser;
 use ekos_plugin_sql_dialect_oracle::OracleDialectParser;
@@ -72,6 +73,9 @@ pub fn build_dialect_registry() -> HashMap<String, Box<dyn SqlDialectParser>> {
     registry.insert("clickhouse".to_string(), Box::new(ClickHouseDialectParser));
     // RFC 0190: the SQL dbt-trino models and EKOS Lakehouse pipelines are written in.
     registry.insert("trino".to_string(), Box::new(TrinoDialectParser));
+    // RFC 0259: DuckDB, the engine gold marts are served from (dbt-duckdb models, `ekos sql
+    // check --duckdb`).
+    registry.insert("duckdb".to_string(), Box::new(DuckDbDialectParser));
     // RFC 0210: Oracle schemas and SQL*Plus scripts. `init --detect` has scored Oracle markers
     // since RFC 0152; this is the parser that name now resolves to.
     registry.insert("oracle".to_string(), Box::new(OracleDialectParser));
@@ -148,6 +152,7 @@ mod tests {
     fn registry_contains_trino() {
         let registry = build_dialect_registry();
         assert_eq!(registry.get("trino").unwrap().name(), "trino");
+        assert_eq!(registry.get("duckdb").unwrap().name(), "duckdb");
         assert_eq!(registry.get("oracle").unwrap().name(), "oracle");
         assert_eq!(registry.get("plsql").unwrap().name(), "oracle");
     }

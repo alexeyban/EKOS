@@ -51,6 +51,7 @@ ekos-plugin-sql-dialect-snowflake.workspace = true
 ekos-plugin-sql-dialect-sqlite.workspace = true
 ekos-plugin-sql-dialect-databricks.workspace = true
 ekos-plugin-sql-dialect-trino.workspace = true
+ekos-plugin-sql-dialect-duckdb.workspace = true
 ekos-plugin-sql-dialect-oracle.workspace = true
 ekos-plsql.workspace = true
 ekos-plugin-sql-dialect-mssql.workspace = true

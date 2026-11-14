@@ -66,6 +66,7 @@ members = [
     "plugins/sql-dialect-snowflake",
     "plugins/sql-dialect-databricks",
     "plugins/sql-dialect-trino",
+    "plugins/sql-dialect-duckdb",
     "plugins/sql-dialect-oracle",
     "plugins/sql-dialect-mssql",
     "plugins/sql-dialect-clickhouse",
@@ -139,6 +140,7 @@ ekos-plugin-rust                   = { path = "plugins/rust", version = "1.4.3" 
 ekos-plugin-sql-dialect-clickhouse = { path = "plugins/sql-dialect-clickhouse", version = "1.4.3" }
 ekos-plugin-sql-dialect-databricks = { path = "plugins/sql-dialect-databricks", version = "1.4.3" }
 ekos-plugin-sql-dialect-trino = { path = "plugins/sql-dialect-trino", version = "1.4.3" }
+ekos-plugin-sql-dialect-duckdb = { path = "plugins/sql-dialect-duckdb", version = "1.4.3" }
 ekos-plugin-sql-dialect-oracle = { path = "plugins/sql-dialect-oracle", version = "1.4.3" }
 ekos-plugin-sql-dialect-mssql      = { path = "plugins/sql-dialect-mssql", version = "1.4.3" }
 ekos-plugin-sql-dialect-mysql      = { path = "plugins/sql-dialect-mysql", version = "1.4.3" }

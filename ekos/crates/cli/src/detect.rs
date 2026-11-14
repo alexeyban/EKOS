@@ -471,6 +471,7 @@ const ENGINE_DIRECTORIES: &[(&str, &str)] = &[
     ("clickhouse", "clickhouse"),
     ("databricks", "databricks"),
     ("trino", "trino"),
+    ("duckdb", "duckdb"),
 ];
 
 /// Pure: the engine-named directories holding `.sql` files, in name order.
@@ -1291,6 +1292,21 @@ mod tests {
                 dialect
             );
         }
+    }
+
+    /// RFC 0259: SQL under a `duckdb/` directory is read as DuckDB, and the registry knows it.
+    #[test]
+    fn a_duckdb_directory_becomes_a_duckdb_rule() {
+        let dirs = detect_engine_directories(&["marts/duckdb/fct_invoice.sql".to_string()]);
+        assert_eq!(
+            dirs,
+            vec![EngineDirectory {
+                name: "duckdb".into(),
+                dialect: "duckdb",
+                sql_files: 1
+            }]
+        );
+        assert!(ekos_recovery::build_dialect_registry().contains_key("duckdb"));
     }
 
     /// A capped enumeration must never print as a total.

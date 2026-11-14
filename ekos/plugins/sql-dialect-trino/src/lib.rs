@@ -16,7 +16,9 @@
 //! Blanking replaces every character except line breaks with a space, so line numbers in
 //! diagnostics and evidence stay the file's own (the same rule RFC 0176 uses).
 
-use ekos_sql_dialect_sdk::lex::{is_ident_char, skip_non_code, statement_spans};
+use ekos_sql_dialect_sdk::lex::{
+    CodeToken as Tok, blank, closing_paren, code_tokens, statement_spans,
+};
 use ekos_sql_dialect_sdk::{DialectFacts, RowLimit, SqlDialectParser};
 use sqlparser::dialect::{Dialect, GenericDialect};
 
@@ -44,7 +46,7 @@ impl SqlDialectParser for TrinoDialectParser {
     fn preprocess(&self, sql: &str) -> String {
         let mut chars: Vec<char> = sql.chars().collect();
         for (start, end) in statement_spans(&chars) {
-            let toks = tokens(&chars[..end], start);
+            let toks = code_tokens(&chars[..end], start);
             if is_alter_execute(&toks) {
                 blank(&mut chars, start, end);
                 continue;
@@ -69,71 +71,14 @@ impl SqlDialectParser for TrinoDialectParser {
     }
 }
 
-/// One code token: a word (identifier or keyword, upper-cased in `word`) or a single symbol.
-/// Strings, quoted identifiers and comments are skipped, never tokens, so a keyword inside a
-/// literal can never trigger a rewrite.
-#[derive(Debug)]
-struct Tok {
-    start: usize,
-    end: usize,
-    word: Option<String>,
-    symbol: char,
-}
-
-fn tokens(chars: &[char], from: usize) -> Vec<Tok> {
-    let mut out = Vec::new();
-    let mut i = from;
-    while i < chars.len() {
-        if let Some(next) = skip_non_code(chars, i) {
-            // A quoted identifier is still a table or column reference; keep it as a word so
-            // a clause that follows it is found.
-            if chars[i] == '"' || chars[i] == '`' {
-                out.push(Tok {
-                    start: i,
-                    end: next,
-                    word: Some(String::new()),
-                    symbol: ' ',
-                });
-            }
-            i = next;
-        } else if chars[i].is_whitespace() {
-            i += 1;
-        } else if is_ident_char(chars[i]) {
-            let s = i;
-            while i < chars.len() && is_ident_char(chars[i]) {
-                i += 1;
-            }
-            out.push(Tok {
-                start: s,
-                end: i,
-                word: Some(chars[s..i].iter().collect::<String>().to_uppercase()),
-                symbol: ' ',
-            });
-        } else {
-            out.push(Tok {
-                start: i,
-                end: i + 1,
-                word: None,
-                symbol: chars[i],
-            });
-            i += 1;
-        }
-    }
-    out
-}
-
-fn is_word(t: &Tok, w: &str) -> bool {
-    t.word.as_deref() == Some(w)
-}
-
 /// `ALTER TABLE <name> EXECUTE`: the name may be dotted and quoted.
 fn is_alter_execute(toks: &[Tok]) -> bool {
-    if toks.len() < 4 || !is_word(&toks[0], "ALTER") || !is_word(&toks[1], "TABLE") {
+    if toks.len() < 4 || !toks[0].is("ALTER") || !toks[1].is("TABLE") {
         return false;
     }
     let mut i = 2;
     while i < toks.len() && (toks[i].word.is_some() || toks[i].symbol == '.') {
-        if is_word(&toks[i], "EXECUTE") && i > 2 {
+        if toks[i].is("EXECUTE") && i > 2 {
             return true;
         }
         i += 1;
@@ -190,12 +135,12 @@ fn blank_clauses(chars: &mut [char], toks: &[Tok], stmt_end: usize) {
 
 /// `FOR TIMESTAMP|VERSION|SYSTEM_TIME AS OF` starts at token `i`.
 fn is_time_travel(toks: &[Tok], i: usize) -> bool {
-    is_word(&toks[i], "FOR")
-        && toks.get(i + 1).is_some_and(|n| {
-            is_word(n, "TIMESTAMP") || is_word(n, "VERSION") || is_word(n, "SYSTEM_TIME")
-        })
-        && toks.get(i + 2).is_some_and(|n| is_word(n, "AS"))
-        && toks.get(i + 3).is_some_and(|n| is_word(n, "OF"))
+    toks[i].is("FOR")
+        && toks
+            .get(i + 1)
+            .is_some_and(|n| n.is("TIMESTAMP") || n.is("VERSION") || n.is("SYSTEM_TIME"))
+        && toks.get(i + 2).is_some_and(|n| n.is("AS"))
+        && toks.get(i + 3).is_some_and(|n| n.is("OF"))
 }
 
 /// The token that ends a time-travel expression starting at `from`: a top-level `,` `;` or
@@ -226,40 +171,11 @@ fn time_travel_end(toks: &[Tok], from: usize) -> usize {
 
 /// `TABLESAMPLE BERNOULLI|SYSTEM (` starts at token `i`.
 fn is_tablesample(toks: &[Tok], i: usize) -> bool {
-    is_word(&toks[i], "TABLESAMPLE")
+    toks[i].is("TABLESAMPLE")
         && toks
             .get(i + 1)
-            .is_some_and(|n| is_word(n, "BERNOULLI") || is_word(n, "SYSTEM"))
+            .is_some_and(|n| n.is("BERNOULLI") || n.is("SYSTEM"))
         && toks.get(i + 2).is_some_and(|n| n.symbol == '(')
-}
-
-/// The token closing the parenthesis opened at `open`, or past the end when it never closes.
-fn closing_paren(toks: &[Tok], open: usize) -> usize {
-    let mut j = open;
-    let mut depth = 0i32;
-    while j < toks.len() {
-        match toks[j].symbol {
-            '(' => depth += 1,
-            ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    break;
-                }
-            }
-            _ => {}
-        }
-        j += 1;
-    }
-    j
-}
-
-/// Spaces over `[start, end)`, keeping line breaks.
-fn blank(chars: &mut [char], start: usize, end: usize) {
-    for c in &mut chars[start..end] {
-        if *c != '\n' && *c != '\r' {
-            *c = ' ';
-        }
-    }
 }
 
 #[cfg(test)]

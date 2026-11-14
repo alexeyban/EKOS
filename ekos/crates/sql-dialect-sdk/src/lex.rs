@@ -174,6 +174,94 @@ pub fn skip_trivia(chars: &[char], from: usize) -> usize {
     }
 }
 
+/// One code token for a clause-level rewrite (RFC 0190, RFC 0259): a word (identifier or keyword,
+/// upper-cased in `word`) or a single symbol. Strings and comments are skipped, never tokens, so a
+/// keyword inside a literal can never trigger a rewrite; a quoted identifier is a word with an
+/// empty `word`, so a clause that follows it is still found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeToken {
+    pub start: usize,
+    pub end: usize,
+    pub word: Option<String>,
+    pub symbol: char,
+}
+
+impl CodeToken {
+    /// True when this token is the (upper-case) keyword `w`.
+    pub fn is(&self, w: &str) -> bool {
+        self.word.as_deref() == Some(w)
+    }
+}
+
+/// The code tokens of `chars` from `from` on.
+pub fn code_tokens(chars: &[char], from: usize) -> Vec<CodeToken> {
+    let mut out = Vec::new();
+    let mut i = from;
+    while i < chars.len() {
+        if let Some(next) = skip_non_code(chars, i) {
+            if chars[i] == '"' || chars[i] == '`' {
+                out.push(CodeToken {
+                    start: i,
+                    end: next,
+                    word: Some(String::new()),
+                    symbol: ' ',
+                });
+            }
+            i = next;
+        } else if chars[i].is_whitespace() {
+            i += 1;
+        } else if is_ident_char(chars[i]) {
+            let s = i;
+            while i < chars.len() && is_ident_char(chars[i]) {
+                i += 1;
+            }
+            out.push(CodeToken {
+                start: s,
+                end: i,
+                word: Some(chars[s..i].iter().collect::<String>().to_uppercase()),
+                symbol: ' ',
+            });
+        } else {
+            out.push(CodeToken {
+                start: i,
+                end: i + 1,
+                word: None,
+                symbol: chars[i],
+            });
+            i += 1;
+        }
+    }
+    out
+}
+
+/// The index of the token closing the parenthesis opened at `open`, or `toks.len()` when it never
+/// closes.
+pub fn closing_paren(toks: &[CodeToken], open: usize) -> usize {
+    let mut depth = 0i32;
+    for (j, t) in toks.iter().enumerate().skip(open) {
+        match t.symbol {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return j;
+                }
+            }
+            _ => {}
+        }
+    }
+    toks.len()
+}
+
+/// Spaces over `[start, end)`, keeping line breaks, so a rewrite never moves a line (RFC 0176).
+pub fn blank(chars: &mut [char], start: usize, end: usize) {
+    for c in &mut chars[start..end] {
+        if *c != '\n' && *c != '\r' {
+            *c = ' ';
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,5 +348,25 @@ mod tests {
     fn skip_trivia_on_all_trivia_returns_end() {
         let c = cv("  -- only a comment\n  ");
         assert_eq!(skip_trivia(&c, 0), c.len());
+    }
+
+    #[test]
+    fn code_tokens_skip_literals_and_keep_quoted_names() {
+        let c = cv("select \"Name\", 'from x' -- where\nFROM t(a)");
+        let toks = code_tokens(&c, 0);
+        let words: Vec<_> = toks.iter().filter_map(|t| t.word.clone()).collect();
+        assert_eq!(words, ["SELECT", "", "FROM", "T", "A"]);
+        assert!(toks[0].is("SELECT"));
+        let open = toks.iter().position(|t| t.symbol == '(').unwrap();
+        assert_eq!(toks[closing_paren(&toks, open)].symbol, ')');
+        assert_eq!(closing_paren(&toks[..open + 2], open), open + 2);
+    }
+
+    #[test]
+    fn blank_keeps_line_breaks() {
+        let mut c = cv("a\nbc\r\nd");
+        let n = c.len();
+        blank(&mut c, 0, n);
+        assert_eq!(c.into_iter().collect::<String>(), " \n  \r\n ");
     }
 }
