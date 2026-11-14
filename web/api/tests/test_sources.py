@@ -18,7 +18,12 @@ from fastapi.testclient import TestClient
 from app import keychain, models
 from app.main import create_app
 from app.semantics_write import ReviewError
-from app.sources_write import database_add_argv, secret_name, source_add_argv
+from app.sources_write import (
+    database_add_argv,
+    duckdb_add_argv,
+    secret_name,
+    source_add_argv,
+)
 
 
 def _not_on_windows(reason: str) -> pytest.MarkDecorator:
@@ -303,3 +308,58 @@ def test_without_a_keychain_adding_a_database_says_what_to_do(setup, monkeypatch
     r = c.post("/api/workspaces/w/databases", headers=W, json=body)
     assert r.status_code == 400 and "--password-env" in r.json()["detail"]
     assert not [x for x in _calls(log) if x["argv"][:2] == ["database", "add"]]
+
+
+def test_a_duckdb_file_is_added_by_its_path_only() -> None:
+    argv = duckdb_add_argv("marts", "/srv/marts/marts.duckdb", ["gold"], "p2")
+    assert argv == [
+        "database",
+        "add",
+        "marts",
+        "--kind=duckdb",
+        "--path=/srv/marts/marts.duckdb",
+        "--profile=p2",
+        "--owner=gold",
+    ]
+    for name, path, owners, profile in (
+        ("Marts", "/m.duckdb", ["gold"], "p0"),
+        ("marts", "", ["gold"], "p0"),
+        ("marts", "/m\x00.duckdb", ["gold"], "p0"),
+        ("marts", "/m.duckdb", [], "p0"),
+        ("marts", "/m.duckdb", ["gold"], "p9"),
+    ):
+        with pytest.raises(ReviewError):
+            duckdb_add_argv(name, path, owners, profile)
+
+
+@_not_on_windows("the fake ekos is a script run by its #! line")
+def test_a_duckdb_file_needs_no_password_and_stays_inside_the_roots(setup) -> None:
+    c, log, tmp = setup
+    mart = tmp / "code" / "marts.duckdb"
+    mart.write_bytes(b"")
+    body = {"name": "marts", "kind": "duckdb", "path": str(mart), "owners": ["gold"]}
+    assert c.post("/api/workspaces/w/databases", headers=R, json=body).status_code == 403
+    r = c.post("/api/workspaces/w/databases", headers=W, json=body)
+    assert r.status_code == 201, r.text
+    assert r.json()["password_env"] is None
+    call = _calls(log)[-1]["argv"]
+    assert call[:5] == ["database", "add", "marts", "--kind=duckdb", f"--path={mart}"]
+    assert not [a for a in call if a.startswith(("--password-env", "--connect", "--user"))]
+    assert models.get_tenant("default").source_env in (None, [])
+    for bad in (
+        {**body, "password": PASSWORD},
+        {**body, "connect": "h/db"},
+        {**body, "dictionary": "idempiere"},
+        {k: v for k, v in body.items() if k != "path"},
+    ):
+        r = c.post("/api/workspaces/w/databases", headers=W, json=bad)
+        assert r.status_code == 400, (bad, r.text)
+    models.update_tenant("default", source_roots=[str(tmp / "code")])
+    outside = {**body, "name": "etc", "path": "/etc/passwd"}
+    r = c.post("/api/workspaces/w/databases", headers=W, json=outside)
+    assert r.status_code == 400 and "outside" in r.json()["detail"]
+    # A server kind still needs its password, and refuses a path.
+    server = {"name": "erp", "connect": "h:1521/S", "user": "u", "owners": ["E"]}
+    assert c.post("/api/workspaces/w/databases", headers=W, json=server).status_code == 400
+    with_path = {**server, "password": PASSWORD, "path": str(mart)}
+    assert c.post("/api/workspaces/w/databases", headers=W, json=with_path).status_code == 400

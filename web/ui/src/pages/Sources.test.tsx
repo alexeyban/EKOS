@@ -232,4 +232,57 @@ describe("Sources page", () => {
     expect(screen.getByText("differs")).toBeInTheDocument();
     expect(screen.getByText(/30457 columns/)).toBeInTheDocument();
   });
+  it("adds a DuckDB file by its path, with no user or password", async () => {
+    vi.spyOn(client, "api").mockResolvedValue({
+      sources: [],
+      databases: [
+        {
+          name: "marts",
+          kind: "duckdb",
+          connect: "",
+          user: "",
+          password_env: "",
+          password_stored: false,
+          owners: ["gold"],
+          profile: "p2",
+          dictionary: null,
+          path: "/srv/marts/marts.duckdb",
+        },
+      ],
+    } as never);
+    const post = vi
+      .spyOn(client, "apiPost")
+      .mockResolvedValue({ message: "Added database m", password_env: null });
+    renderAs(operator);
+    expect(
+      await screen.findByText("/srv/marts/marts.duckdb"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("read-only file, no password")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Add a database"));
+    fireEvent.change(screen.getByLabelText("database kind"), {
+      target: { value: "duckdb" },
+    });
+    expect(screen.queryByLabelText("password")).toBeNull();
+    expect(screen.queryByLabelText("user")).toBeNull();
+    fireEvent.change(screen.getByLabelText("database name"), {
+      target: { value: "m" },
+    });
+    fireEvent.change(screen.getByLabelText("connect"), {
+      target: { value: "/srv/marts/m.duckdb" },
+    });
+    fireEvent.change(screen.getByLabelText("owners"), {
+      target: { value: "gold" },
+    });
+    fireEvent.click(screen.getByText("Add database"));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    const body = post.mock.calls[0][1] as Record<string, unknown>;
+    expect(body).toMatchObject({
+      kind: "duckdb",
+      name: "m",
+      path: "/srv/marts/m.duckdb",
+      owners: ["gold"],
+    });
+    expect(body).not.toHaveProperty("password");
+    expect(body).not.toHaveProperty("connect");
+  });
 });

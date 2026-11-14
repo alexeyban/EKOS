@@ -125,6 +125,21 @@ def database_add_argv(
     return argv
 
 
+def duckdb_add_argv(name: str, path: str, owners: list[str], profile: str) -> list[str]:
+    """RFC 0259 D5: a DuckDB file, by its path alone — no connection, user or password. The
+    caller has checked the path against the tenant's allowed roots."""
+    check_name(name, "database")
+    if not path or "\x00" in path or len(path) > 1024:
+        raise ReviewError("a DuckDB database needs the path of its file")
+    if not owners or any(not _OWNER.match(o) for o in owners) or len(owners) > 50:
+        raise ReviewError("owners: one or more schema names")
+    if profile not in PROFILES:
+        raise ReviewError("profile is p0, p1 or p2")
+    argv = ["database", "add", name, "--kind=duckdb", f"--path={path}", f"--profile={profile}"]
+    argv += [f"--owner={o}" for o in owners]
+    return argv
+
+
 def store_password(tenant: models.Tenant, variable: str, password: str) -> None:
     """Keep the password in the keychain and grant its variable to the tenant."""
     if not password or "\x00" in password or len(password) > 1024:

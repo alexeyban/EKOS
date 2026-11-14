@@ -197,8 +197,18 @@ const KINDS = {
     owners: "Table owners to read (comma-separated)",
     ownersHint: "informix",
   },
+  // RFC 0259 D5. A file on the console's machine, inside the allowed source roots, opened
+  // read-only: no user, no password.
+  duckdb: {
+    label: "DuckDB file",
+    connect: "Database file (path on the server)",
+    connectHint: "/srv/marts/marts.duckdb",
+    owners: "Schemas to read (comma-separated)",
+    ownersHint: "main",
+  },
 } as const;
 type Kind = keyof typeof KINDS;
+const isFile = (kind: string) => kind === "duckdb";
 
 function AddDatabase({ workspace }: { workspace: string }) {
   const qc = useQueryClient();
@@ -221,9 +231,9 @@ function AddDatabase({ workspace }: { workspace: string }) {
         {
           kind: f.kind,
           name: f.name,
-          connect: f.connect,
-          user: f.user,
-          password: f.password,
+          ...(isFile(f.kind)
+            ? { path: f.connect }
+            : { connect: f.connect, user: f.user, password: f.password }),
           owners: f.owners
             .split(/[,\s]+/)
             .map((o) => o.trim())
@@ -238,7 +248,11 @@ function AddDatabase({ workspace }: { workspace: string }) {
       void qc.invalidateQueries({ queryKey: ["sources", workspace] });
     },
   });
-  const ready = f.name && f.connect && f.user && f.password && f.owners;
+  const ready =
+    f.name &&
+    f.connect &&
+    f.owners &&
+    (isFile(f.kind) || (f.user && f.password));
   const k = KINDS[f.kind];
   return (
     <details className="sem-decide">
@@ -278,22 +292,26 @@ function AddDatabase({ workspace }: { workspace: string }) {
             placeholder={k.connectHint}
           />
         </label>
-        <label className="sem-field">
-          <span>Read-only user</span>
-          <input aria-label="user" value={f.user} onChange={set("user")} />
-        </label>
-        <label className="sem-field">
-          <span>
-            Password (kept in the console's keychain, never in ekos.toml)
-          </span>
-          <input
-            aria-label="password"
-            type="password"
-            autoComplete="new-password"
-            value={f.password}
-            onChange={set("password")}
-          />
-        </label>
+        {!isFile(f.kind) && (
+          <>
+            <label className="sem-field">
+              <span>Read-only user</span>
+              <input aria-label="user" value={f.user} onChange={set("user")} />
+            </label>
+            <label className="sem-field">
+              <span>
+                Password (kept in the console's keychain, never in ekos.toml)
+              </span>
+              <input
+                aria-label="password"
+                type="password"
+                autoComplete="new-password"
+                value={f.password}
+                onChange={set("password")}
+              />
+            </label>
+          </>
+        )}
         <label className="sem-field">
           <span>{k.owners}</span>
           <input
@@ -346,6 +364,17 @@ function AddDatabase({ workspace }: { workspace: string }) {
   );
 }
 
+function PasswordChip({ db }: { db: DatabaseSource }) {
+  if (db.path !== undefined) {
+    return <span className="chip ok">read-only file, no password</span>;
+  }
+  return db.password_stored ? (
+    <span className="chip ok">password stored</span>
+  ) : (
+    <span className="chip warn">password from ${db.password_env}</span>
+  );
+}
+
 function DatabaseRow({
   workspace,
   db,
@@ -373,18 +402,12 @@ function DatabaseRow({
     <div className="sem-decide" aria-label={`database ${db.name}`}>
       <p>
         <strong>{db.name}</strong> <span className="chip">{db.kind}</span>{" "}
-        <code>
-          {db.user}@{db.connect}
-        </code>{" "}
+        <code>{db.path ?? `${db.user}@${db.connect}`}</code>{" "}
         · {db.kind === "clickhouse" ? "databases" : "schemas"}{" "}
         {db.owners.join(", ")}
         {` · profile ${db.profile}`}
         {db.dictionary ? ` · dictionary ${db.dictionary}` : ""} ·{" "}
-        {db.password_stored ? (
-          <span className="chip ok">password stored</span>
-        ) : (
-          <span className="chip warn">password from ${db.password_env}</span>
-        )}
+        <PasswordChip db={db} />
       </p>
       {canOperate && (
         <div className="btnrow">

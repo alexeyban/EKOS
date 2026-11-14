@@ -503,6 +503,8 @@ export interface DatabaseSource {
   owners: string[];
   profile: string;
   dictionary: string | null;
+  /** RFC 0259: a DuckDB database's file (it has no connection, user or password). */
+  path?: string;
 }
 
 export interface CensusRow {

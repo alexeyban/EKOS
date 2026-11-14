@@ -144,12 +144,13 @@ async def add_source(
 
 class DatabaseIn(BaseModel):
     name: str = Field(max_length=63)
-    # RFC 0235.
-    kind: Literal["oracle", "postgres", "clickhouse", "sqlserver", "informix"] = "oracle"
-    connect: str = Field(max_length=300)
-    user: str = Field(max_length=128)
-    # Sent once; kept in the keychain; never echoed.
-    password: str = Field(min_length=1, max_length=1024)
+    # RFC 0235; RFC 0259 D5 adds a DuckDB file, which takes `path` and nothing else.
+    kind: Literal["oracle", "postgres", "clickhouse", "sqlserver", "informix", "duckdb"] = "oracle"
+    connect: str = Field(default="", max_length=300)
+    user: str = Field(default="", max_length=128)
+    # Sent once; kept in the keychain; never echoed. Every kind but duckdb needs it.
+    password: str = Field(default="", max_length=1024)
+    path: str | None = Field(default=None, max_length=1024)
     owners: list[str] = Field(min_length=1, max_length=50)
     profile: Literal["p0", "p1", "p2"] = "p0"
     dictionary: Literal["idempiere"] | None = None
@@ -162,10 +163,14 @@ async def add_database(
     settings: Settings = Depends(get_settings),
     principal: Principal = Depends(_OPERATOR),
 ) -> dict:
-    """Add an Oracle, PostgreSQL or ClickHouse database: the password to the keychain, its
-    variable's name to ekos.toml."""
+    """Add a database: a server's password to the keychain and its variable's name to ekos.toml;
+    a DuckDB file by its path, inside the tenant's allowed roots."""
     _no_token(principal)
     tenant = _tenant(ws)
+    if body.kind == "duckdb":
+        return await _add_duckdb(body, ws, settings, tenant)
+    if body.path is not None:
+        raise HTTPException(status_code=400, detail="path is for a duckdb database")
     variable = sources_write.secret_name(tenant.id, _project_name(ws), body.name)
     try:
         argv = sources_write.database_add_argv(
@@ -193,6 +198,28 @@ async def add_database(
         sources_write.forget_password(_tenant(ws), variable)
         raise
     return {"ok": True, "password_env": variable, "message": message}
+
+
+async def _add_duckdb(
+    body: DatabaseIn, ws: models.Workspace, settings: Settings, tenant: models.Tenant
+) -> dict:
+    """RFC 0259 D5: a DuckDB file is opened read-only by `ekos`; it must still lie inside the
+    roots the tenant may read, like a source directory, and it carries no credential."""
+    if body.connect or body.user or body.password or body.dictionary:
+        raise HTTPException(
+            status_code=400,
+            detail="a duckdb database takes a path, not a connection, password or dictionary",
+        )
+    if not body.path:
+        raise HTTPException(status_code=400, detail="a duckdb database needs the path of its file")
+    path = Path(body.path).expanduser().resolve()
+    if not roots.is_allowed(path, roots.allowed_roots(tenant, settings)):
+        raise HTTPException(status_code=400, detail=f"{path} is outside the allowed source roots")
+    try:
+        argv = sources_write.duckdb_add_argv(body.name, str(path), body.owners, body.profile)
+    except semantics_write.ReviewError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "password_env": None, "message": await _run(settings, ws, argv)}
 
 
 class PasswordIn(BaseModel):
