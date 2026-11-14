@@ -401,10 +401,64 @@ fn render_expr(
     }
 }
 
-/// The rendered model, parsed with the first dialect that accepts it.
-fn parse_model(rendered: &str) -> Option<Vec<sqlparser::ast::Statement>> {
-    use ekos_sql_dialect_sdk::SqlDialectParser;
+/// The adapter a dbt project builds with (`type:` of its profile's target), read from its own
+/// `profiles.yml` (RFC 0259 D2). The profile is the one `dbt_project.yml` names under `profile:`
+/// (else the only one in the file); its output is the profile's `target` (else the only output, or
+/// the one type every output shares). `None` when the files do not say.
+pub fn dbt_adapter_type(dbt_project_yml: &str, profiles_yml: &str) -> Option<String> {
+    let profiles: serde_yaml::Value = serde_yaml::from_str(profiles_yml).ok()?;
+    let profiles = profiles.as_mapping()?;
+    let wanted = serde_yaml::from_str::<serde_yaml::Value>(dbt_project_yml)
+        .ok()
+        .and_then(|d| {
+            d.get("profile")
+                .and_then(|p| p.as_str())
+                .map(str::to_string)
+        });
+    let profile = match wanted.as_deref().and_then(|w| profiles.get(w)) {
+        Some(p) => p,
+        None => {
+            let mut real = profiles
+                .iter()
+                .filter(|(k, v)| k.as_str() != Some("config") && v.get("outputs").is_some());
+            let only = real.next()?;
+            if real.next().is_some() {
+                return None;
+            }
+            only.1
+        }
+    };
+    let outputs = profile.get("outputs")?.as_mapping()?;
+    let type_of = |o: &serde_yaml::Value| {
+        o.get("type")
+            .and_then(|t| t.as_str())
+            .map(|t| t.trim().to_ascii_lowercase())
+    };
+    if let Some(target) = profile.get("target").and_then(|t| t.as_str()) {
+        if let Some(t) = outputs.get(target).and_then(type_of) {
+            return Some(t);
+        }
+    }
+    let types: HashSet<String> = outputs.values().filter_map(type_of).collect();
+    (types.len() == 1).then(|| types.into_iter().next().expect("one type"))
+}
+
+/// The rendered model, parsed with the first dialect that accepts it. A model of a dbt-duckdb
+/// project (`adapter` `duckdb`) is read as DuckDB first (RFC 0259 D2); any other model tries the
+/// PostgreSQL, ClickHouse and generic dialects, then Trino, then DuckDB.
+fn parse_model(rendered: &str, adapter: Option<&str>) -> Option<Vec<sqlparser::ast::Statement>> {
     use sqlparser::dialect::{ClickHouseDialect, Dialect, GenericDialect, PostgreSqlDialect};
+    let duckdb = || {
+        parse_with(
+            &ekos_plugin_sql_dialect_duckdb::DuckDbDialectParser,
+            rendered,
+        )
+    };
+    if adapter == Some("duckdb") {
+        if let Some(stmts) = duckdb() {
+            return Some(stmts);
+        }
+    }
     let dialects: [&dyn Dialect; 3] = [
         &PostgreSqlDialect {},
         &ClickHouseDialect {},
@@ -413,21 +467,32 @@ fn parse_model(rendered: &str) -> Option<Vec<sqlparser::ast::Statement>> {
     dialects
         .into_iter()
         .find_map(|d| sqlparser::parser::Parser::parse_sql(d, rendered).ok())
-        .or_else(|| {
-            // RFC 0190: a dbt-trino model (time travel, `TABLESAMPLE`) parses once the Trino
-            // dialect has blanked what no `sqlparser` dialect reads.
-            let trino = ekos_plugin_sql_dialect_trino::TrinoDialectParser;
-            sqlparser::parser::Parser::parse_sql(
-                &*trino.sqlparser_dialect(),
-                &trino.preprocess(rendered),
-            )
-            .ok()
-        })
+        // RFC 0190: a dbt-trino model (time travel, `TABLESAMPLE`) parses once the Trino
+        // dialect has blanked what no `sqlparser` dialect reads.
+        .or_else(|| parse_with(&ekos_plugin_sql_dialect_trino::TrinoDialectParser, rendered))
+        // RFC 0259: a DuckDB model (`USING SAMPLE`, `AS MATERIALIZED`) in a project whose
+        // profile is not checked in.
+        .or_else(duckdb)
+}
+
+fn parse_with(
+    p: &dyn ekos_sql_dialect_sdk::SqlDialectParser,
+    rendered: &str,
+) -> Option<Vec<sqlparser::ast::Statement>> {
+    sqlparser::parser::Parser::parse_sql(&*p.sqlparser_dialect(), &p.preprocess(rendered)).ok()
 }
 
 /// The predicates of a model's rendered SQL.
 pub fn model_predicates(rendered: &str) -> Vec<crate::sql_predicates::PredicateSite> {
-    parse_model(rendered)
+    model_predicates_for(rendered, None)
+}
+
+/// The predicates of a model's rendered SQL, read for the project's dbt `adapter`.
+pub fn model_predicates_for(
+    rendered: &str,
+    adapter: Option<&str>,
+) -> Vec<crate::sql_predicates::PredicateSite> {
+    parse_model(rendered, adapter)
         .map(|stmts| {
             stmts
                 .iter()
@@ -440,7 +505,15 @@ pub fn model_predicates(rendered: &str) -> Vec<crate::sql_predicates::PredicateS
 
 /// A model's column lineage — each output column that passes a source column through.
 pub fn model_lineage(rendered: &str) -> std::collections::BTreeMap<String, (String, String)> {
-    match parse_model(rendered).as_deref() {
+    model_lineage_for(rendered, None)
+}
+
+/// A model's column lineage, read for the project's dbt `adapter`.
+pub fn model_lineage_for(
+    rendered: &str,
+    adapter: Option<&str>,
+) -> std::collections::BTreeMap<String, (String, String)> {
+    match parse_model(rendered, adapter).as_deref() {
         Some([sqlparser::ast::Statement::Query(q)]) => crate::sql_predicates::output_lineage(q),
         _ => Default::default(),
     }
@@ -541,6 +614,8 @@ pub struct DbtAnalyzerPass {
     /// (path relative to the dbt project root, raw SQL content) for every `models/**/*.sql` file
     /// — one dbt model per file, regardless of whether any YAML documents it.
     sql_files: Vec<(String, String)>,
+    /// RFC 0259 D2: the adapter the project builds with ([`dbt_adapter_type`]), when known.
+    adapter: Option<String>,
 }
 
 impl DbtAnalyzerPass {
@@ -555,7 +630,14 @@ impl DbtAnalyzerPass {
             dbt_root,
             yml_files,
             sql_files,
+            adapter: None,
         }
+    }
+
+    /// The adapter the project builds with (`duckdb`, `trino`, …), from its `profiles.yml`.
+    pub fn with_adapter(mut self, adapter: Option<String>) -> Self {
+        self.adapter = adapter;
+        self
     }
 }
 
@@ -664,12 +746,13 @@ impl CompilerPass for DbtAnalyzerPass {
         &self.pass_id
     }
 
-    /// `v5` = RFC 0190: a dbt-trino model that only the Trino dialect parses keeps its
+    /// `v6` = RFC 0259: a dbt-duckdb model is read as DuckDB (and any model that only DuckDB
+    /// reads keeps its predicates and lineage). `v5` = RFC 0190: a dbt-trino model that only the Trino dialect parses keeps its
     /// predicates and lineage. `v3` = RFC 0170: a model carries its own filters (`predicates`).
     /// `v2` = documented columns carry description, type and dbt tests.
     fn version(&self) -> &str {
         // Includes `PREDICATES_VERSION`: a model carries `predicates`.
-        "v5+predicates/8"
+        "v6+predicates/8"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -682,6 +765,8 @@ impl CompilerPass for DbtAnalyzerPass {
             hasher.update(path.as_bytes());
             hasher.update(content.as_bytes());
         }
+        hasher.update(b"adapter:");
+        hasher.update(self.adapter.as_deref().unwrap_or_default().as_bytes());
         vec![hex::encode(hasher.finalize())]
     }
 
@@ -726,13 +811,17 @@ impl CompilerPass for DbtAnalyzerPass {
                 .with_evidence(graph.add_evidence(ev));
             obj.id = id;
 
+            if let Some(adapter) = &self.adapter {
+                obj = obj.with_property("dbt_adapter", serde_json::json!(adapter));
+            }
             if let Some(materialized) = extract_materialized(content) {
                 obj = obj.with_property("materialized", serde_json::json!(materialized));
             }
             // RFC 0170: the model's own filters — a model is a view, and its WHERE defines it.
             let (rendered, used_vars) = render_model_sql(content, &name, &vars);
-            let predicates = model_predicates(&rendered);
-            let lineage = model_lineage(&rendered);
+            let adapter = self.adapter.as_deref();
+            let predicates = model_predicates_for(&rendered, adapter);
+            let lineage = model_lineage_for(&rendered, adapter);
             if !lineage.is_empty() {
                 obj = obj.with_property(
                     "column_lineage",
@@ -914,6 +1003,102 @@ where o.status = 'open'";
             .map(|p| p.canonical())
             .collect();
         assert_eq!(c, vec!["orders.status IN ('open')".to_string()]);
+    }
+
+    /// RFC 0259 D2: the adapter is the `type:` of the profile `dbt_project.yml` names, at its
+    /// target; with no `profile:` the file's only profile is used.
+    #[test]
+    fn the_adapter_comes_from_the_named_profile_s_target() {
+        let profiles = "config:\n  send_anonymous_usage_stats: false\n\
+gold:\n  target: dev\n  outputs:\n    dev:\n      type: duckdb\n      path: marts.next.duckdb\n    \
+prod:\n      type: trino\n\
+other:\n  outputs:\n    x:\n      type: postgres\n";
+        assert_eq!(
+            dbt_adapter_type("profile: gold\n", profiles).as_deref(),
+            Some("duckdb")
+        );
+        assert_eq!(
+            dbt_adapter_type("profile: other\n", profiles).as_deref(),
+            Some("postgres")
+        );
+        assert_eq!(
+            dbt_adapter_type("name: x\n", profiles),
+            None,
+            "two profiles"
+        );
+        let one = "gold:\n  outputs:\n    a:\n      type: DuckDB\n    b:\n      type: duckdb\n";
+        assert_eq!(dbt_adapter_type("", one).as_deref(), Some("duckdb"));
+        assert_eq!(dbt_adapter_type("", "not: [yaml"), None);
+    }
+
+    /// RFC 0259 D2: a dbt-duckdb model — a sample clause and a materialized CTE, which only the
+    /// DuckDB dialect reads — keeps its predicates and lineage, with or without the adapter known.
+    #[test]
+    fn a_dbt_duckdb_model_keeps_predicates_and_lineage() {
+        let rendered = "with src as materialized (select * from c_invoice using sample 10%)\n\
+select src.docstatus, src.grandtotal\nfrom src\nwhere src.docstatus = 'CO'";
+        for adapter in [Some("duckdb"), None] {
+            let lineage = model_lineage_for(rendered, adapter);
+            assert_eq!(
+                lineage.get("docstatus"),
+                Some(&("c_invoice".to_string(), "docstatus".to_string())),
+                "{adapter:?}: {lineage:?}"
+            );
+            let c: Vec<String> = model_predicates_for(rendered, adapter)
+                .iter()
+                .map(|p| p.canonical())
+                .collect();
+            assert_eq!(
+                c,
+                vec!["c_invoice.docstatus IN ('CO')".to_string()],
+                "{adapter:?}"
+            );
+        }
+    }
+
+    /// RFC 0259 D2: a dbt-duckdb project keeps `ref()`/`source()` lineage to silver, and its
+    /// models say which adapter built them; the adapter is part of the cache key.
+    #[tokio::test]
+    async fn a_dbt_duckdb_project_keeps_ref_and_source_lineage() {
+        let sources =
+            "version: 2\nsources:\n  - name: silver\n    tables:\n      - name: c_invoice\n";
+        let model = "{{ config(materialized='table') }}\n\
+select docstatus, count(*) as n, sum(grandtotal)::decimal(18,2) as total\n\
+from {{ source('silver', 'c_invoice') }}\ngroup by all";
+        let (mut c, _dir) = ctx();
+        let mut pass = DbtAnalyzerPass::new(
+            "dbt",
+            vec![("models/sources.yml".into(), sources.into())],
+            vec![("models/gold/fct_invoice.sql".into(), model.into())],
+        )
+        .with_adapter(Some("duckdb".into()));
+        let plain = DbtAnalyzerPass::new(
+            "dbt",
+            vec![("models/sources.yml".into(), sources.into())],
+            vec![("models/gold/fct_invoice.sql".into(), model.into())],
+        );
+        assert_ne!(pass.cache_inputs(), plain.cache_inputs());
+        pass.run(&mut c).await.unwrap();
+        let ids = c.artifact_store.list().unwrap();
+        let json = c.artifact_store.read(&ids[0]).unwrap().unwrap();
+        let kir = serde_json::from_value::<ekos_artifact::KnowledgeArtifact>(json)
+            .unwrap()
+            .content
+            .kir;
+        let fct = kir
+            .objects
+            .iter()
+            .find(|o| o.name == "fct_invoice")
+            .unwrap();
+        let src = kir.objects.iter().find(|o| o.name == "c_invoice").unwrap();
+        assert_eq!(fct.properties["dbt_adapter"], "duckdb");
+        assert!(
+            kir.relationships
+                .iter()
+                .any(|r| r.kind == RelationshipKind::DependsOn
+                    && r.from == fct.id
+                    && r.to == src.id)
+        );
     }
 
     /// RFC 0170 Phase 3: dbt tests are column facts — a declared domain, keys, references.

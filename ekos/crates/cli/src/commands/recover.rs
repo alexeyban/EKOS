@@ -1281,6 +1281,22 @@ async fn register_ossie_passes(
     Ok(found)
 }
 
+/// RFC 0259 D2: the adapter a dbt project builds with, from the `profiles.yml` beside its
+/// `dbt_project.yml`. Both files are read through the RFC 0043 rule (an excluded path is never
+/// opened, the text is redacted); only the adapter's name leaves this function.
+fn dbt_adapter(
+    base: &Path,
+    dbt_dir_rel: &Path,
+    redaction_config: &ekos_common::redaction::RedactionConfig,
+) -> Option<String> {
+    let rel = |name: &str| dbt_dir_rel.join(name).to_string_lossy().replace('\\', "/");
+    let read =
+        |name: &str| ekos_common::redaction::read_redacted(base, &rel(name), redaction_config).ok();
+    let profiles = read("profiles.yml").or_else(|| read("profiles.yaml"))?;
+    let project = read("dbt_project.yml").unwrap_or_default();
+    ekos_recovery::dbt_analyzer::dbt_adapter_type(&project, &profiles)
+}
+
 /// Registers one dbt analyzer pass per dbt project found under the observed paths (RFC 0117).
 #[allow(clippy::too_many_arguments)]
 async fn register_dbt_passes(
@@ -1318,11 +1334,11 @@ async fn register_dbt_passes(
                 read_dbt_models(&dbt_dir, ignore, redaction_config).await;
 
             if !dbt_sql_files.is_empty() || !dbt_yml_files.is_empty() {
-                pass_manager.register(Box::new(DbtAnalyzerPass::new(
-                    dbt_root,
-                    dbt_yml_files,
-                    dbt_sql_files,
-                )));
+                let adapter = dbt_adapter(base, dbt_dir_rel, redaction_config);
+                pass_manager.register(Box::new(
+                    DbtAnalyzerPass::new(dbt_root, dbt_yml_files, dbt_sql_files)
+                        .with_adapter(adapter),
+                ));
             }
         }
     }
@@ -2594,5 +2610,36 @@ mod tests {
     fn non_openai_providers_still_default_to_anthropics_key_env() {
         let config = EkosConfig::default();
         assert_eq!(resolved_key_env(&config), "ANTHROPIC_API_KEY");
+    }
+
+    /// RFC 0259 D2: the adapter comes from the project's own `profiles.yml`; an excluded profile
+    /// file is never read, and no profile means no adapter.
+    #[test]
+    fn a_dbt_project_s_adapter_is_read_from_its_profiles() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("lakehouse/dbt");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("dbt_project.yml"),
+            "name: gold\nprofile: gold\n",
+        )
+        .unwrap();
+        let rel = Path::new("lakehouse/dbt");
+        let config = ekos_common::redaction::RedactionConfig::default();
+        assert_eq!(dbt_adapter(dir.path(), rel, &config), None);
+        std::fs::write(
+            project.join("profiles.yml"),
+            "gold:\n  target: dev\n  outputs:\n    dev:\n      type: duckdb\n      path: marts.next.duckdb\n",
+        )
+        .unwrap();
+        assert_eq!(
+            dbt_adapter(dir.path(), rel, &config).as_deref(),
+            Some("duckdb")
+        );
+        let excluding = ekos_common::redaction::RedactionConfig {
+            extra_excluded_globs: vec!["profiles.yml".into()],
+            ..Default::default()
+        };
+        assert_eq!(dbt_adapter(dir.path(), rel, &excluding), None);
     }
 }
