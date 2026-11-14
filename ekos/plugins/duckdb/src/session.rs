@@ -10,6 +10,11 @@ use std::path::Path;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::time::Duration;
 
+/// An engine error as the text a probe reports.
+fn text(e: duckdb::Error) -> String {
+    e.to_string()
+}
+
 /// A locked, read-only session.
 pub struct Session {
     conn: Connection,
@@ -26,7 +31,7 @@ impl Session {
             .access_mode(AccessMode::ReadOnly)
             .and_then(|c| c.enable_external_access(false))
             .and_then(|c| c.enable_autoload_extension(false))
-            .map_err(|e| e.to_string())?;
+            .map_err(text)?;
         let conn = Connection::open_with_flags(path, config)
             .map_err(|e| format!("cannot open {} read-only: {e}", path.display()))?;
         Session::lock(conn, deadline)
@@ -34,7 +39,7 @@ impl Session {
 
     /// An empty in-memory database, locked the same way (tests and the conformance kit).
     pub fn open_in_memory(deadline: Duration) -> Result<Session, String> {
-        let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
+        let conn = Connection::open_in_memory().map_err(text)?;
         Session::lock(conn, deadline)
     }
 
@@ -60,22 +65,25 @@ impl Session {
     fn rows(&self, sql: &str, max_rows: usize) -> Result<Preview, String> {
         // DuckDB renders every type as text itself, so no Rust-side formatting can disagree with
         // what the engine prints.
-        let text = format!("SELECT COLUMNS(*)::VARCHAR FROM ({sql}) ekos_text");
+        let as_text = format!("SELECT COLUMNS(*)::VARCHAR FROM ({sql}) ekos_text");
         self.with_deadline(|| {
-            let mut stmt = self.conn.prepare(&text).map_err(|e| e.to_string())?;
-            let mut rows = stmt.query([]).map_err(|e| e.to_string())?;
-            let columns = rows.as_ref().map(|s| s.column_names()).unwrap_or_default();
+            let mut stmt = self.conn.prepare(&as_text).map_err(text)?;
+            let mut rows = stmt.query([]).map_err(text)?;
+            let columns = rows
+                .as_ref()
+                .map(duckdb::Statement::column_names)
+                .unwrap_or_default();
             let mut out = Preview {
                 columns,
                 ..Preview::default()
             };
-            while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            while let Some(row) = rows.next().map_err(text)? {
                 if out.rows.len() == max_rows {
                     out.truncated = true;
                     break;
                 }
                 let cells = (0..out.columns.len())
-                    .map(|i| row.get::<_, Option<String>>(i).map_err(|e| e.to_string()))
+                    .map(|i| row.get::<_, Option<String>>(i).map_err(text))
                     .collect::<Result<Vec<_>, _>>()?;
                 out.rows.push(cells);
             }
@@ -111,7 +119,7 @@ impl Session {
     /// refuses first.
     #[cfg(test)]
     pub(crate) fn unguarded(&self, sql: &str) -> Result<(), String> {
-        self.conn.execute_batch(sql).map_err(|e| e.to_string())
+        self.conn.execute_batch(sql).map_err(text)
     }
 }
 

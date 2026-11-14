@@ -107,7 +107,7 @@ read-only (D4/D5). The marts file is written only by dbt-duckdb in the lakehouse
     listed in the crate docs: `FROM`-first queries, the `PIVOT`/`UNPIVOT`/`SUMMARIZE` statements,
     `#1`, list comprehensions, struct-literal field access, `GLOB`, `LIMIT n%`, `**`, `E'…'`,
     `lambda x:`, `SET GLOBAL`, `CREATE TYPE … ENUM`, `EXPORT DATABASE`, `CHECKPOINT`. `facts()`
-    measured on DuckDB 1.5.5: `7 / 2 = 3.5`, NULLs last, `ILIKE`, `LIMIT` and `FETCH FIRST`,
+    measured on the DuckDB 1.5.5 CLI: `7 / 2 = 3.5`, NULLs last, `ILIKE`, `LIMIT` and `FETCH FIRST`,
     no backticks. The clause tokenizer moved from the Trino crate into `sql-dialect-sdk::lex`.
   - **D2** the dbt analyzer reads the adapter from the `profiles.yml` beside `dbt_project.yml`
     (through `read_redacted`; only the adapter name leaves); a `duckdb` project parses DuckDB
@@ -116,13 +116,16 @@ read-only (D4/D5). The marts file is written only by dbt-duckdb in the lakehouse
   - **D3** `migrate-validate::duckdb::DUCKDB` as `Dialect::Registered(&DUCKDB)`, core functions
     only (no `icu`: a `TIMESTAMPTZ` renders through `epoch_us`, so the session's `TimeZone` never
     reaches the canonical form — tested under three zones). The kit passes 31 cases, 4 hashes and
-    the bucket check through the CLI (`EKOS_DUCKDB_CLI`) and in process (`ekos-plugin-duckdb`,
-    feature `duckdb`); a planted one-cent difference in one of 500 rows changes exactly its bucket.
+    the bucket check through the 1.5.5 CLI (`EKOS_DUCKDB_CLI`) and in process (1.5.6,
+    `ekos-plugin-duckdb`, feature `duckdb`); a planted one-cent difference in one of 500 rows
+    changes exactly its bucket.
     The `duckdb` crate is not a dev-dependency of `migrate-validate`: its bundled build takes
     ~5 min (debug) / 8 min (release, 8 jobs), too much for every `cargo test --workspace`.
-  - **D4** `plugins/duckdb` (feature `duckdb` → `duckdb = "=1.10505.0"`, i.e. DuckDB 1.5.5,
-    bundled, no extensions): the file opened `READ_ONLY`, then `autoinstall/autoload` off,
-    `enable_external_access = false`, `lock_configuration = true` before the first statement; the
+  - **D4** `plugins/duckdb` (feature `duckdb` → `duckdb = "=1.10506.1"`, i.e. DuckDB 1.5.6,
+    bundled, no extensions — not 1.5.5's `=1.10505.0`, whose `libduckdb-sys` build-depends on
+    `zip` 6 with four RustSec advisories even though the bundled build never unzips; 1.5.6 reads
+    files the 1.5.5 CLI writes, which the CLI-made test file shows): the file opened `READ_ONLY`,
+    then `autoinstall/autoload` off, `enable_external_access = false`, `lock_configuration = true` before the first statement; the
     shared single-`SELECT` guard plus a DuckDB guard refusing file/network table functions, a quoted
     path in `FROM`, `getenv` and `query()`; a deadline by `interrupt()` from a timer thread
     (default 30 s). `ekos sql check|generate --duckdb <file>`. Tested: `read_csv`, `ATTACH`, `SET`,

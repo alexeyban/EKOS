@@ -985,6 +985,7 @@ dependencies = [
  "ekos-plugin-clickhouse",
  "ekos-plugin-confluence",
  "ekos-plugin-crypto",
+ "ekos-plugin-duckdb",
  "ekos-plugin-elixir",
  "ekos-plugin-file",
  "ekos-plugin-git",
@@ -1496,6 +1497,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-duckdb"
+version = "1.5.5"
+dependencies = [
+ "ekos-sql-dialect-sdk",
+ "sqlparser",
+]
+
+[[package]]
 name = "ekos-plugin-elixir"
 version = "1.5.5"
 dependencies = [
@@ -1769,6 +1778,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-sql-dialect-duckdb"
+version = "1.5.5"
+dependencies = [
+ "ekos-sql-dialect-sdk",
+ "sqlparser",
+]
+
+[[package]]
 name = "ekos-plugin-sql-dialect-mssql"
 version = "1.5.5"
 dependencies = [
@@ -1876,6 +1893,7 @@ dependencies = [
  "ekos-plsql",
  "ekos-plugin-sql-dialect-clickhouse",
  "ekos-plugin-sql-dialect-databricks",
+ "ekos-plugin-sql-dialect-duckdb",
  "ekos-plugin-sql-dialect-mssql",
  "ekos-plugin-sql-dialect-mysql",
  "ekos-plugin-sql-dialect-oracle",

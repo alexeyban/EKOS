@@ -207,9 +207,9 @@ chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
 postgres = "0.19"
 oracle = "0.6.3"
-# RFC 0259: DuckDB 1.5.5 (the crate encodes 1.5.5 as 1.10505.0), bundled; behind the `duckdb`
+# RFC 0259: DuckDB 1.5.6 (the crate encodes 1.5.6 as 1.10506.x), bundled; behind the `duckdb`
 # feature of ekos-plugin-duckdb.
-duckdb = { version = "=1.10505.0", features = ["bundled"] }
+duckdb = { version = "=1.10506.1", features = ["bundled"] }
 # RFC 0252 §3.5: Informix over ODBC (unixODBC plus the IBM Informix Client SDK or IBM Data Server
 # driver at run time). No GUI prompt (`prompt` pulls in winit), narrow strings.
 odbc-api = { version = "30.1", default-features = false, features = ["odbc_version_3_80"] }

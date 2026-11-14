@@ -84,11 +84,11 @@ impl Visitor for Refuse {
     }
 
     fn pre_visit_expr(&mut self, e: &Expr) -> ControlFlow<()> {
-        if let Expr::Function(f) = e {
-            if let Some(name) = refused_function(&f.name) {
-                self.0 = Some(format!("the function {name}() reads outside the database"));
-                return ControlFlow::Break(());
-            }
+        if let Expr::Function(f) = e
+            && let Some(name) = refused_function(&f.name)
+        {
+            self.0 = Some(format!("the function {name}() reads outside the database"));
+            return ControlFlow::Break(());
         }
         ControlFlow::Continue(())
     }

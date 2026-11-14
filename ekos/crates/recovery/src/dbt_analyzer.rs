@@ -412,7 +412,7 @@ pub fn dbt_adapter_type(dbt_project_yml: &str, profiles_yml: &str) -> Option<Str
         .ok()
         .and_then(|d| {
             d.get("profile")
-                .and_then(|p| p.as_str())
+                .and_then(serde_yaml::Value::as_str)
                 .map(str::to_string)
         });
     let profile = match wanted.as_deref().and_then(|w| profiles.get(w)) {
@@ -431,13 +431,13 @@ pub fn dbt_adapter_type(dbt_project_yml: &str, profiles_yml: &str) -> Option<Str
     let outputs = profile.get("outputs")?.as_mapping()?;
     let type_of = |o: &serde_yaml::Value| {
         o.get("type")
-            .and_then(|t| t.as_str())
+            .and_then(serde_yaml::Value::as_str)
             .map(|t| t.trim().to_ascii_lowercase())
     };
-    if let Some(target) = profile.get("target").and_then(|t| t.as_str()) {
-        if let Some(t) = outputs.get(target).and_then(type_of) {
-            return Some(t);
-        }
+    if let Some(target) = profile.get("target").and_then(serde_yaml::Value::as_str)
+        && let Some(t) = outputs.get(target).and_then(type_of)
+    {
+        return Some(t);
     }
     let types: HashSet<String> = outputs.values().filter_map(type_of).collect();
     (types.len() == 1).then(|| types.into_iter().next().expect("one type"))
@@ -454,10 +454,10 @@ fn parse_model(rendered: &str, adapter: Option<&str>) -> Option<Vec<sqlparser::a
             rendered,
         )
     };
-    if adapter == Some("duckdb") {
-        if let Some(stmts) = duckdb() {
-            return Some(stmts);
-        }
+    if adapter == Some("duckdb")
+        && let Some(stmts) = duckdb()
+    {
+        return Some(stmts);
     }
     let dialects: [&dyn Dialect; 3] = [
         &PostgreSqlDialect {},
@@ -811,9 +811,11 @@ impl CompilerPass for DbtAnalyzerPass {
                 .with_evidence(graph.add_evidence(ev));
             obj.id = id;
 
-            if let Some(adapter) = &self.adapter {
-                obj = obj.with_property("dbt_adapter", serde_json::json!(adapter));
-            }
+            obj.properties.extend(
+                self.adapter
+                    .iter()
+                    .map(|a| ("dbt_adapter".to_string(), serde_json::json!(a))),
+            );
             if let Some(materialized) = extract_materialized(content) {
                 obj = obj.with_property("materialized", serde_json::json!(materialized));
             }
@@ -1046,7 +1048,7 @@ select src.docstatus, src.grandtotal\nfrom src\nwhere src.docstatus = 'CO'";
             );
             let c: Vec<String> = model_predicates_for(rendered, adapter)
                 .iter()
-                .map(|p| p.canonical())
+                .map(crate::sql_predicates::PredicateSite::canonical)
                 .collect();
             assert_eq!(
                 c,

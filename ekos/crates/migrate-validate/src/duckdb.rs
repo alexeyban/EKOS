@@ -6,9 +6,9 @@
 //! `icu` extension, so a timestamp with a zone is rendered through `epoch_us` rather than `AT TIME
 //! ZONE`, and the session's `TimeZone` setting never changes the canonical form.
 //!
-//! Proven by the conformance kit ([`crate::conformance::run`]) against DuckDB 1.5.5: through the
-//! CLI in `tests/conformance.rs` (`EKOS_DUCKDB_CLI`) and in process in `ekos-plugin-duckdb`
-//! (feature `duckdb`). The literals the kit renders are [`DuckDbLiterals`], hand-written.
+//! Proven by the conformance kit ([`crate::conformance::run`]) against DuckDB 1.5: the 1.5.5 CLI
+//! in `tests/duckdb_conformance.rs` (`EKOS_DUCKDB_CLI`) and 1.5.6 in process in
+//! `ekos-plugin-duckdb` (feature `duckdb`). The literals the kit renders are [`DuckDbLiterals`], hand-written.
 
 use crate::conformance::{BUCKET_ROWS, Literals};
 use crate::dialect::{CanonDialect, ColumnRule, Dialect};

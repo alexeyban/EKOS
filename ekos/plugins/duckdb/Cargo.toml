@@ -16,7 +16,7 @@ duckdb = ["dep:duckdb"]
 [dependencies]
 ekos-sql-dialect-sdk.workspace = true
 sqlparser.workspace = true
-# Pinned to DuckDB 1.5.5 (crate 1.10505.0): the marts are written by DuckDB 1.5.x, and the file
+# Pinned to DuckDB 1.5.6 (crate 1.10506.1): the marts are written by DuckDB 1.5.x, and the file
 # format must be readable.
 duckdb = { workspace = true, optional = true }
 
