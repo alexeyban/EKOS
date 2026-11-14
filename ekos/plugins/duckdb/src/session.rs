@@ -115,11 +115,17 @@ impl Session {
         }
     }
 
+    /// Runs a statement with no guard and no result: only the catalog's write probe, which the
+    /// read-only session refuses (the refusal is the answer).
+    pub fn execute(&self, sql: &str) -> Result<(), String> {
+        self.with_deadline(|| self.conn.execute_batch(sql).map_err(text))
+    }
+
     /// A statement sent with no guard — tests use it to show DuckDB itself refuses what the guard
     /// refuses first.
     #[cfg(test)]
     pub(crate) fn unguarded(&self, sql: &str) -> Result<(), String> {
-        self.conn.execute_batch(sql).map_err(text)
+        self.execute(sql)
     }
 }
 

@@ -3,12 +3,14 @@
 //! DuckDB serves the lakehouse's gold marts from one file. EKOS reads such a file and never
 //! writes it (RFC 0259 §4): [`probe`] runs the text-to-SQL probes (`ekos sql check --duckdb`)
 //! through a read-only, locked session with a deadline, and [`guard`] refuses anything that
-//! would reach a file, the network or a setting before it is sent.
+//! would reach a file, the network or a setting before it is sent. [`catalog`] reads a file's
+//! catalog for `[[databases]] kind = "duckdb"` (RFC 0259 D5) on the same session.
 //!
 //! The engine is the bundled `duckdb` crate behind the `duckdb` feature, off in the default build
 //! like `oracle` (its C++ build takes several minutes). Without it the guard still runs and every
 //! attempt to open a file says the feature is missing.
 
+pub mod catalog;
 pub mod guard;
 pub mod probe;
 #[cfg(feature = "duckdb")]

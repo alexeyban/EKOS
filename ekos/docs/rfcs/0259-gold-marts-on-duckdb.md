@@ -133,7 +133,28 @@ read-only (D4/D5). The marts file is written only by dbt-duckdb in the lakehouse
     long cross join interrupted at a 0.3 s deadline with the session still usable; the directory
     holding the file byte-identical after a run (no WAL). Open question 1 answered: the catalog
     belongs in `plugins/duckdb` beside the probe, sharing its `session` module.
-  - **D5 not built** (see the branch report): `[[databases]] kind = "duckdb"` needs a
-    `DatabaseKind`, a `CatalogDialect` arm in `recovery::oracle_catalog_analyzer`, a `Flavor`
-    arm in `observation-sdk`'s `signals`/`overlap`/`probe`/`profile` builders (RFC 0252), the
-    build/database/profile/relationships command arms and the console's Sources form.
+- 2026-11-14 — **D5 built**: `[[databases]] kind = "duckdb"` with `path` (relative to the
+  workspace root; `connect`, `user` and `password-env` refused for it, and `path` refused for a
+  server kind — those three became optional in the config and in `ekos database add`).
+  - `plugins/duckdb/src/catalog.rs`: `duckdb_tables()` / `duckdb_views()` / `duckdb_columns()` /
+    `duckdb_constraints()` of this file's database and the listed schemas, on the probe's locked
+    read-only session; reconciled against those functions' own counts (a short catalog is an
+    error); the write probe (`INSERT … WHERE false` into the first table) is refused by the
+    read-only session and recorded as `refused_by_server`; RFC 0211's live-catalog artifacts under
+    `duckdb://<database>/<schema>/…`. A view's text is the query parsed out of
+    `duckdb_views().sql` (which holds the whole `CREATE VIEW`). Name lists come back joined by
+    U+001F because `to_json` needs the `json` extension, which the bundled build lacks. Every free
+    text is redacted — this is a raw-content entry point, like `pg-live` and `ora-live`.
+  - Profiles: P0 is `duckdb_tables().estimated_size`; P1/P2 are `observation-sdk::profile`'s
+    plans in the new `Flavor::DuckDb`, which also got arms in `signals`, `overlap`, `probe` and
+    `usage` (none: a file keeps no statistics). Tested against a real file: a text column is never
+    a `MIN`/`MAX` argument and a personal one only counted; a date bound is measured.
+  - Recovery: `CatalogDialect::DuckDb` (custom kind `DuckDbCatalog`, structurally keyed;
+    diagnostics `DUCKLIVE…`); views read by the DuckDB dialect plugin.
+  - CLI: `build` (one `DuckDbObserver` per entry), `database add --kind duckdb --path`,
+    `database list|test`, `sql check|generate --database`, `profile run`, `relationships
+    discover`, `probe` and `interaction` (no usage statistics) all take the kind. A build without
+    the `duckdb` feature fails a build or test of such an entry with "built without the duckdb
+    feature".
+  - Console: the Sources form has a "DuckDB file" kind — a path inside the tenant's allowed roots,
+    no user, password or dictionary.

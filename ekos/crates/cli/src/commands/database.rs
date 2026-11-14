@@ -25,6 +25,9 @@ pub struct DatabaseInfo {
     pub password_env: String,
     /// Whether that variable is set in this process's environment (its value is never read).
     pub password_set: bool,
+    /// RFC 0259: a `duckdb` database's file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     pub owners: Vec<String>,
     pub profile: &'static str,
     pub dictionary: Option<&'static str>,
@@ -48,7 +51,8 @@ pub fn infos(config: &EkosConfig) -> Vec<DatabaseInfo> {
             connect: d.connect.clone(),
             user: d.user.clone(),
             password_env: d.password_env.clone(),
-            password_set: std::env::var_os(&d.password_env).is_some(),
+            password_set: !d.password_env.is_empty() && std::env::var_os(&d.password_env).is_some(),
+            path: d.path.as_ref().map(|p| p.display().to_string()),
             owners: d.owners.clone(),
             profile: profile_str(d.profile),
             dictionary: d.dictionary.map(|_| "idempiere"),
@@ -72,6 +76,17 @@ pub fn list(config: &EkosConfig, json_out: bool) -> Result<()> {
         );
     }
     for d in rows {
+        if let Some(path) = &d.path {
+            println!(
+                "{:<16} {} {} owners {} profile {} (read-only file)",
+                d.name,
+                d.kind,
+                path,
+                d.owners.join(","),
+                d.profile
+            );
+            continue;
+        }
         println!(
             "{:<16} {} {}@{} owners {} profile {} password ${} ({})",
             d.name,
@@ -93,9 +108,13 @@ pub fn with_database(config_text: &str, d: &DatabaseConfig) -> Result<String> {
     let mut t = toml_edit::Table::new();
     t["name"] = toml_edit::value(d.name.as_str());
     t["kind"] = toml_edit::value(d.kind.as_str());
-    t["connect"] = toml_edit::value(d.connect.as_str());
-    t["user"] = toml_edit::value(d.user.as_str());
-    t["password-env"] = toml_edit::value(d.password_env.as_str());
+    if let Some(path) = &d.path {
+        t["path"] = toml_edit::value(path.to_string_lossy().as_ref());
+    } else {
+        t["connect"] = toml_edit::value(d.connect.as_str());
+        t["user"] = toml_edit::value(d.user.as_str());
+        t["password-env"] = toml_edit::value(d.password_env.as_str());
+    }
     let mut owners = toml_edit::Array::new();
     for o in &d.owners {
         owners.push(o.as_str());
@@ -146,9 +165,11 @@ pub struct AddArgs {
     pub name: String,
     /// `oracle` (default), `postgres` or `clickhouse`.
     pub kind: Option<String>,
-    pub connect: String,
-    pub user: String,
-    pub password_env: String,
+    pub connect: Option<String>,
+    pub user: Option<String>,
+    pub password_env: Option<String>,
+    /// RFC 0259: kind `duckdb` only, the database file.
+    pub path: Option<String>,
     pub owners: Vec<String>,
     pub profile: Option<String>,
     pub dictionary: Option<String>,
@@ -167,25 +188,15 @@ pub fn add(config_path: &Path, a: AddArgs) -> Result<()> {
         Some("idempiere") => Some(DatabaseDictionary::Idempiere),
         Some(other) => bail!("--dictionary is idempiere, not {other:?}"),
     };
-    if !a
-        .password_env
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        || a.password_env.is_empty()
-        || a.password_env.starts_with(|c: char| c.is_ascii_digit())
-    {
-        bail!(
-            "--password-env is the NAME of an environment variable (letters, digits, `_`), never the password itself"
-        );
-    }
     let kind = parse_kind(a.kind.as_deref())?;
-    check_connect(kind, &a.connect)?;
+    let (connect, user, password_env) = location(kind, &a)?;
     let d = DatabaseConfig {
         name: a.name.clone(),
         kind,
-        connect: a.connect,
-        user: a.user,
-        password_env: a.password_env,
+        connect,
+        user,
+        password_env,
+        path: a.path.clone().map(std::path::PathBuf::from),
         // Oracle's dictionary spells owners in upper case; PostgreSQL and ClickHouse names are
         // case-sensitive as written.
         owners: match kind {
@@ -198,6 +209,16 @@ pub fn add(config_path: &Path, a: AddArgs) -> Result<()> {
     let text = std::fs::read_to_string(config_path)
         .with_context(|| format!("reading {}", config_path.display()))?;
     std::fs::write(config_path, with_database(&text, &d)?)?;
+    if let Some(path) = &d.path {
+        println!(
+            "Added database {} (DuckDB file {}, schemas {}). Test it: ekos database test {}",
+            d.name,
+            path.display(),
+            d.owners.join(","),
+            d.name
+        );
+        return Ok(());
+    }
     println!(
         "Added database {} ({}@{}, owners {}). Test it: ekos database test {}",
         d.name,
@@ -209,6 +230,58 @@ pub fn add(config_path: &Path, a: AddArgs) -> Result<()> {
     Ok(())
 }
 
+/// `(connect, user, password-env)` for a server kind, checked; empty for a `duckdb` file, which
+/// takes `--path` and nothing else (RFC 0259 D5).
+fn location(kind: DatabaseKind, a: &AddArgs) -> Result<(String, String, String)> {
+    if kind == DatabaseKind::Duckdb {
+        if a.path.as_deref().is_none_or(str::is_empty) {
+            bail!("a duckdb database is a file: give --path <FILE>");
+        }
+        if a.connect.is_some() || a.user.is_some() || a.password_env.is_some() {
+            bail!("a duckdb database takes --path only, not --connect, --user or --password-env");
+        }
+        return Ok(Default::default());
+    }
+    if a.path.is_some() {
+        bail!(
+            "--path is for --kind duckdb; a {} database takes --connect",
+            kind.as_str()
+        );
+    }
+    let (Some(connect), Some(user), Some(password_env)) =
+        (a.connect.clone(), a.user.clone(), a.password_env.clone())
+    else {
+        bail!(
+            "a {} database needs --connect, --user and --password-env",
+            kind.as_str()
+        );
+    };
+    if !password_env
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || password_env.is_empty()
+        || password_env.starts_with(|c: char| c.is_ascii_digit())
+    {
+        bail!(
+            "--password-env is the NAME of an environment variable (letters, digits, `_`), never the password itself"
+        );
+    }
+    check_connect(kind, &connect)?;
+    Ok((connect, user, password_env))
+}
+
+/// RFC 0259: a `duckdb` database's file, relative to `cwd` (the workspace root) unless absolute.
+pub fn duckdb_file(d: &DatabaseConfig, cwd: &Path) -> Result<std::path::PathBuf> {
+    let Some(path) = &d.path else {
+        bail!("database {}: a duckdb database needs `path`", d.name);
+    };
+    Ok(if path.is_absolute() {
+        path.clone()
+    } else {
+        cwd.join(path)
+    })
+}
+
 fn parse_kind(kind: Option<&str>) -> Result<DatabaseKind> {
     Ok(match kind.unwrap_or("oracle") {
         "oracle" => DatabaseKind::Oracle,
@@ -216,8 +289,11 @@ fn parse_kind(kind: Option<&str>) -> Result<DatabaseKind> {
         "clickhouse" => DatabaseKind::Clickhouse,
         "sqlserver" | "mssql" => DatabaseKind::Sqlserver,
         "informix" => DatabaseKind::Informix,
+        "duckdb" => DatabaseKind::Duckdb,
         other => {
-            bail!("--kind is oracle, postgres, clickhouse, sqlserver or informix, not {other:?}")
+            bail!(
+                "--kind is oracle, postgres, clickhouse, sqlserver, informix or duckdb, not {other:?}"
+            )
         }
     })
 }
@@ -245,6 +321,7 @@ fn check_connect(kind: DatabaseKind, connect: &str) -> Result<()> {
         DatabaseKind::Informix => ekos_plugin_informix::InformixConnection::parse(connect, "", "")
             .map(|_| ())
             .map_err(|e| anyhow::anyhow!("--{e}")),
+        DatabaseKind::Duckdb => Ok(()),
     }
 }
 
@@ -413,6 +490,16 @@ pub async fn test(config: &EkosConfig, cwd: &Path, name: &str, json_out: bool) -
             .await?
             .map_err(fail)?
         }
+        // RFC 0259 D5: the file, read-only; a build without the engine says so.
+        DatabaseKind::Duckdb => {
+            let path = duckdb_file(d, cwd)?;
+            let owners = d.owners.clone();
+            tokio::task::spawn_blocking(move || {
+                ekos_plugin_duckdb::catalog::test_connection(&path, &owners, &redaction)
+            })
+            .await?
+            .map_err(fail)?
+        }
     };
     let ms = started.elapsed().as_millis() as u64;
     let (census, invalid) = census_of(&result);
@@ -521,6 +608,7 @@ mod tests {
             connect: "localhost:1521/XEPDB1".into(),
             user: "ekos_ro".into(),
             password_env: "ERP_PW".into(),
+            path: None,
             owners: vec!["ERP".into()],
             profile: DatabaseProfile::P2,
             dictionary: Some(DatabaseDictionary::Idempiere),
@@ -565,9 +653,10 @@ mod tests {
         let args = |pw: &str| AddArgs {
             name: "erp".into(),
             kind: None,
-            connect: "h:1521/S".into(),
-            user: "u".into(),
-            password_env: pw.into(),
+            connect: Some("h:1521/S".into()),
+            user: Some("u".into()),
+            password_env: Some(pw.into()),
+            path: None,
             owners: vec!["erp".into()],
             profile: None,
             dictionary: None,
@@ -591,9 +680,10 @@ mod tests {
         let args = |name: &str, kind: &str, connect: &str| AddArgs {
             name: name.into(),
             kind: Some(kind.into()),
-            connect: connect.into(),
-            user: "ro".into(),
-            password_env: "PW".into(),
+            connect: Some(connect.into()),
+            user: Some("ro".into()),
+            password_env: Some("PW".into()),
+            path: None,
             owners: vec!["Sales".into()],
             profile: None,
             dictionary: None,
@@ -666,5 +756,47 @@ mod tests {
         assert_eq!(rows[2]["census"], 62);
         assert_eq!(rows[2]["equal"], false);
         assert_eq!(compare(&census, None)[0]["compiled"], Value::Null);
+    }
+
+    /// RFC 0259 D5: a duckdb database is added by `--path` alone; a connection or a password
+    /// variable is refused for it, and `--path` for a server kind. A build without the engine
+    /// says so when the file is tested.
+    #[tokio::test]
+    async fn a_duckdb_file_is_added_by_its_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("ekos.toml");
+        std::fs::write(&p, BASE).unwrap();
+        let args = |path: Option<&str>, connect: Option<&str>| AddArgs {
+            name: "marts".into(),
+            kind: Some("duckdb".into()),
+            connect: connect.map(str::to_string),
+            user: None,
+            password_env: None,
+            path: path.map(str::to_string),
+            owners: vec!["gold".into()],
+            profile: Some("p2".into()),
+            dictionary: None,
+        };
+        assert!(add(&p, args(None, None)).is_err());
+        assert!(add(&p, args(Some("m.duckdb"), Some("h/x"))).is_err());
+        let mut pg = args(Some("m.duckdb"), Some("h/db"));
+        pg.kind = Some("postgres".into());
+        assert!(add(&p, pg).is_err(), "--path is for duckdb");
+        add(&p, args(Some("marts/marts.duckdb"), None)).unwrap();
+        let text = std::fs::read_to_string(&p).unwrap();
+        assert!(!text.contains("password-env"), "{text}");
+        let c: EkosConfig = toml::from_str(&text).unwrap();
+        assert_eq!(c.databases[0].kind, DatabaseKind::Duckdb);
+        let info = &infos(&c)[0];
+        assert_eq!(info.path.as_deref(), Some("marts/marts.duckdb"));
+        assert!(!info.password_set);
+        assert_eq!(
+            duckdb_file(&c.databases[0], Path::new("/w")).unwrap(),
+            Path::new("/w/marts/marts.duckdb")
+        );
+        if !ekos_plugin_duckdb::available() {
+            let e = test(&c, dir.path(), "marts", true).await.unwrap_err();
+            assert!(e.to_string().contains("duckdb feature"), "{e}");
+        }
     }
 }

@@ -541,6 +541,7 @@ fn statement_dialect(
     match kind {
         K::Postgres => Box::new(sqlparser::dialect::PostgreSqlDialect {}),
         K::Clickhouse => Box::new(sqlparser::dialect::ClickHouseDialect {}),
+        K::Duckdb => Box::new(sqlparser::dialect::DuckDbDialect {}),
         _ => Box::new(sqlparser::dialect::GenericDialect {}),
     }
 }
@@ -555,6 +556,10 @@ fn no_usage_statistics(kind: &ekos_compiler_core::DatabaseKind) -> Option<&'stat
         ),
         K::Informix => Some(
             "Informix keeps no per-user statement statistics EKOS reads: this source provides \
+             no usage statistics",
+        ),
+        K::Duckdb => Some(
+            "A DuckDB file keeps no statement statistics and has no users: this source provides \
              no usage statistics",
         ),
         _ => None,

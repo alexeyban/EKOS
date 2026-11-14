@@ -1697,25 +1697,28 @@ enum ProfileCommands {
 
 #[derive(Subcommand, Debug)]
 enum DatabaseCommands {
-    /// Add a database (Oracle, PostgreSQL, ClickHouse, SQL Server or Informix); its password stays
-    /// in an environment variable named here
+    /// Add a database (Oracle, PostgreSQL, ClickHouse, SQL Server, Informix, or a DuckDB file); a
+    /// server's password stays in an environment variable named here
     Add {
         /// Database name: lowercase letters, digits, `-` and `_`
         name: String,
-        /// oracle (default), postgres, clickhouse, sqlserver or informix
+        /// oracle (default), postgres, clickhouse, sqlserver, informix or duckdb
         #[arg(long)]
         kind: Option<String>,
         /// oracle: host:port/service; postgres: host[:port]/database; clickhouse:
         /// http[s]://host[:port]; sqlserver: host[:port]/database[?trust-server-certificate=true];
         /// informix: host[:port]/database@server or drda://host[:port]/database
-        #[arg(long)]
-        connect: String,
+        #[arg(long, conflicts_with = "path")]
+        connect: Option<String>,
         /// A read-only user (EKOS refuses nothing else, but reports a user that can write)
-        #[arg(long)]
-        user: String,
+        #[arg(long, conflicts_with = "path")]
+        user: Option<String>,
         /// The NAME of the environment variable holding the password, never the password
-        #[arg(long, value_name = "VAR")]
-        password_env: String,
+        #[arg(long, value_name = "VAR", conflicts_with = "path")]
+        password_env: Option<String>,
+        /// duckdb: the database file (opened read-only), relative to the workspace root
+        #[arg(long, value_name = "FILE")]
+        path: Option<String>,
         /// A schema (a database, for ClickHouse) to read; repeat for several
         #[arg(long = "owner", required = true)]
         owners: Vec<String>,
@@ -3208,6 +3211,7 @@ where
                     connect,
                     user,
                     password_env,
+                    path,
                     owners,
                     profile,
                     dictionary,
@@ -3219,6 +3223,7 @@ where
                         connect,
                         user,
                         password_env,
+                        path,
                         owners,
                         profile,
                         dictionary,

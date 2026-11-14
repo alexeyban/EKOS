@@ -108,6 +108,7 @@ fn flavor(kind: DatabaseKind) -> Flavor {
         DatabaseKind::Clickhouse => Flavor::ClickHouse,
         DatabaseKind::Sqlserver => Flavor::SqlServer,
         DatabaseKind::Informix => Flavor::Informix,
+        DatabaseKind::Duckdb => Flavor::DuckDb,
     }
 }
 

@@ -66,6 +66,9 @@ pub enum Flavor {
     /// attached schema (`main`). SQLite has no MD5: a caller that computes overlap signatures
     /// registers an `md5(text)` function returning lowercase hex on its connection.
     Sqlite,
+    /// RFC 0259 D5: DuckDB, a mart file read in process through a read-only, locked session. The
+    /// owner is a schema of the file (`main`, `gold`); `md5` is built in.
+    DuckDb,
 }
 
 /// What a profile run did, for the summary line and the catalog object.
@@ -137,6 +140,25 @@ pub fn family(flavor: Flavor, data_type: &str) -> Family {
         Flavor::SqlServer => sqlserver_family(data_type),
         Flavor::Informix => informix_family(data_type),
         Flavor::Sqlite => sqlite_family(data_type),
+        Flavor::DuckDb => duckdb_family(data_type),
+    }
+}
+
+/// DuckDB's `data_type` as `duckdb_columns()` spells it (`DECIMAL(18,2)`, `TIMESTAMP WITH TIME
+/// ZONE`, `VARCHAR`, `INTEGER[]`, `STRUCT(…)`).
+fn duckdb_family(data_type: &str) -> Family {
+    if data_type.trim_end().ends_with(']') {
+        return Family::Other;
+    }
+    let base = base_type(data_type);
+    match base.as_str() {
+        "tinyint" | "smallint" | "integer" | "bigint" | "hugeint" | "utinyint" | "usmallint"
+        | "uinteger" | "ubigint" | "uhugeint" | "decimal" | "numeric" | "float" | "double"
+        | "real" => Family::Number,
+        "date" => Family::Date,
+        "varchar" | "text" | "string" | "uuid" => Family::Text,
+        _ if base.starts_with("timestamp") || base.starts_with("time") => Family::Date,
+        _ => Family::Other,
     }
 }
 
@@ -288,7 +310,9 @@ pub fn ident(flavor: Flavor, name: &str) -> Result<String, String> {
         // `QUOTENAME`'s rule: a `]` inside the name is doubled.
         Flavor::SqlServer => Ok(format!("[{}]", name.replace(']', "]]"))),
         // A delimited identifier (the session sets `DELIMIDENT`); `"` inside is doubled.
-        Flavor::Informix | Flavor::Sqlite => Ok(format!("\"{}\"", name.replace('"', "\"\""))),
+        Flavor::Informix | Flavor::Sqlite | Flavor::DuckDb => {
+            Ok(format!("\"{}\"", name.replace('"', "\"\"")))
+        }
     }
 }
 
@@ -372,6 +396,10 @@ impl Aggregate {
             (Flavor::Sqlite, Self::Min) => format!("CAST(MIN({col}) AS TEXT)"),
             (Flavor::Sqlite, Self::Max) => format!("CAST(MAX({col}) AS TEXT)"),
             (Flavor::Sqlite, Self::MaxLength) => format!("MAX(LENGTH({col}))"),
+            (Flavor::DuckDb, Self::NonNull) => format!("count({col})"),
+            (Flavor::DuckDb, Self::Min) => format!("CAST(min({col}) AS VARCHAR)"),
+            (Flavor::DuckDb, Self::Max) => format!("CAST(max({col}) AS VARCHAR)"),
+            (Flavor::DuckDb, Self::MaxLength) => format!("max(length(CAST({col} AS VARCHAR)))"),
         }
     }
 }
@@ -382,7 +410,7 @@ fn row_count(flavor: Flavor) -> &'static str {
         Flavor::Postgres => "count(*)",
         Flavor::ClickHouse => "count()",
         Flavor::SqlServer => "COUNT_BIG(*)",
-        Flavor::Informix | Flavor::Sqlite => "COUNT(*)",
+        Flavor::Informix | Flavor::Sqlite | Flavor::DuckDb => "COUNT(*)",
     }
 }
 
@@ -648,6 +676,20 @@ mod tests {
         .unwrap()
     }
 
+    /// RFC 0259 D5: DuckDB's own spellings (`duckdb_columns().data_type`).
+    fn duck_invoice() -> Vec<Value> {
+        serde_json::from_value(json!([
+            { "name": "id", "data_type": "BIGINT" },
+            { "name": "documentno", "data_type": "VARCHAR" },
+            { "name": "dateinvoiced", "data_type": "TIMESTAMP WITH TIME ZONE" },
+            { "name": "email", "data_type": "VARCHAR" },
+            { "name": "phone_number", "data_type": "DECIMAL(12,0)" },
+            { "name": "tags", "data_type": "VARCHAR[]" },
+            { "name": "payload", "data_type": "STRUCT(a INTEGER)" },
+        ]))
+        .unwrap()
+    }
+
     fn ch_invoice() -> Vec<Value> {
         serde_json::from_value(json!([
             { "name": "id", "data_type": "UInt64" },
@@ -726,6 +768,12 @@ mod tests {
             (
                 Flavor::Informix,
                 ifx_invoice(),
+                ["documentno", "email"],
+                "phone_number",
+            ),
+            (
+                Flavor::DuckDb,
+                duck_invoice(),
                 ["documentno", "email"],
                 "phone_number",
             ),

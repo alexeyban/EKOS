@@ -10,6 +10,7 @@ use ekos_plugin_clickhouse::catalog::{ChConnection, ClickHouseCatalogObserver};
 use ekos_plugin_clickhouse::{ClickHouseHttpClient, ClickHouseObserver};
 use ekos_plugin_confluence::{ConfluenceApiClient, ConfluenceObserver};
 use ekos_plugin_crypto::{CryptoObserver, ParquetExportReader};
+use ekos_plugin_duckdb::catalog::DuckDbObserver;
 use ekos_plugin_elixir::ElixirObserver;
 use ekos_plugin_file::FileObserver;
 use ekos_plugin_git::GitObserver;
@@ -376,7 +377,7 @@ fn dictionary_kind(k: ekos_compiler_core::DatabaseDictionary) -> DictionaryKind 
 /// RFC 0211: one observer per `[[databases]]` entry, with its name. Kept apart from the file
 /// observers: a database is live state, so it is read once per build — never once per source
 /// directory, and never skipped because the source tree's fingerprint is unchanged.
-fn database_observers(config: &EkosConfig) -> Result<Vec<(String, Box<dyn Observer>)>> {
+fn database_observers(config: &EkosConfig, cwd: &Path) -> Result<Vec<(String, Box<dyn Observer>)>> {
     config
         .databases
         .iter()
@@ -434,6 +435,14 @@ fn database_observers(config: &EkosConfig) -> Result<Vec<(String, Box<dyn Observ
                         profile_tier(d.profile),
                     ))
                 }
+                // RFC 0259 D5: a file, read-only; a build without the engine fails saying so.
+                ekos_compiler_core::DatabaseKind::Duckdb => Box::new(DuckDbObserver::new(
+                    d.name.clone(),
+                    crate::commands::database::duckdb_file(d, cwd)?,
+                    d.owners.clone(),
+                    config.redaction_config(),
+                    profile_tier(d.profile),
+                )),
                 ekos_compiler_core::DatabaseKind::Oracle => Box::new(OracleObserver::new(
                     d.name.clone(),
                     Arc::new(OracleLiveReader {
@@ -464,7 +473,7 @@ async fn read_databases(
 ) -> Result<usize> {
     let redaction_config = config.redaction_config();
     let mut read = 0;
-    for (name, observer) in database_observers(config)? {
+    for (name, observer) in database_observers(config, cwd)? {
         if only.is_some_and(|o| o != name) {
             continue;
         }
@@ -1081,6 +1090,7 @@ mod tests {
             connect: "localhost:1/NONE".into(),
             user: "ekos_ro".into(),
             password_env: "EKOS_TEST_UNSET_PASSWORD".into(),
+            path: None,
             owners: vec!["ADEMPIERE".into()],
             profile: Default::default(),
             dictionary: None,
@@ -1089,6 +1099,30 @@ mod tests {
         let err = run(&config, dir.path()).await.unwrap_err().to_string();
         assert!(err.contains("database erp"), "{err}");
         assert!(err.contains("no Oracle driver"), "{err}");
+    }
+
+    /// RFC 0259 D5: a duckdb database is read every build too; a build without the engine fails
+    /// naming the database and the missing feature, never keeping last time's catalog quietly.
+    #[cfg(not(feature = "duckdb"))]
+    #[tokio::test]
+    async fn a_duckdb_database_without_the_engine_fails_saying_so() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("hello.txt"), b"hello world").unwrap();
+        let mut config = EkosConfig::default();
+        config.databases.push(ekos_compiler_core::DatabaseConfig {
+            name: "marts".into(),
+            kind: ekos_compiler_core::DatabaseKind::Duckdb,
+            connect: String::new(),
+            user: String::new(),
+            password_env: String::new(),
+            path: Some("marts.duckdb".into()),
+            owners: vec!["gold".into()],
+            profile: Default::default(),
+            dictionary: None,
+        });
+        let err = run(&config, dir.path()).await.unwrap_err().to_string();
+        assert!(err.contains("database marts"), "{err}");
+        assert!(err.contains("duckdb feature"), "{err}");
     }
 
     /// Real bug, found live rehearsing the RFC 0045 demo end-to-end: a `File` object's own

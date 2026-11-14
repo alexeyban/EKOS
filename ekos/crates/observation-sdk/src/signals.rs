@@ -49,6 +49,7 @@ fn as_text(flavor: Flavor, col: &str) -> String {
         Flavor::ClickHouse => format!("toString({col})"),
         Flavor::Informix => format!("CAST({col} AS LVARCHAR(4000))"),
         Flavor::Sqlite => format!("CAST({col} AS TEXT)"),
+        Flavor::DuckDb => format!("CAST({col} AS VARCHAR)"),
     }
 }
 
@@ -62,6 +63,7 @@ fn month(flavor: Flavor, expr: &str) -> String {
         // GL_DATETIME directives; a `DATE` takes the date ones.
         Flavor::Informix => format!("TO_CHAR({expr}, '%Y-%m')"),
         Flavor::Sqlite => format!("strftime('%Y-%m', {expr})"),
+        Flavor::DuckDb => format!("strftime({expr}, '%Y-%m')"),
     }
 }
 
@@ -71,7 +73,7 @@ fn count(flavor: Flavor) -> &'static str {
         Flavor::Oracle => "COUNT(*)",
         Flavor::Postgres => "count(*)",
         Flavor::SqlServer => "COUNT_BIG(*)",
-        Flavor::Informix | Flavor::Sqlite => "COUNT(*)",
+        Flavor::Informix | Flavor::Sqlite | Flavor::DuckDb => "COUNT(*)",
     }
 }
 
@@ -566,6 +568,7 @@ pub fn conformance_sql(
             match flavor {
                 Flavor::Postgres => format!("NOT ({} ~ {re})", as_text(flavor, &col)),
                 Flavor::Oracle => format!("NOT REGEXP_LIKE({col}, {re})"),
+                Flavor::DuckDb => format!("NOT regexp_matches({}, {re})", as_text(flavor, &col)),
                 _ => format!("NOT match({}, {re})", as_text(flavor, &col)),
             }
         }

@@ -1379,11 +1379,18 @@ pub struct DatabaseConfig {
     /// Unique in the project; `[a-z0-9][a-z0-9_-]{0,62}`. It keys the database's objects.
     pub name: String,
     pub kind: DatabaseKind,
-    /// Easy Connect string: `host:port/service`.
+    /// Easy Connect string: `host:port/service`. Every kind but `duckdb` needs it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub connect: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub user: String,
-    /// The environment variable holding the password.
+    /// The environment variable holding the password. Every kind but `duckdb` needs it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub password_env: String,
+    /// RFC 0259 D5, kind `duckdb` only: the database file, relative to the workspace root or
+    /// absolute. It is opened read-only and never written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<std::path::PathBuf>,
     /// The schemas (owners) to read, as the dictionary spells them (`ADEMPIERE`).
     pub owners: Vec<String>,
     /// How much `ekos build` may measure (RFC 0211 §3.4), for every kind. `p0` (default) reads
@@ -1397,6 +1404,39 @@ pub struct DatabaseConfig {
     /// processes (`AD_Process`, `AD_Scheduler`). Oracle and PostgreSQL. Off by default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dictionary: Option<DatabaseDictionary>,
+}
+
+/// RFC 0259 D5: a `duckdb` database is a file (`path`, nothing else); every other kind is a
+/// server (`connect` and `password-env`, no `path`).
+fn check_database_location(d: &DatabaseConfig) -> anyhow::Result<()> {
+    if d.kind == DatabaseKind::Duckdb {
+        if d.path.as_ref().is_none_or(|p| p.as_os_str().is_empty()) {
+            anyhow::bail!("[[databases]] {:?}: a duckdb database needs `path`", d.name);
+        }
+        if !d.connect.is_empty() || !d.password_env.is_empty() || !d.user.is_empty() {
+            anyhow::bail!(
+                "[[databases]] {:?}: a duckdb database is a file — give `path`, not `connect`, \
+                 `user` or `password-env`",
+                d.name
+            );
+        }
+        return Ok(());
+    }
+    if d.path.is_some() {
+        anyhow::bail!(
+            "[[databases]] {:?}: `path` is for duckdb databases; a {} database takes `connect`",
+            d.name,
+            d.kind.as_str()
+        );
+    }
+    if d.connect.is_empty() || d.password_env.is_empty() {
+        anyhow::bail!(
+            "[[databases]] {:?}: a {} database needs `connect` and `password-env`",
+            d.name,
+            d.kind.as_str()
+        );
+    }
+    Ok(())
 }
 
 /// RFC 0212 §3.3: which application dictionary `[[databases]] dictionary` reads.
@@ -1423,6 +1463,9 @@ pub enum DatabaseKind {
     /// RFC 0252 §3.5: `connect` is `host[:port]/database@server` (Informix Client SDK) or
     /// `drda://host[:port]/database` (IBM Data Server Driver), `owners` are table owners.
     Informix,
+    /// RFC 0259 D5: a DuckDB file named by `path` (no `connect`, no user, no password), opened
+    /// read-only; `owners` are its schemas (`main`, `gold`).
+    Duckdb,
 }
 
 impl DatabaseKind {
@@ -1433,6 +1476,7 @@ impl DatabaseKind {
             Self::Clickhouse => "clickhouse",
             Self::Sqlserver => "sqlserver",
             Self::Informix => "informix",
+            Self::Duckdb => "duckdb",
         }
     }
 }
@@ -1712,6 +1756,7 @@ impl EkosConfig {
             if d.owners.is_empty() {
                 anyhow::bail!("[[databases]] {:?} lists no owners to read", d.name);
             }
+            check_database_location(d)?;
             // RFC 0235 / 0256: the application dictionary is read on Oracle and PostgreSQL (where
             // iDempiere runs); refused rather than silently ignored for the other kinds. Profiles
             // are read for every kind (RFC 0252).
@@ -2151,6 +2196,34 @@ path = "/tmp/ekos-containers/b"
                 c.check_sources().unwrap();
             }
         }
+    }
+
+    /// RFC 0259 D5: a duckdb database is a file — `path`, no connection or password; a server
+    /// kind refuses `path` and still needs `connect` and `password-env`.
+    #[test]
+    fn a_duckdb_database_is_a_path() {
+        let db = "[[databases]]\nname = \"marts\"\nkind = \"duckdb\"\npath = \"marts/marts.duckdb\"\n\
+                  owners = [\"gold\"]\nprofile = \"p2\"\n";
+        let cfg: EkosConfig = toml::from_str(db).unwrap();
+        cfg.check_sources().unwrap();
+        assert_eq!(cfg.databases[0].kind, DatabaseKind::Duckdb);
+        assert_eq!(
+            cfg.databases[0].path.as_deref(),
+            Some(std::path::Path::new("marts/marts.duckdb"))
+        );
+        let err = |toml: &str| {
+            toml::from_str::<EkosConfig>(toml)
+                .unwrap()
+                .check_sources()
+                .unwrap_err()
+                .to_string()
+        };
+        assert!(err(&db.replace("path = \"marts/marts.duckdb\"\n", "")).contains("needs `path`"));
+        assert!(err(&format!("{db}password-env = \"X\"\n")).contains("not `connect`"));
+        let pg = "[[databases]]\nname = \"wh\"\nkind = \"postgres\"\nconnect = \"h/db\"\n\
+                  user = \"ro\"\npassword-env = \"WH_PW\"\nowners = [\"public\"]\n";
+        assert!(err(&format!("{pg}path = \"x.duckdb\"\n")).contains("is for duckdb"));
+        assert!(err(&pg.replace("password-env = \"WH_PW\"\n", "")).contains("needs `connect`"));
     }
 
     /// RFC 0211: `[[databases]]` parses, and its names share the sources' namespace.

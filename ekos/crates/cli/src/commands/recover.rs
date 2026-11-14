@@ -270,6 +270,7 @@ fn print_live_catalog_stats(
         CatalogDialect::ClickHouse => "ClickHouse",
         CatalogDialect::SqlServer => "SQL Server",
         CatalogDialect::Informix => "Informix",
+        CatalogDialect::DuckDb => "DuckDB",
     };
     // A pass served from cache does not run, so it fills no counters; zeros would read as an
     // empty database.
@@ -1649,6 +1650,7 @@ pub async fn run_with(
         CatalogDialect::ClickHouse,
         CatalogDialect::SqlServer,
         CatalogDialect::Informix,
+        CatalogDialect::DuckDb,
     ] {
         let ids = collect_artifact_ids_for_connector(&*artifact_store, dialect.observer());
         if ids.is_empty() {

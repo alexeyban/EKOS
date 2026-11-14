@@ -48,6 +48,8 @@ pub enum CatalogDialect {
     SqlServer,
     /// RFC 0252 §3.5.
     Informix,
+    /// RFC 0259 D5: a DuckDB file.
+    DuckDb,
 }
 
 impl CatalogDialect {
@@ -59,6 +61,7 @@ impl CatalogDialect {
             Self::ClickHouse => "clickhouse",
             Self::SqlServer => "sqlserver",
             Self::Informix => "informix",
+            Self::DuckDb => "duckdb",
         }
     }
 
@@ -70,6 +73,7 @@ impl CatalogDialect {
             Self::ClickHouse => "clickhouse-live",
             Self::SqlServer => "sqlserver",
             Self::Informix => "informix",
+            Self::DuckDb => "duckdb",
         }
     }
 
@@ -81,6 +85,7 @@ impl CatalogDialect {
             Self::ClickHouse => "clickhouse",
             Self::SqlServer => "sqlserver",
             Self::Informix => "informix",
+            Self::DuckDb => "duckdb",
         }
     }
 
@@ -92,6 +97,7 @@ impl CatalogDialect {
             Self::ClickHouse => "ClickHouseCatalog",
             Self::SqlServer => "SqlServerCatalog",
             Self::Informix => "InformixCatalog",
+            Self::DuckDb => "DuckDbCatalog",
         }
     }
 
@@ -102,6 +108,7 @@ impl CatalogDialect {
             Self::ClickHouse => "CHLIVE",
             Self::SqlServer => "MSLIVE",
             Self::Informix => "IFXLIVE",
+            Self::DuckDb => "DUCKLIVE",
         };
         format!("{prefix}{n:03}")
     }
@@ -114,6 +121,7 @@ impl CatalogDialect {
             Self::ClickHouse => "ClickHouse",
             Self::SqlServer => "SQL Server",
             Self::Informix => "Informix",
+            Self::DuckDb => "DuckDB",
         }
     }
 }
@@ -678,7 +686,7 @@ fn add_view(graph: &mut KirGraph, d: CatalogDialect, i: &Item) -> bool {
                 &sql,
             )
         }
-        CatalogDialect::Postgres | CatalogDialect::ClickHouse => {
+        CatalogDialect::Postgres | CatalogDialect::ClickHouse | CatalogDialect::DuckDb => {
             // `pg_get_viewdef` ends the query with `;`.
             let body = body.trim().trim_end_matches(';');
             let head = if i.detail["materialized"] == true {
@@ -690,6 +698,13 @@ fn add_view(graph: &mut KirGraph, d: CatalogDialect, i: &Item) -> bool {
             if d == CatalogDialect::Postgres {
                 read_views(
                     &ekos_plugin_sql_dialect_postgres::PostgresDialectParser,
+                    &i.target,
+                    &sql,
+                )
+            } else if d == CatalogDialect::DuckDb {
+                // RFC 0259: `duckdb_views().sql` is the query the view was created with.
+                read_views(
+                    &ekos_plugin_sql_dialect_duckdb::DuckDbDialectParser,
                     &i.target,
                     &sql,
                 )
@@ -1298,6 +1313,54 @@ mod tests {
                 .unwrap()
                 .id,
             "keyed by engine, database and owner"
+        );
+    }
+
+    /// RFC 0259 D5: a DuckDB file's catalog compiles like PostgreSQL's, its views read by the
+    /// DuckDB dialect (here `GROUP BY ALL` and a `QUALIFY`, which only it reads).
+    #[test]
+    fn a_duckdb_catalog_compiles_with_its_own_dialect() {
+        let obj = |kind: &str, name: &str, detail: Value| {
+            (
+                format!("duckdb://marts/gold/{kind}/{name}"),
+                json!({ "kind": "object", "database": "marts",
+                        "object": { "kind": kind, "owner": "gold", "name": name, "status": null,
+                                    "detail": detail } }),
+            )
+        };
+        let artifacts = vec![
+            (
+                "duckdb://marts/gold".to_string(),
+                json!({ "kind": "catalog", "database": "marts", "owner": "gold",
+                        "family": "duckdb_catalog",
+                        "census": { "TABLE": { "valid": 1, "invalid": 0 },
+                                    "VIEW": { "valid": 1, "invalid": 0 } },
+                        "write_check": { "result": "refused_by_server", "message": "read-only" },
+                        "objects": ["table/fct_invoice", "view/v_status"] }),
+            ),
+            obj(
+                "table",
+                "fct_invoice",
+                json!({ "columns": [
+                    { "name": "docstatus", "data_type": "VARCHAR", "nullable": true },
+                    { "name": "total", "data_type": "DECIMAL(18,2)", "nullable": true }] }),
+            ),
+            obj(
+                "view",
+                "v_status",
+                json!({ "text": "SELECT docstatus, sum(total) AS t FROM gold.fct_invoice \
+                                 GROUP BY ALL QUALIFY rank() OVER (ORDER BY t DESC) <= 3" }),
+            ),
+        ];
+        let (g, stats) = recover_catalog_as(CatalogDialect::DuckDb, &artifacts);
+        assert_eq!((stats.catalogs, stats.tables), (1, 1));
+        assert_eq!((stats.views, stats.views_unparsed), (1, 0), "{stats:?}");
+        let t = g.objects.iter().find(|o| o.name == "fct_invoice").unwrap();
+        assert_eq!(t.properties["dialect"], "duckdb");
+        assert!(
+            g.objects
+                .iter()
+                .any(|o| o.kind == ObjectKind::Custom("DuckDbCatalog".into()))
         );
     }
 

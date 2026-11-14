@@ -57,6 +57,7 @@ fn kind_dialect(kind: &DatabaseKind) -> &'static str {
         DatabaseKind::Sqlserver => "mssql",
         // No Informix grammar: the generic one, as the probe's guard uses.
         DatabaseKind::Informix => "generic",
+        DatabaseKind::Duckdb => "duckdb",
     }
 }
 
@@ -326,6 +327,18 @@ fn connect_database(
                 allow_writable_role,
             )?;
             (Box::new(p), c.label())
+        }
+        // RFC 0259 D5: the file, through the same locked session as `--duckdb`. Relative to the
+        // workspace root, which is the working directory once a project is selected.
+        DatabaseKind::Duckdb => {
+            let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
+            let path = super::database::duckdb_file(d, &cwd).map_err(|e| e.to_string())?;
+            let p = ekos_plugin_duckdb::probe::DuckDbProbe::open(
+                &path,
+                ekos_plugin_duckdb::probe::DEFAULT_DEADLINE,
+            )?;
+            let label = p.label().to_string();
+            (Box::new(p), label)
         }
         DatabaseKind::Oracle => {
             let c = ekos_plugin_oracle::OraConnection {

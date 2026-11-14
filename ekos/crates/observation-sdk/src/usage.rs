@@ -79,7 +79,8 @@ pub fn sources(flavor: Flavor) -> &'static [UsageSource] {
         Flavor::Informix => &[UsageSource::SqlTrace, UsageSource::PartitionProfile],
         Flavor::Postgres => &[UsageSource::PgStatStatements, UsageSource::TableStats],
         // SQLite keeps no usage statistics; the benchmark reads its files, not a server.
-        Flavor::Oracle | Flavor::ClickHouse | Flavor::Sqlite => &[],
+        // A DuckDB file keeps no usage statistics either.
+        Flavor::Oracle | Flavor::ClickHouse | Flavor::Sqlite | Flavor::DuckDb => &[],
     }
 }
 

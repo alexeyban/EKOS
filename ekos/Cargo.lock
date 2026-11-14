@@ -1874,11 +1874,16 @@ dependencies = [
 name = "ekos-plugin-duckdb"
 version = "1.5.5"
 dependencies = [
+ "async-trait",
  "duckdb",
+ "ekos-common",
  "ekos-migrate-validate",
+ "ekos-observation-sdk",
  "ekos-sql-dialect-sdk",
+ "serde_json",
  "sqlparser",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

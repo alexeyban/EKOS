@@ -233,6 +233,11 @@ pub const REGISTRY: &[CustomKind] = &[
         note: "(database, owner) — RFC 0252 §3.5; one live catalog summary per owner read",
     },
     CustomKind {
+        name: "DuckDbCatalog",
+        structurally_keyed: true,
+        note: "(database entry, schema) — RFC 0259 D5; one live catalog summary per DuckDB schema read",
+    },
+    CustomKind {
         name: "WriteBehaviour",
         structurally_keyed: true,
         note: "the table it describes — RFC 0212; one per table, derived at commit",
@@ -613,6 +618,7 @@ mod tests {
             "ClickHouseCatalog",
             "SqlServerCatalog",
             "InformixCatalog",
+            "DuckDbCatalog",
             "WriteBehaviour",
             "Ticket",
             "JsModule",

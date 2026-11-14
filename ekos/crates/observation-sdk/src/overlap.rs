@@ -67,6 +67,8 @@ fn md5_hex(flavor: Flavor, expr: &str) -> Option<String> {
         Flavor::Informix => return None,
         // SQLite has none built in; the caller registers `md5(text)` (see `Flavor::Sqlite`).
         Flavor::Sqlite => format!("md5({expr})"),
+        // DuckDB's `md5` of a VARCHAR is lowercase hex.
+        Flavor::DuckDb => format!("md5({expr})"),
     })
 }
 
@@ -77,7 +79,7 @@ fn substr(flavor: Flavor, expr: &str, from: usize, len: usize) -> String {
         Flavor::Postgres => format!("substr({expr}, {from}, {len})"),
         Flavor::SqlServer => format!("SUBSTRING({expr}, {from}, {len})"),
         Flavor::Informix => format!("SUBSTR({expr}, {from}, {len})"),
-        Flavor::Sqlite => format!("substr({expr}, {from}, {len})"),
+        Flavor::Sqlite | Flavor::DuckDb => format!("substr({expr}, {from}, {len})"),
     }
 }
 
@@ -96,6 +98,7 @@ fn as_text(flavor: Flavor, col: &str) -> String {
         Flavor::ClickHouse => format!("toString({col})"),
         Flavor::Informix => format!("CAST({col} AS LVARCHAR(4000))"),
         Flavor::Sqlite => format!("CAST({col} AS TEXT)"),
+        Flavor::DuckDb => format!("CAST({col} AS VARCHAR)"),
     }
 }
 
