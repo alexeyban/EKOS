@@ -639,8 +639,15 @@ pub fn aggregate_query(d: Dialect, table: &str, column_exprs: &[String]) -> Stri
         parts.push(format!(
             "sum(case when {e} = {null} then 1 else 0 end) AS nulls_{i}"
         ));
-        parts.push(format!("min({e}) AS min_{i}"));
-        parts.push(format!("max({e}) AS max_{i}"));
+        // min and max of the canonical text must order it by code point on both sides. PostgreSQL
+        // orders by the database collation unless told otherwise: on en_US.utf8 every iDempiere
+        // table with amounts or free text diverged at V2 against Trino with equal rows (V1, V3).
+        let ordered = match d {
+            Dialect::Postgres => format!(r#"{e} COLLATE "C""#),
+            _ => e.clone(),
+        };
+        parts.push(format!("min({ordered}) AS min_{i}"));
+        parts.push(format!("max({ordered}) AS max_{i}"));
         // Bytes on both sides: the canonical form is compared as bytes, and PostgreSQL's
         // `length()` counts *characters* while ClickHouse's counts *bytes* — so every column
         // holding one non-ASCII character diverged at V2 (LedgerSMB demo: "Raw Materials — Steel").
@@ -809,6 +816,19 @@ mod tests {
             ch.ends_with("SETTINGS aggregate_functions_null_for_empty = 1"),
             "{ch}"
         );
+    }
+
+    /// V2's min and max compare canonical text, so both sides must order it the same way: by code
+    /// point. PostgreSQL orders text by the database collation (en_US.utf8 skips punctuation at the
+    /// first level: min('100.00', '10.80') is '100.00' there and '10.80' in "C"); Trino, ClickHouse
+    /// and Oracle's default BINARY sort compare code points.
+    #[test]
+    fn v2_orders_text_by_code_point_on_postgres() {
+        let pg = aggregate_query(Dialect::Postgres, "t", &["x".into()]);
+        assert!(pg.contains(r#"min(x COLLATE "C") AS min_0"#), "{pg}");
+        assert!(pg.contains(r#"max(x COLLATE "C") AS max_0"#), "{pg}");
+        let trino = aggregate_query(Dialect::Trino, "t", &["x".into()]);
+        assert!(trino.contains("min(x) AS min_0"), "{trino}");
     }
 
     #[test]
