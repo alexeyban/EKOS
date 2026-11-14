@@ -91,10 +91,11 @@ fn prop<'a>(o: &'a KirObject, key: &str) -> Option<&'a str> {
     o.properties.get(key).and_then(Value::as_str)
 }
 
-/// `oracle://<database>/<OWNER>/<kind>/<NAME>`, the observer's target for a live object.
+/// `<engine>://<database>/<OWNER>/<kind>/<NAME>`, the observer's target for a live object.
 fn live_path(o: &KirObject, kind: &str) -> String {
     format!(
-        "oracle://{}/{}/{kind}/{}",
+        "{}://{}/{}/{kind}/{}",
+        scheme(o),
         prop(o, "database").unwrap_or_default(),
         prop(o, "owner").unwrap_or_default(),
         o.name
@@ -358,11 +359,8 @@ impl Out<'_> {
 /// Compare the code's claims with the live catalog in `objects`; the conflicts as a graph to
 /// append, and the counts.
 pub fn detect(objects: &[KirObject]) -> (KirGraph, LiveConflictStats) {
-    let live = by_name(
-        objects
-            .iter()
-            .filter(|o| is_live(o) && (o.kind == ObjectKind::Table || custom(o, "View"))),
-    );
+    let models = by_name(objects.iter().filter(|o| custom(o, "ModelTable")));
+    let live = by_name(application_relations(objects, &models).into_iter());
     let mut out = Out {
         graph: KirGraph::new(),
         stats: LiveConflictStats {
@@ -376,7 +374,6 @@ pub fn detect(objects: &[KirObject]) -> (KirGraph, LiveConflictStats) {
     };
     out.stats.horizon = out.history.horizon;
     out.stats.horizon_release = out.history.horizon_release.map(str::to_string);
-    let models = by_name(objects.iter().filter(|o| custom(o, "ModelTable")));
     if !live.is_empty() && !models.is_empty() {
         compare_tables(&mut out, &live, &models);
     }
@@ -392,6 +389,36 @@ pub fn detect(objects: &[KirObject]) -> (KirGraph, LiveConflictStats) {
         compare_routines(&mut out, &live_routines, &files);
     }
     (out.graph, out.stats)
+}
+
+/// The live tables and views of the application's own databases: those holding at least one of
+/// the models' tables. Another database of the project (the lakehouse's DuckDB marts, a reporting
+/// copy) says nothing about whether the application's tables exist. When no database holds any
+/// model table (one never migrated), every database is compared, as before.
+fn application_relations<'a>(objects: &'a [KirObject], models: &ByName) -> Vec<&'a KirObject> {
+    let relations: Vec<&KirObject> = objects
+        .iter()
+        .filter(|o| is_live(o) && (o.kind == ObjectKind::Table || custom(o, "View")))
+        .collect();
+    let database = |o: &KirObject| prop(o, "database").unwrap_or_default().to_string();
+    let application: BTreeSet<String> = relations
+        .iter()
+        .filter(|o| models.contains_key(&o.name.to_lowercase()))
+        .map(|o| database(o))
+        .collect();
+    if application.is_empty() {
+        return relations;
+    }
+    relations
+        .into_iter()
+        .filter(|o| application.contains(&database(o)))
+        .collect()
+}
+
+/// A live object's engine as the claim path's scheme (`postgres://`, `duckdb://`, …); objects a
+/// ledger recorded before the catalog pass stamped `dialect` came from Oracle.
+fn scheme(o: &KirObject) -> &str {
+    prop(o, "dialect").unwrap_or("oracle")
 }
 
 fn compare_tables(out: &mut Out, live: &ByName, models: &ByName) {
@@ -455,14 +482,15 @@ fn compare_tables(out: &mut Out, live: &ByName, models: &ByName) {
     }
 }
 
-/// The `oracle://<database>/<OWNER>` of every schema the live relations came from.
+/// The `<engine>://<database>/<OWNER>` of every schema the live relations came from.
 fn live_catalogs(live: &ByName) -> Vec<String> {
     let set: BTreeSet<String> = live
         .values()
         .flatten()
         .map(|t| {
             format!(
-                "oracle://{}/{}",
+                "{}://{}/{}",
+                scheme(t),
                 prop(t, "database").unwrap_or_default(),
                 prop(t, "owner").unwrap_or_default()
             )
@@ -764,6 +792,43 @@ mod tests {
                 .any(|c| c["path"] == "oracle://erp/ADEMPIERE/table/C_INVOICE")
         );
         assert_eq!(g.relationships.len(), 5, "one Disputes link per conflict");
+    }
+
+    /// A second database that holds none of the application's tables (the lakehouse's DuckDB
+    /// marts) is not the application's database: it claims no model table missing and its own
+    /// tables are not "tables without a model". Claim paths name each database's engine.
+    #[test]
+    fn only_the_applications_databases_are_compared_with_its_models() {
+        let mut mart = live_table("SALES_BY_MONTH", json!([]));
+        mart.properties.insert("database".into(), json!("gold"));
+        mart.properties.insert("owner".into(), json!("gold_idem"));
+        mart.properties.insert("dialect".into(), json!("duckdb"));
+        let mut invoice = live_table("C_INVOICE", json!([]));
+        invoice
+            .properties
+            .insert("dialect".into(), json!("postgres"));
+        let objects = vec![
+            invoice,
+            mart,
+            model("C_Invoice", json!({})),
+            model(
+                "C_Gone",
+                json!({ "C_Gone_ID": { "source": "X_C_Gone.java:9" } }),
+            ),
+        ];
+        let (g, stats) = detect(&objects);
+        assert_eq!(
+            types(&g),
+            [(MODEL_TABLE_MISSING.into(), "database_table".into())]
+        );
+        assert_eq!(stats.table_without_model, 0);
+        let claims = g.objects[0].properties["claims"].as_array().unwrap();
+        let databases: Vec<_> = claims
+            .iter()
+            .filter(|c| c["source"] == "database")
+            .map(|c| c["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(databases, ["postgres://erp/ADEMPIERE"]);
     }
 
     #[test]
