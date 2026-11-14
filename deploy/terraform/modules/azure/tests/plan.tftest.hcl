@@ -57,7 +57,7 @@ mock_provider "azurerm" {
     defaults = {
       id           = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/ekos-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/ekos-identity"
       client_id    = "00000000-0000-0000-0000-0000000000c1"
-      principal_id = "00000000-0000-0000-0000-0000000000p1"
+      principal_id = "00000000-0000-0000-0000-0000000000b1"
     }
   }
   mock_resource "azurerm_container_app_environment" {
