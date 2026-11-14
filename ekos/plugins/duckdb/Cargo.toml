@@ -1,0 +1,25 @@
+[package]
+name = "ekos-plugin-duckdb"
+description = "RFC 0259 — DuckDB files, read-only: the text-to-SQL probe and the live catalog"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[features]
+# The bundled DuckDB engine (a C++ build of several minutes), off by default like `oracle`: without
+# it every connection attempt fails with a message saying so (RFC 0259 §3.1).
+duckdb = ["dep:duckdb"]
+
+[dependencies]
+ekos-sql-dialect-sdk.workspace = true
+sqlparser.workspace = true
+# Pinned to DuckDB 1.5.5 (crate 1.10505.0): the marts are written by DuckDB 1.5.x, and the file
+# format must be readable.
+duckdb = { workspace = true, optional = true }
+
+[dev-dependencies]
+ekos-migrate-validate.workspace = true
+tempfile = "3"

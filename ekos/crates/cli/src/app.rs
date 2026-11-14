@@ -2131,22 +2131,26 @@ enum SignoffCommands {
 enum SqlCommands {
     /// Check a query against the ledger's tables, columns, keys and foreign keys and the
     /// dialect's rules (unknown names, row-limit form, integer division, quoting, NULL ordering,
-    /// …). With --database or --sqlite it also runs read-only probes on that database: the
+    /// …). With --database, --sqlite or --duckdb it also runs read-only probes on that database: the
     /// result, value spellings, rows repeated by joins, ties (RFC 0242/0243)
     Check {
         /// A file holding the query; `-` or nothing reads stdin
         file: Option<PathBuf>,
-        /// sqlite, postgres, mysql, mssql, snowflake, databricks, clickhouse, trino, oracle or
-        /// generic; default: the database's kind, else the project's first
+        /// sqlite, postgres, mysql, mssql, snowflake, databricks, clickhouse, trino, duckdb, oracle
+        /// or generic; default: the database's kind, else the project's first
         /// `[[recover.sql.dialect-rules]]` dialect, else generic
         #[arg(long)]
         dialect: Option<String>,
         /// A `[[databases]]` entry to run the probes on (read-only)
-        #[arg(long, conflicts_with = "sqlite")]
+        #[arg(long, conflicts_with_all = ["sqlite", "duckdb"])]
         database: Option<String>,
         /// A SQLite file to run the probes on (opened read-only)
-        #[arg(long, value_name = "FILE")]
+        #[arg(long, value_name = "FILE", conflicts_with = "duckdb")]
         sqlite: Option<PathBuf>,
+        /// A DuckDB file to run the probes on (opened read-only, external access off, the
+        /// configuration locked; needs a build with the `duckdb` feature)
+        #[arg(long, value_name = "FILE")]
+        duckdb: Option<PathBuf>,
         /// Probe a PostgreSQL database even when its role can write (the session stays read-only)
         #[arg(long)]
         allow_writable_role: bool,
@@ -2160,10 +2164,13 @@ enum SqlCommands {
         question: String,
         #[arg(long)]
         dialect: Option<String>,
-        #[arg(long, conflicts_with = "sqlite")]
+        #[arg(long, conflicts_with_all = ["sqlite", "duckdb"])]
         database: Option<String>,
-        #[arg(long, value_name = "FILE")]
+        #[arg(long, value_name = "FILE", conflicts_with = "duckdb")]
         sqlite: Option<PathBuf>,
+        /// A DuckDB file to run the probes on (read-only; needs the `duckdb` feature)
+        #[arg(long, value_name = "FILE")]
+        duckdb: Option<PathBuf>,
         /// Model replies in total, the first draft included
         #[arg(long, default_value_t = 6)]
         max_turns: usize,
@@ -3113,6 +3120,7 @@ where
                 dialect,
                 database,
                 sqlite,
+                duckdb,
                 allow_writable_role,
                 json,
             } => crate::commands::sql_check::run(
@@ -3122,7 +3130,10 @@ where
                     file: file.as_ref(),
                     dialect: dialect.as_deref(),
                     database: database.as_deref(),
-                    sqlite: sqlite.as_deref(),
+                    files: crate::commands::sql_check::LocalFiles {
+                        sqlite: sqlite.as_deref(),
+                        duckdb: duckdb.as_deref(),
+                    },
                     allow_writable_role,
                     json,
                 },
@@ -3132,6 +3143,7 @@ where
                 dialect,
                 database,
                 sqlite,
+                duckdb,
                 max_turns,
                 max_tokens,
                 allow_metered,
@@ -3145,7 +3157,10 @@ where
                         question: &question,
                         dialect: dialect.as_deref(),
                         database: database.as_deref(),
-                        sqlite: sqlite.as_deref(),
+                        files: crate::commands::sql_check::LocalFiles {
+                            sqlite: sqlite.as_deref(),
+                            duckdb: duckdb.as_deref(),
+                        },
                         max_turns,
                         max_tokens,
                         allow_metered,

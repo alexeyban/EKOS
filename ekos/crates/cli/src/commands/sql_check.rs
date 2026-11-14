@@ -136,7 +136,7 @@ fn report(
         (Some(Ok(label)), _) => format!("checked against {label}, read-only"),
         (Some(Err(why)), _) => format!("static checks only — the database was not queried: {why}"),
         (None, _) => "static checks only: value spellings, row counts and results need a \
-                      database (--database or --sqlite)"
+                      database (--database, --sqlite or --duckdb)"
             .into(),
     };
     let preview = preview.map(|p| {
@@ -188,6 +188,16 @@ pub enum Target {
     None,
     Database(DatabaseConfig),
     Sqlite(PathBuf),
+    /// RFC 0259 D4: a DuckDB file, opened read-only with external access off and the
+    /// configuration locked.
+    Duckdb(PathBuf),
+}
+
+/// A local database file to probe instead of a `[[databases]]` entry.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LocalFiles<'a> {
+    pub sqlite: Option<&'a Path>,
+    pub duckdb: Option<&'a Path>,
 }
 
 /// A connected probe and its label.
@@ -197,10 +207,16 @@ impl Target {
     pub fn pick(
         config: &EkosConfig,
         database: Option<&str>,
-        sqlite: Option<&Path>,
+        files: LocalFiles<'_>,
     ) -> Result<Self> {
-        match (database, sqlite) {
-            (Some(_), Some(_)) => bail!("give --database or --sqlite, not both"),
+        let file = match (files.sqlite, files.duckdb) {
+            (Some(_), Some(_)) => bail!("give --sqlite or --duckdb, not both"),
+            (Some(p), None) => Some(Target::Sqlite(p.to_path_buf())),
+            (None, Some(p)) => Some(Target::Duckdb(p.to_path_buf())),
+            (None, None) => None,
+        };
+        match (database, file) {
+            (Some(_), Some(_)) => bail!("give --database or a database file, not both"),
             (Some(name), None) => config
                 .databases
                 .iter()
@@ -210,7 +226,7 @@ impl Target {
                 .ok_or_else(|| {
                     anyhow!("no database {name:?} in this project (ekos database list)")
                 }),
-            (None, Some(path)) => Ok(Target::Sqlite(path.to_path_buf())),
+            (None, Some(file)) => Ok(file),
             (None, None) => Ok(Target::None),
         }
     }
@@ -229,6 +245,7 @@ impl Target {
             Target::None => None,
             Target::Database(d) => Some(kind_dialect(&d.kind)),
             Target::Sqlite(_) => Some("sqlite"),
+            Target::Duckdb(_) => Some("duckdb"),
         }
     }
 
@@ -244,6 +261,14 @@ impl Target {
                     Box::new(SqliteFile(db)) as Box<dyn Probe>,
                     format!("sqlite:{}", path.display()),
                 )
+            }
+            Target::Duckdb(path) => {
+                let p = ekos_plugin_duckdb::probe::DuckDbProbe::open(
+                    path,
+                    ekos_plugin_duckdb::probe::DEFAULT_DEADLINE,
+                )?;
+                let label = p.label().to_string();
+                (Box::new(p) as Box<dyn Probe>, label)
             }
             Target::Database(d) => connect_database(d, &run_id, allow_writable_role)?,
         }))
@@ -437,7 +462,7 @@ pub struct CheckOpts<'a> {
     pub file: Option<&'a PathBuf>,
     pub dialect: Option<&'a str>,
     pub database: Option<&'a str>,
-    pub sqlite: Option<&'a Path>,
+    pub files: LocalFiles<'a>,
     pub allow_writable_role: bool,
     pub json: bool,
 }
@@ -462,10 +487,11 @@ fn pick_dialect(config: &EkosConfig, asked: Option<&str>, target: &Target) -> St
         .unwrap_or_else(|| dialect_name(config, None))
 }
 
-/// `ekos sql check [FILE|-] [--dialect D] [--database NAME | --sqlite FILE] [--json]`.
+/// `ekos sql check [FILE|-] [--dialect D] [--database NAME | --sqlite FILE | --duckdb FILE]
+/// [--json]`.
 pub fn run(config: &EkosConfig, cwd: &Path, o: CheckOpts<'_>) -> Result<()> {
     let sql = read_sql(o.file)?;
-    let target = Target::pick(config, o.database, o.sqlite)?;
+    let target = Target::pick(config, o.database, o.files)?;
     let store = open_store_read_only(config, cwd)?;
     let schema = target.narrow(schema_for(config, cwd, store.as_ref())?);
     let dialect = pick_dialect(config, o.dialect, &target);
@@ -529,7 +555,7 @@ pub struct GenerateOpts<'a> {
     pub question: &'a str,
     pub dialect: Option<&'a str>,
     pub database: Option<&'a str>,
-    pub sqlite: Option<&'a Path>,
+    pub files: LocalFiles<'a>,
     pub max_turns: usize,
     pub max_tokens: u32,
     pub allow_metered: bool,
@@ -578,7 +604,7 @@ pub fn generation_prompt(schema: &Schema, dialect: &str, question: &str) -> Resu
 /// `ekos sql generate "<question>"`.
 pub async fn generate(config: &EkosConfig, cwd: &Path, o: GenerateOpts<'_>) -> Result<()> {
     super::migrate_logic::model_call_allowed(config, o.allow_metered)?;
-    let target = Target::pick(config, o.database, o.sqlite)?;
+    let target = Target::pick(config, o.database, o.files)?;
     let schema = {
         let store = open_store_read_only(config, cwd)?;
         target.narrow(schema_for(config, cwd, store.as_ref())?)
@@ -772,7 +798,7 @@ fn generate_core(
                 [only] => Some(only.name.as_str()),
                 _ => None,
             });
-    let target = Target::pick(config, database, None)?;
+    let target = Target::pick(config, database, LocalFiles::default())?;
     let allowed = allowed_tables(args)?;
     let mut schema = target.narrow(schema_source()?);
     if schema.tables.is_empty() {
@@ -1007,7 +1033,7 @@ fn print_generated(
     let checked = match probed {
         Some(Ok(label)) => format!("checked against {label}, read-only"),
         Some(Err(why)) => format!("static checks only — the database was not queried: {why}"),
-        None => "static checks only (no --database or --sqlite)".into(),
+        None => "static checks only (no --database, --sqlite or --duckdb)".into(),
     };
     if json {
         println!(
@@ -1203,6 +1229,94 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM customers", [], |r| r.get(0))
             .unwrap();
         assert_eq!(n, 2);
+    }
+
+    /// RFC 0259 D4: `--duckdb` checks in the DuckDB dialect. A build without the engine says so
+    /// and runs the static checks only.
+    #[test]
+    fn a_duckdb_file_is_checked_in_its_dialect() {
+        let config = EkosConfig::default();
+        let path = Path::new("/nonexistent/marts.duckdb");
+        let files = LocalFiles {
+            duckdb: Some(path),
+            ..LocalFiles::default()
+        };
+        let target = Target::pick(&config, None, files).unwrap();
+        assert_eq!(pick_dialect(&config, None, &target), "duckdb");
+        assert!(
+            Target::pick(
+                &config,
+                None,
+                LocalFiles {
+                    sqlite: Some(path),
+                    duckdb: Some(path)
+                }
+            )
+            .is_err()
+        );
+        if !ekos_plugin_duckdb::available() {
+            let v = check_on(
+                &schema(),
+                "SELECT city FROM customers",
+                "duckdb",
+                &target,
+                false,
+            )
+            .unwrap();
+            assert!(
+                v["note"].as_str().unwrap().contains("duckdb feature"),
+                "{v}"
+            );
+        }
+    }
+
+    /// RFC 0259 D4, with the engine: a real DuckDB file (written by the `duckdb` CLI named in
+    /// `EKOS_DUCKDB_CLI`) is probed, a write is refused, and the file is byte-identical after.
+    #[cfg(feature = "duckdb")]
+    #[test]
+    fn a_duckdb_file_is_probed_read_only() {
+        let Ok(cli) = std::env::var("EKOS_DUCKDB_CLI") else {
+            eprintln!("skipped: set EKOS_DUCKDB_CLI to a duckdb 1.5.x binary");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("marts.duckdb");
+        let made = std::process::Command::new(cli)
+            .arg(&path)
+            .arg("-c")
+            .arg(
+                "CREATE TABLE customers (id INTEGER PRIMARY KEY, city VARCHAR); \
+                 INSERT INTO customers VALUES (1, 'Paris'), (2, 'Lyon'); CHECKPOINT;",
+            )
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let before = std::fs::read(&path).unwrap();
+        let target = Target::Duckdb(path.clone());
+        let v = check_on(
+            &schema(),
+            "SELECT city FROM customers WHERE city = 'paris'",
+            "duckdb",
+            &target,
+            false,
+        )
+        .unwrap();
+        assert!(
+            v["note"]
+                .as_str()
+                .unwrap()
+                .starts_with("checked against duckdb:"),
+            "{v}"
+        );
+        assert!(codes(&v).contains(&"P001"), "{v}");
+        for sql in [
+            "DELETE FROM customers",
+            "SELECT * FROM read_csv('/etc/passwd')",
+        ] {
+            let v = check_on(&schema(), sql, "duckdb", &target, false).unwrap();
+            assert!(v["findings"].to_string().contains("not sent"), "{sql}: {v}");
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), before);
     }
 
     #[test]

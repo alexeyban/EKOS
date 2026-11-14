@@ -43,6 +43,7 @@ members = [
     "plugins/salesforce",
     "plugins/sap",
     "plugins/oracle",
+    "plugins/duckdb",
     "plugins/postgres",
     "plugins/fabric",
     "plugins/snowflake",
@@ -120,6 +121,7 @@ ekos-marketing                     = { path = "crates/marketing", version = "1.4
 ekos-observation-sdk               = { path = "crates/observation-sdk", version = "1.4.3" }
 ekos-plugin-clickhouse             = { path = "plugins/clickhouse", version = "1.4.3" }
 ekos-plugin-oracle                 = { path = "plugins/oracle", version = "1.4.3" }
+ekos-plugin-duckdb                 = { path = "plugins/duckdb", version = "1.4.3" }
 ekos-plugin-postgres               = { path = "plugins/postgres", version = "1.4.3" }
 ekos-plugin-sqlserver              = { path = "plugins/sqlserver", version = "1.4.3" }
 ekos-plugin-informix               = { path = "plugins/informix", version = "1.4.3" }
@@ -205,6 +207,9 @@ chrono = { version = "0.4", features = ["serde"] }
 sha2 = "0.10"
 postgres = "0.19"
 oracle = "0.6.3"
+# RFC 0259: DuckDB 1.5.5 (the crate encodes 1.5.5 as 1.10505.0), bundled; behind the `duckdb`
+# feature of ekos-plugin-duckdb.
+duckdb = { version = "=1.10505.0", features = ["bundled"] }
 # RFC 0252 §3.5: Informix over ODBC (unixODBC plus the IBM Informix Client SDK or IBM Data Server
 # driver at run time). No GUI prompt (`prompt` pulls in winit), narrow strings.
 odbc-api = { version = "30.1", default-features = false, features = ["odbc_version_3_80"] }
