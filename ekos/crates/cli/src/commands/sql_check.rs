@@ -331,8 +331,8 @@ fn connect_database(
         // RFC 0259 D5: the file, through the same locked session as `--duckdb`. Relative to the
         // workspace root, which is the working directory once a project is selected.
         DatabaseKind::Duckdb => {
-            let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-            let path = super::database::duckdb_file(d, &cwd).map_err(|e| e.to_string())?;
+            let cwd = std::env::current_dir().map_err(error_text)?;
+            let path = super::database::duckdb_file(d, &cwd).map_err(error_text)?;
             let p = ekos_plugin_duckdb::probe::DuckDbProbe::open(
                 &path,
                 ekos_plugin_duckdb::probe::DEFAULT_DEADLINE,
@@ -353,6 +353,11 @@ fn connect_database(
             )
         }
     })
+}
+
+/// An error as the text a probe reports.
+fn error_text(e: impl std::fmt::Display) -> String {
+    e.to_string()
 }
 
 /// A local SQLite file, opened read-only (the bench's probe, with a 30-second deadline).

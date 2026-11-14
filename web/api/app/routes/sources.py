@@ -200,6 +200,11 @@ async def add_database(
     return {"ok": True, "password_env": variable, "message": message}
 
 
+def _resolved(raw: str) -> Path:
+    """An absolute, symlink-free path, so the roots check sees where the file really is."""
+    return Path(raw).expanduser().resolve()
+
+
 async def _add_duckdb(
     body: DatabaseIn, ws: models.Workspace, settings: Settings, tenant: models.Tenant
 ) -> dict:
@@ -212,7 +217,7 @@ async def _add_duckdb(
         )
     if not body.path:
         raise HTTPException(status_code=400, detail="a duckdb database needs the path of its file")
-    path = Path(body.path).expanduser().resolve()
+    path = _resolved(body.path)
     if not roots.is_allowed(path, roots.allowed_roots(tenant, settings)):
         raise HTTPException(status_code=400, detail=f"{path} is outside the allowed source roots")
     try:
