@@ -36,6 +36,7 @@ pub mod canon;
 pub mod conformance;
 pub mod dialect;
 pub mod divergence;
+pub mod duckdb;
 pub mod fixtures;
 pub mod hash;
 pub mod metrics;
