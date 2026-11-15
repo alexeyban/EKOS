@@ -1088,7 +1088,8 @@ ekos signoff approve pii --digest <digest>
 ```
 
 A sign-off is valid only while the facts it covered are unchanged; after a compile that changes one, `signoff show`
-says **stale** and names the items added, removed or changed. Row and null counts are shown but not signed, so a fresh
+says **stale** and names the items added, removed or changed; `ekos review show <subject> --changed` lists just those
+items, so a re-review starts from the delta. Row and null counts are shown but not signed, so a fresh
 profile alone does not invalidate anything. Decisions and sign-offs are human-only: no MCP tool can make them.
 
 `ekos workflow status [--json]` is the step bar of the seven-step operator workflow (analyse, documentation, review
@@ -1227,6 +1228,9 @@ and against the dialect's rules:
 | `=` on a list column | needs `LIKE` |
 | NULLs first under `ORDER BY … LIMIT` | — |
 | Date literals | in another format |
+| A join that multiplies rows (L002) | also through a function: `DATE_TRUNC('month', a.m) = DATE_TRUNC('month', b.m)` |
+| A constant under a column's name (L013) | `'Unknown' AS customer`: a made-up value where the data is expected |
+| Text where a date is needed (L014) | `DATE_TRUNC('year', '2026-01-01')` — write `DATE '…'` or `CURRENT_DATE` |
 
 Every SQL dialect plugin (sqlite, postgres, mysql, mssql, snowflake, databricks, clickhouse,
 trino, oracle) states these rules and its own notes for writing SQL.

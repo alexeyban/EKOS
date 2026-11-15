@@ -299,15 +299,60 @@ pub fn list(config: &EkosConfig, cwd: &Path, json_out: bool) -> Result<()> {
     Ok(())
 }
 
+/// Which items `review show` lists.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ShowFilter {
+    /// Only items without a current decision.
+    pub undecided: bool,
+    /// Only items added or changed since the last sign-off (RFC 0260 X4).
+    pub changed: bool,
+}
+
+/// Pure: each item added or changed since the sign-off `state` names, with how (`added` /
+/// `changed`), in the items' order; and the removed items' ids. Nothing when the sign-off is
+/// valid; every item when there is none (all of it is new to a reviewer).
+pub fn changed_since<'a>(
+    state: &SignState,
+    items: &'a [Item],
+) -> (Vec<(&'a Item, &'static str)>, Vec<String>) {
+    match state {
+        SignState::Stale {
+            added,
+            removed,
+            changed,
+            ..
+        } => {
+            let marked = items
+                .iter()
+                .filter_map(|i| {
+                    if added.contains(&i.label) || added.contains(&i.id) {
+                        Some((i, "added"))
+                    } else if changed.contains(&i.label) || changed.contains(&i.id) {
+                        Some((i, "changed"))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            (marked, removed.clone())
+        }
+        SignState::Valid { .. } => (vec![], vec![]),
+        SignState::None | SignState::Revoked { .. } => {
+            (items.iter().map(|i| (i, "added")).collect(), vec![])
+        }
+    }
+}
+
 /// `ekos review show <subject>`
 pub fn show(
     config: &EkosConfig,
     cwd: &Path,
     name: &str,
-    undecided: bool,
+    filter: ShowFilter,
     limit: Option<usize>,
     json_out: bool,
 ) -> Result<()> {
+    let undecided = filter.undecided;
     let s = subject(name)?;
     let ledger = open_store_read_only(config, cwd)?;
     let rs = review_state(config, cwd, &*ledger)?;
@@ -319,9 +364,12 @@ pub fn show(
         .ok_or_else(|| anyhow!("no status for {}", s.as_str()))?;
     let digest = st.digest.clone();
     let state = st.signoff.clone();
+    let (since, removed) = changed_since(&state, items);
+    let how = |i: &Item| since.iter().find(|(x, _)| x.id == i.id).map(|(_, h)| *h);
     let shown: Vec<&Item> = items
         .iter()
         .filter(|i| !undecided || i.decision.is_none())
+        .filter(|i| !filter.changed || how(i).is_some())
         .take(limit.unwrap_or(usize::MAX))
         .collect();
     if json_out {
@@ -330,6 +378,15 @@ pub fn show(
         v["digest"] = json!(digest);
         v["signoff"] = serde_json::to_value(&state)?;
         v["rows"] = serde_json::to_value(&shown)?;
+        if filter.changed {
+            v["since_signoff"] = json!(
+                shown
+                    .iter()
+                    .map(|i| json!({"id": i.id, "how": how(i)}))
+                    .collect::<Vec<_>>()
+            );
+            v["removed"] = json!(removed);
+        }
         println!("{}", serde_json::to_string_pretty(&v)?);
         return Ok(());
     }
@@ -354,13 +411,25 @@ pub fn show(
             (None, false, Some(p)) => format!("proposed {p}"),
             _ => String::new(),
         };
+        let mark = match (filter.changed, how(i)) {
+            (true, Some(h)) => format!("[{h}] "),
+            _ => String::new(),
+        };
         println!(
-            "  {}{}  {}  {}",
+            "  {mark}{}{}  {}  {}",
             if i.blocking { "! " } else { "" },
             i.label,
             facts.join(" "),
             decision
         );
+    }
+    if filter.changed {
+        for r in &removed {
+            println!("  [removed] {r}");
+        }
+        if matches!(state, SignState::Valid { .. }) {
+            println!("  nothing changed since the sign-off");
+        }
     }
     Ok(())
 }
@@ -658,6 +727,43 @@ fn write_signoff(ledger: &dyn ekos_ledger::KnowledgeStore, o: &KirObject) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// RFC 0260 X4: `review show --changed` lists what a stale sign-off's delta names.
+    #[test]
+    fn changed_since_marks_added_and_changed_items_only() {
+        let item = |id: &str, label: &str| Item {
+            id: id.into(),
+            label: label.into(),
+            facts: Default::default(),
+            info: Default::default(),
+            proposed: None,
+            decision: None,
+            outdated: false,
+            blocking: false,
+        };
+        let items = vec![
+            item("table:a", "a"),
+            item("table:xx_loyalty_txn", "xx_loyalty_txn"),
+            item("table:c", "c"),
+        ];
+        let stale = SignState::Stale {
+            signed_by: "ana".into(),
+            signed_at: "t".into(),
+            added: vec!["xx_loyalty_txn".into()],
+            removed: vec!["table:gone".into()],
+            changed: vec!["c".into()],
+        };
+        let (marked, removed) = changed_since(&stale, &items);
+        let got: Vec<(&str, &str)> = marked.iter().map(|(i, h)| (i.label.as_str(), *h)).collect();
+        assert_eq!(got, [("xx_loyalty_txn", "added"), ("c", "changed")]);
+        assert_eq!(removed, ["table:gone"]);
+        let valid = SignState::Valid {
+            signed_by: "ana".into(),
+            signed_at: "t".into(),
+        };
+        assert!(changed_since(&valid, &items).0.is_empty());
+        assert_eq!(changed_since(&SignState::None, &items).0.len(), 3);
+    }
 
     fn fresh(config: &EkosConfig, cwd: &Path) -> ReviewState {
         let ledger = open_store_read_only(config, cwd).unwrap();

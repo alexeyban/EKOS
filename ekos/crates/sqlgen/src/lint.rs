@@ -56,7 +56,7 @@ impl Finding {
 /// Every lint code, in order.
 pub const LINT_CODES: &[&str] = &[
     "L001", "L002", "L003", "L004", "L005", "L006", "L007", "L008", "L009", "L010", "L011", "L012",
-    "E001",
+    "L013", "L014", "E001",
 ];
 
 /// Parses and lints `sql`. A statement the dialect's parser cannot read gives `E001` (a warning:
@@ -127,6 +127,8 @@ pub fn lint_analysis(a: &Analysis, facts: &DialectFacts, schema: &Schema) -> Vec
     dates(a, facts, schema, &mut out);
     dialect_forms(a, facts, schema, &mut out);
     metric_shapes(a, schema, &mut out);
+    stand_ins(a, schema, &mut out);
+    text_dates(a, &mut out);
     out
 }
 
@@ -192,6 +194,54 @@ fn metric_shapes(a: &Analysis, schema: &Schema, out: &mut Vec<Finding>) {
                 None,
             ));
         }
+    }
+}
+
+/// L013: a constant returned under the name of a column (`'Unknown' AS customer`): the answer
+/// shows a value the query made up where the data's column is expected.
+fn stand_ins(a: &Analysis, schema: &Schema, out: &mut Vec<Finding>) {
+    for (alias, constant) in &a.constants {
+        let holders: Vec<String> = schema
+            .tables
+            .iter()
+            .filter_map(|t| t.column(alias).map(|c| format!("{}.{}", t.name, c.name)))
+            .take(3)
+            .collect();
+        if holders.is_empty() {
+            continue;
+        }
+        out.push(Finding::new(
+            "L013",
+            Severity::Warn,
+            format!(
+                "{constant} AS {alias} returns a constant under the name of a column ({}): \
+                 every row shows the same made-up value — read the column from a table that has \
+                 it, or say the question cannot be answered",
+                holders.join(", ")
+            ),
+            holders
+                .first()
+                .and_then(|h| h.split_once('.'))
+                .map(|(t, _)| Fetch::DescribeTable {
+                    table: t.to_string(),
+                }),
+        ));
+    }
+}
+
+/// L014: a date function given quoted text where it needs a date; the engines do not convert it
+/// (DuckDB, PostgreSQL and Trino refuse `DATE_TRUNC('year', '2026-01-01')`).
+fn text_dates(a: &Analysis, out: &mut Vec<Finding>) {
+    for call in &a.text_dates {
+        out.push(Finding::new(
+            "L014",
+            Severity::Error,
+            format!(
+                "{call} gives a text where a date is needed: write DATE '…', or CURRENT_DATE for \
+                 today"
+            ),
+            None,
+        ));
     }
 }
 
@@ -708,6 +758,45 @@ mod tests {
             vec!["L002"]
         );
         assert!(codes("SELECT 1 FROM cards c JOIN rulings r ON r.id = c.power").is_empty());
+        // A function or cast around a column does not hide the join (RFC 0260 demo: two marts
+        // joined on DATE_TRUNC of their months).
+        assert_eq!(
+            codes("SELECT 1 FROM cards c JOIN rulings r ON lower(r.text) = lower(c.name)"),
+            vec!["L002"]
+        );
+        assert_eq!(
+            codes("SELECT 1 FROM cards c JOIN rulings r ON CAST(r.text AS TEXT) = c.name"),
+            vec!["L002"]
+        );
+        assert!(
+            codes("SELECT 1 FROM cards c JOIN rulings r ON CAST(r.card_id AS INT) = c.id")
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn l013_a_constant_under_a_column_name() {
+        assert_eq!(
+            codes("SELECT c.id, 'Unknown' AS name FROM cards c"),
+            vec!["L013"]
+        );
+        assert_eq!(
+            codes("SELECT c.id, NULL AS text FROM cards c"),
+            vec!["L013"]
+        );
+        // A constant under a name no table uses, or the column itself, is fine.
+        assert!(codes("SELECT c.id, 'all' AS bucket FROM cards c").is_empty());
+        assert!(codes("SELECT c.id, c.name AS name FROM cards c").is_empty());
+    }
+
+    #[test]
+    fn l014_text_where_a_date_is_needed() {
+        assert_eq!(
+            codes("SELECT 1 FROM cards WHERE id >= date_trunc('year', '2026-01-01')"),
+            vec!["L014"]
+        );
+        assert!(codes("SELECT date_trunc('year', CURRENT_DATE) FROM cards").is_empty());
+        assert!(codes("SELECT date_trunc('year', DATE '2026-01-01') FROM cards").is_empty());
     }
 
     #[test]

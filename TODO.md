@@ -7170,3 +7170,19 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
 - [x] `ekos.toml` that does not parse is an error naming the file (it silently ran on defaults);
       `config validate`, `doctor`, `init` still run on it; keys nothing reads are warnings
       (`serde_ignored`), also in `config validate` (`unknown-key`)
+- [x] RFC 0259 gold marts on DuckDB, EKOS side D1–D5: dialect `duckdb`, dbt-duckdb projects, canonical
+      form, read-only probe (`ekos sql check --duckdb`), `[[databases]] kind = "duckdb"` + console Sources
+- [x] V2 orders PostgreSQL text `COLLATE "C"` (an `en_US.utf8` source diverged at V2 only)
+- [x] Code-vs-database conflicts compare only the application's databases; claim paths name the engine
+- [x] RFC 0260 (ekos-lakehouse): X1 downstream impact of a source change (marts, dashboards), X6
+      `change_measure`, X7 edit gates on DuckDB, X8 totals before/after, X9 `lakehouse spec`
+- [x] RFC 0260 §2.5, the chapter 9 dry-run gaps: L002 through functions/casts, L013 constant under a
+      column's name, L014 date function on quoted text (EKOS); unreadable tables refused, stale scope keeps
+      the deployed tables, unreviewed new tables held, new tables wait for the plan approval, source-only
+      widening, silver impact from model YAML, Dagster reload after generate, additive edits carry the
+      approval (ekos-lakehouse); the fork blocks L013
+- [x] RFC 0260 X4 `ekos review show <subject> --changed` (+ console `?changed=true`), X5 `lakehouse
+      extraction approve --table` (generate builds the approved tables, holds the rest)
+- [x] Two proposals merge back to back: no lock hash in `.generated.json`, one silver YAML per model;
+      `generate --from-lock` keeps step 3's masks
+- [ ] RFC 0260 X10/X11 shown in `spec` / `lakehouse alert` only; console UI for `--changed` and per-table approval

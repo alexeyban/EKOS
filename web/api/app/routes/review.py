@@ -66,12 +66,16 @@ async def subject_items(
     ws: models.Workspace = Depends(require_workspace),
     settings: Settings = Depends(get_settings),
     undecided: bool = Query(default=False),
+    changed: bool = Query(default=False),
     limit: int | None = Query(default=None, ge=1, le=100000),
 ) -> dict:
-    """One subject's items with the facts shown, decisions and the digest a sign-off needs."""
+    """One subject's items with the facts shown, decisions and the digest a sign-off needs.
+    ``changed``: only what changed since the sign-off (RFC 0260 X4)."""
     argv = ["review", "show", subject, "--json"]
     if undecided:
         argv.append("--undecided")
+    if changed:
+        argv.append("--changed")
     if limit is not None:
         argv += ["--limit", str(limit)]
     return await _read(settings, ws, argv)

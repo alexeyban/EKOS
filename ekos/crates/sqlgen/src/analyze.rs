@@ -84,7 +84,9 @@ pub struct Analysis {
     pub unknown_tables: Vec<String>,
     pub unresolved: Vec<Unresolved>,
     pub comparisons: Vec<Comparison>,
-    /// `a.x = b.y` between two different real tables (ON or WHERE).
+    /// `a.x = b.y` between two different real tables (ON or WHERE). A side wrapped in a function
+    /// or a cast of one column (`DATE_TRUNC('month', a.x)`) counts as that column: wrapping a
+    /// column keeps every row that matched, so the join multiplies rows the same way.
     pub joins: Vec<(Col, Col)>,
     /// Both operands and the division as written.
     pub divisions: Vec<(NumKind, NumKind, String)>,
@@ -101,6 +103,11 @@ pub struct Analysis {
     /// RFC 0243: `"text"` read as a string literal (MySQL's default mode).
     pub double_quoted_strings: Vec<String>,
     pub top: TopLevel,
+    /// A constant in the top-level projection under a name: `(alias, constant as written)`.
+    pub constants: Vec<(String, String)>,
+    /// A date function given a quoted text where it needs a date (`DATE_TRUNC('year',
+    /// '2026-01-01')`), as written.
+    pub text_dates: Vec<String>,
     /// RFC 0243: each real table (lower-case) as the query names it (`sqlgen.customers`), so a
     /// probe queries the same object in a schema-qualified database.
     pub written: std::collections::BTreeMap<String, String>,
@@ -196,6 +203,13 @@ impl Walker<'_> {
                 let (agg, cd) = aggregate_in(e);
                 t.aggregate |= agg;
                 t.count_distinct |= cd;
+            }
+            if let SelectItem::ExprWithAlias { expr, alias } = item
+                && is_constant(expr)
+            {
+                self.out
+                    .constants
+                    .push((alias.value.clone(), expr.to_string()));
             }
         }
     }
@@ -464,6 +478,28 @@ impl Walker<'_> {
         }
     }
 
+    /// The one column inside a function or cast whose other arguments are constants
+    /// (`DATE_TRUNC('month', t.x)`, `CAST(t.x AS DATE)`, `LOWER(t.x)`).
+    fn wrapped(&self, e: &Expr) -> Option<Col> {
+        match e {
+            Expr::Nested(inner) | Expr::Cast { expr: inner, .. } => {
+                self.col(inner).or_else(|| self.wrapped(inner))
+            }
+            Expr::Function(f) => {
+                let args = function_args(&f.args);
+                let mut cols = args
+                    .iter()
+                    .filter(|a| !is_constant(a))
+                    .map(|a| self.col(a).or_else(|| self.wrapped(a)));
+                match (cols.next(), cols.next()) {
+                    (Some(Some(c)), None) => Some(c),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn expr(&mut self, e: &Expr) {
         match e {
             Expr::Identifier(_) | Expr::CompoundIdentifier(_) => self.reference(e),
@@ -575,6 +611,13 @@ impl Walker<'_> {
     fn function(&mut self, f: &Function) {
         let name = f.name.to_string().to_lowercase();
         let args = function_args(&f.args);
+        let unqualified = name.rsplit('.').next().unwrap_or(&name);
+        if matches!(unqualified, "date_trunc" | "date_part")
+            && args.len() == 2
+            && string_literal(args[1]).is_some()
+        {
+            self.out.text_dates.push(f.to_string());
+        }
         if matches!(name.as_str(), "avg" | "min" | "max" | "sum" | "total")
             && args.len() == 1
             && let Some(c) = self.col(args[0])
@@ -612,6 +655,8 @@ impl Walker<'_> {
                         }
                     }
                 }
+                let l = l.or_else(|| self.wrapped(left));
+                let r = r.or_else(|| self.wrapped(right));
                 if *op == B::Eq
                     && let (Some(a), Some(b)) = (l, r)
                     && !a.0.eq_ignore_ascii_case(&b.0)
@@ -796,6 +841,17 @@ fn aggregate_in(e: &Expr) -> (bool, bool) {
             out
         }
         _ => (false, false),
+    }
+}
+
+/// A literal, possibly cast or negated: no column, no function.
+fn is_constant(e: &Expr) -> bool {
+    match e {
+        Expr::Value(_) | Expr::TypedString { .. } | Expr::Interval(_) => true,
+        Expr::Nested(inner)
+        | Expr::Cast { expr: inner, .. }
+        | Expr::UnaryOp { expr: inner, .. } => is_constant(inner),
+        _ => false,
     }
 }
 

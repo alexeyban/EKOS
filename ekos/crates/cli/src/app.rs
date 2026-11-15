@@ -1991,6 +1991,10 @@ enum ReviewCommands {
         /// Only items without a current decision
         #[arg(long)]
         undecided: bool,
+        /// Only what changed since the last sign-off: items added or changed, and the removed
+        /// ones named (RFC 0260 X4)
+        #[arg(long)]
+        changed: bool,
         #[arg(long)]
         limit: Option<usize>,
         #[arg(long)]
@@ -3577,9 +3581,17 @@ fn dispatch_review(
         ReviewCommands::Show {
             subject,
             undecided,
+            changed,
             limit,
             json,
-        } => review::show(config, cwd, &subject, undecided, limit, json),
+        } => review::show(
+            config,
+            cwd,
+            &subject,
+            review::ShowFilter { undecided, changed },
+            limit,
+            json,
+        ),
         ReviewCommands::Scope {
             tables,
             r#in,

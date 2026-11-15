@@ -72,7 +72,8 @@ _ALLOWED: dict[tuple[str, ...], frozenset[str]] = {
     ("transformation", "graph", "--json"): frozenset({"--object", "--expand"}),
 }
 
-# RFC 0213: `review show <subject> --json [--undecided] [--limit <n>]` — the subject is one of a
+# RFC 0213: `review show <subject> --json [--undecided] [--changed] [--limit <n>]` (`--changed`:
+# RFC 0260 X4, only what changed since the sign-off) — the subject is one of a
 # fixed set, the limit digits only.
 REVIEW_SUBJECTS = ("scope", "pii", "conflicts", "identity", "write-behaviour", "glossary")
 _DIGITS = re.compile(r"^[0-9]{1,6}$")
@@ -86,7 +87,7 @@ def _check_review_show(extra: list[str]) -> None:
         raise ReadProcError("review show needs --json")
     i = 1
     while i < len(rest):
-        if rest[i] == "--undecided":
+        if rest[i] in ("--undecided", "--changed"):
             i += 1
         elif rest[i] == "--limit" and i + 1 < len(rest) and _DIGITS.match(rest[i + 1]):
             i += 2

@@ -89,6 +89,7 @@ def test_review_reads_are_fixed_shapes() -> None:
     _check_allowed(["workflow", "status", "--json"])
     _check_allowed(["review", "list", "--json"])
     _check_allowed(["review", "show", "pii", "--json", "--undecided", "--limit", "50"])
+    _check_allowed(["review", "show", "scope", "--json", "--changed"])
     for argv in (
         ["review", "show", "../x", "--json"],
         ["review", "show", "pii"],
@@ -198,12 +199,14 @@ def test_the_bar_and_the_review_need_only_the_read_right(setup) -> None:
     assert c.get("/api/workspaces/w/review", headers=R).json()["subjects"][0]["items"] == 2
     r = c.get("/api/workspaces/w/review/pii?undecided=true&limit=20", headers=R)
     assert r.status_code == 200 and r.json()["subject"] == "pii"
+    assert c.get("/api/workspaces/w/review/scope?changed=true", headers=R).status_code == 200
     assert c.get("/api/workspaces/w/review/everything", headers=R).status_code == 422
     assert c.get("/api/workspaces/w/workflow").status_code == 401
     assert _calls(log) == [
         ["workflow", "status", "--json"],
         ["review", "list", "--json"],
         ["review", "show", "pii", "--json", "--undecided", "--limit", "20"],
+        ["review", "show", "scope", "--json", "--changed"],
     ]
 
 
