@@ -15,6 +15,9 @@
 # RFC 0199: an extension's binary packages the same way under its own name —
 # EKOS_PACKAGE_PROGRAM=ekos-lakehouse (the binary, the archive and the starters use it) and
 # EKOS_PACKAGE_INSTALL_MD=<its own INSTALL.md>. Unset, the package is EKOS's, as before.
+#
+# RFC 0261 §2.8: EKOS_PACKAGE_DESKTOP=<ekos-desktop binary for this target> adds the EKOS.DEV
+# desktop app as bin/ekos-desktop[.exe], beside ekos, where it looks for it first.
 set -euo pipefail
 
 target="$1"; bin="$2"; out="$3"; version="$4"; ui="${5:-}"
@@ -38,6 +41,13 @@ stage="$out/$name"
 rm -rf "$stage"; mkdir -p "$stage/bin" "$stage/console"
 cp "$bin" "$stage/bin/$exe"
 chmod 755 "$stage/bin/$exe"
+desktop="${EKOS_PACKAGE_DESKTOP:-}"
+if [[ -n "$desktop" ]]; then
+  desktop_exe="ekos-desktop"
+  [[ "$windows" = 1 ]] && desktop_exe="ekos-desktop.exe"
+  cp "$desktop" "$stage/bin/$desktop_exe"
+  chmod 755 "$stage/bin/$desktop_exe"
+fi
 
 # ── Python, verified before it is unpacked ────────────────────────────────────
 asset="cpython-${pyver}+${release}-${target}-install_only.tar.gz"

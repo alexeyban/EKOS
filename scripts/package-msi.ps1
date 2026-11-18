@@ -51,9 +51,11 @@ try {
   # per-user package with harvested files fails, are not run here; uninstall removes the whole
   # program directory with util:RemoveFolderEx (packaging/wix/ekos.wxs).
   # wix's own messages go to the host, not the pipeline: callers keep only this script's last line.
+  # RFC 0261 §2.8: the desktop app and its Start menu entry, when the full package has it.
+  $defines = @('-d', "Version=$MsiVersion", '-d', "Source=$($src.FullName)", '-d', "Assets=$work")
+  if (Test-Path "$($src.FullName)\bin\ekos-desktop.exe") { $defines += @('-d', 'Desktop=yes') }
   & wix build (Join-Path $assets 'ekos.wxs') -arch x64 `
-      -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
-      -d "Version=$MsiVersion" -d "Source=$($src.FullName)" -d "Assets=$work" `
+      -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext @defines `
       -o $msi | Out-Host
   if ($LASTEXITCODE -ne 0) { throw "wix build failed ($LASTEXITCODE)" }
   Write-Output $msi

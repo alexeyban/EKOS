@@ -3,3 +3,8 @@
 [workspace]
 resolver = "3"
 members = ["src-tauri"]
+
+# The app ships in the installers (RFC 0261 §2.8): no symbols, as the ekos binary.
+[profile.release]
+strip = true
+lto = "thin"

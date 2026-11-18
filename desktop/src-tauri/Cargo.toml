@@ -1,8 +1,8 @@
 [package]
 name = "ekos-desktop"
-version = "0.0.1"
+version = "1.6.0"
 edition = "2024"
-description = "EKOS.DEV desktop shell around the EKOS console (RFC 0261, D0 spike)"
+description = "EKOS.DEV desktop shell around the EKOS console (RFC 0261)"
 license = "Apache-2.0"
 publish = false
 

@@ -9,6 +9,9 @@
 #   /usr/local/bin/ekos              → /usr/local/ekos/bin/ekos
 #   /Applications/EKOS Setup.app     opens Terminal with `ekos setup` (the setup wizard)
 #   /Applications/EKOS Console.app   `ekos console open --start`
+#   /Applications/EKOS.DEV.app       the desktop app (RFC 0261 §2.8), when the full package has it:
+#                                    bin/ekos-desktop moves into the bundle, and Contents/MacOS/ekos
+#                                    links to /usr/local/ekos/bin/ekos, beside it, where it looks first
 # The package's postinstall runs as root, so it never runs the wizard itself: it opens EKOS Setup
 # as the person logged in at the screen, and not at all for a command-line install.
 # `installer.toml` tells `ekos setup` and `ekos uninstall` that the program is the package's:
@@ -63,7 +66,7 @@ if [[ "$(id -u)" != 0 ]]; then exec sudo "$0" "$@"; fi
 if [[ "$(readlink /usr/local/bin/ekos 2>/dev/null)" = /usr/local/ekos/bin/ekos ]]; then
   rm -f /usr/local/bin/ekos
 fi
-rm -rf "/Applications/EKOS Setup.app" "/Applications/EKOS Console.app" /usr/local/ekos
+rm -rf "/Applications/EKOS Setup.app" "/Applications/EKOS Console.app" "/Applications/EKOS.DEV.app" /usr/local/ekos
 pkgutil --forget com.ekos.cli >/dev/null 2>&1 || true
 echo "EKOS is removed. Your EKOS home is where it was."
 EOF
@@ -88,12 +91,8 @@ else
   echo "no icon: sips/iconutil failed; the apps get the default icon" >&2
 fi
 
-app() {  # name, bundle id suffix, command run by the app
-  local title="$1" suffix="$2" command="$3"
-  local bundle="$root/Applications/$title.app"
-  mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
-  printf '#!/bin/sh\n%s\n' "$command" > "$bundle/Contents/MacOS/run"
-  chmod 755 "$bundle/Contents/MacOS/run"
+plist_app() {  # bundle dir, name, bundle id suffix, executable, extra keys
+  local bundle="$1" title="$2" suffix="$3" executable="$4" extra="$5"
   [[ -n "$icns" ]] && cp "$icns" "$bundle/Contents/Resources/ekos.icns"
   cat > "$bundle/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -103,19 +102,34 @@ app() {  # name, bundle id suffix, command run by the app
   <key>CFBundleName</key><string>${title}</string>
   <key>CFBundleDisplayName</key><string>${title}</string>
   <key>CFBundleIdentifier</key><string>com.ekos.${suffix}</string>
-  <key>CFBundleExecutable</key><string>run</string>
+  <key>CFBundleExecutable</key><string>${executable}</string>
   <key>CFBundleIconFile</key><string>ekos</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${pkgver}</string>
   <key>CFBundleVersion</key><string>${pkgver}</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
-  <key>LSUIElement</key><true/>
+${extra}
 </dict>
 </plist>
 EOF
 }
+app() {  # name, bundle id suffix, command run by the app
+  local title="$1" suffix="$2" command="$3"
+  local bundle="$root/Applications/$title.app"
+  mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
+  printf '#!/bin/sh\n%s\n' "$command" > "$bundle/Contents/MacOS/run"
+  chmod 755 "$bundle/Contents/MacOS/run"
+  plist_app "$bundle" "$title" "$suffix" run '  <key>LSUIElement</key><true/>'
+}
 app "EKOS Setup" setup 'exec open -a Terminal /usr/local/ekos/setup.command'
 app "EKOS Console" console 'exec /usr/local/ekos/bin/ekos console open --start'
+if [[ -x "$prog/bin/ekos-desktop" ]]; then
+  desk="$root/Applications/EKOS.DEV.app"
+  mkdir -p "$desk/Contents/MacOS" "$desk/Contents/Resources"
+  mv "$prog/bin/ekos-desktop" "$desk/Contents/MacOS/ekos-desktop"
+  ln -s /usr/local/ekos/bin/ekos "$desk/Contents/MacOS/ekos"
+  plist_app "$desk" "EKOS.DEV" desktop ekos-desktop '  <key>NSHighResolutionCapable</key><true/>'
+fi
 
 # ── postinstall: EKOS Setup for the person at the screen ─────────────────────
 scripts="$work/scripts"
@@ -153,7 +167,7 @@ cat > "$res/welcome.html" <<EOF
 <h2>EKOS ${pkgver}</h2>
 <p>Installs the <code>ekos</code> command, its web console and the Python it runs on in
 <code>/usr/local/ekos</code>, puts <code>ekos</code> in <code>/usr/local/bin</code>, and adds
-<b>EKOS Setup</b> and <b>EKOS Console</b> to Applications.</p>
+<b>EKOS Setup</b>, <b>EKOS Console</b> and the <b>EKOS.DEV</b> desktop app to Applications.</p>
 <p>When it finishes, EKOS Setup opens: a page in your browser for your EKOS home, the web console,
 a first project and your AI agents.</p>
 </body></html>

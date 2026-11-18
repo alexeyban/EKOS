@@ -8,6 +8,10 @@
 #   /usr/bin/ekos                        → /opt/ekos/bin/ekos
 #   /usr/share/applications/ekos-setup.desktop    "EKOS Setup"   (ekos setup, in a terminal)
 #   /usr/share/applications/ekos-console.desktop  "EKOS Console" (ekos console open --start)
+#   /usr/share/applications/ekos-desktop.desktop  "EKOS.DEV" (/opt/ekos/bin/ekos-desktop), when the
+#                                        full package has the desktop app (RFC 0261 §2.8)
+# The desktop app needs WebKitGTK 4.1 and an AppIndicator library. They are recommended, not
+# required, so a server gets the command without a desktop stack (apt --no-install-recommends).
 # Nothing runs as root after installing except a message: the setup wizard, the EKOS home and
 # the console belong to the person who runs `ekos setup`. `installer.toml` tells `ekos setup` and
 # `ekos uninstall` that the package manager owns /opt/ekos: setup copies nothing and adds no PATH
@@ -45,6 +49,10 @@ trap 'rm -rf "$work"' EXIT
 tar -xzf "$full" -C "$work"
 src="$work/$name"
 [[ -x "$src/bin/ekos" ]] || { echo "$full has no bin/ekos" >&2; exit 1; }
+app=0
+[[ -x "$src/bin/ekos-desktop" ]] && app=1
+deb_recommends="xdg-utils"
+[[ "$app" = 1 ]] && deb_recommends="xdg-utils, libwebkit2gtk-4.1-0, libayatana-appindicator3-1"
 
 # ── the tree both packages install ───────────────────────────────────────────
 stage() {  # $1 = root, $2 = deb|rpm
@@ -78,6 +86,19 @@ Icon=/opt/ekos/share/ekos.png
 Terminal=false
 Categories=Development;
 EOF
+  if [[ "$app" = 1 ]]; then
+    cat > "$root/usr/share/applications/ekos-desktop.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=EKOS.DEV
+Comment=The EKOS console in its own window, with a tray icon and run notifications
+Exec=/opt/ekos/bin/ekos-desktop
+Icon=/opt/ekos/share/ekos.png
+Terminal=false
+Categories=Development;
+StartupWMClass=ekos-desktop
+EOF
+  fi
   # Readable by everyone, writable by root only, whatever the build machine's umask was.
   chmod -R u+rwX,go+rX,go-w "$root"
 }
@@ -100,7 +121,7 @@ Architecture: ${deb_arch}
 Maintainer: EKOS <https://github.com/alexeyban/EKOS>
 Installed-Size: $(du -sk "$root/opt" | cut -f1)
 Depends: libc6 (>= 2.34)
-Recommends: xdg-utils
+Recommends: ${deb_recommends}
 Section: devel
 Priority: optional
 Homepage: https://github.com/alexeyban/EKOS
@@ -159,6 +180,13 @@ EOM
 /usr/share/applications/ekos-setup.desktop
 /usr/share/applications/ekos-console.desktop
 EOF
+  if [[ "$app" = 1 ]]; then
+    # Weak dependencies by library, so they resolve whatever each distribution names its packages.
+    printf '%s\n' 'Recommends:     libwebkit2gtk-4.1.so.0()(64bit)' \
+      'Recommends:     libayatana-appindicator3.so.1()(64bit)' > "$work/recommends"
+    sed -i "/^Requires: /r $work/recommends" "$top/SPECS/ekos.spec"
+    echo /usr/share/applications/ekos-desktop.desktop >> "$top/SPECS/ekos.spec"
+  fi
   rpmbuild -bb --quiet --target "$rpm_arch" --define "_topdir $top" "$top/SPECS/ekos.spec" >/dev/null
   file="$out/ekos-${version}-${target}.rpm"
   mv "$top/RPMS/$rpm_arch/"ekos-*.rpm "$file"

@@ -7191,5 +7191,9 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
       (pulled forward from D1); `ekos console open --json` prints `{url, code}` (devlog_335)
 - [ ] RFC 0261 D0 on Windows (WebView2 on a clean Windows 10), macOS (WKWebView), and a Linux machine with an
       NVIDIA driver; IPC scoped to the loopback origin (§6.1); a hidden window's `EventSource` (§6.2)
-- [ ] RFC 0261 D1: `console status|stop --json`, `stop` refusing while runs are active, single instance, the
-      app in the MSI/pkg/deb/rpm; notification app name "EKOS.DEV" through the `.desktop` entry
+- [x] RFC 0261 D1 (part): the app in the MSI/pkg/deb/rpm and the full packages, built and unit-tested on
+      Linux, Windows and macOS by the release workflow; installer tests check it is placed, linked and
+      removed; v1.6.0 (devlog_336)
+- [ ] RFC 0261 D1: `console status|stop --json`, `stop` refusing while runs are active, single instance;
+      the app started on a fresh Windows and macOS by a person; notification app name "EKOS.DEV"
+      through the `.desktop` entry; a start-up screen that says "run EKOS Setup first" when no home exists

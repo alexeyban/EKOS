@@ -161,6 +161,11 @@ console, a first project and your agents — the same wizard as below.
 | Linux x86_64 / ARM 64-bit, Debian or Ubuntu | `ekos-<version>-<arch>-unknown-linux-gnu.deb` | `sudo apt install ./ekos-….deb`: `/opt/ekos`, `/usr/bin/ekos`, menu entries **EKOS Setup** and **EKOS Console**. Then run `ekos setup` as yourself. |
 | Linux x86_64 / ARM 64-bit, RHEL 9, Rocky, Alma, Fedora | `ekos-<version>-<arch>-unknown-linux-gnu.rpm` | `sudo dnf install ./ekos-….rpm`: the same as the .deb. |
 
+**EKOS.DEV, the desktop app (from v1.6.0).** Every installer also adds **EKOS.DEV**: the console
+in its own window, started and signed in for you, with a tray menu of your projects and a
+notification when a run ends (RFC 0261; local mode). Run **EKOS Setup** once first. On Linux it needs
+WebKitGTK 4.1 and an AppIndicator library, which the `.deb` and `.rpm` recommend.
+
 The Linux packages need glibc 2.34 or newer (Ubuntu 22.04, Debian 12, RHEL 9); on older systems
 use the command-only `musl` archive below. Nothing is started as root, and no service is installed:
 the console is started by `ekos setup` (or at login, if you ask it to) as the person who runs it.
@@ -318,7 +323,7 @@ step only applies if you clicked the link in a browser.
 #### Windows
 
 ```powershell
-$Version = "v1.5.5"
+$Version = "v1.6.0"
 $Asset   = "ekos-$($Version -replace '^v','')-x86_64-pc-windows-msvc.zip"
 $Base    = "https://github.com/alexeyban/EKOS/releases/download/$Version"
 

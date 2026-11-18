@@ -1,6 +1,6 @@
 # RFC 0261 — EKOS Desktop: a native app shell for the console, and one refreshed console UI
 
-**Status:** proposed (2026-11-18) · **Target:** not set
+**Status:** accepted (2026-11-18) · **Target:** EKOS 1.6.0 (D0, and the app in the installers from D1)
 **Depends on:** RFC 0127 (web console), RFC 0180 (roles), RFC 0184 (local mode, keychain), RFC 0185 (full
 package, `ekos console`, `ekos setup`), RFC 0186 (command catalogue), RFC 0188 (uninstall page), RFC 0189
 (Init & compile), RFC 0198 (extension pages)

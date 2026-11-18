@@ -9,6 +9,8 @@
   with its own Python, LICENSE, INSTALL.md and installer.toml), `bin\` is appended to the user Path,
   and the Start menu gets "EKOS Setup" (`ekos setup`, the setup wizard) and "EKOS Console"
   (`ekos console open` with its start flag). The last page offers to open EKOS Setup.
+  With -d Desktop=yes (the full package has bin\ekos-desktop.exe) it also installs the EKOS.DEV
+  desktop app beside ekos.exe and its Start menu entry "EKOS.DEV" (RFC 0261 §2.8).
 
   installer.toml tells `ekos setup` and `ekos uninstall` that this installer owns the program:
   setup copies nothing and does not touch the Path, uninstall removes the person's EKOS home only.
@@ -76,6 +78,12 @@
                      System="no" Permanent="no" />
       </Component>
 
+      <?ifdef Desktop?>
+      <Component Id="DesktopApp" Directory="BinDir">
+        <File Id="DesktopExe" Source="$(var.Source)\bin\ekos-desktop.exe" KeyPath="yes" />
+      </Component>
+      <?endif?>
+
       <Files Directory="ConsoleDir" Include="$(var.Source)\console\**" />
 
       <Component Id="StartMenu" Directory="MenuDir">
@@ -86,6 +94,11 @@
                   Description="Open the EKOS web console, starting it when it is not running"
                   Target="[#EkosExe]" Arguments="console open --start" WorkingDirectory="INSTALLFOLDER"
                   Icon="ekos.ico" />
+        <?ifdef Desktop?>
+        <Shortcut Id="DesktopShortcut" Name="EKOS.DEV"
+                  Description="The EKOS console in its own window, with a tray icon and run notifications"
+                  Target="[#DesktopExe]" WorkingDirectory="INSTALLFOLDER" Icon="ekos.ico" />
+        <?endif?>
         <RemoveFolder Id="RemoveMenuDir" On="uninstall" />
         <RegistryValue Root="HKCU" Key="Software\EKOS" Name="StartMenu" Type="integer" Value="1"
                        KeyPath="yes" />

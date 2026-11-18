@@ -1,5 +1,41 @@
 # Changelog
 
+## v1.6.0 — 2026-11-18
+
+**EKOS.DEV, the desktop app** (RFC 0261, early)
+- **A native window for the console**, in every installer: Windows `.msi` (Start menu **EKOS.DEV**),
+  macOS `.pkg` (**EKOS.DEV** in Applications) and Linux `.deb`/`.rpm` (menu entry **EKOS.DEV**,
+  `/opt/ekos/bin/ekos-desktop`). It starts the console when it is not running, signs you in with a
+  one-time code and shows the console's own pages; nothing is served twice.
+- A start-up screen with the console's log and "Open in browser instead"; a tray menu with your
+  projects, "Open in browser" and "Restart the console"; closing the window keeps it in the tray.
+- A notification when a run ends, and a quit dialog when one is in progress: keep it running in the
+  background, wait and then quit, or cancel the run and quit.
+- Local mode only for now (a team console opens in the browser). Linux needs WebKitGTK 4.1 and an
+  AppIndicator library: the `.deb` recommends them, so a server installs the command without them
+  (`apt install --no-install-recommends`). Built on Linux, Windows and macOS by the release workflow;
+  measured so far on Linux only. Unsigned, like the other installers.
+- `ekos console open --json` prints `{url, code}` instead of opening a browser.
+
+**DuckDB** (RFC 0259)
+- `sql-dialect-duckdb`: DuckDB SQL from files (`init --detect` maps a `duckdb/` directory); dbt-duckdb
+  projects are read with it.
+- DuckDB canonical form for `ekos migrate` validation (V1–V3 against a DuckDB file).
+- Behind the `duckdb` build feature (not in the prebuilt binaries): `[[databases]] kind = "duckdb"`
+  with a read-only catalog, profiles and probes, `ekos sql check --duckdb`, and a "DuckDB file" kind
+  in the console's Sources form.
+
+**SQL checks and review** (RFC 0260)
+- L013 (a constant under a column's name) and L014 (`date_trunc`/`date_part` on quoted text); L002
+  sees a join column inside functions and casts.
+- `ekos review show <subject> --changed` lists what was added or changed since the sign-off.
+
+**Fixes**
+- Code-vs-database conflicts compare only the application's databases, so a second live database
+  (the lakehouse's DuckDB marts) no longer reopens decided conflicts.
+- Migrate V2 orders PostgreSQL text by code point (`COLLATE "C"`), as Trino does: an `en_US.utf8`
+  source no longer diverges at V2 when V1 and V3 agree.
+
 ## v1.5.5 — 2026-11-13
 
 **Installers**

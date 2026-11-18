@@ -160,12 +160,78 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+  # RFC 0261 §2.8 — the EKOS.DEV desktop app (desktop/, its own Cargo workspace) for every target
+  # that has a full package. It ships inside the full package and the installers, never as an
+  # asset of its own, so the artifact is not named `ekos-*`. Tauri needs the system webview:
+  # WebKitGTK 4.1 on Linux (its development packages here), WebView2 on Windows, WKWebView on macOS.
+  desktop:
+    name: Desktop app ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 22.04 for the same glibc baseline as the ekos binary (see `build`).
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+          - target: aarch64-apple-darwin
+            runner: macos-15
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Install the pinned toolchain and add the target to it
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install WebKitGTK and the tray library
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/target
+          key: desktop-${{ matrix.target }}-${{ hashFiles('desktop/Cargo.lock') }}
+          restore-keys: desktop-${{ matrix.target }}-
+
+      - name: Test
+        working-directory: desktop
+        run: cargo test --locked --target ${{ matrix.target }}
+
+      - name: Build
+        working-directory: desktop
+        env:
+          CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: "-C target-feature=+crt-static"
+        run: cargo build --release --locked -p ekos-desktop --target ${{ matrix.target }}
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.target }}
+          path: |
+            desktop/target/${{ matrix.target }}/release/ekos-desktop
+            desktop/target/${{ matrix.target }}/release/ekos-desktop.exe
+          if-no-files-found: error
+
   # RFC 0185 — the full package per target: the binary from `build`, a pinned standalone Python,
   # the console's wheels for that platform, the console and its built UI, the setup starters.
   # Every target is assembled here on Linux; only the binary had to be built on its own OS.
   package:
     name: Full package ${{ matrix.target }}
-    needs: build
+    needs: [build, desktop]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -198,6 +264,12 @@ jobs:
           name: ekos-${{ matrix.target }}
           path: bare
 
+      - name: Download this target's desktop app
+        uses: actions/download-artifact@v7
+        with:
+          name: desktop-${{ matrix.target }}
+          path: desktop-app
+
       - name: Assemble
         shell: bash
         run: |
@@ -213,6 +285,8 @@ jobs:
             bin="$PWD/ekos-${version}-${{ matrix.target }}/ekos"
           fi
           cd ..
+          app="$(ls "$PWD"/desktop-app/ekos-desktop* | head -1)"
+          export EKOS_PACKAGE_DESKTOP="$app"
           mkdir -p dist
           archive="$(scripts/package-full.sh "${{ matrix.target }}" "$bin" dist "$version" | tail -1)"
           (cd dist && sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256")
@@ -262,6 +336,7 @@ jobs:
             (Test-Path "$($pkg.FullName)\bin\ekos.exe") -and (Test-Path "$($pkg.FullName)\console\python\python.exe") -and
             (Test-Path "$($pkg.FullName)\console\app\main.py") -and (Test-Path "$($pkg.FullName)\setup.cmd")
           }
+          Check "the package has the desktop app beside ekos.exe" { Test-Path "$($pkg.FullName)\bin\ekos-desktop.exe" }
 
           # The bundled Python starts on its own (its vcruntime140.dll is beside it).
           & "$($pkg.FullName)\console\python\python.exe" -c "import sys; print(sys.version)"
@@ -603,6 +678,10 @@ jobs:
 
           # 2. What the installer put in place, without an administrator.
           Check "ekos.exe is in $prog\bin" { Test-Path "$prog\bin\ekos.exe" }
+          Check "the desktop app is beside it" { Test-Path "$prog\bin\ekos-desktop.exe" }
+          Check "Start menu: EKOS.DEV runs it" {
+            (New-Object -ComObject WScript.Shell).CreateShortcut("$menu\EKOS.DEV.lnk").TargetPath -eq "$prog\bin\ekos-desktop.exe"
+          }
           Check "the console and its Python are there" { (Test-Path "$prog\console\python\python.exe") -and (Test-Path "$prog\console\app\main.py") }
           Check "installer.toml says msi" { (Get-Content "$prog\installer.toml" -Raw) -match 'kind = "msi"' }
           & "$prog\bin\ekos.exe" --version
@@ -732,6 +811,12 @@ jobs:
           [ -x /usr/local/ekos/bin/ekos ] && ok "the program is in /usr/local/ekos" || fail "no /usr/local/ekos/bin/ekos"
           [ "$(readlink /usr/local/bin/ekos)" = /usr/local/ekos/bin/ekos ] && ok "ekos is in /usr/local/bin" || fail "/usr/local/bin/ekos"
           [ -d "/Applications/EKOS Setup.app" ] && [ -d "/Applications/EKOS Console.app" ] && ok "the apps" || fail "the apps"
+          desk="/Applications/EKOS.DEV.app/Contents/MacOS"
+          [ -x "$desk/ekos-desktop" ] && [ "$(readlink "$desk/ekos")" = /usr/local/ekos/bin/ekos ] \
+            && ok "EKOS.DEV.app, with ekos beside its binary" || fail "EKOS.DEV.app"
+          # Every library it links is part of macOS (no Homebrew path), so it starts on a clean Mac.
+          otool -L "$desk/ekos-desktop"
+          ! otool -L "$desk/ekos-desktop" | tail -n +2 | grep -vE '^\s*(/usr/lib/|/System/)' && ok "system libraries only" || fail "a non-system library"
           grep -q 'kind = "pkg"' /usr/local/ekos/installer.toml && ok "installer.toml" || fail "installer.toml"
           pkgutil --pkg-info com.ekos.cli
           [ "$(stat -f%Su /usr/local/ekos/bin/ekos)" = root ] && ok "owned by root" || fail "owner"
@@ -759,6 +844,7 @@ jobs:
 
           sudo /usr/local/ekos/uninstall.sh
           [ ! -e /usr/local/ekos ] && [ ! -e /usr/local/bin/ekos ] && [ ! -e "/Applications/EKOS Setup.app" ] \
+            && [ ! -e /Applications/EKOS.DEV.app ] \
             && ok "uninstall.sh removed the program" || fail "uninstall.sh"
           ! pkgutil --pkg-info com.ekos.cli >/dev/null 2>&1 && ok "the receipt is gone" || fail "receipt"
 
@@ -797,6 +883,7 @@ jobs:
           for f in ./*.deb ./*.rpm; do sha256sum "${f#./}" > "${f#./}.sha256"; done
           dpkg-deb --info ./*.deb
           rpm -qip ./*.rpm
+          rpm -qp --recommends ./*.rpm
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
@@ -845,11 +932,26 @@ jobs:
           fi
           ekos --version
           [ "$(readlink -f /usr/bin/ekos)" = /opt/ekos/bin/ekos ] && ok "/usr/bin/ekos" || fail "/usr/bin/ekos"
-          for d in ekos-setup ekos-console; do
+          for d in ekos-setup ekos-console ekos-desktop; do
             [ -f "/usr/share/applications/$d.desktop" ] && ok "$d.desktop" || fail "$d.desktop"
           done
           grep -q "kind = \"$FORMAT\"" /opt/ekos/installer.toml && ok "installer.toml" || fail "installer.toml"
           [ "$(stat -c %U /opt/ekos/bin/ekos)" = root ] && ok "owned by root" || fail "owner"
+          [ -x /opt/ekos/bin/ekos-desktop ] && ok "the desktop app" || fail "the desktop app"
+
+          # The desktop app's libraries come from the weak dependencies, installed here on purpose
+          # (the install above left them out): every library it links must then be found. On RPM
+          # systems WebKitGTK 4.1 may not be packaged (RHEL 9 has 4.0 only); that is a warning.
+          if [ "$FORMAT" = deb ]; then
+            apt-get install -y -qq libwebkit2gtk-4.1-0 libayatana-appindicator3-1 >/dev/null
+          else
+            dnf install -y -q 'libwebkit2gtk-4.1.so.0()(64bit)' >/dev/null 2>&1 \
+              || echo "::warning::no WebKitGTK 4.1 package on $(. /etc/os-release; echo "$PRETTY_NAME")"
+          fi
+          missing="$(ldd /opt/ekos/bin/ekos-desktop | grep 'not found' || true)"
+          if [ -z "$missing" ]; then ok "every library the desktop app links is found"
+          elif [ "$FORMAT" = deb ]; then echo "$missing"; fail "the desktop app's libraries"
+          else echo "::warning::the desktop app cannot start here: $missing"; fi
 
           # The person: not root, the program from PATH, the default home.
           useradd -m tester
@@ -878,6 +980,7 @@ jobs:
 
           if [ "$FORMAT" = deb ]; then apt-get remove -y -qq ekos; else dnf remove -y -q ekos; fi
           [ ! -e /opt/ekos ] && [ ! -e /usr/bin/ekos ] && [ ! -e /usr/share/applications/ekos-setup.desktop ] \
+            && [ ! -e /usr/share/applications/ekos-desktop.desktop ] \
             && ok "the package manager removed the program" || { ls -laR /opt/ekos | head -40; fail "left behind"; }
           [ -d /home/tester/src/shop ] && ok "the person's files stay"
 
