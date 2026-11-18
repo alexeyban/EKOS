@@ -1833,6 +1833,9 @@ enum ConsoleCommands {
         /// Start the console first when it is not running (the "EKOS Console" shortcut)
         #[arg(long)]
         start: bool,
+        /// Print `{"url","code"}` as JSON and open nothing (the desktop app, RFC 0261 §2.3)
+        #[arg(long)]
+        json: bool,
     },
     /// The end of the console's log
     Logs {
@@ -3495,11 +3498,15 @@ fn run_console(home: &std::path::Path, subcommand: ConsoleCommands) -> Result<()
         ConsoleCommands::Stop => console::stop(home),
         ConsoleCommands::Restart => console::restart(home),
         ConsoleCommands::Status => console::status(home),
-        ConsoleCommands::Open { no_browser, start } => {
+        ConsoleCommands::Open {
+            no_browser,
+            start,
+            json,
+        } => {
             if start {
                 console::start(home)?;
             }
-            console::open(home, no_browser)
+            console::open(home, no_browser, json)
         }
         ConsoleCommands::Logs { lines } => console::logs(home, lines),
     }

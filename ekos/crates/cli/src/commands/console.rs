@@ -666,8 +666,35 @@ pub fn status(home: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `ekos console open`.
-pub fn open(home: &Path, no_browser: bool) -> Result<()> {
+/// What `ekos console open --json` prints (RFC 0261 §2.3): the console's address and, in local
+/// mode, a fresh one-time code (`null` in team mode). The desktop app signs in with
+/// `{url}/api/auth/local?code={code}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OpenTarget {
+    pub url: String,
+    pub code: Option<String>,
+}
+
+impl OpenTarget {
+    /// Where a browser goes: the sign-in link with the code, else the address.
+    pub fn link(&self) -> String {
+        match &self.code {
+            Some(code) => format!("{}/api/auth/local?code={code}", self.url),
+            None => self.url.clone(),
+        }
+    }
+}
+
+/// The target for `conf`; `code` is kept in local mode only.
+pub fn open_target(conf: &ServerConf, code: Option<&str>) -> OpenTarget {
+    OpenTarget {
+        url: url(conf),
+        code: code.filter(|_| conf.mode == "local").map(str::to_string),
+    }
+}
+
+/// `ekos console open`. `json` prints the target as one JSON object and opens nothing.
+pub fn open(home: &Path, no_browser: bool, json: bool) -> Result<()> {
     let conf = server_conf(home, &std_env)?;
     if !healthy(&conf.host, conf.port) {
         bail!(
@@ -675,15 +702,22 @@ pub fn open(home: &Path, no_browser: bool) -> Result<()> {
             url(&conf)
         );
     }
-    let target = if conf.mode == "local" {
-        let code = issue_code(home)?;
-        println!("One-time sign-in code (two minutes): {code}");
-        format!("{}/api/auth/local?code={code}", url(&conf))
+    let code = if conf.mode == "local" {
+        Some(issue_code(home)?)
     } else {
-        url(&conf)
+        None
     };
-    if no_browser || !open_browser(&target) {
-        println!("Open {target}");
+    let target = open_target(&conf, code.as_deref());
+    if json {
+        println!("{}", serde_json::to_string(&target)?);
+        return Ok(());
+    }
+    if let Some(code) = &code {
+        println!("One-time sign-in code (two minutes): {code}");
+    }
+    let link = target.link();
+    if no_browser || !open_browser(&link) {
+        println!("Open {link}");
     }
     Ok(())
 }
@@ -862,6 +896,32 @@ mod tests {
     }
 
     #[test]
+    fn the_open_target_carries_a_code_in_local_mode_only() {
+        let local = ServerConf {
+            mode: "local".into(),
+            host: "127.0.0.1".into(),
+            port: 8123,
+        };
+        let t = open_target(&local, Some("abc"));
+        assert_eq!(
+            serde_json::to_value(&t).unwrap(),
+            serde_json::json!({"url": "http://127.0.0.1:8123", "code": "abc"})
+        );
+        assert_eq!(t.link(), "http://127.0.0.1:8123/api/auth/local?code=abc");
+
+        let team = ServerConf {
+            mode: "team".into(),
+            ..local
+        };
+        let t = open_target(&team, Some("abc"));
+        assert_eq!(
+            serde_json::to_value(&t).unwrap(),
+            serde_json::json!({"url": "http://127.0.0.1:8123", "code": null})
+        );
+        assert_eq!(t.link(), "http://127.0.0.1:8123");
+    }
+
+    #[test]
     fn nothing_listening_is_not_healthy() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -964,7 +1024,10 @@ mod tests {
             format!("port = {port}\n"),
         )
         .unwrap();
-        assert!(open(home, true).is_err(), "open needs a running console");
+        assert!(
+            open(home, true, false).is_err(),
+            "open needs a running console"
+        );
     }
 
     #[test]
@@ -974,12 +1037,13 @@ mod tests {
         let port = fake_console(up.clone());
         let local = home_running_at(port, "local");
         status(local.path()).unwrap();
-        open(local.path(), true).unwrap();
+        open(local.path(), true, false).unwrap();
         let codes = std::fs::read_dir(control(local.path()).join(SIGNIN_DIR)).unwrap();
         assert_eq!(codes.count(), 1, "local mode signs in with one stored code");
 
         let team = home_running_at(port, "team");
-        open(team.path(), true).unwrap();
+        open(team.path(), true, false).unwrap();
+        open(team.path(), false, true).unwrap();
         assert!(
             !control(team.path()).join(SIGNIN_DIR).exists(),
             "team mode issues no code"

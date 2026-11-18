@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EKOS.DEV</title>
+<!-- RFC 0261 §2.3: the start-up screen. Local and static; the Rust host reports each step through
+     window.ekos. The colours are the house palette (web/ui/src/theme.css, design walkthrough). -->
+<style>
+  :root {
+    --ground: #f6f4fc; --raised: #ffffff; --soft: #efeafb; --text: #171326; --muted: #5c5578;
+    --rule: #e3ddf5; --accent: #7c3aed; --accent-text: #6d28d9; --done: #047857; --warn: #8a5a06;
+    --bad: #be1e46;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0b0a12; --raised: #14121d; --soft: #1d1a2b; --text: #f3f1fa; --muted: #a7a2c4;
+      --rule: rgba(255,255,255,.10); --accent: #9945ff; --accent-text: #bb98ff; --done: #14f195;
+      --warn: #f5c15c; --bad: #ff7a92;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: var(--ground); color: var(--text);
+    font: 13px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .card {
+    width: min(460px, calc(100vw - 32px)); background: var(--raised); border: 1px solid var(--rule);
+    border-radius: 14px; padding: 28px; box-shadow: 0 12px 40px rgba(23,19,38,.10);
+  }
+  .mark { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 20px; }
+  .mark span { color: var(--accent-text); }
+  ol { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 10px; }
+  li { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+  li[data-state="running"], li[data-state="done"] { color: var(--text); }
+  li[data-state="failed"] { color: var(--bad); }
+  .dot {
+    width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--rule); flex: none;
+    display: grid; place-items: center; font-size: 11px; font-weight: 700;
+  }
+  li[data-state="running"] .dot {
+    border-color: var(--rule); border-top-color: var(--accent); animation: spin .9s linear infinite;
+  }
+  li[data-state="done"] .dot { border: none; background: color-mix(in srgb, var(--done) 16%, transparent); color: var(--done); }
+  li[data-state="done"] .dot::after { content: "✓"; }
+  li[data-state="failed"] .dot { border-color: var(--bad); color: var(--bad); }
+  li[data-state="failed"] .dot::after { content: "!"; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { li[data-state="running"] .dot { animation: none; } }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
+  pre {
+    margin: 0 0 18px; padding: 10px 12px; min-height: 44px; max-height: 260px; overflow: auto;
+    background: var(--soft); border-radius: 10px; white-space: pre-wrap; word-break: break-word;
+    font: 12px/1.5 "JetBrains Mono", ui-monospace, monospace; color: var(--muted);
+  }
+  .error { color: var(--bad); margin: -8px 0 14px; display: none; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--rule);
+    background: var(--raised); color: var(--text); font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<main class="card">
+  <h1 class="mark"><span>EKOS</span>.DEV</h1>
+  <ol>
+    <li id="s1" data-state="idle"><span class="dot" aria-hidden="true"></span>Found the EKOS home</li>
+    <li id="s2" data-state="idle"><span class="dot" aria-hidden="true"></span>Starting the console</li>
+    <li id="s3" data-state="idle"><span class="dot" aria-hidden="true"></span>Signing you in</li>
+  </ol>
+  <p class="error" id="error" role="alert"></p>
+  <p class="label">console.log</p>
+  <pre id="log" aria-live="polite">waiting for the console to answer on 127.0.0.1</pre>
+  <div class="actions">
+    <button type="button" id="show-log">Show log</button>
+    <button type="button" id="browser">Open in browser instead</button>
+  </div>
+</main>
+<script>
+  const invoke = (cmd) => window.__TAURI__ && window.__TAURI__.core.invoke(cmd);
+  window.ekos = {
+    step(n, state) { document.getElementById("s" + n).dataset.state = state; },
+    detail(text) { document.getElementById("log").textContent = text; },
+    log(text) { const el = document.getElementById("log"); el.textContent = text; el.scrollTop = el.scrollHeight; },
+    teamMode() {
+      document.getElementById("s3").dataset.state = "failed";
+      const el = document.getElementById("error");
+      el.textContent = "This install is in team mode. Open it in the browser.";
+      el.style.display = "block";
+    },
+    fail(message) {
+      document.querySelectorAll('li[data-state="running"]').forEach((li) => { li.dataset.state = "failed"; });
+      const el = document.getElementById("error"); el.textContent = message; el.style.display = "block";
+    },
+  };
+  document.getElementById("show-log").addEventListener("click", () => invoke("show_log"));
+  document.getElementById("browser").addEventListener("click", () => invoke("open_in_browser"));
+  invoke("startup_ready");
+</script>
+</body>
+</html>

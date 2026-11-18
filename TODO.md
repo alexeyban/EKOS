@@ -7186,3 +7186,10 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
 - [x] Two proposals merge back to back: no lock hash in `.generated.json`, one silver YAML per model;
       `generate --from-lock` keeps step 3's masks
 - [ ] RFC 0260 X10/X11 shown in `spec` / `lakehouse alert` only; console UI for `--changed` and per-table approval
+- [x] RFC 0261 D0 spike on Linux (Mint 21.3 / Cinnamon, WebKitGTK 2.50.4): `desktop/` Tauri 2 shell attaches
+      to or starts the console and signs in with no sign-in screen; tray, quit dialog, run-end notifications
+      (pulled forward from D1); `ekos console open --json` prints `{url, code}` (devlog_335)
+- [ ] RFC 0261 D0 on Windows (WebView2 on a clean Windows 10), macOS (WKWebView), and a Linux machine with an
+      NVIDIA driver; IPC scoped to the loopback origin (§6.1); a hidden window's `EventSource` (§6.2)
+- [ ] RFC 0261 D1: `console status|stop --json`, `stop` refusing while runs are active, single instance, the
+      app in the MSI/pkg/deb/rpm; notification app name "EKOS.DEV" through the `.desktop` entry

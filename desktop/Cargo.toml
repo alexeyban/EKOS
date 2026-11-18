@@ -1,0 +1,5 @@
+# RFC 0261: the EKOS.DEV desktop shell, a separate workspace so Tauri's GTK/WebKitGTK
+# dependencies (system development packages) never reach `ekos/` or its CI.
+[workspace]
+resolver = "3"
+members = ["src-tauri"]

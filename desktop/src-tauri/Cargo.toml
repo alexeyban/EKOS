@@ -1,0 +1,20 @@
+[package]
+name = "ekos-desktop"
+version = "0.0.1"
+edition = "2024"
+description = "EKOS.DEV desktop shell around the EKOS console (RFC 0261, D0 spike)"
+license = "Apache-2.0"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "cookies", "json", "rustls-tls"] }
+url = "2"

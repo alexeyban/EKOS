@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "startup-page",
+  "description": "RFC 0261 §4: the local start-up page only. No `remote` entry, so the console's own origin gets no Tauri API.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
