@@ -71,12 +71,22 @@ both themes". Before this change:
   from the repository root, it put `package.json`, `package-lock.json` and `node_modules/` there.
   They are untracked, are not part of this change, and can be deleted.
 
-## Not verified yet
-- The `deploy/e2e` browser stages in Chromium and WebKit, which are U1's exit. The selectors they use
-  were kept (`section.commands-form`, `#arg-query`, `pre.argv`, `section.chat-main`, the chat classes,
-  and the Send and Run button names).
-- What was checked: 257 unit tests, typecheck, build, `sonar-local.sh`, a scan for the rules
-  SonarCloud caught last time, and headless screenshots of 22 pages in both themes (fixtures).
+## Verified afterwards: the browser stages in Chromium and WebKit
+`deploy/e2e/package.sh` now takes `E2E_BROWSER` (chromium, webkit or firefox) for the console stages.
+The setup wizard is its own page and stays on Chromium. Against the new shell it passed in Chromium
+and in WebKit 27.2, the engine EKOS.DEV uses on Linux and macOS. Every stage ran: sign-in, Init &
+compile, the Commands form, ekos.toml through the settings form, chat with a local Ollama model,
+the wizard, and uninstall from Settings. That is RFC 0261 U1's exit.
+
+The ekos.toml stage had used `textarea.toml`, `button.save` and `p.ok-line`. The page pass renamed
+all three. It now uses the field's accessible name, the Save button's role and the visible "saved"
+line, which a restyle does not change.
+
+- WebKit for Playwright: `uv run --with playwright playwright install webkit` puts it in the user's
+  cache, and the browser needs `libavif13` from apt (sudo). Without them the stage prints SKIP. The
+  uninstall checks after it then fail, because the uninstall is driven from that browser stage.
+- What was checked besides: 257 unit tests, typecheck, build, `sonar-local.sh`, a scan for the
+  rules SonarCloud caught last time, and headless screenshots of 22 pages in both themes (fixtures).
 
 ## Files Changed
 | File | Change summary |
@@ -86,4 +96,5 @@ both themes". Before this change:
 | `web/ui/src/pages/*.tsx` (36 pages), `pages/decide-kit.tsx`, `people-shared.ts` | the page pass |
 | `web/ui/src/pages/*.test.tsx` (6) | same assertions, new markup; local-mode reviewer tests |
 | `web/ui/src/index.css`, `shell.css`, `Icon.tsx`, `WorkspaceShell.tsx` | unused CSS removed, tokens, `info` icon, `Me.mode` |
-| `TODO.md`, `docs/generated/ekos-self-documentation.html` | U3 |
+| `deploy/e2e/package_browser_common.py`, `package_browser.py`, `package_uninstall.py`, `package.sh` | `E2E_BROWSER`; selectors that survive a restyle |
+| `TODO.md`, `docs/generated/ekos-self-documentation.html` | U3, U1 exit |

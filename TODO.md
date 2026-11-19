@@ -7203,6 +7203,7 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
 - [x] RFC 0261 U3 page pass: every page on `PageHead` / `QueryView` / `Empty` (`web/ui/src/ui.tsx`), one
       list-and-detail pattern for the Decide pages, one form pattern for Configure, charts and the graph canvas
       following the theme; ~465 lines of unused CSS removed (devlog_338)
-- [ ] RFC 0261 U1 exit: the `deploy/e2e` browser stages in Chromium **and WebKit** against the new shell
+- [x] RFC 0261 U1 exit: `deploy/e2e/package.sh` passes against the new shell in Chromium and in WebKit 27.2
+      (`E2E_BROWSER=webkit`), every stage including chat with a local model (devlog_338)
 - [ ] Console: the Graph, Commands, ekos.toml, Settings, Review, Sources and Conflicts pages throw when an API
       answer lacks a field they read (seen with fixtures, before and after the page pass); read defensively

@@ -12,15 +12,22 @@ def check(ok: bool, what: str, detail: str = "") -> None:
     print(("PASS  " if ok else "FAIL  ") + what + (f"   [{detail}]" if detail and not ok else ""))
 
 
-def chromium(p):
+def browser(p):
+    """The browser the console stages run in: `E2E_BROWSER` = chromium (default), webkit or firefox.
+
+    RFC 0261 U1: the console must work in WebKit too, the engine EKOS.DEV uses on macOS and Linux.
+    """
+    name = os.environ.get("E2E_BROWSER", "chromium")
+    if name not in ("chromium", "webkit", "firefox"):
+        sys.exit(f"E2E_BROWSER: chromium, webkit or firefox, not {name!r}")
     try:
-        return p.chromium.launch()
+        return getattr(p, name).launch()
     except Exception:  # noqa: BLE001 — fall back to a Chromium Playwright cached earlier
         found = sorted(
             glob.glob(os.path.expanduser("~/.cache/ms-playwright/chromium-*/chrome-linux*/chrome"))
         )
-        if not found:
-            print("SKIP  no Chromium for Playwright")
+        if name != "chromium" or not found:
+            print(f"SKIP  no {name} for Playwright (uv run --with playwright playwright install {name})")
             sys.exit(0)
         return p.chromium.launch(executable_path=found[-1])
 

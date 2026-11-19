@@ -6,7 +6,7 @@ binary serves, which lists the project, takes the confirmation word and removes 
 import os
 import sys
 
-from package_browser_common import check, chromium, finish
+from package_browser_common import browser, check, finish
 from playwright.sync_api import sync_playwright
 
 LINK = os.environ["E2E_LINK"]
@@ -14,8 +14,8 @@ BASE = os.environ["E2E_BASE"]
 
 errors: list[str] = []
 with sync_playwright() as p:
-    browser = chromium(p)
-    page = browser.new_page()
+    engine = browser(p)
+    page = engine.new_page()
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(LINK)
     page.wait_for_selector("header")
@@ -32,6 +32,6 @@ with sync_playwright() as p:
     title = page.inner_text("#done-title")
     check(title == "EKOS was removed", "the page reports every step done", title + " " + page.inner_text("#results"))
     check("kept" in page.inner_text("#kept"), "and says the projects are kept")
-    browser.close()
+    engine.close()
 
 sys.exit(finish(errors))

@@ -3,7 +3,7 @@
 import os
 import sys
 
-from package_browser_common import check, chromium, finish
+from package_browser_common import browser, check, finish
 from playwright.sync_api import sync_playwright
 
 LINK = os.environ["E2E_LINK"]
@@ -11,8 +11,8 @@ BASE = os.environ["E2E_BASE"]
 
 errors: list[str] = []
 with sync_playwright() as p:
-    browser = chromium(p)
-    page = browser.new_page()
+    engine = browser(p)
+    page = engine.new_page()
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.goto(LINK)
     page.wait_for_selector("header")
@@ -47,12 +47,15 @@ with sync_playwright() as p:
     page.click("summary:has-text('[semantics]')")
     page.fill("#cfg-semantics\\.max-enum-values", "40")
     page.click("button:has-text('Apply 1 change')")
-    page.wait_for_function("document.querySelector('textarea.toml').value.includes('max-enum-values = 40')")
+    # By the field's accessible name, not its class, so a restyle (RFC 0261) does not break the check.
+    page.wait_for_function(
+        "document.querySelector('textarea[aria-label=\"ekos.toml text\"]').value.includes('max-enum-values = 40')"
+    )
     check(True, "the form's change lands in the text")
     page.click("button:has-text('Validate')")
     page.wait_for_selector("text=valid ✓", timeout=30_000)
-    page.click("button.save")
-    page.wait_for_selector("p.ok-line:has-text('saved')", timeout=30_000)
+    page.get_by_role("button", name="Save", exact=True).click()
+    page.wait_for_selector("text=saved · ekos.toml.bak written", timeout=30_000)
     check(True, "and is validated and saved")
 
     # RFC 0187: the Chat page with the local model.
@@ -78,6 +81,6 @@ with sync_playwright() as p:
         check(len(page.inner_text(".chat-answer").strip()) > 0, "and the answer")
     else:
         print("SKIP  chat page: Ollama does not answer")
-    browser.close()
+    engine.close()
 
 sys.exit(finish(errors))

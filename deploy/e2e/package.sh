@@ -5,6 +5,8 @@
 # Playwright into a second home, and uninstall.
 #
 #   deploy/e2e/package.sh [<ekos binary>]     (default: ekos/target/release/ekos)
+#   E2E_BROWSER=webkit deploy/e2e/package.sh   the console stages in WebKit (or firefox; default chromium):
+#                                               RFC 0261 asks for Chromium and WebKit, EKOS.DEV's engine
 #
 # The chat stage uses a local Ollama model (default qwen2.5:1.5b) — never a paid one — and is
 # skipped when Ollama does not answer.
