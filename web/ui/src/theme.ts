@@ -17,8 +17,8 @@ export function readTheme(): ThemeChoice {
 
 export function applyTheme(choice: ThemeChoice): void {
   const root = document.documentElement;
-  if (choice === "system") root.removeAttribute("data-theme");
-  else root.setAttribute("data-theme", choice);
+  if (choice === "system") delete root.dataset.theme;
+  else root.dataset.theme = choice;
   try {
     if (choice === "system") window.localStorage.removeItem(THEME_KEY);
     else window.localStorage.setItem(THEME_KEY, choice);

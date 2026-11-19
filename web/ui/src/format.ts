@@ -8,7 +8,7 @@ export function commandTitle(command: string): string {
 
 /** "12 minutes ago", "in 3 hours", "just now"; `now` is injectable for tests. */
 export function relativeTime(iso: string, now: number = Date.now()): string {
-  const t = Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+  const t = Date.parse(/(?:[zZ]|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}Z`);
   if (Number.isNaN(t)) return iso;
   const s = Math.round((t - now) / 1000);
   const abs = Math.abs(s);

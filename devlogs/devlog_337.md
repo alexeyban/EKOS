@@ -75,6 +75,13 @@ only `prefers-color-scheme`, and the fonts came from the system.
   in Playwright. A page that reads a large document (the Dashboard's stats) needs a full fixture, or
   it shows its error boundary.
 
+- The first SonarCloud scan of this work was red (reliability C), and `sonar-local.sh` had passed it.
+  The bug was S5850 in `format.ts`: in `/[zZ]|[+-]\d\d:?\d\d$/` the `$` binds only to the
+  offset, so a `z` anywhere counted as a zone. The local S5850 check reads Python only. The scan also
+  found `.dataset` over `setAttribute` (S7761), a second `:root` block (S4666), `var` (S3504) and the
+  reduced-motion `!important` (S9423, kept with `NOSONAR`: it must beat every animation). None of
+  these has a local stand-in yet.
+
 ## Not verified yet
 - The `deploy/e2e` browser stages (Chromium and WebKit) against the new shell, which is U1's exit
   criterion. What was checked: unit tests (254), typecheck, build, the Sonar rules, and headless

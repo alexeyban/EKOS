@@ -1,7 +1,7 @@
 /* EKOS design tokens (RFC 0261 §2.7, the EKOS.DEV design walkthrough). The house palette mirrors
    docs/assets/theme.css. Light and dark follow the system unless a person chose one
-   (`data-theme` on <html>, set before first paint by index.html). The older names at the end
-   (`--ink`, `--accent-a`, …) are aliases so existing rules keep working. */
+   (`data-theme` on <html>, set before first paint by public/theme-init.js). The older names at the
+   end of the first block (`--ink`, `--accent-a`, …) are aliases so existing rules keep working. */
 :root {
   color-scheme: light;
   /* Surfaces */
@@ -63,6 +63,15 @@
   --shadow-2: 0 16px 48px rgba(23, 19, 38, 0.18);
   --focus: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
   --sidebar-w: 228px;
+
+  /* The names the console's CSS used before RFC 0261. */
+  --ground: var(--bg);
+  --ground-raised: var(--surface);
+  --ink: var(--text);
+  --ink-soft: var(--text-2);
+  --rule: var(--border);
+  --accent-a: var(--accent);
+  --accent-b: var(--ok);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -120,13 +129,3 @@
   --shadow-2: 0 16px 48px rgba(0, 0, 0, 0.55);
 }
 
-/* The names the console's CSS used before RFC 0261. */
-:root {
-  --ground: var(--bg);
-  --ground-raised: var(--surface);
-  --ink: var(--text);
-  --ink-soft: var(--text-2);
-  --rule: var(--border);
-  --accent-a: var(--accent);
-  --accent-b: var(--ok);
-}

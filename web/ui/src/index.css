@@ -24,8 +24,10 @@ a {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+    /* A person's reduced-motion setting must beat every animation, whatever its specificity. */
+    animation-duration: 0.01ms !important; /* NOSONAR */
+    /* Same reason as above. */
+    transition-duration: 0.01ms !important; /* NOSONAR */
   }
 }
 /* small rounded action button (graph toolbar, etc.) */
