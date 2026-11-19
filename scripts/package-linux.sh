@@ -6,7 +6,9 @@
 # Both install the same tree:
 #   /opt/ekos/{bin,console,LICENSE,INSTALL.md,installer.toml,share/ekos.png}
 #   /usr/bin/ekos                        → /opt/ekos/bin/ekos
-#   /usr/share/applications/ekos-setup.desktop    "EKOS Setup"   (ekos setup, in a terminal)
+#   /usr/share/applications/ekos-setup.desktop    "EKOS Setup"   (the wizard in the EKOS.DEV window when
+#                                        the package has the app, and it starts; else `ekos setup`
+#                                        in a terminal, the wizard in the browser: RFC 0261 §8)
 #   /usr/share/applications/ekos-console.desktop  "EKOS Console" (ekos console open --start)
 #   /usr/share/applications/ekos-desktop.desktop  "EKOS.DEV" (/opt/ekos/bin/ekos-desktop), when the
 #                                        full package has the desktop app (RFC 0261 §2.8)
@@ -66,14 +68,22 @@ stage() {  # $1 = root, $2 = deb|rpm
   cp "$repo/packaging/msix/Assets/Square310x310Logo.png" "$root/opt/ekos/share/ekos.png"
   printf 'kind = "%s"\nremove = "%s"\n' "$kind" "$remove" > "$root/opt/ekos/installer.toml"
   ln -s /opt/ekos/bin/ekos "$root/usr/bin/ekos"
-  cat > "$root/usr/share/applications/ekos-setup.desktop" <<'EOF'
+  # RFC 0261 §8: in the app's window when it can start (a server without WebKitGTK cannot: then
+  # the wizard opens in the browser, as before).
+  setup_exec="/usr/bin/ekos setup"
+  setup_terminal=true
+  if [[ "$app" = 1 ]]; then
+    setup_exec='sh -c "/opt/ekos/bin/ekos-desktop --setup || exec /usr/bin/ekos setup"'
+    setup_terminal=false
+  fi
+  cat > "$root/usr/share/applications/ekos-setup.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=EKOS Setup
 Comment=Set up EKOS: its home, the web console, a first project and your AI agents
-Exec=/usr/bin/ekos setup
+Exec=${setup_exec}
 Icon=/opt/ekos/share/ekos.png
-Terminal=true
+Terminal=${setup_terminal}
 Categories=Development;
 EOF
   cat > "$root/usr/share/applications/ekos-console.desktop" <<'EOF'

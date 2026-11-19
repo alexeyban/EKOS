@@ -87,9 +87,16 @@
       <Files Directory="ConsoleDir" Include="$(var.Source)\console\**" />
 
       <Component Id="StartMenu" Directory="MenuDir">
+        <?ifdef Desktop?>
+        <!-- RFC 0261 §8: the setup wizard in EKOS.DEV's window. -->
+        <Shortcut Id="SetupShortcut" Name="EKOS Setup"
+                  Description="Set up EKOS: its home, the web console, a first project and your AI agents"
+                  Target="[#DesktopExe]" Arguments="--setup" WorkingDirectory="INSTALLFOLDER" Icon="ekos.ico" />
+        <?else?>
         <Shortcut Id="SetupShortcut" Name="EKOS Setup"
                   Description="Set up EKOS: its home, the web console, a first project and your AI agents"
                   Target="[#EkosExe]" Arguments="setup" WorkingDirectory="INSTALLFOLDER" Icon="ekos.ico" />
+        <?endif?>
         <Shortcut Id="ConsoleShortcut" Name="EKOS Console"
                   Description="Open the EKOS web console, starting it when it is not running"
                   Target="[#EkosExe]" Arguments="console open --start" WorkingDirectory="INSTALLFOLDER"
@@ -120,7 +127,11 @@
          per-user package; nothing is elevated). -->
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Open EKOS Setup now" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <?ifdef Desktop?>
+    <CustomAction Id="LaunchSetup" FileRef="DesktopExe" ExeCommand="--setup" Return="asyncNoWait" />
+    <?else?>
     <CustomAction Id="LaunchSetup" FileRef="EkosExe" ExeCommand="setup" Return="asyncNoWait" />
+    <?endif?>
     <WixVariable Id="WixUILicenseRtf" Value="$(var.Assets)\license.rtf" />
     <UI>
       <ui:WixUI Id="WixUI_Minimal" />

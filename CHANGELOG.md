@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+**EKOS Setup is an application** (RFC 0261 §8)
+- EKOS Setup opens in EKOS.DEV's own window, not in the browser: from the Start menu, the MSI's last page,
+  "EKOS Setup" in Applications (and so after installing the `.pkg`) and the Linux menu. When it is done, the
+  window goes on to the console, signed in.
+- Where the app cannot start (a Linux server without WebKitGTK) or the package has none, EKOS Setup is the
+  browser wizard, as before. `ekos setup` and `ekos setup --answers` are unchanged.
+
 ## v1.6.1 — 2026-11-19
 
 **The refreshed console** (RFC 0261, in the browser and in EKOS.DEV)

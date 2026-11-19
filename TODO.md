@@ -7197,6 +7197,8 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
 - [x] RFC 0261 D1: `ekos console status --json` (with `set_up` and the runs in progress), `stop --json`,
       `stop` refusing while runs are active (`--wait`, `--force`; uninstall and the MSI force), single
       instance, and a start-up screen that sends a home without `console.toml` to EKOS Setup (devlog_339)
+- [x] RFC 0261 §8: EKOS Setup in the app's window; the installers' EKOS Setup entries start
+      `ekos-desktop --setup`, falling back to the browser wizard (devlog_340)
 - [ ] RFC 0261 D1: the app started on a fresh Windows and macOS by a person (Linux: the setup-first screen and
       single instance seen under Xvfb, devlog_339); notification app name "EKOS.DEV" through the `.desktop` entry
 - [x] RFC 0261 U1 + U2 (part of U3): tokens and a per-person light/dark/system theme, the sidebar shell from

@@ -373,3 +373,23 @@ One question D3 raises: the MSI's other shortcut, "EKOS Setup", once Set up is i
 | 2 | The app's name where it shows | EKOS.DEV, as reserved in the Store | Start menu, `.app`, `.desktop`, window title, tray |
 | 3 | Closing the window | Stays in the tray; Quit is in the tray menu | §2.3 |
 | 4 | The browser shortcut once the app ships | Removed | §2.8 |
+
+## 8. Set up in the app, pulled forward (2026-11-19)
+
+The owner asked for EKOS Setup as an application, not a page in the browser. §2.6's **Set up** row
+is built now, ahead of the rest of D3:
+
+- **The app runs the wizard.** `ekos-desktop --setup` (and **Open EKOS Setup** on the start-up
+  screen of a home that is not set up) starts `ekos setup --no-browser`. It reads the address the
+  command prints and loads it in the app's window, titled "EKOS Setup". Only that loopback origin is
+  allowed, as for the console (§2.4). The token stays in the URL, as in the browser.
+- **The page knows it is in the app** (`&app=1`): it hides "Open it in the browser" and sends nothing
+  to the browser. At Done it does not close the window. When `ekos setup` exits, the app goes on to the
+  start-up steps (§2.3): it starts the console and signs in.
+- **A second start with `--setup`** reaches the running app (single instance), which opens Set up.
+- **The "EKOS Setup" entries start the app.** On the Windows Start menu, the MSI's last page, the
+  macOS "EKOS Setup.app" (and so the `.pkg`'s postinstall), and the Linux menu entry. Each falls back to
+  the browser wizard (`ekos setup`) when the package has no app, and on Linux also when the app cannot
+  start: the entry runs `ekos-desktop --setup || ekos setup`, which covers a server without WebKitGTK.
+- `ekos setup` itself is unchanged. The browser wizard stays the command line's and the fallback's,
+  and `--answers` stays the unattended path.

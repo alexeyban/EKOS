@@ -126,17 +126,37 @@ impl Ekos {
         ))
     }
 
-    /// Starts EKOS Setup (`ekos setup`: the set-up wizard in the browser) and returns at once.
-    pub fn open_setup(&self) -> Result<()> {
+    /// RFC 0261 §8: starts the set-up wizard for the app's window (`ekos setup --no-browser`) and
+    /// returns it with the address it serves, marked for the app (`&app=1`). The wizard's output
+    /// keeps being read, so its later lines never meet a closed pipe.
+    pub fn start_setup(&self) -> Result<(std::process::Child, String)> {
+        use std::io::BufRead;
         let mut cmd = Command::new(&self.program);
-        cmd.arg("setup")
+        cmd.args(["setup", "--no-browser"])
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::null());
         no_window(&mut cmd);
-        cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .with_context(|| format!("running {} setup", self.program.display()))?;
-        Ok(())
+        let stdout = child.stdout.take().context("the wizard's output")?;
+        let mut lines = std::io::BufReader::new(stdout).lines();
+        let url = loop {
+            match lines.next() {
+                Some(Ok(line)) => {
+                    if let Some(url) = setup_address(&line) {
+                        break url;
+                    }
+                }
+                _ => {
+                    let _ = child.kill();
+                    bail!("`ekos setup` stopped before it served the wizard");
+                }
+            }
+        };
+        std::thread::spawn(move || lines.for_each(drop));
+        Ok((child, url))
     }
 
     pub fn restart(&self) -> Result<()> {
@@ -205,6 +225,15 @@ fn no_window(_cmd: &mut Command) {}
 /// `ekos console status` begins with "running at" only when the console answers.
 pub fn status_says_running(stdout: &str) -> bool {
     stdout.trim_start().starts_with("running at ")
+}
+
+/// The wizard's address from the line `ekos setup --no-browser` prints (`EKOS setup: <url>`), with
+/// `app=1` added so the page knows it is in the app (RFC 0261 §8). Only a loopback address counts.
+pub fn setup_address(line: &str) -> Option<String> {
+    let url = line.trim().strip_prefix("EKOS setup: ")?;
+    let parsed = url::Url::parse(url).ok()?;
+    let loopback = matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "[::1]"));
+    (parsed.scheme() == "http" && loopback).then(|| format!("{url}&app=1"))
 }
 
 /// The JSON line of `status --json`.
@@ -309,6 +338,21 @@ mod tests {
             "a missing field means set up"
         );
         assert!(parse_status("running at http://…").is_err());
+    }
+
+    #[test]
+    fn the_wizard_address_is_read_from_its_line_and_marked_for_the_app() {
+        assert_eq!(
+            setup_address("EKOS setup: http://127.0.0.1:40123/?t=abc\n").as_deref(),
+            Some("http://127.0.0.1:40123/?t=abc&app=1")
+        );
+        assert_eq!(
+            setup_address("Open that address in a browser on this machine."),
+            None
+        );
+        // Never another host: the window may load only this machine's wizard.
+        assert_eq!(setup_address("EKOS setup: http://example.com/?t=abc"), None);
+        assert_eq!(setup_address("EKOS setup: file:///etc/passwd"), None);
     }
 
     #[test]

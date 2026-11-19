@@ -169,8 +169,15 @@ code { font-family: ui-monospace, monospace; font-size:.9em; }
 </main>
 <script type="module">
 const token = new URLSearchParams(location.search).get("t") || "";
+// RFC 0261 §8: shown in EKOS.DEV's window, which opens the console itself once setup ends.
+const inApp = new URLSearchParams(location.search).get("app") === "1";
 const H = { "x-setup-token": token, "content-type": "application/json" };
 const $ = (id) => document.getElementById(id);
+if (inApp) {
+  $("open").checked = false;
+  $("open").closest("label").hidden = true;
+  document.title = "EKOS Setup";
+}
 const steps = [...document.querySelectorAll("section[data-step]")];
 let at = 0, state = null;
 
@@ -310,7 +317,11 @@ $("test-issuer").onclick = async () => {
 $("back").onclick = () => { at = Math.max(0, at - 1); show(); };
 $("next").onclick = async () => {
   const name = steps[at].dataset.step;
-  if (name === "Done") { await call("/api/finish", {}).catch(() => {}); window.close(); $("done-next").textContent = "You can close this tab."; return; }
+  if (name === "Done") {
+    await call("/api/finish", {}).catch(() => {});
+    if (inApp) { $("done-next").textContent = "Opening the console…"; return; }
+    window.close(); $("done-next").textContent = "You can close this tab."; return;
+  }
   if (name === "Review") { await install(); return; }
   if (steps[at + 1].dataset.step === "Review") {
     $("plan-error").textContent = ""; $("plan").innerHTML = "";
@@ -339,6 +350,7 @@ async function install() {
     const failed = r.steps.some((s) => !s.ok);
     $("done-title").textContent = failed ? "Stopped at a step that failed" : "EKOS is set up";
     $("done-next").innerHTML = failed ? "Fix what it says and run <code>ekos setup</code> again; finished steps are not repeated twice." :
+      inApp ? "Press Done: EKOS.DEV starts the console and signs you in." :
       `The console: <a href="${r.console_url}">${r.console_url}</a>. Later: <code>ekos console open</code>, <code>ekos console status</code>.`;
   } catch (e) {
     $("done-title").textContent = "Setup failed"; $("steps").innerHTML = `<li class="err">${e.message}</li>`;

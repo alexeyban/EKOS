@@ -54,6 +54,10 @@ struct Shell {
     /// The tray's last shown state, so the menu is rebuilt only when it changes.
     shown: Mutex<(String, Vec<Project>)>,
     startup_begun: AtomicBool,
+    /// RFC 0261 §8: started with `--setup`, so the first page runs Set up instead of the steps.
+    want_setup: AtomicBool,
+    /// Set up is running: the wizard's origin, which the window may load until it ends.
+    setup: Mutex<Option<Url>>,
 }
 
 type Shared = Arc<Shell>;
@@ -70,12 +74,19 @@ fn main() {
         projects: Mutex::new(Vec::new()),
         shown: Mutex::new((String::new(), Vec::new())),
         startup_begun: AtomicBool::new(false),
+        want_setup: AtomicBool::new(asks_for_setup(std::env::args())),
+        setup: Mutex::new(None),
     });
     tauri::Builder::default()
         // RFC 0261 §2.3 step 1: a second start shows the first window instead of a second app
         // (two would each poll, notify and own the console). Registered first, as the plugin asks.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show_window(app, None);
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if asks_for_setup(args) {
+                let (app, shell) = (app.clone(), app.state::<Shared>().inner().clone());
+                std::thread::spawn(move || run_setup(&app, &shell));
+            } else {
+                show_window(app, None);
+            }
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -107,7 +118,8 @@ fn build_window(app: &AppHandle, shell: Shared) -> tauri::Result<WebviewWindow> 
         .min_inner_size(960.0, 640.0)
         .on_navigation(move |url| {
             let console = guard.console.lock().unwrap().clone();
-            if nav::allowed(url, console.as_ref()) {
+            let setup = guard.setup.lock().unwrap().clone();
+            if nav::allowed(url, console.as_ref(), setup.as_ref()) {
                 true
             } else {
                 nav::open_externally(url.as_str());
@@ -136,6 +148,10 @@ fn startup_ready(app: AppHandle, shell: tauri::State<'_, Shared>) {
         return;
     }
     let shell = shell.inner().clone();
+    if shell.want_setup.swap(false, Ordering::SeqCst) {
+        std::thread::spawn(move || run_setup(&app, &shell));
+        return;
+    }
     std::thread::spawn(move || {
         if let Err(e) = start_up(&app, &shell) {
             page(&app, &format!("ekos.fail({})", js(&format!("{e:#}"))));
@@ -167,11 +183,49 @@ fn open_in_browser(shell: tauri::State<'_, Shared>) {
 #[tauri::command]
 fn open_setup(app: AppHandle, shell: tauri::State<'_, Shared>) {
     let shell = shell.inner().clone();
-    std::thread::spawn(move || {
-        if let Err(e) = shell.ekos.open_setup() {
-            page(&app, &format!("ekos.fail({})", js(&format!("{e:#}"))));
+    std::thread::spawn(move || run_setup(&app, &shell));
+}
+
+/// Whether the app was started (or started again) to set EKOS up: `ekos-desktop --setup`.
+fn asks_for_setup<S: AsRef<str>>(args: impl IntoIterator<Item = S>) -> bool {
+    args.into_iter().any(|a| a.as_ref() == "--setup")
+}
+
+/// RFC 0261 §8: the set-up wizard in this window. When `ekos setup` ends (the person pressed
+/// Done, or it stopped), the window goes back to the start-up page, whose steps start the console
+/// and sign in. A second request while it runs only shows the window.
+fn run_setup(app: &AppHandle, shell: &Shared) {
+    if shell.setup.lock().unwrap().is_some() {
+        show_window(app, None);
+        return;
+    }
+    let Some(w) = app.get_webview_window(MAIN) else {
+        return;
+    };
+    let back = w.url().ok();
+    let (mut child, address) = match shell.ekos.start_setup() {
+        Ok(started) => started,
+        Err(e) => {
+            page(app, &format!("ekos.fail({})", js(&format!("{e:#}"))));
+            return;
         }
-    });
+    };
+    let Ok(dest) = Url::parse(&address) else {
+        let _ = child.kill();
+        return;
+    };
+    *shell.setup.lock().unwrap() = Some(dest.clone());
+    let _ = w.set_title("EKOS Setup");
+    let _ = w.navigate(dest);
+    show_window(app, None);
+    let _ = child.wait();
+    *shell.setup.lock().unwrap() = None;
+    let _ = w.set_title("EKOS.DEV");
+    // The start-up page runs its steps again when it loads.
+    shell.startup_begun.store(false, Ordering::SeqCst);
+    if let Some(back) = back.filter(|u| nav::allowed(u, None, None)) {
+        let _ = w.navigate(back);
+    }
 }
 
 /// "Try again" on the start-up screen: the steps run once more (after EKOS Setup, or a failure).

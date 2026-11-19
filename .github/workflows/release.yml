@@ -689,11 +689,12 @@ jobs:
           $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
           Check "bin is on the user Path" { ($userPath -split ';') -contains "$prog\bin\" -or ($userPath -split ';') -contains "$prog\bin" }
           $shell = New-Object -ComObject WScript.Shell
-          foreach ($s in @(@('EKOS Setup', 'setup'), @('EKOS Console', 'console open --start'))) {
+          # RFC 0261 §8: EKOS Setup is the wizard in EKOS.DEV's window (the release's MSI has the app).
+          foreach ($s in @(@('EKOS Setup', 'ekos-desktop.exe', '--setup'), @('EKOS Console', 'ekos.exe', 'console open --start'))) {
             $lnk = "$menu\$($s[0]).lnk"
             Check "Start menu: $($s[0])" { Test-Path $lnk }
             $l = $shell.CreateShortcut($lnk)
-            Check "$($s[0]) runs ekos.exe $($s[1])" { $l.TargetPath -eq "$prog\bin\ekos.exe" -and $l.Arguments -eq $s[1] }
+            Check "$($s[0]) runs $($s[1]) $($s[2])" { $l.TargetPath -eq "$prog\bin\$($s[1])" -and $l.Arguments -eq $s[2] }
           }
 
           # 3. Setup from answers, run from the installed program: nothing copied, Path untouched.
@@ -811,6 +812,8 @@ jobs:
           [ -x /usr/local/ekos/bin/ekos ] && ok "the program is in /usr/local/ekos" || fail "no /usr/local/ekos/bin/ekos"
           [ "$(readlink /usr/local/bin/ekos)" = /usr/local/ekos/bin/ekos ] && ok "ekos is in /usr/local/bin" || fail "/usr/local/bin/ekos"
           [ -d "/Applications/EKOS Setup.app" ] && [ -d "/Applications/EKOS Console.app" ] && ok "the apps" || fail "the apps"
+          grep -q 'EKOS.DEV.app" --args --setup' "/Applications/EKOS Setup.app/Contents/MacOS/run" \
+            && ok "EKOS Setup opens EKOS.DEV (RFC 0261 §8)" || fail "EKOS Setup's command"
           desk="/Applications/EKOS.DEV.app/Contents/MacOS"
           [ -x "$desk/ekos-desktop" ] && [ "$(readlink "$desk/ekos")" = /usr/local/ekos/bin/ekos ] \
             && ok "EKOS.DEV.app, with ekos beside its binary" || fail "EKOS.DEV.app"
@@ -935,6 +938,9 @@ jobs:
           for d in ekos-setup ekos-console ekos-desktop; do
             [ -f "/usr/share/applications/$d.desktop" ] && ok "$d.desktop" || fail "$d.desktop"
           done
+          # RFC 0261 §8: EKOS Setup opens the app, and the browser wizard when the app cannot start.
+          grep -q '^Exec=sh -c "/opt/ekos/bin/ekos-desktop --setup || exec /usr/bin/ekos setup"$' \
+            /usr/share/applications/ekos-setup.desktop && ok "EKOS Setup opens the app" || fail "EKOS Setup's Exec"
           grep -q "kind = \"$FORMAT\"" /opt/ekos/installer.toml && ok "installer.toml" || fail "installer.toml"
           [ "$(stat -c %U /opt/ekos/bin/ekos)" = root ] && ok "owned by root" || fail "owner"
           [ -x /opt/ekos/bin/ekos-desktop ] && ok "the desktop app" || fail "the desktop app"

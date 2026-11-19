@@ -7,7 +7,8 @@
 # Installs (for every user of the Mac, so it needs an administrator's password):
 #   /usr/local/ekos/{bin,console,LICENSE,INSTALL.md,installer.toml,setup.command,uninstall.sh}
 #   /usr/local/bin/ekos              → /usr/local/ekos/bin/ekos
-#   /Applications/EKOS Setup.app     opens Terminal with `ekos setup` (the setup wizard)
+#   /Applications/EKOS Setup.app     the setup wizard in EKOS.DEV's window when the package has the
+#                                    app (RFC 0261 §8), else Terminal with `ekos setup` (browser)
 #   /Applications/EKOS Console.app   `ekos console open --start`
 #   /Applications/EKOS.DEV.app       the desktop app (RFC 0261 §2.8), when the full package has it:
 #                                    bin/ekos-desktop moves into the bundle, and Contents/MacOS/ekos
@@ -121,7 +122,12 @@ app() {  # name, bundle id suffix, command run by the app
   chmod 755 "$bundle/Contents/MacOS/run"
   plist_app "$bundle" "$title" "$suffix" run '  <key>LSUIElement</key><true/>'
 }
-app "EKOS Setup" setup 'exec open -a Terminal /usr/local/ekos/setup.command'
+if [[ -x "$prog/bin/ekos-desktop" ]]; then
+  # A new instance with --setup: the running app, if any, takes it over (single instance).
+  app "EKOS Setup" setup 'exec open -n -a "/Applications/EKOS.DEV.app" --args --setup'
+else
+  app "EKOS Setup" setup 'exec open -a Terminal /usr/local/ekos/setup.command'
+fi
 app "EKOS Console" console 'exec /usr/local/ekos/bin/ekos console open --start'
 if [[ -x "$prog/bin/ekos-desktop" ]]; then
   desk="$root/Applications/EKOS.DEV.app"

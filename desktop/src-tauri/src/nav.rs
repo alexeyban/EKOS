@@ -1,5 +1,5 @@
-//! Where the window may go (RFC 0261 §4): the local start-up page and the console's own origin.
-//! Any other address opens in the system browser instead.
+//! Where the window may go (RFC 0261 §4): the local start-up page, the console's own origin, and
+//! while Set up runs the set-up wizard's (§8). Any other address opens in the system browser.
 
 use url::Url;
 
@@ -13,12 +13,16 @@ fn is_startup_page(url: &Url) -> bool {
     }
 }
 
-/// Whether the window may load `url`, given the console's origin once it is known.
-pub fn allowed(url: &Url, console: Option<&Url>) -> bool {
+/// Whether the window may load `url`, given the console's origin once it is known and the
+/// wizard's while it runs.
+pub fn allowed(url: &Url, console: Option<&Url>, setup: Option<&Url>) -> bool {
     if is_startup_page(url) || url.scheme() == "about" {
         return true;
     }
-    console.is_some_and(|c| c.origin() == url.origin())
+    [console, setup]
+        .into_iter()
+        .flatten()
+        .any(|o| o.origin() == url.origin())
 }
 
 /// Opens `url` in the person's default browser. Failing is not fatal: nothing else depends on it.
@@ -50,12 +54,28 @@ mod tests {
     #[test]
     fn only_the_start_up_page_and_the_console_origin_load_in_the_window() {
         let console = u("http://127.0.0.1:8000");
-        assert!(allowed(&u("tauri://localhost/index.html"), None));
-        assert!(allowed(&u("http://tauri.localhost/index.html"), None));
-        assert!(!allowed(&u("http://127.0.0.1:8000/w/1"), None));
-        assert!(allowed(&u("http://127.0.0.1:8000/w/1"), Some(&console)));
-        assert!(!allowed(&u("http://127.0.0.1:8001/"), Some(&console)));
-        assert!(!allowed(&u("http://localhost:8000/"), Some(&console)));
-        assert!(!allowed(&u("https://github.com/x"), Some(&console)));
+        assert!(allowed(&u("tauri://localhost/index.html"), None, None));
+        assert!(allowed(&u("http://tauri.localhost/index.html"), None, None));
+        assert!(!allowed(&u("http://127.0.0.1:8000/w/1"), None, None));
+        assert!(allowed(
+            &u("http://127.0.0.1:8000/w/1"),
+            Some(&console),
+            None
+        ));
+        assert!(!allowed(&u("http://127.0.0.1:8001/"), Some(&console), None));
+        assert!(!allowed(&u("http://localhost:8000/"), Some(&console), None));
+        assert!(!allowed(&u("https://github.com/x"), Some(&console), None));
+    }
+
+    #[test]
+    fn the_wizard_loads_only_while_set_up_runs() {
+        let wizard = u("http://127.0.0.1:40123/?t=abc&app=1");
+        assert!(allowed(
+            &u("http://127.0.0.1:40123/api/plan"),
+            None,
+            Some(&wizard)
+        ));
+        assert!(!allowed(&u("http://127.0.0.1:40123/"), None, None));
+        assert!(!allowed(&u("http://127.0.0.1:40124/"), None, Some(&wizard)));
     }
 }
