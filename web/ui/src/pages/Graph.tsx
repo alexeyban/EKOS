@@ -448,6 +448,15 @@ export function Graph() {
   const graph = useQuery({
     queryKey: ["graph", id, params.toString()],
     queryFn: () => api<GraphOut>(`/workspaces/${id}/graph?${params}`),
+    // An answer without its lists draws an empty graph, not a crash.
+    select: (d): GraphOut => ({
+      ...d,
+      counts: d?.counts ?? {},
+      nodes: d?.nodes ?? [],
+      edges: d?.edges ?? [],
+      kind_index: d?.kind_index ?? [],
+      rel_kind_index: d?.rel_kind_index ?? [],
+    }),
     enabled: id !== "",
   });
 

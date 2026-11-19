@@ -61,7 +61,12 @@ const display = (v: SettingField["value"]) => (v === null ? "" : String(v));
 
 export function Settings() {
   const qc = useQueryClient();
-  const view = useQuery({ queryKey: ["platform-settings"], queryFn: () => api<SettingsView>("/platform/settings") });
+  const view = useQuery({
+    queryKey: ["platform-settings"],
+    queryFn: () => api<SettingsView>("/platform/settings"),
+    // An answer without fields reads as no settings, not a crash.
+    select: (d) => ({ ...d, fields: d?.fields ?? [] }),
+  });
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [secrets, setSecrets] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState(false);
@@ -345,7 +350,11 @@ function SecretInput({
 
 function Keychain() {
   const qc = useQueryClient();
-  const view = useQuery({ queryKey: ["keychain"], queryFn: () => api<KeychainView>("/platform/keychain") });
+  const view = useQuery({
+    queryKey: ["keychain"],
+    queryFn: () => api<KeychainView>("/platform/keychain"),
+    select: (d) => ({ ...d, names: d?.names ?? [] }),
+  });
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const done = () => qc.invalidateQueries({ queryKey: ["keychain"] });

@@ -13,6 +13,11 @@ export function Config() {
   const current = useQuery({
     queryKey: ["config", id],
     queryFn: () => api<ConfigOut>(`/workspaces/${id}/config`),
+    // A missing `[observe]` block reads as one with no paths, not a crash.
+    select: (d) => ({
+      ...d,
+      observe: { paths: d?.observe?.paths ?? [], ignore_patterns: d?.observe?.ignore_patterns ?? [] },
+    }),
     enabled: id !== "",
   });
 

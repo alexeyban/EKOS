@@ -33,6 +33,8 @@ export function Review() {
   const list = useQuery({
     queryKey: ["review", id],
     queryFn: () => api<{ subjects: SubjectStatus[] }>(`/workspaces/${id}/review`),
+    // An answer without the list reads as an empty review, not a crash.
+    select: (d) => ({ subjects: d?.subjects ?? [] }),
     enabled: id !== "",
   });
   const current =

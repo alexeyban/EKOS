@@ -60,6 +60,14 @@ function renderAs(me: Me) {
 const writer: Me = { mode: "token", email: null, role: "write" };
 const reader: Me = { mode: "token", email: null, role: "read" };
 
+describe("Review with an incomplete answer", () => {
+  it("shows the empty state, not an error page, when the answer has no subjects", async () => {
+    vi.spyOn(client, "api").mockResolvedValue({} as never);
+    renderAs(writer);
+    expect(await screen.findByText("Nothing to review yet")).toBeTruthy();
+  });
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   try {

@@ -7205,5 +7205,5 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
       following the theme; ~465 lines of unused CSS removed (devlog_338)
 - [x] RFC 0261 U1 exit: `deploy/e2e/package.sh` passes against the new shell in Chromium and in WebKit 27.2
       (`E2E_BROWSER=webkit`), every stage including chat with a local model (devlog_338)
-- [ ] Console: the Graph, Commands, ekos.toml, Settings, Review, Sources and Conflicts pages throw when an API
-      answer lacks a field they read (seen with fixtures, before and after the page pass); read defensively
+- [x] Console: the Graph, Commands, ekos.toml, Settings, Review, Sources and Conflicts pages no longer throw when
+      an API answer lacks a list they read; each query fills it in with `select` (devlog_339)

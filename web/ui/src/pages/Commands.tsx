@@ -103,6 +103,8 @@ export function Commands() {
   const list = useQuery({
     queryKey: ["cli", id],
     queryFn: () => api<{ commands: CommandEntry[] }>(`/workspaces/${id}/cli`),
+    // An answer without the list reads as no commands offered, not a crash.
+    select: (d) => ({ commands: d?.commands ?? [] }),
     enabled: id !== "",
   });
   const [filter, setFilter] = useState("");

@@ -21,6 +21,8 @@ export function Sources() {
       api<{ sources: DirSource[]; databases: DatabaseSource[] }>(
         `/workspaces/${id}/sources`,
       ),
+    // An answer without a list reads as none of that kind, not a crash.
+    select: (d) => ({ sources: d?.sources ?? [], databases: d?.databases ?? [] }),
     enabled: id !== "",
   });
   const canOperate = mayOperate(me);

@@ -27,7 +27,7 @@ export function claimWhere(c: ConflictClaim): string {
 /** Open first — those are the ones waiting for a person — then by name. */
 export function conflictOrder(items: Conflict[]): Conflict[] {
   const rank = (c: Conflict) => (c.status === "open" ? 0 : 1);
-  return [...items].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  return [...items].sort((a, b) => rank(a) - rank(b) || (a.name ?? "").localeCompare(b.name ?? ""));
 }
 
 /** The object ids with an open conflict — what the graph rings. */
