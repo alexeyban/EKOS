@@ -1,0 +1,13 @@
+@@ Scoreboard — and what this does not prove
+recovered   1 binaries, 10 types, 101 methods, 85 fields, 0 I/O boundaries — Markdown type: 78   control_flow 2   statements 76
+rewrite     702 lines of Python in python-port/mdport (constants lifted from the recovered literals)
+static      matches 42   differs 22   missing 14   python_only 5   [evidence, not a verdict]
+recorded    16 passed, 0 failed, 0 skipped, 0 error(s)
+fixtures    15 identical, 0 different
+fuzz        seed 20260921: 3000 generated documents, 3000 identical, 0 different
+generic     ignoring whitespace  : Python-Markdown 10/15   markdown-it 8/15 (recovered-spec port: 15/15 byte-exact)
+mutation    a planted one-flag bug: 256 identical, 44 different — caught
+
+[90m# Not proven: behaviour on the .NET Framework itself (the original ran on wine-mono's class library);[0m
+[90m# inputs the fuzzer's grammar never generates; the app.config constructor (not ported); System.Random output.[0m
+[90m# Recovery is .NET only today. A Java jar reaches 'structural' fidelity, not statement bodies, so this flow needs a JVM decoder first.[0m

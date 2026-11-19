@@ -1,0 +1,14 @@
+@@ Before running any untrusted code: prove the sandbox holds
+[90m# The next steps EXECUTE the original assembly. It runs under bubblewrap: no network, no $HOME, read-only system.[0m
+[1;32m$[0m [1mekos-characterize doctor[0m
+wine     /usr/bin/wine
+bwrap    /usr/bin/bwrap
+python   /usr/bin/python3.13
+prefix   ~/.cache/ekos-characterize/prefix
+wine-mono in prefix: ok
+  blocked  filesystem: list the user's home
+  blocked  filesystem: read a host file outside the binds
+  blocked  filesystem: write into a user-writable host directory
+  blocked  network: connect to 1.1.1.1:53
+  blocked  network: resolve a hostname
+sandbox: every escape attempt was blocked

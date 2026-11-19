@@ -1,0 +1,26 @@
+@@ ekos_binary_explain on one method: the spec the rewrite is written from
+[1;35mmcp>[0m [1mekos_binary_explain {"id": "MarkdownSharp.Markdown", "method": "DoItalicsAndBold"}[0m
+DoItalicsAndBold(System.String) -> System.String   token 0x06000043
+fidelity    statements   readiness: ready
+why         every branch structured and every expression recovered; the pseudo-code is the whole method
+calls       get_StrictBoldItalic, get_AsteriskIntraWordEmphasis
+external    System.String.Contains, System.Text.RegularExpressions.Regex.Replace
+called by   RunSpanGamut
+literals    ["*", "_", "$1<strong>$3</strong>", "$1<em>$3</em>", "<strong>$2</strong>", "<em>$2</em>"]
+statements  11   ifs 3  loops 0  switches 0  gotos 0  unknown 0
+
+pseudocode (every line cites its IL offset):
+  if (text.Contains("*") || text.Contains("_")) {  // IL_000B
+      if (!this.StrictBoldItalic) {  // IL_0022
+          text = MarkdownSharp.Markdown._bold.Replace(text, "<strong>$2</strong>");  // IL_0088
+          text = MarkdownSharp.Markdown._italic.Replace(text, "<em>$2</em>");  // IL_009A
+      } else if (!this.AsteriskIntraWordEmphasis) {  // IL_002A
+          text = MarkdownSharp.Markdown._strictBold.Replace(text, "$1<strong>$3</strong>");  // IL_0062
+          text = MarkdownSharp.Markdown._strictItalic.Replace(text, "$1<em>$3</em>");  // IL_0074
+      } else {
+          text = MarkdownSharp.Markdown._semiStrictBold.Replace(text, "$1<strong>$3</strong>");  // IL_003C
+          text = MarkdownSharp.Markdown._semiStrictItalic.Replace(text, "$1<em>$3</em>");  // IL_004E
+      }
+      return text;  // IL_009D
+  }
+  return text;  // IL_001B

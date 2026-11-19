@@ -1,0 +1,23 @@
+@@ Record what the original does, then check the rewrite against the record
+[1;32m$[0m [1mekos-characterize record cases.json[0m
+recorded 16 case(s) from original/MarkdownSharp.dll → cases.golden.json
+
+[1;32m$[0m [1mekos-characterize check cases.json     # no wine, no untrusted code[0m
+16 case(s) against original/MarkdownSharp.dll (sha256 3d23eace6f20…, ekos-characterize-dotnet/1):
+  PASS  01-headers
+  PASS  02-emphasis
+  PASS  03-lists
+  PASS  04-code
+  PASS  05-blockquote
+  PASS  06-links
+  PASS  07-images
+  PASS  08-html
+  PASS  09-breaks-whitespace
+  PASS  10-crlf
+  PASS  11-unicode
+  PASS  12-mixed-document
+  PASS  13-empty
+  PASS  14-whitespace-only
+  PASS  15-adversarial
+  PASS  null-input
+16 passed, 0 failed, 0 skipped, 0 error(s)

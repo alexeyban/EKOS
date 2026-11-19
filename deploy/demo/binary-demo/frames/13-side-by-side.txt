@@ -1,0 +1,38 @@
+@@ Same inputs through both programs, compared byte for byte
+[1;32m$[0m [1mtools/side_by_side.sh     # wine mdcli.exe  vs  python -m mdport[0m
+  identical  01-headers.md                sha256 7b1056a0849d
+  identical  02-emphasis.md               sha256 7f2cfb770aa2
+  identical  03-lists.md                  sha256 3d210b8da71a
+  identical  04-code.md                   sha256 d9ad3b596972
+  identical  05-blockquote.md             sha256 3bc46449d32a
+  identical  06-links.md                  sha256 e8b7bc26a569
+  identical  07-images.md                 sha256 40bc70297231
+  identical  08-html.md                   sha256 adc2cd2ad0cb
+  identical  09-breaks-whitespace.md      sha256 e8549533650d
+  identical  10-crlf.md                   sha256 8ab751557f28
+  identical  11-unicode.md                sha256 e0d1bef88baf
+  identical  12-mixed-document.md         sha256 f26969f56534
+  identical  13-empty.md                  sha256 e3b0c44298fc
+  identical  14-whitespace-only.md        sha256 f87324480b6f
+  identical  15-adversarial.md            sha256 0788aee12a12
+15 identical, 0 different
+
+[1;32m$[0m [1mcat inputs/12-mixed-document.md | python -m mdport[0m
+<h1>Project Notes</h1>
+
+<p>The <strong>quick</strong> brown fox, see <a href="http://example.com/docs" title="Docs">the docs</a> for <code>details</code>.</p>
+
+<h2>Steps</h2>
+
+<ol>
+<li>Install it</li>
+<li><p>Configure it:</p>
+
+<pre><code>key = "value"
+</code></pre></li>
+<li><p>Run it</p></li>
+</ol>
+
+<blockquote>
+  <p><strong>Note</strong>: keep the config <em>private</em>.</p>
+</blockquote>

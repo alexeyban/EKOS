@@ -1,0 +1,44 @@
+@@ Where recovery is incomplete, it says so — and refuses to guess
+[1;35mmcp>[0m [1mekos_binary_explain {"id": "MarkdownSharp.Markdown", "method": "Normalize"}[0m
+Normalize(System.String) -> System.String   token 0x0600005A
+fidelity    control_flow   readiness: partial
+why         statements recovered, but some control flow did not structure or some expression was not recovered — see statement_gap
+calls       -
+external    System.Object.ToString, System.String.get_Chars, System.String.get_Length, System.Text.StringBuilder..ctor, System.Tex
+called by   Transform
+literals    ["\n\n"]
+statements  33   ifs 6  loops 2  switches 1  gotos 1  unknown 0
+GAP         ["1 goto target(s) did not structure"]
+
+pseudocode (every line cites its IL offset):
+  loc0 = new System.Text.StringBuilder(text.Length);  // IL_000B
+  loc1 = new System.Text.StringBuilder();  // IL_0011
+  loc2 = false;  // IL_0013
+  loc3 = 0;  // IL_0015
+  while (loc3 < text.Length) {  // IL_00ED
+      loc4 = text[loc3];  // IL_0022
+      switch (loc4) {  // IL_0029
+          case 9:
+              loc5 = 4 - loc1.Length % 4;  // IL_00AD
+              loc6 = 0;  // IL_00B0
+              while (loc6 < loc5) {  // IL_00C3
+                  loc1.Append(32);  // IL_00BC
+                  loc6 = loc6 + 1;  // IL_00C1
+              }
+          case 10:
+              if (loc2) {  // IL_004E
+                  loc0.Append(loc1);  // IL_0057
+              }
+              loc0.Append(10);  // IL_0060
+              loc1.Length = 0;  // IL_0063
+              loc2 = false;  // IL_0069
+  … 27 more lines
+
+[90m# Whole assembly, every method body, by how far recovery got:[0m
+[1;32m$[0m [1msurvey MarkdownSharp.dll --fidelity[0m
+    fidelity : {"control_flow": 2, "statements": 99}
+Method bodies by fidelity (101 total, 0.0s):
+  control_flow        2    2.0%
+  statements         99   98.0%
+Gap reasons:
+       2   goto target(s) did not structure

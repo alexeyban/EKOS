@@ -1,0 +1,23 @@
+@@ Why the spec matters: what general Markdown knowledge produces instead
+[90m# Two mature generic Markdown libraries (a proxy for writing 'a Markdown converter' without the recovered spec):[0m
+[1;32m$[0m [1mtools/generic_baseline.py     # vs the original's output, 15 fixtures[0m
+  fixture                    Python-Markdown      markdown-it           (byte-exact / ignoring whitespace)
+  01-headers.md              DIFFERENT / identical DIFFERENT / identical
+  02-emphasis.md             DIFFERENT / DIFFERENT DIFFERENT / DIFFERENT
+  03-lists.md                DIFFERENT / DIFFERENT DIFFERENT / DIFFERENT
+  04-code.md                 DIFFERENT / identical DIFFERENT / identical
+  05-blockquote.md           DIFFERENT / identical DIFFERENT / identical
+  06-links.md                DIFFERENT / identical DIFFERENT / identical
+  07-images.md               DIFFERENT / DIFFERENT DIFFERENT / identical
+  08-html.md                 DIFFERENT / identical DIFFERENT / DIFFERENT
+  09-breaks-whitespace.md    DIFFERENT / identical DIFFERENT / identical
+  10-crlf.md                 DIFFERENT / identical DIFFERENT / identical
+  11-unicode.md              DIFFERENT / identical DIFFERENT / DIFFERENT
+  12-mixed-document.md       DIFFERENT / identical DIFFERENT / DIFFERENT
+  13-empty.md                identical / identical identical / identical
+  14-whitespace-only.md      DIFFERENT / DIFFERENT DIFFERENT / DIFFERENT
+  15-adversarial.md          DIFFERENT / DIFFERENT DIFFERENT / DIFFERENT
+
+  byte-exact           : Python-Markdown 1/15   markdown-it 1/15
+  ignoring whitespace  : Python-Markdown 10/15   markdown-it 8/15
+  port from recovered spec: 15/15 byte-exact
