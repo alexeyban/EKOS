@@ -144,6 +144,15 @@ def test_token_mode_records_a_marked_claim_and_oidc_an_identity() -> None:
     assert reviewer_for(o, True, "ignored") == "ann@x.io"
 
 
+def test_local_mode_records_a_typed_name_as_local() -> None:
+    # local mode signs no person in: the page asks for a name (it asked only in token mode, so a
+    # local-mode decision could never be recorded); the ledger marks the claim local, not a person
+    local = Principal(kind="local", id="local", subject="local", owner=True)
+    assert reviewer_for(local, False, "Maria") == "local:Maria"
+    with pytest.raises(ReviewError):
+        reviewer_for(local, False, "  ")
+
+
 # ── routes ───────────────────────────────────────────────────────────────────────────────────
 
 

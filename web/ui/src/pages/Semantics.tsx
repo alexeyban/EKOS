@@ -308,10 +308,10 @@ function BulkBar({
     mutationFn: (action: "confirm" | "reject") =>
       apiPost<{ count: number; reviewer: string }>(
         `/workspaces/${workspace}/semantics/review-bulk`,
-        { action, ids, note: note || null, reviewer: me.mode === "token" ? reviewer : null },
+        { action, ids, note: note || null, reviewer: me.mode !== "oidc" ? reviewer : null },
       ),
     onSuccess: (r, action) => {
-      if (me.mode === "token") saveReviewer(reviewer);
+      if (me.mode !== "oidc") saveReviewer(reviewer);
       setNote("");
       onDone(`${r.count} item(s) ${action}ed — recorded as ${r.reviewer}.`);
       void qc.invalidateQueries({ queryKey: ["semantics"] });
@@ -320,11 +320,11 @@ function BulkBar({
       void qc.invalidateQueries({ queryKey: ["linkml"] });
     },
   });
-  const needsName = me.mode === "token" && !reviewer.trim();
+  const needsName = me.mode !== "oidc" && !reviewer.trim();
   return (
     <div className="sem-bulk" role="region" aria-label="bulk review">
       <strong>{ids.length} selected</strong>
-      {me.mode === "token" && (
+      {me.mode !== "oidc" && (
         <input
           aria-label="bulk reviewer"
           placeholder="reviewer name"

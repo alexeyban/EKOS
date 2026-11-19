@@ -120,7 +120,7 @@ export function AddForm({
   const [shared, setShared] = useState(false);
   const [reviewer, setReviewer] = useState(loadReviewer());
   const rule = parseRule(ruleText);
-  const needsName = me.mode === "token" && !reviewer.trim();
+  const needsName = me.mode !== "oidc" && !reviewer.trim();
   const ready =
     validTarget(target) &&
     text.trim() !== "" &&
@@ -136,10 +136,10 @@ export function AddForm({
         rule: kind === "instruction" ? rule.rule : null,
         term: kind === "synonym" ? term.trim() : null,
         shared,
-        reviewer: me.mode === "token" ? reviewer : null,
+        reviewer: me.mode !== "oidc" ? reviewer : null,
       }),
     onSuccess: () => {
-      if (me.mode === "token") saveReviewer(reviewer);
+      if (me.mode !== "oidc") saveReviewer(reviewer);
       setText("");
       setTerm("");
       setRuleText("");
@@ -209,7 +209,7 @@ export function AddForm({
           Apply to everyone once someone else approves
         </label>
       )}
-      {me.mode === "token" && (
+      {me.mode !== "oidc" && (
         <label className="sem-field">
           <span>Your name (token mode has no identity; recorded as token:&lt;name&gt;)</span>
           <input
@@ -243,14 +243,14 @@ function AnnotationPanel({
 }) {
   const qc = useQueryClient();
   const [reviewer, setReviewer] = useState(loadReviewer());
-  const needsName = me.mode === "token" && !reviewer.trim();
+  const needsName = me.mode !== "oidc" && !reviewer.trim();
   const act = useMutation({
     mutationFn: (action: "withdraw" | "approve" | "confirm") =>
       apiPost<{ author: string }>(`/workspaces/${workspace}/annotations/${a.id}/${action}`, {
-        reviewer: me.mode === "token" ? reviewer : null,
+        reviewer: me.mode !== "oidc" ? reviewer : null,
       }),
     onSuccess: () => {
-      if (me.mode === "token") saveReviewer(reviewer);
+      if (me.mode !== "oidc") saveReviewer(reviewer);
       void qc.invalidateQueries({ queryKey: ["annotations"] });
     },
   });
@@ -298,7 +298,7 @@ function AnnotationPanel({
       <p className="sem-summary">{a.text}</p>
       {open && (mayOperate(me) || mayReview(me)) && (
         <div className="sem-decide">
-          {me.mode === "token" && (
+          {me.mode !== "oidc" && (
             <label className="sem-field">
               <span>Your name (recorded as token:&lt;name&gt;)</span>
               <input

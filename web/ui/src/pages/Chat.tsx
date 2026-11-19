@@ -194,7 +194,7 @@ export function Chat() {
   const [mode, setMode] = useState<"ask" | "tell">("ask");
   const [name, setName] = useState("");
   // Token mode has no identity: what is sent or saved is recorded as token:<name>.
-  const reviewer = me?.mode === "token" ? name : null;
+  const reviewer = (me != null && me.mode !== "oidc") ? name : null;
 
   const toInbox = async (body: Record<string, unknown>, shown: string) => {
     setItems((xs) => [...xs, { kind: "user", text: shown }]);
@@ -349,7 +349,7 @@ export function Chat() {
               }}
             />
           </label>
-          {me?.mode === "token" && (
+          {(me != null && me.mode !== "oidc") && (
             <input aria-label="your name" placeholder="your name" value={name} onChange={(e) => setName(e.target.value)} />
           )}
           <span className="muted small">a lone link goes to the project's inbox</span>

@@ -29,10 +29,10 @@ export function Inbox() {
   });
   const named = me.mode !== "token" || reviewer.trim() !== "";
   const done = () => {
-    if (me.mode === "token") saveReviewer(reviewer);
+    if (me.mode !== "oidc") saveReviewer(reviewer);
     void qc.invalidateQueries({ queryKey: ["inbox", id] });
   };
-  const who = me.mode === "token" ? reviewer : null;
+  const who = me.mode !== "oidc" ? reviewer : null;
   const accept = useMutation({
     mutationFn: (item: string) =>
       apiPost(`/workspaces/${id}/inbox/${item}/accept`, { reviewer: who }),
@@ -65,7 +65,7 @@ export function Inbox() {
           accepted. Originals stay outside the ledger.
         </span>
       </div>
-      {me.mode === "token" && (
+      {me.mode !== "oidc" && (
         <label className="sem-field">
           <span>
             Your name (token mode has no identity; recorded as

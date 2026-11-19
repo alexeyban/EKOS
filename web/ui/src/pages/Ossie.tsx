@@ -272,11 +272,11 @@ function ImportCard({ me }: { me: Me }) {
     mutationFn: () =>
       apiPost<ImportPlan>(`/workspaces/${id}/semantics/ossie/import`, {
         yaml: text,
-        reviewer: me.mode === "token" ? reviewer : null,
+        reviewer: me.mode !== "oidc" ? reviewer : null,
       }),
     onSuccess: (p) => {
       setPlan(p);
-      if (me.mode === "token") saveReviewer(reviewer);
+      if (me.mode !== "oidc") saveReviewer(reviewer);
       void qc.invalidateQueries({ queryKey: ["semantics"] });
       void qc.invalidateQueries({ queryKey: ["ossie"] });
       void qc.invalidateQueries({ queryKey: ["linkml"] });
@@ -289,7 +289,7 @@ function ImportCard({ me }: { me: Me }) {
     plan.errors.length === 0 &&
     plan.decisions.length > 0 &&
     plan.applied === 0 &&
-    !(me.mode === "token" && !reviewer.trim()) &&
+    !(me.mode !== "oidc" && !reviewer.trim()) &&
     !apply.isPending;
 
   const upload = (file: File | undefined) => {
@@ -323,7 +323,7 @@ function ImportCard({ me }: { me: Me }) {
           setDirty(true);
         }}
       />
-      {me.role === "write" && me.mode === "token" && (
+      {me.role === "write" && me.mode !== "oidc" && (
         <label className="sem-field">
           <span>Reviewer (recorded as token:&lt;name&gt;)</span>
           <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} />

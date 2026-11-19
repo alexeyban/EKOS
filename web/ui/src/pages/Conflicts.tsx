@@ -117,15 +117,15 @@ function ConflictPanel({
       apiPost<{ reviewer: string }>(`/workspaces/${workspace}/conflicts/${c.id}/resolve`, {
         ...decision,
         note: note || null,
-        reviewer: me.mode === "token" ? reviewer : null,
+        reviewer: me.mode !== "oidc" ? reviewer : null,
       }),
     onSuccess: () => {
-      if (me.mode === "token") saveReviewer(reviewer);
+      if (me.mode !== "oidc") saveReviewer(reviewer);
       setNote("");
       void qc.invalidateQueries({ queryKey: ["conflicts"] });
     },
   });
-  const needsName = me.mode === "token" && !reviewer.trim();
+  const needsName = me.mode !== "oidc" && !reviewer.trim();
 
   return (
     <aside className="card sem-panel" aria-label="conflict">
@@ -203,7 +203,7 @@ function ConflictPanel({
         {!canWrite && <p className="muted">Deciding needs the write role.</p>}
         {canWrite && (
           <>
-            {me.mode === "token" && (
+            {me.mode !== "oidc" && (
               <label className="sem-field">
                 <span>Reviewer (token mode has no identity; recorded as token:&lt;name&gt;)</span>
                 <input

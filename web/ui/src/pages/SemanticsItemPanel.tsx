@@ -97,14 +97,14 @@ export function SemanticsItemPanel({
         {
           action,
           note: note || null,
-          reviewer: me.mode === "token" ? reviewer : null,
+          reviewer: me.mode !== "oidc" ? reviewer : null,
           ...(action === "edit"
             ? { name: name || null, description: description || null, label: label || null }
             : {}),
         },
       ),
     onSuccess: () => {
-      if (me.mode === "token") saveReviewer(reviewer);
+      if (me.mode !== "oidc") saveReviewer(reviewer);
       setEditing(false);
       setNote("");
       void qc.invalidateQueries({ queryKey: ["semantics"] });
@@ -118,7 +118,7 @@ export function SemanticsItemPanel({
   const target = d ? usageTarget(d) : null;
   const reviewable = d ? REVIEWABLE.includes(d.kind) : false;
   const canWrite = mayReview(me);
-  const needsName = me.mode === "token" && !reviewer.trim();
+  const needsName = me.mode !== "oidc" && !reviewer.trim();
 
   const startEdit = () => {
     if (!d) return;
@@ -189,7 +189,7 @@ export function SemanticsItemPanel({
               {!canWrite && <p className="muted">Reviewing needs the write role.</p>}
               {canWrite && (
                 <>
-                  {me.mode === "token" && (
+                  {me.mode !== "oidc" && (
                     <label className="sem-field">
                       <span>Reviewer (token mode has no identity; recorded as token:&lt;name&gt;)</span>
                       <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} />

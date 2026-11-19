@@ -48,7 +48,7 @@ class CliFailed(RuntimeError):
 
 
 def reviewer_for(principal: Principal, oidc: bool, typed_name: str | None) -> str:
-    """The `--as` value: an OIDC identity, or a marked token-mode claim."""
+    """The `--as` value: an OIDC identity, or a name typed in token or local mode (marked so)."""
     if oidc:
         who = principal.email or principal.subject
         if not who:
@@ -56,10 +56,12 @@ def reviewer_for(principal: Principal, oidc: bool, typed_name: str | None) -> st
         return who
     name = (typed_name or "").strip()
     if not name:
-        raise ReviewError("token mode has no identity: give a reviewer name")
+        raise ReviewError("no signed-in identity here (token or local mode): give a reviewer name")
     if len(name) > 80 or not re.fullmatch(r"[\w .@'-]+", name):
         raise ReviewError("reviewer name: letters, digits, spaces and . @ ' - only, ≤ 80 chars")
-    return f"token:{name}"
+    # local mode (this machine's console) and token mode are marked: neither is an authenticated
+    # person, and the ledger must not present one as such
+    return f"{'local' if principal.kind == 'local' else 'token'}:{name}"
 
 
 def _clean(field: str, value: str | None) -> str | None:

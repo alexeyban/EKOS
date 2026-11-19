@@ -222,11 +222,11 @@ type Reviewer = ReturnType<typeof useReviewer>;
 /** One reviewer field per page: token mode has no identity, so the person types a name. */
 function useReviewer(me: Me) {
   const [reviewer, setReviewer] = useState(loadReviewer());
-  const needsName = me.mode === "token" && !reviewer.trim();
+  const needsName = me.mode !== "oidc" && !reviewer.trim();
   const field =
-    me.mode === "token" ? (
+    me.mode !== "oidc" ? (
       <label className="sem-field">
-        <span>Reviewer (token mode has no identity; recorded as token:&lt;name&gt;)</span>
+        <span>Reviewer (no signed-in identity here; recorded as token:&lt;name&gt; or local:&lt;name&gt;)</span>
         <input
           aria-label="reviewer"
           value={reviewer}
@@ -234,9 +234,9 @@ function useReviewer(me: Me) {
         />
       </label>
     ) : null;
-  const who = me.mode === "token" ? reviewer : null;
+  const who = me.mode !== "oidc" ? reviewer : null;
   const remember = () => {
-    if (me.mode === "token") saveReviewer(reviewer);
+    if (me.mode !== "oidc") saveReviewer(reviewer);
   };
   return { field, who, needsName, remember };
 }

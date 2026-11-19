@@ -444,11 +444,11 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
     mutationFn: () =>
       apiPost<ImportPlan>(`/workspaces/${id}/semantics/linkml/import`, {
         yaml: text,
-        reviewer: me.mode === "token" ? reviewer : null,
+        reviewer: me.mode !== "oidc" ? reviewer : null,
       }),
     onSuccess: (p) => {
       setPlan(p);
-      if (me.mode === "token") saveReviewer(reviewer);
+      if (me.mode !== "oidc") saveReviewer(reviewer);
       void qc.invalidateQueries({ queryKey: ["semantics"] });
       void qc.invalidateQueries({ queryKey: ["semantics-gaps"] });
       void qc.invalidateQueries({ queryKey: ["linkml"] });
@@ -463,7 +463,7 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
     plan.errors.length === 0 &&
     plan.decisions.length > 0 &&
     plan.applied === 0 &&
-    !(me.mode === "token" && !reviewer.trim()) &&
+    !(me.mode !== "oidc" && !reviewer.trim()) &&
     !apply.isPending;
 
   const download = () => {
@@ -533,7 +533,7 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
           }
         }}
       />
-      {me.role === "write" && me.mode === "token" && (
+      {me.role === "write" && me.mode !== "oidc" && (
         <label className="sem-field">
           <span>Reviewer (recorded as token:&lt;name&gt;)</span>
           <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} />

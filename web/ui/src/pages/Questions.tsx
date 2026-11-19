@@ -144,11 +144,11 @@ function QuestionPanel({
 }) {
   const qc = useQueryClient();
   const [reviewer, setReviewer] = useState(loadReviewer());
-  const who = me.mode === "token" ? reviewer : null;
+  const who = me.mode !== "oidc" ? reviewer : null;
   const named = me.mode !== "token" || reviewer.trim() !== "";
   const base = `/workspaces/${workspace}/questions/${q.id}`;
   const refresh = () => {
-    if (me.mode === "token") saveReviewer(reviewer);
+    if (me.mode !== "oidc") saveReviewer(reviewer);
     void qc.invalidateQueries({ queryKey: ["questions", workspace] });
   };
   const reveal = useMutation({
@@ -210,7 +210,7 @@ function QuestionPanel({
           {reveal.data && <Revealed value={reveal.data.revealed} />}
         </div>
       )}
-      {me.mode === "token" && (
+      {me.mode !== "oidc" && (
         <label className="sem-field">
           <span>
             Your name (token mode has no identity; recorded as
