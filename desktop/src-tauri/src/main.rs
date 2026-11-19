@@ -72,13 +72,20 @@ fn main() {
         startup_begun: AtomicBool::new(false),
     });
     tauri::Builder::default()
+        // RFC 0261 §2.3 step 1: a second start shows the first window instead of a second app
+        // (two would each poll, notify and own the console). Registered first, as the plugin asks.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_window(app, None);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(shell.clone())
         .invoke_handler(tauri::generate_handler![
             startup_ready,
             show_log,
-            open_in_browser
+            open_in_browser,
+            open_setup,
+            retry_startup
         ])
         .setup(move |app| {
             build_window(app.handle(), shell.clone())?;
@@ -156,10 +163,36 @@ fn open_in_browser(shell: tauri::State<'_, Shared>) {
     });
 }
 
+/// "Open EKOS Setup" on the start-up screen of a home that is not set up yet.
+#[tauri::command]
+fn open_setup(app: AppHandle, shell: tauri::State<'_, Shared>) {
+    let shell = shell.inner().clone();
+    std::thread::spawn(move || {
+        if let Err(e) = shell.ekos.open_setup() {
+            page(&app, &format!("ekos.fail({})", js(&format!("{e:#}"))));
+        }
+    });
+}
+
+/// "Try again" on the start-up screen: the steps run once more (after EKOS Setup, or a failure).
+#[tauri::command]
+fn retry_startup(app: AppHandle, shell: tauri::State<'_, Shared>) {
+    shell.startup_begun.store(false, Ordering::SeqCst);
+    startup_ready(app, shell);
+}
+
 /// The design's three steps: found the EKOS home, starting the console, signing you in.
 fn start_up(app: &AppHandle, shell: &Shared) -> anyhow::Result<()> {
+    page(app, "ekos.reset()");
     page(app, "ekos.step(1,'running')");
-    let running = shell.ekos.is_running()?;
+    let status = shell.ekos.status()?;
+    // RFC 0261 §2.3 step 2: no `console.toml` in the home is a first run. EKOS Setup sets the
+    // home up (mode, port, the login service); the app does not guess those.
+    if !status.set_up {
+        page(app, "ekos.needsSetup()");
+        return Ok(());
+    }
+    let running = status.running();
     page(app, "ekos.step(1,'done')");
 
     page(app, "ekos.step(2,'running')");
@@ -469,7 +502,7 @@ fn ask_to_quit(app: &AppHandle, shell: &Shared) {
                     let _ = api.cancel(&run.id);
                 }
             }
-            quit_now(app, shell);
+            quit_after_cancel(app, shell);
         }
         // "Keep running in the background", or the dialog closed.
         _ => hide_window(app),
@@ -482,10 +515,25 @@ fn hide_window(app: &AppHandle) {
     }
 }
 
-/// Stops the console only when the shell started it, then exits.
+/// Stops the console only when the shell started it, then exits. The stop never ends a run
+/// (RFC 0261 §2.3): while one is in progress the console keeps running after the app quits.
 fn quit_now(app: &AppHandle, shell: &Shared) {
     if shell.started_console.load(Ordering::SeqCst) {
-        let _ = shell.ekos.stop();
+        let _ = shell.ekos.stop_if_idle();
+    }
+    app.exit(0);
+}
+
+/// After "Cancel the run and quit": the cancelled runs take a moment to end, so the stop is asked
+/// again for a short while; if a run still holds the console, it is left running.
+fn quit_after_cancel(app: &AppHandle, shell: &Shared) {
+    if shell.started_console.load(Ordering::SeqCst) {
+        for _ in 0..10 {
+            if shell.ekos.stop_if_idle().unwrap_or(true) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(1500));
+        }
     }
     app.exit(0);
 }

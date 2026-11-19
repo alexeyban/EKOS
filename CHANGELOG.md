@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.6.1 — 2026-11-19
+
+**The refreshed console** (RFC 0261, in the browser and in EKOS.DEV)
+- A sidebar of grouped pages (Overview, Explore, Decide, Check, Operate, Configure) with badges for what
+  waits for a person, a top bar with the project switcher and search, and a status bar.
+- **Ctrl/⌘ K**, the command palette: go to a page, switch project, find an object, or open the form of a
+  command you may run (nothing runs from the palette itself).
+- Light, dark or "follow the system", kept per person; fonts in the bundle.
+- Every page redone: the same header, loading placeholders, an empty state that says what to do next,
+  errors that name the failed request. The Decide pages share one list-and-detail layout, Configure one
+  form layout; charts and the graph follow the theme. Tested end to end in Chromium and WebKit.
+
+**A stop never loses a run** (RFC 0261 §2.3)
+- `ekos console stop` refuses while runs are queued or running and names them; `--wait` waits for them,
+  `--force` ends them. `ekos uninstall` and the Windows installer force, after you confirm.
+- `ekos console status --json` and `stop --json` for tools (the desktop app).
+
+**EKOS.DEV**
+- One app at a time: a second start shows the first window.
+- On a machine where EKOS Setup has not run, the start-up screen says so and opens it.
+- Quitting stops the console only when no run is in progress.
+
+**Fixes**
+- Reviewing in local mode (the console on your machine) asks for your name and records `local:<name>`;
+  Inbox and Questions required it only in token mode.
+- Seven console pages no longer show an error screen when an answer lacks a list.
+
 ## v1.6.0 — 2026-11-18
 
 **EKOS.DEV, the desktop app** (RFC 0261, early)

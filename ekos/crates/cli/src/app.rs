@@ -1819,12 +1819,26 @@ enum ConsoleCommands {
     Run,
     /// Start the console in the background and wait until it answers
     Start,
-    /// Stop the console
-    Stop,
+    /// Stop the console. While runs are in progress it refuses and names them (RFC 0261 §2.3)
+    Stop {
+        /// Wait for the runs in progress to finish, then stop
+        #[arg(long, conflicts_with = "force")]
+        wait: bool,
+        /// Stop now: runs in progress end as interrupted
+        #[arg(long)]
+        force: bool,
+        /// Print `{"stopped": …, "active_runs": […]}` as JSON (the desktop app)
+        #[arg(long)]
+        json: bool,
+    },
     /// Restart the console, e.g. after changing its settings
     Restart,
     /// Whether the console runs, where, and its process ids
-    Status,
+    Status {
+        /// Print the state as JSON, with the runs in progress (the desktop app, RFC 0261 §2.3)
+        #[arg(long)]
+        json: bool,
+    },
     /// Open the console in the browser; in local mode, signed in with a one-time code
     Open {
         /// Print the address (and code) instead of opening a browser
@@ -3495,9 +3509,18 @@ fn run_console(home: &std::path::Path, subcommand: ConsoleCommands) -> Result<()
     match subcommand {
         ConsoleCommands::Run => console::run(home),
         ConsoleCommands::Start => console::start(home),
-        ConsoleCommands::Stop => console::stop(home),
+        ConsoleCommands::Stop { wait, force, json } => {
+            let mode = if force {
+                console::StopMode::Force
+            } else if wait {
+                console::StopMode::Wait
+            } else {
+                console::StopMode::Ask
+            };
+            console::stop(home, mode, json)
+        }
         ConsoleCommands::Restart => console::restart(home),
-        ConsoleCommands::Status => console::status(home),
+        ConsoleCommands::Status { json } => console::status(home, json),
         ConsoleCommands::Open {
             no_browser,
             start,

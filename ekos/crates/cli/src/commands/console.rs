@@ -24,6 +24,10 @@ use sha2::{Digest, Sha256};
 
 pub const STOP: &str = "stop-requested";
 pub const RESTART: &str = "restart-requested";
+/// RFC 0261 §2.3: the console's answer to a stop it refused, naming the runs that hold it.
+pub const REFUSED: &str = "stop-refused";
+/// RFC 0261 §2.3: the runs queued or running, kept current by the console for `status --json`.
+pub const ACTIVE: &str = "active-runs.json";
 pub const PID_FILE: &str = "console.pid";
 pub const LOG_FILE: &str = "console.log";
 pub const SIGNIN_DIR: &str = "local-signin";
@@ -219,7 +223,7 @@ fn write_pid(home: &Path, pid: &PidFile) -> Result<()> {
 }
 
 fn remove_markers(home: &Path) {
-    for m in [STOP, RESTART] {
+    for m in [STOP, RESTART, REFUSED, ACTIVE] {
         let _ = std::fs::remove_file(control(home).join(m));
     }
 }
@@ -595,25 +599,136 @@ fn force_end(pid: u32) {
     };
 }
 
-/// `ekos console stop`.
-pub fn stop(home: &Path) -> Result<()> {
+/// How `ekos console stop` treats runs in progress (RFC 0261 §2.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopMode {
+    /// Stop only when nothing runs; otherwise name the runs and leave the console running.
+    Ask,
+    /// Wait for the runs to finish, then stop.
+    Wait,
+    /// Stop now; runs in progress end as interrupted. Uninstall and the installers, after
+    /// telling the person.
+    Force,
+}
+
+/// A run that holds the console, as the console writes it in [`REFUSED`] and [`ACTIVE`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveRun {
+    pub id: String,
+    pub workspace: String,
+    pub command: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub since: String,
+}
+
+/// What `ekos console stop --json` prints: `{stopped: true}`, or `{stopped: false, active_runs}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StopOutcome {
+    pub stopped: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub active_runs: Vec<ActiveRun>,
+}
+
+impl StopOutcome {
+    fn stopped() -> Self {
+        Self {
+            stopped: true,
+            active_runs: Vec::new(),
+        }
+    }
+}
+
+fn read_runs(path: &Path) -> Option<Vec<ActiveRun>> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    // `stop-refused` is `{active_runs: [...]}`, `active-runs.json` the list itself.
+    let list = value.get("active_runs").cloned().unwrap_or(value);
+    serde_json::from_value(list).ok()
+}
+
+/// Asks the console to stop and waits for its answer: gone, or refused because runs are active
+/// (a console from before RFC 0261 never refuses). A console that answers neither within 20 s
+/// is hung and is ended, as before.
+pub fn stop_console(home: &Path, mode: StopMode) -> Result<StopOutcome> {
     let Some(pid) = running(home) else {
         let _ = std::fs::remove_file(control(home).join(PID_FILE));
-        println!("The console is not running.");
-        return Ok(());
+        return Ok(StopOutcome::stopped());
     };
-    std::fs::write(control(home).join(STOP), b"")?;
     let pid_file = control(home).join(PID_FILE);
-    if !wait_until(Duration::from_secs(20), || !pid_file.exists()) {
-        eprintln!("The console did not stop within 20 seconds; ending it.");
-        if let Some(c) = pid.console {
-            force_end(c);
+    let refused = control(home).join(REFUSED);
+    let marker: &[u8] = if mode == StopMode::Force {
+        b"force"
+    } else {
+        b""
+    };
+    let mut announced = false;
+    loop {
+        let _ = std::fs::remove_file(&refused);
+        std::fs::write(control(home).join(STOP), marker)?;
+        if !wait_until(Duration::from_secs(20), || {
+            !pid_file.exists() || refused.exists()
+        }) {
+            eprintln!("The console did not stop within 20 seconds; ending it.");
+            if let Some(c) = pid.console {
+                force_end(c);
+            }
+            force_end(pid.supervisor);
+            remove_markers(home);
+            let _ = std::fs::remove_file(&pid_file);
+            return Ok(StopOutcome::stopped());
         }
-        force_end(pid.supervisor);
-        remove_markers(home);
-        let _ = std::fs::remove_file(&pid_file);
+        if !pid_file.exists() {
+            let _ = std::fs::remove_file(&refused);
+            return Ok(StopOutcome::stopped());
+        }
+        let runs = read_runs(&refused).unwrap_or_default();
+        let _ = std::fs::remove_file(&refused);
+        if mode != StopMode::Wait {
+            return Ok(StopOutcome {
+                stopped: false,
+                active_runs: runs,
+            });
+        }
+        if !announced {
+            eprintln!("Waiting for {} to finish…", runs_words(&runs));
+            announced = true;
+        }
+        std::thread::sleep(Duration::from_secs(2));
     }
-    println!("The console stopped.");
+}
+
+fn runs_words(runs: &[ActiveRun]) -> String {
+    match runs.len() {
+        1 => "1 run".into(),
+        n => format!("{n} runs"),
+    }
+}
+
+/// `ekos console stop [--wait|--force] [--json]`. Refused, it names the runs and exits non-zero.
+pub fn stop(home: &Path, mode: StopMode, json: bool) -> Result<()> {
+    let outcome = stop_console(home, mode)?;
+    if json {
+        println!("{}", serde_json::to_string(&outcome)?);
+    } else if outcome.stopped {
+        println!("The console stopped.");
+    } else {
+        println!(
+            "The console keeps running: {} in progress would be lost.",
+            runs_words(&outcome.active_runs)
+        );
+        for r in &outcome.active_runs {
+            println!(
+                "  {}  {}  {} since {}",
+                r.id, r.workspace, r.command, r.since
+            );
+        }
+        println!("Wait for them with `ekos console stop --wait`, or end them with `--force`.");
+    }
+    if !outcome.stopped {
+        bail!("the console was not stopped: runs are in progress");
+    }
     Ok(())
 }
 
@@ -634,8 +749,58 @@ pub fn restart(home: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `ekos console status`.
-pub fn status(home: &Path) -> Result<()> {
+/// What `ekos console status --json` prints (RFC 0261 §2.3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct StatusJson {
+    /// `running` (it answers), `starting` (a supervisor, no answer yet) or `stopped`.
+    pub state: &'static str,
+    /// The home has its `console.toml`: `ekos setup` ran. Without it this is a first run, and the
+    /// desktop app sends the person to EKOS Setup (RFC 0261 §2.3 step 2).
+    pub set_up: bool,
+    pub mode: String,
+    pub host: String,
+    pub port: u16,
+    pub since: Option<String>,
+    pub supervisor: Option<u32>,
+    pub console: Option<u32>,
+    /// The runs in progress, while it runs; `null` from a console that does not report them.
+    pub active_runs: Option<Vec<ActiveRun>>,
+}
+
+pub fn status_json(home: &Path) -> Result<StatusJson> {
+    let conf = server_conf(home, &std_env)?;
+    let pid = read_pid(home);
+    let up = pid.as_ref().is_some_and(|p| healthy(&p.host, p.port));
+    let state = match (&pid, up) {
+        (Some(_), true) => "running",
+        (Some(_), false) => "starting",
+        (None, _) => "stopped",
+    };
+    let active_runs = match state {
+        "running" => read_runs(&control(home).join(ACTIVE)),
+        _ => Some(Vec::new()),
+    };
+    Ok(StatusJson {
+        state,
+        set_up: config_file(home, &std_env).is_file(),
+        mode: conf.mode.clone(),
+        host: pid
+            .as_ref()
+            .map_or(conf.host.clone(), |p| url_host(&p.host)),
+        port: pid.as_ref().map_or(conf.port, |p| p.port),
+        since: pid.as_ref().map(|p| p.started.clone()),
+        supervisor: pid.as_ref().map(|p| p.supervisor),
+        console: pid.as_ref().and_then(|p| p.console),
+        active_runs,
+    })
+}
+
+/// `ekos console status [--json]`.
+pub fn status(home: &Path, json: bool) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string(&status_json(home)?)?);
+        return Ok(());
+    }
     let conf = server_conf(home, &std_env)?;
     match read_pid(home) {
         Some(p) if healthy(&p.host, p.port) => println!(
@@ -993,7 +1158,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path();
         std::fs::create_dir_all(control(home)).unwrap();
-        status(home).unwrap();
+        status(home, false).unwrap();
         // A pid file left by a console that is gone is removed by stop.
         write_pid(
             home,
@@ -1006,8 +1171,8 @@ mod tests {
             },
         )
         .unwrap();
-        status(home).unwrap();
-        stop(home).unwrap();
+        status(home, true).unwrap();
+        stop(home, StopMode::Ask, false).unwrap();
         assert!(read_pid(home).is_none());
         assert!(
             logs(home, 10).is_err(),
@@ -1036,7 +1201,7 @@ mod tests {
         let up = std::sync::Arc::new(AtomicBool::new(true));
         let port = fake_console(up.clone());
         let local = home_running_at(port, "local");
-        status(local.path()).unwrap();
+        status(local.path(), false).unwrap();
         open(local.path(), true, false).unwrap();
         let codes = std::fs::read_dir(control(local.path()).join(SIGNIN_DIR)).unwrap();
         assert_eq!(codes.count(), 1, "local mode signs in with one stored code");
@@ -1051,7 +1216,8 @@ mod tests {
 
         // Running but not answering.
         up.store(false, std::sync::atomic::Ordering::SeqCst);
-        status(team.path()).unwrap();
+        status(team.path(), false).unwrap();
+        assert_eq!(status_json(team.path()).unwrap().state, "starting");
     }
 
     #[test]
@@ -1070,9 +1236,105 @@ mod tests {
                 std::fs::remove_file(control(&home).join(PID_FILE)).unwrap();
             })
         };
-        stop(&home).unwrap();
+        stop(&home, StopMode::Ask, false).unwrap();
         watcher.join().unwrap();
         assert!(read_pid(&home).is_none());
+    }
+
+    /// A fake supervisor for RFC 0261 §2.3: answers each stop request with a refusal naming one
+    /// run, `refusals` times, then stops (removes the pid file). Returns the markers' texts.
+    fn refusing_console(home: PathBuf, refusals: usize) -> std::thread::JoinHandle<Vec<String>> {
+        std::thread::spawn(move || {
+            let mut seen = Vec::new();
+            let run = r#"{"active_runs":[{"id":"r1","workspace":"shop","command":"build","status":"running","since":"t0"}]}"#;
+            loop {
+                let marker = control(&home).join(STOP);
+                let Ok(text) = std::fs::read_to_string(&marker) else {
+                    std::thread::sleep(Duration::from_millis(20));
+                    continue;
+                };
+                seen.push(text.clone());
+                let _ = std::fs::remove_file(&marker);
+                if seen.len() > refusals || text.contains("force") {
+                    std::fs::remove_file(control(&home).join(PID_FILE)).unwrap();
+                    return seen;
+                }
+                std::fs::write(control(&home).join(REFUSED), run).unwrap();
+            }
+        })
+    }
+
+    #[test]
+    fn a_stop_with_runs_in_progress_is_refused_and_names_them() {
+        use std::sync::atomic::AtomicBool;
+        let port = fake_console(std::sync::Arc::new(AtomicBool::new(true)));
+        let dir = home_running_at(port, "local");
+        let home = dir.path().to_path_buf();
+        let console = refusing_console(home.clone(), usize::MAX);
+        let out = stop_console(&home, StopMode::Ask).unwrap();
+        assert!(!out.stopped);
+        assert_eq!(out.active_runs.len(), 1);
+        assert_eq!(out.active_runs[0].command, "build");
+        assert_eq!(
+            serde_json::to_value(&out).unwrap()["active_runs"][0]["id"],
+            "r1",
+            "the JSON names the run"
+        );
+        assert!(read_pid(&home).is_some(), "the console keeps running");
+        assert!(
+            !control(&home).join(REFUSED).exists(),
+            "the answer is read once"
+        );
+        // Let the fake console go: a forced stop ends it.
+        assert!(stop_console(&home, StopMode::Force).unwrap().stopped);
+        assert_eq!(
+            console.join().unwrap().last().map(String::as_str),
+            Some("force")
+        );
+    }
+
+    #[test]
+    fn a_waiting_stop_asks_again_until_the_runs_are_done() {
+        use std::sync::atomic::AtomicBool;
+        let port = fake_console(std::sync::Arc::new(AtomicBool::new(true)));
+        let dir = home_running_at(port, "local");
+        let home = dir.path().to_path_buf();
+        let console = refusing_console(home.clone(), 1);
+        let out = stop_console(&home, StopMode::Wait).unwrap();
+        assert_eq!(out, StopOutcome::stopped());
+        assert_eq!(
+            console.join().unwrap(),
+            ["", ""],
+            "asked twice, never forced"
+        );
+        assert_eq!(serde_json::to_string(&out).unwrap(), r#"{"stopped":true}"#);
+    }
+
+    #[test]
+    fn status_json_reports_the_state_and_the_runs() {
+        use std::sync::atomic::AtomicBool;
+        let stopped = tempfile::tempdir().unwrap();
+        let s = status_json(stopped.path()).unwrap();
+        assert_eq!(
+            (s.state, s.supervisor, s.active_runs),
+            ("stopped", None, Some(vec![]))
+        );
+        assert!(!s.set_up, "no console.toml: a first run");
+
+        let port = fake_console(std::sync::Arc::new(AtomicBool::new(true)));
+        let dir = home_running_at(port, "local");
+        // A console from before RFC 0261 writes no list: unknown, not empty.
+        assert_eq!(status_json(dir.path()).unwrap().active_runs, None);
+        std::fs::write(
+            control(dir.path()).join(ACTIVE),
+            r#"[{"id":"r1","workspace":"shop","command":"build"}]"#,
+        )
+        .unwrap();
+        let s = status_json(dir.path()).unwrap();
+        assert_eq!(s.state, "running");
+        assert!(s.set_up);
+        assert_eq!(s.port, port);
+        assert_eq!(s.active_runs.unwrap()[0].workspace, "shop");
     }
 
     #[test]

@@ -33,7 +33,7 @@ stage_passed='[[ $rc -eq 0 ]]'
 
 cleanup() {
   for h in "$HOME/.ekos" "$WORK/home2"; do
-    [[ -x "$h/bin/ekos" ]] && "$h/bin/ekos" --home "$h" console stop >/dev/null 2>&1 || true
+    [[ -x "$h/bin/ekos" ]] && "$h/bin/ekos" --home "$h" console stop --force >/dev/null 2>&1 || true
   done
   [[ -n "${WIZARD_PID:-}" ]] && kill "$WIZARD_PID" 2>/dev/null || true
   [[ "${EKOS_E2E_KEEP:-}" = 1 ]] && echo "kept $WORK" || rm -rf "$WORK"

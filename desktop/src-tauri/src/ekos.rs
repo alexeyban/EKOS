@@ -25,6 +25,25 @@ impl OpenTarget {
     }
 }
 
+/// What `ekos console status --json` says (RFC 0261 §2.3); only the fields the shell reads.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Status {
+    pub state: String,
+    /// `false` when the home has no `console.toml`: a first run, EKOS Setup has not run.
+    #[serde(default = "yes")]
+    pub set_up: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Status {
+    pub fn running(&self) -> bool {
+        self.state == "running"
+    }
+}
+
 /// The `ekos` program (RFC 0261 §2.3): beside the app's own executable, as the console finds its
 /// runtime; else `EKOS_BIN`; else where an installer or `ekos setup` puts it; else `ekos` from
 /// `PATH` (a checkout). The installed places matter on macOS, where an app started from the Finder
@@ -72,17 +91,52 @@ impl Ekos {
         Ok(stdout)
     }
 
-    /// Whether the console answers now (`ekos console status`).
-    pub fn is_running(&self) -> Result<bool> {
-        Ok(status_says_running(&self.console(&["status"])?))
+    /// The console's state (`ekos console status --json`). An `ekos` from before the flag
+    /// answers in words; then only "running" is known, and the home counts as set up.
+    pub fn status(&self) -> Result<Status> {
+        match self.console(&["status", "--json"]) {
+            Ok(out) => parse_status(&out),
+            Err(_) => Ok(Status {
+                state: if status_says_running(&self.console(&["status"])?) {
+                    "running".into()
+                } else {
+                    "stopped".into()
+                },
+                set_up: true,
+            }),
+        }
     }
 
     pub fn start(&self) -> Result<()> {
         self.console(&["start"]).map(drop)
     }
 
-    pub fn stop(&self) -> Result<()> {
-        self.console(&["stop"]).map(drop)
+    /// `ekos console stop --json`: stops only when no run is in progress (RFC 0261 §2.3). Returns
+    /// whether it stopped; a refusal is not an error, the console just keeps running.
+    pub fn stop_if_idle(&self) -> Result<bool> {
+        let mut cmd = Command::new(&self.program);
+        cmd.args(["console", "stop", "--json"]).stdin(Stdio::null());
+        no_window(&mut cmd);
+        let out = cmd
+            .output()
+            .with_context(|| format!("running {}", self.program.display()))?;
+        Ok(stopped_from(
+            &String::from_utf8_lossy(&out.stdout),
+            out.status.success(),
+        ))
+    }
+
+    /// Starts EKOS Setup (`ekos setup`: the set-up wizard in the browser) and returns at once.
+    pub fn open_setup(&self) -> Result<()> {
+        let mut cmd = Command::new(&self.program);
+        cmd.arg("setup")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        no_window(&mut cmd);
+        cmd.spawn()
+            .with_context(|| format!("running {} setup", self.program.display()))?;
+        Ok(())
     }
 
     pub fn restart(&self) -> Result<()> {
@@ -153,6 +207,30 @@ pub fn status_says_running(stdout: &str) -> bool {
     stdout.trim_start().starts_with("running at ")
 }
 
+/// The JSON line of `status --json`.
+pub fn parse_status(stdout: &str) -> Result<Status> {
+    let line = stdout
+        .lines()
+        .rev()
+        .find(|l| l.trim_start().starts_with('{'))
+        .context("`ekos console status --json` printed no JSON")?;
+    serde_json::from_str(line).context("reading `ekos console status --json`")
+}
+
+/// Whether `stop --json` stopped the console: its `stopped` field, else its exit status. (An
+/// `ekos` from before the flag refuses it, exits non-zero, and the console is left running.)
+pub fn stopped_from(stdout: &str, success: bool) -> bool {
+    #[derive(Deserialize)]
+    struct Stopped {
+        stopped: bool,
+    }
+    stdout
+        .lines()
+        .rev()
+        .find_map(|l| serde_json::from_str::<Stopped>(l.trim()).ok())
+        .map_or(success, |s| s.stopped)
+}
+
 /// The JSON line of `open --json`; anything printed before it (e.g. by `--start`) is skipped.
 pub fn parse_open_target(stdout: &str) -> Result<OpenTarget> {
     let line = stdout
@@ -214,6 +292,35 @@ mod tests {
         assert!(!status_says_running(
             "not running (configured for http://127.0.0.1:8000 in local mode)"
         ));
+    }
+
+    #[test]
+    fn the_status_says_whether_it_runs_and_whether_the_home_is_set_up() {
+        let s = parse_status(
+            r#"{"state":"running","set_up":true,"mode":"local","host":"127.0.0.1","port":8000,"since":"t","supervisor":1,"console":2,"active_runs":[]}"#,
+        )
+        .unwrap();
+        assert!(s.running() && s.set_up);
+        let first = parse_status(r#"{"state":"stopped","set_up":false}"#).unwrap();
+        assert!(!first.running() && !first.set_up);
+        let starting = parse_status(r#"{"state":"starting"}"#).unwrap();
+        assert!(
+            !starting.running() && starting.set_up,
+            "a missing field means set up"
+        );
+        assert!(parse_status("running at http://…").is_err());
+    }
+
+    #[test]
+    fn a_refused_stop_is_told_apart_from_a_stopped_console() {
+        assert!(stopped_from("{\"stopped\":true}\n", true));
+        assert!(!stopped_from(
+            r#"{"stopped":false,"active_runs":[{"id":"r1"}]}"#,
+            false
+        ));
+        // No JSON line: the exit status decides.
+        assert!(stopped_from("The console stopped.\n", true));
+        assert!(!stopped_from("", false));
     }
 
     #[test]

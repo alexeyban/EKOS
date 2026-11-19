@@ -1,6 +1,6 @@
 [package]
 name = "ekos-desktop"
-version = "1.6.0"
+version = "1.6.1"
 edition = "2024"
 description = "EKOS.DEV desktop shell around the EKOS console (RFC 0261)"
 license = "Apache-2.0"
@@ -18,3 +18,4 @@ serde_json = "1"
 anyhow = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "cookies", "json", "rustls-tls"] }
 url = "2"
+tauri-plugin-single-instance = "2"

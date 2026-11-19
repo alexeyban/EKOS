@@ -7194,9 +7194,12 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
 - [x] RFC 0261 D1 (part): the app in the MSI/pkg/deb/rpm and the full packages, built and unit-tested on
       Linux, Windows and macOS by the release workflow; installer tests check it is placed, linked and
       removed; v1.6.0 (devlog_336)
-- [ ] RFC 0261 D1: `console status|stop --json`, `stop` refusing while runs are active, single instance;
-      the app started on a fresh Windows and macOS by a person; notification app name "EKOS.DEV"
-      through the `.desktop` entry; a start-up screen that says "run EKOS Setup first" when no home exists
+- [x] RFC 0261 D1: `ekos console status --json` (with `set_up` and the runs in progress), `stop --json`,
+      `stop` refusing while runs are active (`--wait`, `--force`; uninstall and the MSI force), single
+      instance, and a start-up screen that sends a home without `console.toml` to EKOS Setup (devlog_339)
+- [ ] RFC 0261 D1: the app started on a fresh Windows and macOS by a person; its window seen with the new
+      start-up screen and a second start (no Xvfb here to look without the owner's desktop); notification
+      app name "EKOS.DEV" through the `.desktop` entry
 - [x] RFC 0261 U1 + U2 (part of U3): tokens and a per-person light/dark/system theme, the sidebar shell from
       one navigation model (`web/ui/src/nav.ts`), badges, status bar, the command palette (Ctrl/⌘ K), and the
       Workspaces, RunDetail and evidence-panel pages; fonts bundled (devlog_337)

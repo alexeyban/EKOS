@@ -212,6 +212,8 @@ login. It shows the exact list of steps before doing anything. Afterwards:
 
 ```bash
 ekos console open | status | stop | start | restart | logs
+ekos console stop            # refuses while runs are in progress and names them;
+                              # --wait waits for them, --force ends them (RFC 0261)
 ekos setup                  # change any of it later
 ekos uninstall              # the program, login entry, PATH line, agent entries; keeps projects
 ekos uninstall --ui         # the same on a page in the browser: what goes, your projects, confirm
@@ -325,7 +327,7 @@ step only applies if you clicked the link in a browser.
 #### Windows
 
 ```powershell
-$Version = "v1.6.0"
+$Version = "v1.6.1"
 $Asset   = "ekos-$($Version -replace '^v','')-x86_64-pc-windows-msvc.zip"
 $Base    = "https://github.com/alexeyban/EKOS/releases/download/$Version"
 

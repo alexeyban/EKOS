@@ -231,7 +231,9 @@ async def _lifespan(app: FastAPI):
 
     # RFC 0185: under `ekos console`, stop and restart arrive as files in the control directory.
     watcher = (
-        asyncio.create_task(lifecycle.watch(settings.control_dir)) if settings.supervised else None
+        asyncio.create_task(lifecycle.watch(settings.control_dir, active_runs=models.active_runs))
+        if settings.supervised
+        else None
     )
     holder = asyncio.create_task(lease.hold(lifecycle.shut_down)) if lease is not None else None
     # RFC 0253: the channels service, only when a channel is configured.

@@ -499,6 +499,26 @@ def update_run(run_id: str, **fields: Any) -> None:
         s.commit()
 
 
+def active_runs() -> list[dict[str, Any]]:
+    """Queued or running runs, oldest first, as `ekos console stop` and `status --json` show."""
+    with session() as s:
+        rows = list(
+            s.exec(
+                select(Run).where(Run.status.in_(["queued", "running"])).order_by(Run.created_at)
+            )
+        )
+    return [
+        {
+            "id": r.id,
+            "workspace": r.workspace_id,
+            "command": r.command,
+            "status": r.status,
+            "since": (r.started_at or r.created_at).isoformat(),
+        }
+        for r in rows
+    ]
+
+
 def sweep_stale_runs() -> int:
     """On startup, any run left `queued`/`running` (the console died mid-run) is `interrupted`."""
     with session() as s:

@@ -106,8 +106,10 @@
     </Feature>
 
     <!-- A console started from this program holds its files open: stop it before removing them.
-         `console stop` returns at once when none runs; a failure never stops the uninstall. -->
-    <CustomAction Id="StopConsole" FileRef="EkosExe" ExeCommand="console stop" Execute="immediate"
+         `console stop` returns at once when none runs; a failure never stops the uninstall.
+         `--force`: since RFC 0261 a plain stop refuses while runs are in progress, and the files
+         must go (the stop the MSI did before, which also ended running work). -->
+    <CustomAction Id="StopConsole" FileRef="EkosExe" ExeCommand="console stop --force" Execute="immediate"
                   Return="ignore" />
     <InstallExecuteSequence>
       <Custom Action="StopConsole" Before="InstallValidate" Condition='REMOVE="ALL"' />

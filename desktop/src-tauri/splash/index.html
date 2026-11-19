@@ -62,6 +62,10 @@
   }
   button:hover { border-color: var(--accent); }
   button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .setup { margin: 0 0 18px; padding: 14px 16px; border-radius: 10px; background: var(--soft); }
+  .setup h2 { margin: 0 0 6px; font-size: 15px; }
+  .setup p { margin: 0 0 12px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -73,6 +77,15 @@
     <li id="s3" data-state="idle"><span class="dot" aria-hidden="true"></span>Signing you in</li>
   </ol>
   <p class="error" id="error" role="alert"></p>
+  <section class="setup" id="setup" hidden aria-labelledby="setup-title">
+    <h2 id="setup-title">Run EKOS Setup first</h2>
+    <p>This EKOS home is not set up yet. EKOS Setup asks where your projects live and how the
+      console runs, then installs it. It opens in your browser; come back here when it is done.</p>
+    <div class="actions">
+      <button type="button" class="primary" id="open-setup">Open EKOS Setup</button>
+      <button type="button" id="retry">Try again</button>
+    </div>
+  </section>
   <p class="label">console.log</p>
   <pre id="log" aria-live="polite">waiting for the console to answer on 127.0.0.1</pre>
   <div class="actions">
@@ -86,6 +99,16 @@
     step(n, state) { document.getElementById("s" + n).dataset.state = state; },
     detail(text) { document.getElementById("log").textContent = text; },
     log(text) { const el = document.getElementById("log"); el.textContent = text; el.scrollTop = el.scrollHeight; },
+    reset() {
+      ["s1", "s2", "s3"].forEach((id) => { document.getElementById(id).dataset.state = "idle"; });
+      const el = document.getElementById("error"); el.textContent = ""; el.style.display = "none";
+      document.getElementById("setup").hidden = true;
+    },
+    needsSetup() {
+      document.getElementById("s1").dataset.state = "failed";
+      document.getElementById("setup").hidden = false;
+      document.getElementById("open-setup").focus();
+    },
     teamMode() {
       document.getElementById("s3").dataset.state = "failed";
       const el = document.getElementById("error");
@@ -99,6 +122,8 @@
   };
   document.getElementById("show-log").addEventListener("click", () => invoke("show_log"));
   document.getElementById("browser").addEventListener("click", () => invoke("open_in_browser"));
+  document.getElementById("open-setup").addEventListener("click", () => invoke("open_setup"));
+  document.getElementById("retry").addEventListener("click", () => invoke("retry_startup"));
   invoke("startup_ready");
 </script>
 </body>

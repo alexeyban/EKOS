@@ -1064,8 +1064,9 @@ fn remove_old_program(
     windows_path: Option<&Path>,
     manifest: &mut Manifest,
 ) -> Result<String> {
-    // The old console may run from the old copy; on Windows its files are in use.
-    super::console::stop(&cx.layout.home)?;
+    // The old console may run from the old copy; on Windows its files are in use. A run in
+    // progress stops the step rather than being lost (RFC 0261 §2.3).
+    super::console::stop(&cx.layout.home, super::console::StopMode::Ask, false)?;
     remove_path_lines(path_files)?;
     manifest.path_files.retain(|f| !path_files.contains(f));
     if let Some(bin) = windows_path {
@@ -1475,7 +1476,11 @@ pub fn uninstall(home: &Path, purge: bool, m: &Machine, fx: &dyn Effects) -> Res
             message: r.err().map(|e| format!("{e:#}")).unwrap_or_default(),
         })
     };
-    step("stop the console", super::console::stop(home));
+    // The person confirmed the uninstall; runs in progress end (RFC 0261 §2.3: uninstall forces).
+    step(
+        "stop the console",
+        super::console::stop(home, super::console::StopMode::Force, false),
+    );
     if let Some(service) = &manifest.service {
         let r = match service.as_str() {
             "linux" => fx
