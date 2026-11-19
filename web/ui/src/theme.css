@@ -1,23 +1,132 @@
-/* EKOS house palette — mirrors docs/assets/theme.css (light + dark). */
+/* EKOS design tokens (RFC 0261 §2.7, the EKOS.DEV design walkthrough). The house palette mirrors
+   docs/assets/theme.css. Light and dark follow the system unless a person chose one
+   (`data-theme` on <html>, set before first paint by index.html). The older names at the end
+   (`--ink`, `--accent-a`, …) are aliases so existing rules keep working. */
 :root {
-  --ground: #f6f4fc;
-  --ground-raised: #ffffff;
-  --ink: #171326;
-  --ink-soft: #5c5578;
-  --rule: #e3ddf5;
-  --accent-a: #7c3aed;
-  --accent-b: #059669;
-  --bad: #dc2f57;
+  color-scheme: light;
+  /* Surfaces */
+  --bg: #f6f4fc;
+  --surface: #ffffff;
+  --surface-soft: #efeafb;
+  --border: #e3ddf5;
+  /* Text */
+  --text: #171326;
+  --text-2: #5c5578;
+  /* Accent */
+  --accent: #7c3aed;
+  --accent-text: #6d28d9;
+  --accent-soft: #ede5fd;
+  --on-accent: #ffffff;
+  /* State: text on a soft tint of the same hue */
+  --ok: #047857;
+  --ok-soft: #dcf5ea;
+  --warn: #8a5a06;
+  --warn-soft: #fbefd5;
+  --bad: #be1e46;
+  --bad-soft: #fbe3e9;
+  --info: #1d5fd1;
+  --info-soft: #e1ebfc;
+  /* Graph node kinds */
+  --kind-table: #7c3aed;
+  --kind-class: #3b6fd9;
+  --kind-method: #5b93e6;
+  --kind-column: #a77bf0;
+
+  /* Type */
+  --font-sans: "Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --mono: var(--font-mono);
+  --fs-label: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-h3: 16px;
+  --fs-h2: 20px;
+  --fs-h1: 26px;
+  /* Space (4 px steps) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  /* Shape */
+  --r-chip: 999px;
+  --r-row: 7px;
+  --r-btn: 8px;
+  --r-inner: 10px;
+  --r-card: 14px;
+  --h-btn: 32px;
+  --h-chip: 20px;
+  --h-row: 28px;
+  --shadow-1: 0 1px 2px rgba(23, 19, 38, 0.06);
+  --shadow-2: 0 16px 48px rgba(23, 19, 38, 0.18);
+  --focus: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+  --sidebar-w: 228px;
 }
+
 @media (prefers-color-scheme: dark) {
-  :root {
-    --ground: #0b0a12;
-    --ground-raised: #14121d;
-    --ink: #f3f1fa;
-    --ink-soft: #a7a2c4;
-    --rule: rgba(255, 255, 255, 0.1);
-    --accent-a: #9945ff;
-    --accent-b: #14f195;
-    --bad: #ff5c7a;
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0b0a12;
+    --surface: #14121d;
+    --surface-soft: #1d1a2b;
+    --border: rgba(255, 255, 255, 0.1);
+    --text: #f3f1fa;
+    --text-2: #a7a2c4;
+    --accent: #9945ff;
+    --accent-text: #bb98ff;
+    --accent-soft: rgba(153, 69, 255, 0.18);
+    --ok: #14f195;
+    --ok-soft: rgba(20, 241, 149, 0.12);
+    --warn: #f5c15c;
+    --warn-soft: rgba(245, 193, 92, 0.14);
+    --bad: #ff7a92;
+    --bad-soft: rgba(255, 122, 146, 0.14);
+    --info: #7fb0ff;
+    --info-soft: rgba(127, 176, 255, 0.14);
+    --kind-table: #9945ff;
+    --kind-class: #4f86f0;
+    --kind-method: #6ea8f5;
+    --kind-column: #b993ff;
+    --shadow-1: none;
+    --shadow-2: 0 16px 48px rgba(0, 0, 0, 0.55);
   }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0a12;
+  --surface: #14121d;
+  --surface-soft: #1d1a2b;
+  --border: rgba(255, 255, 255, 0.1);
+  --text: #f3f1fa;
+  --text-2: #a7a2c4;
+  --accent: #9945ff;
+  --accent-text: #bb98ff;
+  --accent-soft: rgba(153, 69, 255, 0.18);
+  --ok: #14f195;
+  --ok-soft: rgba(20, 241, 149, 0.12);
+  --warn: #f5c15c;
+  --warn-soft: rgba(245, 193, 92, 0.14);
+  --bad: #ff7a92;
+  --bad-soft: rgba(255, 122, 146, 0.14);
+  --info: #7fb0ff;
+  --info-soft: rgba(127, 176, 255, 0.14);
+  --kind-table: #9945ff;
+  --kind-class: #4f86f0;
+  --kind-method: #6ea8f5;
+  --kind-column: #b993ff;
+  --shadow-1: none;
+  --shadow-2: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+/* The names the console's CSS used before RFC 0261. */
+:root {
+  --ground: var(--bg);
+  --ground-raised: var(--surface);
+  --ink: var(--text);
+  --ink-soft: var(--text-2);
+  --rule: var(--border);
+  --accent-a: var(--accent);
+  --accent-b: var(--ok);
 }

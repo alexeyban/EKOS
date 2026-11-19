@@ -7197,3 +7197,8 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
 - [ ] RFC 0261 D1: `console status|stop --json`, `stop` refusing while runs are active, single instance;
       the app started on a fresh Windows and macOS by a person; notification app name "EKOS.DEV"
       through the `.desktop` entry; a start-up screen that says "run EKOS Setup first" when no home exists
+- [x] RFC 0261 U1 + U2 (part of U3): tokens and a per-person light/dark/system theme, the sidebar shell from
+      one navigation model (`web/ui/src/nav.ts`), badges, status bar, the command palette (Ctrl/⌘ K), and the
+      Workspaces, RunDetail and evidence-panel pages; fonts bundled (devlog_337)
+- [ ] RFC 0261 U1 exit: the `deploy/e2e` browser stages in Chromium **and WebKit** against the new shell; U3
+      page pass for the rest (Dashboard, Decide pages' list-and-detail, forms), skeletons and empty states

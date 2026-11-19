@@ -165,6 +165,8 @@ console, a first project and your agents — the same wizard as below.
 in its own window, started and signed in for you, with a tray menu of your projects and a
 notification when a run ends (RFC 0261; local mode). Run **EKOS Setup** once first. On Linux it needs
 WebKitGTK 4.1 and an AppIndicator library, which the `.deb` and `.rpm` recommend.
+The console itself (in the app and in a browser) has a sidebar of grouped pages and a command
+palette, **Ctrl/⌘ K**, to go to a page, switch project, find an object or open a command's form.
 
 The Linux packages need glibc 2.34 or newer (Ubuntu 22.04, Debian 12, RHEL 9); on older systems
 use the command-only `musl` archive below. Nothing is started as root, and no service is installed:

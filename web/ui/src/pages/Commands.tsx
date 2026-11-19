@@ -2,8 +2,8 @@
 // arguments. The server turns the form into an argv and checks every value; this page only
 // shows what will run and who may run it.
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
 
 export interface ArgSpec {
@@ -104,9 +104,18 @@ export function Commands() {
     enabled: id !== "",
   });
   const [filter, setFilter] = useState("");
-  const [picked, setPicked] = useState<string>("");
+  // RFC 0261: the command palette opens a command's form with `?cmd=<path>`.
+  const [searchParams] = useSearchParams();
+  const [picked, setPicked] = useState<string>(() => searchParams.get("cmd") ?? "");
   const [values, setValues] = useState<Values>({});
   const [confirm, setConfirm] = useState("");
+  const asked = searchParams.get("cmd");
+  useEffect(() => {
+    if (!asked) return;
+    setPicked(asked);
+    setValues({});
+    setConfirm("");
+  }, [asked]);
   const cmd = useMemo(
     () => list.data?.commands.find((c) => c.path.join(" ") === picked),
     [list.data, picked],

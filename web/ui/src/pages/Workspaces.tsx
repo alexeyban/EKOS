@@ -2,7 +2,16 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, apiDelete, apiPost } from "../api/client";
-import type { Health, TenantSummary, Workspace } from "../api/types";
+import type { Health, TenantSummary, Workspace, WorkflowStep } from "../api/types";
+
+/** The line under a project card: the first workflow step not done (RFC 0213), in words. */
+export function nextStepLine(steps: WorkflowStep[] | undefined): string | null {
+  if (!steps || steps.length === 0) return null;
+  const open = steps.find((s) => s.state !== "done");
+  if (!open) return "Every step is done";
+  const what = open.id === "review" ? "the review is waiting for you" : open.title.toLowerCase();
+  return `Step ${open.n} of ${steps.length}: ${what}`;
+}
 
 export function Workspaces() {
   const qc = useQueryClient();
@@ -19,32 +28,35 @@ export function Workspaces() {
   });
 
   return (
-    <>
-      <section className="card">
-        <strong>API</strong>{" "}
-        {health.isError ? (
-          <span className="err">unreachable: {String(health.error)}</span>
-        ) : health.data ? (
-          <span className="muted">
-            {health.data.service} <code>v{health.data.version}</code> — {health.data.status}
-          </span>
-        ) : (
-          <span className="muted">checking…</span>
-        )}
-      </section>
-
-      <section className="card">
-        <strong>Workspaces</strong>
-        {workspaces.isError && (
-          <p className="err">
-            {String(workspaces.error)} — set a console token above.
-          </p>
-        )}
-        {workspaces.data?.length === 0 && <p className="muted">none registered yet</p>}
-        <ul className="ws-list">
-          {workspaces.data?.map((w) => (
-            <li key={w.id}>
-              <Link to={`/w/${w.id}`}>{w.name}</Link>
+    <div className="projects-page">
+      <div className="page-head">
+        <h1 className="page-title">
+          Projects <span className="page-title-sub">registered with this console</span>
+        </h1>
+      </div>
+      {health.isError && (
+        <p className="banner warn-banner" role="alert">
+          The console API is unreachable: {String(health.error)}
+        </p>
+      )}
+      {workspaces.isError && (
+        <p className="err">
+          {String(workspaces.error)} — sign in again, or check the console&apos;s token.
+        </p>
+      )}
+      {workspaces.data?.length === 0 && (
+        <p className="muted empty-state">none registered yet — add a project below.</p>
+      )}
+      <ul className="project-grid">
+        {workspaces.data?.map((w) => (
+          <li key={w.id} className="project-card">
+            <div className="project-card-head">
+              <Link to={`/w/${w.id}`} className="project-card-link">
+                {w.name}
+              </Link>
+              <ServerChip w={w} />
+            </div>
+            <div className="chips">
               <code className="path">{w.path}</code>
               {w.tenant_id && w.tenant_id !== "default" && (
                 <span className="chip" title="tenant">
@@ -61,7 +73,10 @@ export function Workspaces() {
                   {w.roles.join(", ")}
                 </span>
               )}
-              <ServerChip w={w} />
+            </div>
+            <div className="project-card-foot">
+              {!w.restricted && <NextStep id={w.id} />}
+              <span className="topbar-gap" />
               {(!w.roles || w.roles.includes("admin")) && (
                 <button
                   className="linkish danger"
@@ -71,14 +86,26 @@ export function Workspaces() {
                   remove
                 </button>
               )}
-            </li>
-          ))}
-        </ul>
-      </section>
+            </div>
+          </li>
+        ))}
+      </ul>
 
       <RegisterForm />
-    </>
+    </div>
   );
+}
+
+/** The project's next workflow step, from the same query its step bar uses. */
+function NextStep({ id }: { id: string }) {
+  const bar = useQuery({
+    queryKey: ["workflow", id],
+    queryFn: () => api<{ steps: WorkflowStep[] }>(`/workspaces/${id}/workflow`),
+    staleTime: 60_000,
+    retry: false,
+  });
+  const line = nextStepLine(bar.data?.steps);
+  return line ? <span className="muted">{line}</span> : null;
 }
 
 function ServerChip({ w }: { w: Workspace }) {
@@ -138,8 +165,8 @@ function RegisterForm() {
   if (tenants.data && adminOf.length === 0) return null;
 
   return (
-    <section className="card">
-      <strong>Add a workspace</strong>
+    <section className="card add-project">
+      <strong className="card-title">Add a project</strong>
       <div className="reg-mode">
         <label>
           <input

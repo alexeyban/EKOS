@@ -26,11 +26,9 @@ interface Workspace {
   restricted?: boolean;
 }
 
-// What someone who sees only part of a workspace can open (RFC 0181): the pages that read
-// through their scope. The API refuses the others for them.
-const RESTRICTED_TABS = new Set(["graph"]);
-// What a read-only showcase leaves out: the pages that act or call a paid model (RFC 0251).
-export const READ_ONLY_HIDDEN = new Set(["run", "commands", "chat", "config"]);
+// The page rules live in the one navigation model (RFC 0261 §2.7); re-exported for the pages
+// and tests that import them from here.
+export { READ_ONLY_HIDDEN, RESTRICTED_TABS } from "./nav";
 
 // What the caller may do in the open workspace. Outside a workspace shell (or against an API
 // that sends no roles) the summary decides. These only hide controls; the API enforces.
@@ -40,32 +38,6 @@ export const mayAdmin = (me: Me) => me.canAdmin ?? me.role === "write";
 // False for someone who sees part of the workspace: a page then skips the requests the API
 // refuses them (statistics, conflicts) instead of making them and drawing nothing.
 export const seesAll = (me: Me | undefined) => me?.restricted !== true;
-
-// RFC 0198: extension pages come after the built-in tabs; a restricted reader sees none (their
-// commands read the whole workspace).
-export const extensionTabs = (pages?: { extension: string; id: string; title: string }[]) =>
-  (pages ?? []).map((p) => ({ to: `x/${p.extension}/${p.id}`, label: p.title, end: false }));
-
-const TABS: { to: string; label: string; end?: boolean }[] = [
-  { to: "", label: "Dashboard", end: true },
-  { to: "sources", label: "Sources" },
-  { to: "graph", label: "Graph" },
-  { to: "chat", label: "Chat" },
-  { to: "run", label: "Run" },
-  { to: "commands", label: "Commands" },
-  { to: "runs", label: "History" },
-  { to: "evals", label: "Evals" },
-  { to: "semantics", label: "Semantics" },
-  { to: "conflicts", label: "Conflicts" },
-  { to: "questions", label: "Questions" },
-  { to: "interaction", label: "Interaction" },
-  { to: "inbox", label: "Inbox" },
-  { to: "annotations", label: "Notes" },
-  { to: "integrity", label: "Integrity" },
-  { to: "transformations", label: "Transformations" },
-  { to: "review", label: "Review" },
-  { to: "config", label: "ekos.toml" },
-];
 
 export function WorkspaceShell() {
   const me = useOutletContext<Me>();
@@ -78,12 +50,6 @@ export function WorkspaceShell() {
   const name = current?.name ?? id;
   const roles = current?.roles;
   const restricted = current?.restricted === true;
-  // RFC 0198: one tab per page the console's binary declares (none for the public `ekos`).
-  const extPages = useQuery({
-    queryKey: ["extension-pages"],
-    queryFn: () => api<{ pages: { extension: string; id: string; title: string }[] }>("/extensions"),
-    staleTime: Infinity,
-  });
   const { pathname } = useLocation();
   const onScopedPage = pathname.replace(/\/$/, "").endsWith("/graph");
   const readOnly = me.read_only === true;
@@ -101,28 +67,6 @@ export function WorkspaceShell() {
 
   return (
     <>
-      <nav className="ws-nav">
-        <NavLink to="/" className="ws-nav-home" end>
-          ‹ workspaces
-        </NavLink>
-        <span className="ws-nav-name">{name}</span>
-        <span className="ws-nav-tabs">
-          {[...TABS, ...(restricted || readOnly ? [] : extensionTabs(extPages.data?.pages))]
-            .filter((t) => !restricted || RESTRICTED_TABS.has(t.to))
-            .filter((t) => !readOnly || !READ_ONLY_HIDDEN.has(t.to))
-            .map((t) => (
-            <NavLink
-              key={t.to}
-              to={t.to ? `/w/${id}/${t.to}` : `/w/${id}`}
-              end={t.end}
-              className={({ isActive }) => (isActive ? "ws-tab active" : "ws-tab")}
-            >
-              {t.label}
-            </NavLink>
-          ))}
-        </span>
-        {!restricted && mayOperate(scoped) && <InitAndCompile workspace={id} name={name} />}
-      </nav>
       {/* Until the list says whether this caller is restricted, a page would ask for what
           a restricted reader is refused. */}
       {ws.isPending ? null : restricted && !onScopedPage ? (
@@ -137,7 +81,12 @@ export function WorkspaceShell() {
         </section>
       ) : (
         <>
-          {!restricted && <StepBar workspace={id} />}
+          {!restricted && (
+            <div className="ws-bar">
+              <StepBar workspace={id} />
+              {mayOperate(scoped) && <InitAndCompile workspace={id} name={name} />}
+            </div>
+          )}
           <Outlet context={scoped} />
         </>
       )}

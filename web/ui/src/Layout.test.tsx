@@ -45,16 +45,16 @@ describe("Layout sign-out", () => {
 
     // Authenticated view is shown first.
     expect(await screen.findByText("workspace list")).toBeInTheDocument();
-    const button = screen.getByRole("button", { name: "sign out" });
-
-    await userEvent.click(button);
+    // Sign-out lives in the identity menu in the header.
+    await userEvent.click(screen.getByText("token", { selector: ".identity-name" }));
+    await userEvent.click(screen.getByRole("menuitem", { name: "sign out" }));
 
     // The stale `me.data` must not keep the console looking signed in: a logout 401s the `me`
     // refetch, which must drop us back to the token entry form.
     expect(await screen.findByLabelText("console token")).toBeInTheDocument();
     expect(logoutSpy).toHaveBeenCalled();
     expect(screen.queryByText("workspace list")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "sign out" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "sign out" })).not.toBeInTheDocument();
   });
 });
 

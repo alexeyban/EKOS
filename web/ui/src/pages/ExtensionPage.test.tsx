@@ -3,7 +3,8 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as client from "../api/client";
-import { extensionTabs, type Me } from "../WorkspaceShell";
+import { allItems, workspaceNav } from "../nav";
+import type { Me } from "../WorkspaceShell";
 import { ExtensionPage } from "./ExtensionPage";
 import { at, rowsOf, show, tone, type ExtPage } from "./extension-view";
 
@@ -109,11 +110,15 @@ describe("extension view helpers", () => {
     expect(rowsOf({ tables: "x" }, view)).toEqual([]);
   });
 
-  it("puts extension tabs after the built-in ones, keyed by extension and page", () => {
-    expect(extensionTabs([PAGE])).toEqual([
-      { to: "x/lakehouse/lakehouse", label: "Lakehouse", end: false },
-    ]);
-    expect(extensionTabs(undefined)).toEqual([]);
+  it("puts extension pages after the built-in ones, keyed by extension and page", () => {
+    const me = { mode: "local" as const, email: null, role: "write" as const };
+    const items = allItems(workspaceNav("w", me, { restricted: false }, [PAGE]));
+    expect(items[items.length - 1]).toMatchObject({
+      to: "/w/w/x/lakehouse/lakehouse",
+      label: "Lakehouse",
+      group: "Extensions",
+    });
+    expect(allItems(workspaceNav("w", me, { restricted: false })).some((i) => i.group === "Extensions")).toBe(false);
   });
 });
 

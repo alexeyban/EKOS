@@ -54,3 +54,22 @@ export function modelCalls(events: RunEvent[]): { completions: number; embedding
   const sum = (k: string) => lines.reduce((n, e) => n + (typeof e[k] === "number" ? (e[k] as number) : 0), 0);
   return { completions: sum("count"), embeddings: sum("embeddings") };
 }
+
+/** How long each command of the run has taken so far: its largest `t_ms`, by command name. */
+export function stageTimes(events: RunEvent[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const e of events) {
+    if (typeof e.cmd !== "string" || typeof e.t_ms !== "number") continue;
+    out[e.cmd] = Math.max(out[e.cmd] ?? 0, e.t_ms);
+  }
+  return out;
+}
+
+/** `m:ss` (or `h:mm:ss`) for a duration in milliseconds. */
+export function clock(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = String(total % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}

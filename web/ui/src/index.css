@@ -1,113 +1,48 @@
 @import "./theme.css";
+@import "./shell.css";
 
 * {
   box-sizing: border-box;
 }
 body {
   margin: 0;
-  background: var(--ground);
-  color: var(--ink);
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 a {
-  color: var(--accent-a);
+  color: var(--accent-text);
 }
-header {
-  display: flex;
-  align-items: center;
-  gap: 0.9rem;
-  padding: 0.7rem 1.25rem;
-  border-bottom: 1px solid var(--rule);
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
 }
-.brand {
-  font-size: 1.1rem;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-  text-decoration: none;
-  color: var(--ink);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
-.brand span {
-  color: var(--accent-a);
-}
-.hdr-link {
-  text-decoration: none;
-  font-size: 0.85rem;
-  font-weight: 550;
-  color: var(--ink-soft);
-  padding: 0.3rem 0.7rem;
-  border-radius: 7px;
-}
-.hdr-link:hover {
-  color: var(--ink);
-  background: var(--ground-raised);
-}
-
-/* ── per-workspace tab bar ── */
-.ws-nav {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0 0 1rem;
-  padding-bottom: 0.5rem;
-  border-bottom: 1px solid var(--rule);
-  flex-wrap: wrap;
-}
-.ws-nav-home {
-  text-decoration: none;
-  color: var(--ink-soft);
-  font-size: 0.82rem;
-}
-.ws-nav-home:hover {
-  color: var(--accent-a);
-}
-.ws-nav-name {
-  font-weight: 650;
-  margin-right: 0.4rem;
-}
-.ws-nav-action {
-  margin-left: auto;
-}
-.ws-nav-tabs {
-  display: flex;
-  gap: 0.25rem;
-}
-.ws-tab {
-  text-decoration: none;
-  color: var(--ink-soft);
-  font-size: 0.88rem;
-  font-weight: 550;
-  padding: 0.4rem 0.85rem;
-  border-radius: 8px;
-  border: 1px solid transparent;
-}
-.ws-tab:hover {
-  color: var(--ink);
-  background: var(--ground-raised);
-}
-.ws-tab.active {
-  color: var(--accent-a);
-  background: var(--ground-raised);
-  border-color: var(--rule);
-}
-main:has(.graph-page) .ws-nav {
-  margin-bottom: 0.5rem;
-  padding-bottom: 0.35rem;
-}
-
 /* small rounded action button (graph toolbar, etc.) */
 .pill {
   font: inherit;
-  font-size: 0.82rem;
-  padding: 0.32rem 0.75rem;
-  border-radius: 999px;
-  border: 1px solid var(--rule);
-  background: var(--ground-raised);
-  color: var(--ink);
+  font-size: var(--fs-small);
+  font-weight: 550;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: var(--r-btn);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
   cursor: pointer;
 }
 .pill:hover {
-  border-color: var(--accent-a);
+  border-color: var(--accent);
 }
 .graph-toolbar {
   display: flex;
@@ -115,51 +50,73 @@ main:has(.graph-page) .ws-nav {
   align-items: center;
   margin: 0 0 0.5rem;
 }
-main {
-  max-width: 940px;
-  margin: 0 auto;
-  padding: 1.5rem;
+/* the page column; the graph and the wide list pages use the full width */
+.app-content > * {
+  max-width: 1120px;
 }
-/* the graph page breaks out of the centered column and uses the full viewport */
-main:has(.graph-page) {
+.app-content:has(.graph-page) > *,
+.app-content:has(.sem-page) > *,
+.app-content:has(.wide-page) > * {
   max-width: none;
-  padding: 0.5rem 0.9rem;
 }
 .graph-page > .crumbs {
   margin: 0 0 0.4rem;
   font-size: 0.82rem;
 }
 .card {
-  background: var(--ground-raised);
-  border: 1px solid var(--rule);
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
-  margin: 1rem 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: var(--sp-4) var(--sp-5);
+  margin: var(--sp-4) 0;
+  box-shadow: var(--shadow-1);
 }
 .card > strong {
   display: block;
   margin-bottom: 0.5rem;
 }
 .muted {
-  color: var(--ink-soft);
-  font-size: 0.9rem;
+  color: var(--text-2);
 }
 .err {
   color: var(--bad);
   font-size: 0.9rem;
 }
-code {
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
-  font-size: 0.85em;
+code,
+kbd,
+pre {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
 }
+/* Buttons: outlined by default; the primary action (`.primary`, a form's submit) is filled. */
 button {
   font: inherit;
+  font-weight: 550;
   cursor: pointer;
-  border-radius: 8px;
-  border: 1px solid var(--accent-a);
-  background: var(--accent-a);
-  color: #fff;
-  padding: 0.4rem 0.85rem;
+  min-height: var(--h-btn);
+  border-radius: var(--r-btn);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 var(--sp-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+button.primary,
+button[type="submit"],
+button.save {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+button.primary:hover:not(:disabled),
+button[type="submit"]:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 button:disabled {
   opacity: 0.5;
@@ -168,8 +125,11 @@ button:disabled {
 .linkish {
   border: none;
   background: none;
-  color: var(--accent-a);
+  color: var(--accent-text);
   padding: 0;
+  min-height: 0;
+  display: inline;
+  font-weight: inherit;
   text-decoration: underline;
 }
 .linkish.danger {
@@ -241,24 +201,39 @@ ul.ws-list .path {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Chips: text on a soft tint of the same hue (the design's state language). */
 .chip {
-  font-size: 0.75rem;
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-  border: 1px solid var(--rule);
-  color: var(--ink-soft);
+  display: inline-flex;
+  align-items: center;
+  height: var(--h-chip);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  padding: 0 8px;
+  border-radius: var(--r-chip);
+  background: var(--surface-soft);
+  color: var(--text-2);
+  white-space: nowrap;
+  vertical-align: middle;
 }
 .chip.ok {
-  color: var(--accent-b);
-  border-color: var(--accent-b);
+  background: var(--ok-soft);
+  color: var(--ok);
 }
 .chip.bad {
+  background: var(--bad-soft);
   color: var(--bad);
-  border-color: var(--bad);
 }
 .chip.warn {
-  color: #b7791f;
-  border-color: #b7791f;
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.chip.accent {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.chip.info {
+  background: var(--info-soft);
+  color: var(--info);
 }
 .tiles {
   display: grid;
@@ -297,20 +272,20 @@ ul.checks li {
 }
 .dot {
   display: inline-block;
-  width: 0.6rem;
-  height: 0.6rem;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--ink-soft);
+  background: var(--text-2);
   vertical-align: middle;
 }
 .dot.ok {
-  background: var(--accent-b);
+  background: var(--ok);
 }
 .dot.fail {
   background: var(--bad);
 }
 .dot.warn {
-  background: #b7791f;
+  background: var(--warn);
 }
 @media (max-width: 640px) {
   .tiles {
@@ -391,13 +366,13 @@ pre.log {
   max-height: 460px;
   overflow: auto;
   margin-top: 0.6rem;
-  padding: 0.7rem 0.85rem;
-  background: #0b0a12;
-  color: #d6d3e6;
-  border-radius: 8px;
-  font-family: ui-monospace, "SF Mono", Consolas, monospace;
-  font-size: 0.78rem;
-  line-height: 1.5;
+  padding: 12px 14px;
+  background: var(--surface-soft);
+  color: var(--text);
+  border-radius: var(--r-inner);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -414,9 +389,6 @@ button.danger-btn {
   background: var(--bad);
   border-color: var(--bad);
 }
-header .chip {
-  font-size: 0.7rem;
-}
 
 /* ── Graph view ── */
 .graph-page.fs {
@@ -431,7 +403,7 @@ header .chip {
   display: grid;
   grid-template-columns: 230px 1fr;
   gap: 0.9rem;
-  height: calc(100vh - 150px); /* header + tab bar + toolbar */
+  height: calc(100vh - 210px); /* top bar + step bar + toolbar + status bar */
   min-height: 420px;
   /* drag the bottom-right corner to resize the whole graph area */
   resize: vertical;
@@ -613,43 +585,135 @@ header .chip {
 }
 .obj-panel {
   overflow: auto;
-  border: 1px solid var(--rule);
-  border-radius: 12px;
-  padding: 0.9rem 1rem;
-  font-size: 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  padding: var(--sp-4);
 }
-.obj-panel details {
-  margin: 0.5rem 0;
+.obj-head {
+  display: grid;
+  gap: 6px;
+  margin-bottom: var(--sp-3);
 }
-.obj-panel summary {
-  cursor: pointer;
-  color: var(--ink-soft);
+.obj-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-h3);
+}
+.obj-id {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.obj-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-3);
+}
+.obj-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: var(--sp-3) 0;
+  padding: 10px 12px;
+  border-radius: var(--r-inner);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-weight: 600;
+}
+.obj-banner span {
+  flex: 1;
+}
+.obj-banner a {
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
 }
 pre.props,
 pre.frag {
-  background: var(--ground);
-  border-radius: 6px;
-  padding: 0.5rem;
-  font-size: 0.72rem;
+  background: var(--surface-soft);
+  border-radius: var(--r-inner);
+  padding: 8px 10px;
+  margin: 0;
+  font-size: var(--fs-small);
   overflow-x: auto;
   white-space: pre-wrap;
 }
 .rel-list,
-.ev-list {
+.ev-list,
+.ev-cards {
   list-style: none;
   padding: 0;
-  margin: 0.3rem 0;
+  margin: var(--sp-2) 0;
 }
 .rel-list li,
 .ev-list li {
-  padding: 0.2rem 0;
-  border-top: 1px solid var(--rule);
+  padding: 6px 0;
+  border-top: 1px solid var(--border);
+}
+.ev-cards {
+  display: grid;
+  gap: var(--sp-2);
+}
+.ev-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-inner);
+}
+.ev-where {
+  font-size: var(--fs-small);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.ev-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+button.small-btn {
+  min-height: 26px;
+  padding: 0 8px;
+  font-size: var(--fs-small);
+}
+
+/* tabs: a row of text buttons with an accent line under the chosen one */
+.tabs {
+  display: flex;
+  gap: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  margin-bottom: var(--sp-3);
+  overflow-x: auto;
+}
+.tabs .tab {
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.tabs .tab:hover:not(:disabled) {
+  color: var(--text);
+  border-color: transparent;
+}
+.tabs .tab.active {
+  color: var(--accent-text);
+  border-bottom-color: var(--accent);
 }
 
 /* ── Business semantics review + LinkML viewer/editor (RFC 0170) ── */
-main:has(.sem-page) {
-  max-width: 1440px;
-}
 .pill.active {
   border-color: var(--accent-a);
   background: var(--accent-a);

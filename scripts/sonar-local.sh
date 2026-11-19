@@ -88,7 +88,11 @@ if [[ "${#ts[@]}" -gt 0 ]]; then
   # --ignore-scripts: the linters need no install scripts, and none may run.
   [[ -x "$tools/node_modules/.bin/eslint" ]] || (cd "$tools" && npm ci --ignore-scripts --no-audit --no-fund --loglevel=error)
   echo "── TypeScript: eslint sonarjs + jsx-a11y (changed lines)"
-  "$tools/node_modules/.bin/eslint" --config "$tools/eslint.config.mjs" --no-warn-ignored -f json "${ts[@]}" \
+  # eslint exits 1 for any finding in a file, including ones on lines nobody touched (such as a
+  # disable comment naming a plugin this config does not load), which the filter then drops: only
+  # exit 2, eslint itself failing, is an error here.
+  { "$tools/node_modules/.bin/eslint" --config "$tools/eslint.config.mjs" --no-warn-ignored -f json "${ts[@]}" \
+      || [[ $? -eq 1 ]]; } \
     | python3 -c '
 import json, sys
 for f in json.load(sys.stdin):

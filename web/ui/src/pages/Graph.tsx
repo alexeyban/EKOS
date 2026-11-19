@@ -646,6 +646,7 @@ export function Graph() {
             workspace={id}
             objectId={selectedId}
             asOf={isolate ? null : asOf}
+            disputed={disputed.has(selectedId)}
             onClose={() => setSelectedId(null)}
             onGoto={gotoObject}
             onIsolate={(oid) => {

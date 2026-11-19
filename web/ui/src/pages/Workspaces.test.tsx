@@ -33,11 +33,11 @@ afterEach(() => {
 });
 
 describe("Workspaces health banner", () => {
-  it("shows the health payload once loaded", async () => {
+  it("shows no banner while the API answers (the status bar carries the version)", async () => {
     stubWorkspaces([]);
     renderWorkspaces();
-    expect(await screen.findByText(/ekos-console-api/)).toBeInTheDocument();
-    expect(screen.getByText("v1.2.3")).toBeInTheDocument();
+    expect(await screen.findByText(/none registered yet/)).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("shows an unreachable message when the health check fails", async () => {
@@ -54,7 +54,7 @@ describe("Workspaces list", () => {
   it("shows an empty-state message when none are registered", async () => {
     stubWorkspaces([]);
     renderWorkspaces();
-    expect(await screen.findByText("none registered yet")).toBeInTheDocument();
+    expect(await screen.findByText(/none registered yet/)).toBeInTheDocument();
   });
 
   it("lists each workspace with its path and a ready server chip", async () => {
@@ -108,7 +108,7 @@ describe("RegisterForm", () => {
     const user = userEvent.setup();
 
     renderWorkspaces();
-    await screen.findByText("none registered yet");
+    await screen.findByText(/none registered yet/);
 
     await user.click(screen.getByLabelText("Existing workspace"));
     await user.type(screen.getByPlaceholderText("id"), "w1");
@@ -126,7 +126,7 @@ describe("RegisterForm", () => {
     const user = userEvent.setup();
 
     renderWorkspaces();
-    await screen.findByText("none registered yet");
+    await screen.findByText(/none registered yet/);
 
     await user.type(screen.getByPlaceholderText("id"), "shop");
     await user.type(screen.getByPlaceholderText("name"), "Shop");
@@ -148,7 +148,7 @@ describe("RegisterForm", () => {
     const user = userEvent.setup();
 
     renderWorkspaces();
-    await screen.findByText("none registered yet");
+    await screen.findByText(/none registered yet/);
 
     await user.type(screen.getByPlaceholderText("id"), "x");
     await user.type(screen.getByPlaceholderText("name"), "X");
@@ -158,5 +158,19 @@ describe("RegisterForm", () => {
     expect(await screen.findByText(/outside the configured workspaces root/)).toBeInTheDocument();
     // The form is not cleared on failure — the user can fix and resubmit.
     expect(screen.getByPlaceholderText("id")).toHaveValue("x");
+  });
+});
+
+describe("next step line", () => {
+  it("names the first step not done, and the review as waiting for you", async () => {
+    const { nextStepLine } = await import("./Workspaces");
+    const step = (n: number, id: string, title: string, state: string) =>
+      ({ n, id, title, state, detail: "" }) as never;
+    expect(
+      nextStepLine([step(1, "analyse", "Analyse sources", "done"), step(2, "docs", "Documentation", "done"),
+        step(3, "review", "Review", "todo"), step(4, "req", "Requirements", "todo")]),
+    ).toBe("Step 3 of 4: the review is waiting for you");
+    expect(nextStepLine([step(1, "analyse", "Analyse sources", "done")])).toBe("Every step is done");
+    expect(nextStepLine(undefined)).toBeNull();
   });
 });
