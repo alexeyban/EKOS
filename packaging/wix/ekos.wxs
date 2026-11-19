@@ -107,8 +107,9 @@
 
     <!-- A console started from this program holds its files open: stop it before removing them.
          `console stop` returns at once when none runs; a failure never stops the uninstall.
-         `--force`: since RFC 0261 a plain stop refuses while runs are in progress, and the files
-         must go (the stop the MSI did before, which also ended running work). -->
+         Forced: since RFC 0261 a plain stop refuses while runs are in progress, and the files
+         must go (the stop the MSI did before, which also ended running work). An XML comment
+         may not contain two hyphens in a row, so the flag is not spelled out here. -->
     <CustomAction Id="StopConsole" FileRef="EkosExe" ExeCommand="console stop --force" Execute="immediate"
                   Return="ignore" />
     <InstallExecuteSequence>
