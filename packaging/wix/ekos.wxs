@@ -10,7 +10,9 @@
   and the Start menu gets "EKOS Setup" (`ekos setup`, the setup wizard) and "EKOS Console"
   (`ekos console open` with its start flag). The last page offers to open EKOS Setup.
   With -d Desktop=yes (the full package has bin\ekos-desktop.exe) it also installs the EKOS.DEV
-  desktop app beside ekos.exe and its Start menu entry "EKOS.DEV" (RFC 0261 §2.8).
+  desktop app beside ekos.exe and its Start menu entry "EKOS.DEV" (RFC 0261 §2.8). Then EKOS Setup
+  opens in the app's window and there is no "EKOS Console" entry: EKOS.DEV is the console, and
+  nothing opens a browser or a terminal window (RFC 0261 §8, §9).
 
   installer.toml tells `ekos setup` and `ekos uninstall` that this installer owns the program:
   setup copies nothing and does not touch the Path, uninstall removes the person's EKOS home only.
@@ -97,10 +99,13 @@
                   Description="Set up EKOS: its home, the web console, a first project and your AI agents"
                   Target="[#EkosExe]" Arguments="setup" WorkingDirectory="INSTALLFOLDER" Icon="ekos.ico" />
         <?endif?>
+        <?ifndef Desktop?>
+        <!-- RFC 0261 §9: with EKOS.DEV there is no browser shortcut; EKOS.DEV is the console. -->
         <Shortcut Id="ConsoleShortcut" Name="EKOS Console"
                   Description="Open the EKOS web console, starting it when it is not running"
                   Target="[#EkosExe]" Arguments="console open --start" WorkingDirectory="INSTALLFOLDER"
                   Icon="ekos.ico" />
+        <?endif?>
         <?ifdef Desktop?>
         <Shortcut Id="DesktopShortcut" Name="EKOS.DEV"
                   Description="The EKOS console in its own window, with a tray icon and run notifications"
@@ -117,8 +122,11 @@
          Forced: since RFC 0261 a plain stop refuses while runs are in progress, and the files
          must go (the stop the MSI did before, which also ended running work). An XML comment
          may not contain two hyphens in a row, so the flag is not spelled out here. -->
-    <CustomAction Id="StopConsole" FileRef="EkosExe" ExeCommand="console stop --force" Execute="immediate"
-                  Return="ignore" />
+    <!-- RFC 0261 §9: through WiX's quiet-exec action, so no terminal window opens while it runs. -->
+    <SetProperty Id="WixQuietExec64CmdLine" Value="&quot;[#EkosExe]&quot; console stop --force"
+                 Before="StopConsole" Sequence="execute" Condition='REMOVE="ALL"' />
+    <CustomAction Id="StopConsole" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec64"
+                  Execute="immediate" Return="ignore" />
     <InstallExecuteSequence>
       <Custom Action="StopConsole" Before="InstallValidate" Condition='REMOVE="ALL"' />
     </InstallExecuteSequence>

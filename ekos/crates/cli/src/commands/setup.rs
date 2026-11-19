@@ -568,16 +568,33 @@ pub fn service_file(os: Os, m: &Machine, layout: &Layout) -> (Option<PathBuf>, S
                 xml(&home.join("control/console.log").display().to_string()),
             ),
         ),
-        // The task runs `console start`, which detaches without a window and returns.
+        // The task runs `console start`, which detaches and returns. `ekos.exe` is a console
+        // program, so Windows shows a terminal window while it waits; with EKOS.DEV installed the
+        // task runs the app's windowless `--start-console` instead (RFC 0261 §9).
         Os::Windows => (
             None,
-            format!(
-                "\"{}\" --home \"{}\" console start",
-                exe.display(),
-                home.display()
-            ),
+            match windows_launcher(m, layout) {
+                Some(app) => format!(
+                    "\"{}\" --start-console --home \"{}\"",
+                    app.display(),
+                    home.display()
+                ),
+                None => format!(
+                    "\"{}\" --home \"{}\" console start",
+                    exe.display(),
+                    home.display()
+                ),
+            },
         ),
     }
+}
+
+/// EKOS.DEV's executable beside the installed `ekos.exe`, when this package has the app (it is in
+/// the program's `bin` already, or setup copies it there from the package).
+fn windows_launcher(m: &Machine, layout: &Layout) -> Option<PathBuf> {
+    const APP: &str = "ekos-desktop.exe";
+    let installed = layout.bin_dir().join(APP);
+    (installed.is_file() || m.package.join("bin").join(APP).is_file()).then_some(installed)
 }
 
 fn xml(s: &str) -> String {

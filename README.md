@@ -165,7 +165,8 @@ console, a first project and your agents — the same wizard as below.
 in its own window, started and signed in for you, with a tray menu of your projects and a
 notification when a run ends (RFC 0261; local mode). Run **EKOS Setup** once first. On Linux it needs
 WebKitGTK 4.1 and an AppIndicator library, which the `.deb` and `.rpm` recommend.
-EKOS Setup itself opens in the app's window (in the browser where the app cannot run).
+EKOS Setup itself opens in the app's window (in the browser where the app cannot run), and with the
+app nothing opens a browser or a terminal window: there is no separate "EKOS Console" shortcut.
 The console itself (in the app and in a browser) has a sidebar of grouped pages and a command
 palette, **Ctrl/⌘ K**, to go to a page, switch project, find an object or open a command's form.
 

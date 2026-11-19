@@ -690,7 +690,9 @@ jobs:
           Check "bin is on the user Path" { ($userPath -split ';') -contains "$prog\bin\" -or ($userPath -split ';') -contains "$prog\bin" }
           $shell = New-Object -ComObject WScript.Shell
           # RFC 0261 §8: EKOS Setup is the wizard in EKOS.DEV's window (the release's MSI has the app).
-          foreach ($s in @(@('EKOS Setup', 'ekos-desktop.exe', '--setup'), @('EKOS Console', 'ekos.exe', 'console open --start'))) {
+          # RFC 0261 §9: no "EKOS Console" entry beside the app (EKOS.DEV is the console).
+          Check "no EKOS Console shortcut (EKOS.DEV is the console)" { -not (Test-Path "$menu\EKOS Console.lnk") }
+          foreach ($s in @(,@('EKOS Setup', 'ekos-desktop.exe', '--setup'))) {
             $lnk = "$menu\$($s[0]).lnk"
             Check "Start menu: $($s[0])" { Test-Path $lnk }
             $l = $shell.CreateShortcut($lnk)
@@ -811,7 +813,9 @@ jobs:
           sudo installer -pkg "$pkg" -target /
           [ -x /usr/local/ekos/bin/ekos ] && ok "the program is in /usr/local/ekos" || fail "no /usr/local/ekos/bin/ekos"
           [ "$(readlink /usr/local/bin/ekos)" = /usr/local/ekos/bin/ekos ] && ok "ekos is in /usr/local/bin" || fail "/usr/local/bin/ekos"
-          [ -d "/Applications/EKOS Setup.app" ] && [ -d "/Applications/EKOS Console.app" ] && ok "the apps" || fail "the apps"
+          [ -d "/Applications/EKOS Setup.app" ] && ok "EKOS Setup.app" || fail "EKOS Setup.app"
+          # RFC 0261 §9: no browser shortcut beside EKOS.DEV.
+          [ ! -e "/Applications/EKOS Console.app" ] && ok "no EKOS Console.app" || fail "EKOS Console.app is there"
           grep -q 'EKOS.DEV.app" --args --setup' "/Applications/EKOS Setup.app/Contents/MacOS/run" \
             && ok "EKOS Setup opens EKOS.DEV (RFC 0261 §8)" || fail "EKOS Setup's command"
           desk="/Applications/EKOS.DEV.app/Contents/MacOS"
@@ -935,9 +939,12 @@ jobs:
           fi
           ekos --version
           [ "$(readlink -f /usr/bin/ekos)" = /opt/ekos/bin/ekos ] && ok "/usr/bin/ekos" || fail "/usr/bin/ekos"
-          for d in ekos-setup ekos-console ekos-desktop; do
+          for d in ekos-setup ekos-desktop; do
             [ -f "/usr/share/applications/$d.desktop" ] && ok "$d.desktop" || fail "$d.desktop"
           done
+          # RFC 0261 §9: no browser entry beside the app.
+          [ ! -e /usr/share/applications/ekos-console.desktop ] && ok "no ekos-console.desktop" \
+            || fail "ekos-console.desktop is there"
           # RFC 0261 §8: EKOS Setup opens the app, and the browser wizard when the app cannot start.
           grep -q '^Exec=sh -c "/opt/ekos/bin/ekos-desktop --setup || exec /usr/bin/ekos setup"$' \
             /usr/share/applications/ekos-setup.desktop && ok "EKOS Setup opens the app" || fail "EKOS Setup's Exec"

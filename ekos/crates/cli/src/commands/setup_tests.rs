@@ -396,6 +396,14 @@ fn service_entries_for_macos_and_windows() {
     let (path, task) = service_file(Os::Windows, &m, &layout);
     assert!(path.is_none());
     assert!(task.contains("ekos.exe\" --home") && task.ends_with("console start"));
+    // RFC 0261 §9: with EKOS.DEV in the package, the windowless app starts the console at login.
+    std::fs::write(m.package.join("bin").join("ekos-desktop.exe"), "app").unwrap();
+    let (_, task) = service_file(Os::Windows, &m, &layout);
+    assert!(
+        task.contains("ekos-desktop.exe\" --start-console --home \""),
+        "{task}"
+    );
+    assert!(!task.contains("console start"));
     // macOS profiles include zsh's.
     assert!(m.profile_files().iter().any(|p| p.ends_with(".zprofile")));
 }

@@ -9,7 +9,7 @@
 #   /usr/local/bin/ekos              → /usr/local/ekos/bin/ekos
 #   /Applications/EKOS Setup.app     the setup wizard in EKOS.DEV's window when the package has the
 #                                    app (RFC 0261 §8), else Terminal with `ekos setup` (browser)
-#   /Applications/EKOS Console.app   `ekos console open --start`
+#   /Applications/EKOS Console.app   `ekos console open --start`, only without EKOS.DEV (RFC 0261 §9)
 #   /Applications/EKOS.DEV.app       the desktop app (RFC 0261 §2.8), when the full package has it:
 #                                    bin/ekos-desktop moves into the bundle, and Contents/MacOS/ekos
 #                                    links to /usr/local/ekos/bin/ekos, beside it, where it looks first
@@ -128,7 +128,10 @@ if [[ -x "$prog/bin/ekos-desktop" ]]; then
 else
   app "EKOS Setup" setup 'exec open -a Terminal /usr/local/ekos/setup.command'
 fi
-app "EKOS Console" console 'exec /usr/local/ekos/bin/ekos console open --start'
+# RFC 0261 §9: with EKOS.DEV there is no browser shortcut; EKOS.DEV is the console.
+if [[ ! -x "$prog/bin/ekos-desktop" ]]; then
+  app "EKOS Console" console 'exec /usr/local/ekos/bin/ekos console open --start'
+fi
 if [[ -x "$prog/bin/ekos-desktop" ]]; then
   desk="$root/Applications/EKOS.DEV.app"
   mkdir -p "$desk/Contents/MacOS" "$desk/Contents/Resources"
@@ -173,9 +176,9 @@ cat > "$res/welcome.html" <<EOF
 <h2>EKOS ${pkgver}</h2>
 <p>Installs the <code>ekos</code> command, its web console and the Python it runs on in
 <code>/usr/local/ekos</code>, puts <code>ekos</code> in <code>/usr/local/bin</code>, and adds
-<b>EKOS Setup</b>, <b>EKOS Console</b> and the <b>EKOS.DEV</b> desktop app to Applications.</p>
-<p>When it finishes, EKOS Setup opens: a page in your browser for your EKOS home, the web console,
-a first project and your AI agents.</p>
+<b>EKOS Setup</b> and the <b>EKOS.DEV</b> desktop app to Applications.</p>
+<p>When it finishes, EKOS Setup opens in the EKOS.DEV window: your EKOS home, the web console, a
+first project and your AI agents. EKOS.DEV is then the console.</p>
 </body></html>
 EOF
 cat > "$res/conclusion.html" <<'EOF'

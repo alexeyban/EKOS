@@ -13,10 +13,18 @@ fn is_startup_page(url: &Url) -> bool {
     }
 }
 
+/// RFC 0261 §9: a page `ekos` serves on this machine for one person, with its one-time token in
+/// the URL (`?t=`): the set-up wizard and the uninstall page (RFC 0188). They open in the window,
+/// not in a browser.
+fn is_local_token_page(url: &Url) -> bool {
+    let loopback = matches!(url.host_str(), Some("127.0.0.1" | "[::1]"));
+    url.scheme() == "http" && loopback && url.query_pairs().any(|(k, v)| k == "t" && v.len() >= 32)
+}
+
 /// Whether the window may load `url`, given the console's origin once it is known and the
 /// wizard's while it runs.
 pub fn allowed(url: &Url, console: Option<&Url>, setup: Option<&Url>) -> bool {
-    if is_startup_page(url) || url.scheme() == "about" {
+    if is_startup_page(url) || url.scheme() == "about" || is_local_token_page(url) {
         return true;
     }
     [console, setup]
@@ -65,6 +73,27 @@ mod tests {
         assert!(!allowed(&u("http://127.0.0.1:8001/"), Some(&console), None));
         assert!(!allowed(&u("http://localhost:8000/"), Some(&console), None));
         assert!(!allowed(&u("https://github.com/x"), Some(&console), None));
+    }
+
+    #[test]
+    fn a_local_page_with_its_token_opens_in_the_window() {
+        let token = "a".repeat(64);
+        assert!(allowed(
+            &u(&format!("http://127.0.0.1:41000/?t={token}")),
+            None,
+            None
+        ));
+        assert!(!allowed(&u("http://127.0.0.1:41000/?t=short"), None, None));
+        assert!(!allowed(
+            &u(&format!("http://example.com/?t={token}")),
+            None,
+            None
+        ));
+        assert!(!allowed(
+            &u(&format!("https://127.0.0.1:41000/?t={token}")),
+            None,
+            None
+        ));
     }
 
     #[test]

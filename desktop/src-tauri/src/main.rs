@@ -63,6 +63,13 @@ struct Shell {
 type Shared = Arc<Shell>;
 
 fn main() {
+    // RFC 0261 §9: the Windows login task's windowless start. No window, no tray, and no
+    // hand-over to a running app: it starts the console and exits.
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if let Some(home) = start_console_request(&args) {
+        let started = Ekos::from_env().start_console_in(home);
+        std::process::exit(i32::from(started.is_err()));
+    }
     let shell: Shared = Arc::new(Shell {
         ekos: Ekos::from_env(),
         console: Mutex::new(None),
@@ -184,6 +191,19 @@ fn open_in_browser(shell: tauri::State<'_, Shared>) {
 fn open_setup(app: AppHandle, shell: tauri::State<'_, Shared>) {
     let shell = shell.inner().clone();
     std::thread::spawn(move || run_setup(&app, &shell));
+}
+
+/// `ekos-desktop --start-console [--home DIR]`: `Some(home)` when asked, `None` otherwise.
+fn start_console_request(args: &[std::ffi::OsString]) -> Option<Option<&std::ffi::OsStr>> {
+    if !args.iter().any(|a| a == "--start-console") {
+        return None;
+    }
+    let home = args
+        .iter()
+        .position(|a| a == "--home")
+        .and_then(|i| args.get(i + 1))
+        .map(std::ffi::OsString::as_os_str);
+    Some(home)
 }
 
 /// Whether the app was started (or started again) to set EKOS up: `ekos-desktop --setup`.
@@ -590,4 +610,34 @@ fn quit_after_cancel(app: &AppHandle, shell: &Shared) {
         }
     }
     app.exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<std::ffi::OsString> {
+        list.iter().map(Into::into).collect()
+    }
+
+    #[test]
+    fn the_login_start_is_read_from_the_arguments() {
+        let given = args(&[
+            "ekos-desktop",
+            "--start-console",
+            "--home",
+            r"C:\Users\p\.ekos",
+        ]);
+        assert_eq!(
+            start_console_request(&given),
+            Some(Some(std::ffi::OsStr::new(r"C:\Users\p\.ekos")))
+        );
+        assert_eq!(
+            start_console_request(&args(&["x", "--start-console"])),
+            Some(None)
+        );
+        assert_eq!(start_console_request(&args(&["x", "--setup"])), None);
+        assert!(asks_for_setup(["x", "--setup"]));
+        assert!(!asks_for_setup(["x"]));
+    }
 }

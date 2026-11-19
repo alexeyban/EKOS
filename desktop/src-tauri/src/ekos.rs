@@ -126,6 +126,27 @@ impl Ekos {
         ))
     }
 
+    /// RFC 0261 §9: `ekos [--home DIR] console start`, without a window, for the Windows login
+    /// task. Returns once the console answers (or `console start` gave up).
+    pub fn start_console_in(&self, home: Option<&std::ffi::OsStr>) -> Result<()> {
+        let mut cmd = Command::new(&self.program);
+        if let Some(home) = home {
+            cmd.arg("--home").arg(home);
+        }
+        cmd.args(["console", "start"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        no_window(&mut cmd);
+        let status = cmd
+            .status()
+            .with_context(|| format!("running {}", self.program.display()))?;
+        if !status.success() {
+            bail!("`ekos console start` failed ({status})");
+        }
+        Ok(())
+    }
+
     /// RFC 0261 §8: starts the set-up wizard for the app's window (`ekos setup --no-browser`) and
     /// returns it with the address it serves, marked for the app (`&app=1`). The wizard's output
     /// keeps being read, so its later lines never meet a closed pipe.

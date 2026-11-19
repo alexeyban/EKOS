@@ -1,4 +1,4 @@
-# Devlog 340 — EKOS Setup as an application (RFC 0261 §8)
+# Devlog 340 — EKOS Setup as an application; no browser, no terminal (RFC 0261 §8, §9)
 
 **Date:** 2026-11-19
 **PRs:** none (pushed to `main`)
@@ -57,12 +57,33 @@ release.
   from outside the webview. The step after it is the start-up path devlog_335 measured.
 - **In the built `.deb`,** `ekos-setup.desktop` carries the new `Exec` and `Terminal=false`.
 
+## No browser and no terminal on a desktop install (RFC 0261 §9)
+
+The owner's rule, given while the setup work was being checked: every local application installs and
+works as an application, with no browser and no terminal window. Going through every entry point found
+four that still opened one:
+
+| Where | Before | Now |
+|---|---|---|
+| "EKOS Console" (Start menu, Applications, Linux menu) | `ekos console open --start`: the browser, and on Windows a terminal | not installed beside EKOS.DEV, which is the console (RFC 0261 decision 4). Packages without the app keep it |
+| Settings → Uninstall EKOS in the app | the page left the window for the browser | `nav::is_local_token_page`: a loopback HTTP page with a ≥32-character `t` token loads in the window |
+| Windows login start | `schtasks` ran `ekos.exe … console start`; a console program shows a terminal while it waits | `setup::windows_launcher`: with `ekos-desktop.exe` beside `ekos.exe`, the task runs `ekos-desktop.exe --start-console --home …`. That windows-subsystem program runs `console start` with `CREATE_NO_WINDOW`, before Tauri starts (no window, no single-instance hand-over), and exits |
+| MSI uninstall | `StopConsole` ran `ekos.exe` and flashed a terminal | `WixQuietExec64` (`Wix4UtilCA_X64`) with `WixQuietExec64CmdLine` set just before it |
+
+Kept on purpose: "Open in browser" in the tray and on the start-up screen, which are a person's choice,
+and outside links.
+
+- **Not verified on Windows.** The quiet-exec stop and the windowless login start were not seen on a
+  Windows desktop. CI builds the MSI and the release workflow installs and uninstalls it there. Whether a
+  window shows at login has to be seen by a person (TODO).
+
 ## Files Changed
 | File | Change summary |
 |---|---|
 | `desktop/src-tauri/src/{ekos,main,nav}.rs`, `splash/index.html` | Set up in the window, tests |
 | `ekos/crates/cli/src/commands/setup.html` | the in-app mode |
 | `scripts/package-linux.sh`, `scripts/package-macos.sh`, `packaging/wix/ekos.wxs` | EKOS Setup starts the app |
-| `.github/workflows/release.yml` | installer tests |
+| `.github/workflows/release.yml` | installer tests (§8, §9) |
+| `ekos/crates/cli/src/commands/setup.rs`, `setup_tests.rs` | the Windows login task through EKOS.DEV |
 | `ekos/docs/rfcs/0261-ekos-desktop.md` | §8 |
 | `CHANGELOG.md`, `README.md`, `TODO.md`, `docs/generated/ekos-self-documentation.html` | docs |

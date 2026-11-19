@@ -9,7 +9,8 @@
 #   /usr/share/applications/ekos-setup.desktop    "EKOS Setup"   (the wizard in the EKOS.DEV window when
 #                                        the package has the app, and it starts; else `ekos setup`
 #                                        in a terminal, the wizard in the browser: RFC 0261 §8)
-#   /usr/share/applications/ekos-console.desktop  "EKOS Console" (ekos console open --start)
+#   /usr/share/applications/ekos-console.desktop  "EKOS Console" (ekos console open --start), only
+#                                        without the desktop app: EKOS.DEV is the console (RFC 0261 §9)
 #   /usr/share/applications/ekos-desktop.desktop  "EKOS.DEV" (/opt/ekos/bin/ekos-desktop), when the
 #                                        full package has the desktop app (RFC 0261 §2.8)
 # The desktop app needs WebKitGTK 4.1 and an AppIndicator library. They are recommended, not
@@ -86,7 +87,8 @@ Icon=/opt/ekos/share/ekos.png
 Terminal=${setup_terminal}
 Categories=Development;
 EOF
-  cat > "$root/usr/share/applications/ekos-console.desktop" <<'EOF'
+  if [[ "$app" = 0 ]]; then
+    cat > "$root/usr/share/applications/ekos-console.desktop" <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=EKOS Console
@@ -96,6 +98,7 @@ Icon=/opt/ekos/share/ekos.png
 Terminal=false
 Categories=Development;
 EOF
+  fi
   if [[ "$app" = 1 ]]; then
     cat > "$root/usr/share/applications/ekos-desktop.desktop" <<'EOF'
 [Desktop Entry]
@@ -188,8 +191,10 @@ EOM
 /opt/ekos
 /usr/bin/ekos
 /usr/share/applications/ekos-setup.desktop
-/usr/share/applications/ekos-console.desktop
 EOF
+  if [[ "$app" = 0 ]]; then
+    echo /usr/share/applications/ekos-console.desktop >> "$top/SPECS/ekos.spec"
+  fi
   if [[ "$app" = 1 ]]; then
     # Weak dependencies by library, so they resolve whatever each distribution names its packages.
     printf '%s\n' 'Recommends:     libwebkit2gtk-4.1.so.0()(64bit)' \

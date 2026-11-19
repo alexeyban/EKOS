@@ -393,3 +393,21 @@ is built now, ahead of the rest of D3:
   start: the entry runs `ekos-desktop --setup || ekos setup`, which covers a server without WebKitGTK.
 - `ekos setup` itself is unchanged. The browser wizard stays the command line's and the fallback's,
   and `--answers` stays the unattended path.
+
+## 9. No browser and no terminal on a desktop install (2026-11-19)
+
+The owner's rule: every local application installs and works as a standalone application, without a
+browser and without a terminal window. Where EKOS.DEV is installed:
+
+- **No "EKOS Console" entry.** The Start menu, Applications and the Linux menu lose it, because EKOS.DEV
+  is the console (decision 4 in §7). A package without the app (a server, the command-line archives)
+  keeps it.
+- **Uninstall in the app's window.** Settings → Uninstall EKOS sends the window to the uninstall page
+  (RFC 0188). The window may load a loopback page that carries its one-time token (`?t=`, the wizard's
+  and the uninstall page's rule), not only the console's origin.
+- **The Windows login start has no window.** The task runs `ekos-desktop.exe --start-console`, a
+  windows-subsystem program that runs `ekos console start` without a console window and exits. It does
+  not open the app's window. Without the app, the task stays `ekos.exe … console start`.
+- **The MSI stops the console without a window** (WiX's quiet-exec custom action).
+- Kept on purpose: "Open in browser" in the tray and on the start-up screen are choices a person makes.
+  Links to outside pages open in the browser. The command line is unchanged.

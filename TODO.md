@@ -7199,6 +7199,9 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
       instance, and a start-up screen that sends a home without `console.toml` to EKOS Setup (devlog_339)
 - [x] RFC 0261 §8: EKOS Setup in the app's window; the installers' EKOS Setup entries start
       `ekos-desktop --setup`, falling back to the browser wizard (devlog_340)
+- [x] RFC 0261 §9: no browser and no terminal on a desktop install: no EKOS Console entry beside the app,
+      uninstall in the window, Windows login start and MSI stop without a window (devlog_340)
+- [ ] RFC 0261 §9 on a real Windows: the login task's start and the MSI's quiet stop seen without a window
 - [ ] RFC 0261 D1: the app started on a fresh Windows and macOS by a person (Linux: the setup-first screen and
       single instance seen under Xvfb, devlog_339); notification app name "EKOS.DEV" through the `.desktop` entry
 - [x] RFC 0261 U1 + U2 (part of U3): tokens and a per-person light/dark/system theme, the sidebar shell from

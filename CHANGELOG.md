@@ -9,6 +9,12 @@
 - Where the app cannot start (a Linux server without WebKitGTK) or the package has none, EKOS Setup is the
   browser wizard, as before. `ekos setup` and `ekos setup --answers` are unchanged.
 
+**No browser and no terminal on a desktop install** (RFC 0261 §9)
+- No "EKOS Console" shortcut beside EKOS.DEV (Start menu, Applications, Linux menu): EKOS.DEV is the console.
+- Settings → Uninstall EKOS opens its page in the app's window.
+- Windows: the console's login start no longer shows a terminal window (the task runs EKOS.DEV's windowless
+  `--start-console`), and uninstalling the MSI stops the console without one.
+
 ## v1.6.1 — 2026-11-19
 
 **The refreshed console** (RFC 0261, in the browser and in EKOS.DEV)
