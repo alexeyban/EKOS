@@ -77,10 +77,15 @@ fixtures that leave lists out, none of the 22 pages throws.
   - `--wait` stopped two seconds after the run was marked done.
 - `deploy/e2e/package.sh` passed (61 checks) with the new stop: restart, the uninstall page and
   `uninstall --purge` all go through it.
-- No Xvfb on this machine, so the app's window was not looked at. The start-up screen's new panel
-  and the single-instance hand-over are covered by code and tests only. To look without the
-  owner's desktop: `sudo apt install xvfb`, then run the app under `xvfb-run dbus-run-session` with
-  `HOME` set to a scratch directory.
+- **Seen on a virtual screen** (`xvfb-run dbus-run-session`, a scratch `HOME` with no EKOS home):
+  - the window opens on "Run EKOS Setup first", with **Open EKOS Setup** focused;
+  - a second start exits 0 and the first app keeps running;
+  - the console's log box and "Open in browser instead" are hidden on that screen, since no console
+    exists before setup.
+
+  In a fresh D-Bus session the first paint took 20–35 s, and the second start's first hand-over
+  took up to 15 s. Both are the desktop portal starting for the first time (xdg-desktop-portal is
+  activated on demand). The next runs were immediate.
 - The `tauri-plugin-single-instance` plugin must be registered first, before the other plugins.
 
 ## Files Changed

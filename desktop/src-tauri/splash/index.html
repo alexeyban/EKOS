@@ -86,11 +86,13 @@
       <button type="button" id="retry">Try again</button>
     </div>
   </section>
+  <div id="console-part">
   <p class="label">console.log</p>
   <pre id="log" aria-live="polite">waiting for the console to answer on 127.0.0.1</pre>
   <div class="actions">
     <button type="button" id="show-log">Show log</button>
     <button type="button" id="browser">Open in browser instead</button>
+  </div>
   </div>
 </main>
 <script>
@@ -103,10 +105,13 @@
       ["s1", "s2", "s3"].forEach((id) => { document.getElementById(id).dataset.state = "idle"; });
       const el = document.getElementById("error"); el.textContent = ""; el.style.display = "none";
       document.getElementById("setup").hidden = true;
+      document.getElementById("console-part").hidden = false;
     },
     needsSetup() {
       document.getElementById("s1").dataset.state = "failed";
       document.getElementById("setup").hidden = false;
+      // No console exists before setup: its log and "Open in browser" have nothing to show.
+      document.getElementById("console-part").hidden = true;
       document.getElementById("open-setup").focus();
     },
     teamMode() {
