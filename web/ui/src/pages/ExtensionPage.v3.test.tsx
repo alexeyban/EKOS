@@ -194,11 +194,11 @@ describe("ExtensionPage with selections", () => {
     const calls = renderPage();
     expect(await screen.findByRole("cell", { name: "crm" })).toBeTruthy();
     expect(screen.getAllByText(/Choose a package/).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("cell", { name: "etl" }));
+    fireEvent.click(screen.getByRole("button", { name: "etl" }));
     expect(await screen.findByRole("cell", { name: "js" })).toBeTruthy();
     expect(calls).toContain(`${base}/steps?package=etl`);
     expect(screen.getByText("Choose a step to see this.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("cell", { name: "js" }));
+    fireEvent.click(screen.getByRole("button", { name: "js" }));
     expect(await screen.findByText("var x = 1;")).toBeTruthy();
     expect(screen.getByText("SELECT 1")).toBeTruthy();
     expect(calls).toContain(`${base}/step?package=etl&step=js`);

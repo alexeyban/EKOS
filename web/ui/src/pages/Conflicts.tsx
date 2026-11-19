@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
 import type { Conflict } from "../api/types";
+import { Empty, ErrorNote, PageHead, QueryView } from "../ui";
 import { type Me, mayReview } from "../WorkspaceShell";
 import {
   TYPE_LABEL,
@@ -16,6 +17,7 @@ import {
   conflictChip,
   conflictOrder,
 } from "./conflicts-shared";
+import { DetailPanel, PickRow, ReviewerField, SplitView } from "./decide-kit";
 import { loadReviewer, saveReviewer } from "./semantics-shared";
 
 export function Conflicts() {
@@ -35,64 +37,119 @@ export function Conflicts() {
   const current = shown.find((c) => c.id === selected) ?? null;
 
   return (
-    <div className="sem-page">
-      <div className="sem-views">
-        <select aria-label="status" value={statusFilter} onChange={(e) => setStatus(e.target.value)}>
-          <option value="open">open</option>
-          <option value="resolved">resolved</option>
-          <option value="dismissed">dismissed (both valid)</option>
-          <option value="">any status</option>
-        </select>
-        <span className="muted sem-note">
-          Two sources state one fact differently (RFC 0172). EKOS keeps both claims; only a person
-          decides.
-        </span>
-      </div>
-      <div className={current ? "sem-layout with-panel" : "sem-layout"}>
-        <section className="card sem-list">
-          <p className="muted">{shown.length} conflict(s)</p>
-          {list.isLoading && <p className="muted">loading…</p>}
-          {list.isError && <p className="err">{String(list.error)}</p>}
-          {list.data?.length === 0 && (
-            <p className="muted">
-              {statusFilter === "open"
-                ? "No open conflicts: no source disagrees with another about the same fact."
-                : "Nothing with this status."}
-            </p>
-          )}
-          <ul className="sem-items">
-            {shown.map((c) => (
-              <li key={c.id} className={selected === c.id ? "selected" : ""}>
-                <div className="sem-item-head">
-                  <span className="chip">{TYPE_LABEL[c.conflict_type] ?? c.conflict_type}</span>
-                  <button
-                    type="button"
-                    className="sem-item-pick"
-                    aria-pressed={selected === c.id}
-                    onClick={() => setSelected(c.id)}
-                  >
-                    {c.name}
-                  </button>
-                  <span className={conflictChip(c.status)}>{c.status}</span>
-                </div>
-                <div className="muted sem-item-sum">
-                  {(c.claims ?? []).map((k) => claimValue(k.value)).join("  ≠  ")}
-                </div>
-              </li>
-            ))}
-          </ul>
+    <div className="dk-page">
+      <PageHead
+        title="Conflicts"
+        sub="Where two sources state one fact differently (RFC 0172). EKOS keeps both claims; only a person decides which is right."
+      />
+      <SplitView
+        panel={
+          current && (
+            <ConflictPanel
+              key={current.id}
+              workspace={id}
+              conflict={current}
+              me={me}
+              onClose={() => setSelected(null)}
+            />
+          )
+        }
+      >
+        <section className="card dk-list" aria-label="conflicts">
+          <div className="dk-toolbar">
+            <select
+              aria-label="status"
+              value={statusFilter}
+              onChange={(e) => setStatus(e.target.value)}
+            >
+              <option value="open">open</option>
+              <option value="resolved">resolved</option>
+              <option value="dismissed">dismissed (both valid)</option>
+              <option value="">any status</option>
+            </select>
+            <span className="dk-count">{shown.length} conflict(s)</span>
+          </div>
+          <QueryView
+            q={list}
+            what="conflicts"
+            rows={6}
+            isEmpty={(d) => d.length === 0}
+            empty={
+              statusFilter === "open" ? (
+                <Empty title="No open conflicts." icon="check">
+                  Sources agree on everything compiled so far: no source states a fact differently
+                  from another.
+                </Empty>
+              ) : (
+                <Empty title="Nothing with this status.">Pick another status above.</Empty>
+              )
+            }
+          >
+            {() => (
+              <ul className="dk-rows">
+                {shown.map((c) => (
+                  <PickRow
+                    key={c.id}
+                    selected={selected === c.id}
+                    onPick={() => setSelected(c.id)}
+                    title={c.name}
+                    before={
+                      <span className="chip">{TYPE_LABEL[c.conflict_type] ?? c.conflict_type}</span>
+                    }
+                    after={<span className={conflictChip(c.status)}>{c.status}</span>}
+                    sub={(c.claims ?? []).map((k) => claimValue(k.value)).join("  ≠  ")}
+                  />
+                ))}
+              </ul>
+            )}
+          </QueryView>
         </section>
-        {current && (
-          <ConflictPanel
-            key={current.id}
-            workspace={id}
-            conflict={current}
-            me={me}
-            onClose={() => setSelected(null)}
-          />
-        )}
-      </div>
+      </SplitView>
     </div>
+  );
+}
+
+/** What the conflict is about, as a definition list. */
+function ConflictFacts({ c }: { c: Conflict }) {
+  return (
+    <dl className="dk-props">
+      <div>
+        <dt>about</dt>
+        <dd>
+          {c.subject.name} <span className="muted">({c.subject.kind})</span>
+        </dd>
+      </div>
+      <div>
+        <dt>attribute</dt>
+        <dd>{c.attribute}</dd>
+      </div>
+      {c.chosen_by_ekos != null && (
+        <div>
+          <dt>EKOS kept</dt>
+          <dd>{claimValue(c.chosen_by_ekos)}</dd>
+        </div>
+      )}
+      {c.measured?.violating_rows != null && (
+        <div>
+          <dt>measured</dt>
+          <dd>{c.measured.violating_rows} contradicting row(s)</dd>
+        </div>
+      )}
+      {c.review_note && (
+        <div>
+          <dt>note</dt>
+          <dd>{c.review_note}</dd>
+        </div>
+      )}
+    </dl>
+  );
+}
+
+function isPicked(c: Conflict, k: NonNullable<Conflict["claims"]>[number]): boolean {
+  return (
+    c.picked_claim != null &&
+    c.picked_claim.path === k.path &&
+    claimValue(c.picked_claim.value) === claimValue(k.value)
   );
 }
 
@@ -128,66 +185,26 @@ function ConflictPanel({
   const needsName = me.mode !== "oidc" && !reviewer.trim();
 
   return (
-    <aside className="card sem-panel" aria-label="conflict">
-      <div className="sem-panel-head">
-        <strong className="sem-title">{c.name}</strong>
-        <button className="linkish" onClick={onClose}>
-          close
-        </button>
-      </div>
-      <p className="sem-summary">
+    <DetailPanel label="conflict" title={<h3 className="dk-title">{c.name}</h3>} onClose={onClose}>
+      <p className="dk-summary">
         <span className={conflictChip(c.status)}>{c.status}</span> {c.status_meaning}
       </p>
-      <dl className="sem-props">
-        <div>
-          <dt>about</dt>
-          <dd>
-            {c.subject.name} <span className="muted">({c.subject.kind})</span>
-          </dd>
-        </div>
-        <div>
-          <dt>attribute</dt>
-          <dd>{c.attribute}</dd>
-        </div>
-        {c.chosen_by_ekos != null && (
-          <div>
-            <dt>EKOS kept</dt>
-            <dd>{claimValue(c.chosen_by_ekos)}</dd>
-          </div>
-        )}
-        {c.measured?.violating_rows != null && (
-          <div>
-            <dt>measured</dt>
-            <dd>{c.measured.violating_rows} contradicting row(s)</dd>
-          </div>
-        )}
-        {c.review_note && (
-          <div>
-            <dt>note</dt>
-            <dd>{c.review_note}</dd>
-          </div>
-        )}
-      </dl>
+      <ConflictFacts c={c} />
 
-      <strong className="sem-sub">Claims</strong>
-      <ol className="sem-evidence conflict-claims">
+      <h4 className="dk-sub">Claims</h4>
+      <ol className="dk-claims">
         {claims.map((k, n) => (
           <li key={n}>
             <span>
               <strong>{n + 1}.</strong> {claimValue(k.value)}
-              {c.picked_claim &&
-                c.picked_claim.path === k.path &&
-                claimValue(c.picked_claim.value) === claimValue(k.value) && (
-                  <span className="chip ok" style={{ marginLeft: "0.4rem" }}>
-                    picked
-                  </span>
-                )}
+              {isPicked(c, k) && <span className="chip ok dk-chip-gap">picked</span>}
             </span>
             <span className="muted">
               {claimWhere(k)} · {k.source}
             </span>
             {canWrite && (
               <button
+                type="button"
                 disabled={decide.isPending || needsName}
                 onClick={() => decide.mutate({ pick: n + 1 })}
               >
@@ -198,22 +215,15 @@ function ConflictPanel({
         ))}
       </ol>
 
-      <div className="sem-decide">
-        <strong className="sem-sub">Decision</strong>
+      <section className="dk-section" aria-label="decision">
+        <h4 className="dk-sub">Decision</h4>
         {!canWrite && <p className="muted">Deciding needs the write role.</p>}
         {canWrite && (
           <>
             {me.mode !== "oidc" && (
-              <label className="sem-field">
-                <span>Reviewer (token mode has no identity; recorded as token:&lt;name&gt;)</span>
-                <input
-                  aria-label="reviewer"
-                  value={reviewer}
-                  onChange={(e) => setReviewer(e.target.value)}
-                />
-              </label>
+              <ReviewerField ariaLabel="reviewer" value={reviewer} onChange={setReviewer} />
             )}
-            <label className="sem-field">
+            <label className="dk-field">
               <span>Note (required to say both are valid)</span>
               <textarea
                 aria-label="note"
@@ -222,19 +232,20 @@ function ConflictPanel({
                 onChange={(e) => setNote(e.target.value)}
               />
             </label>
-            <div className="btnrow">
+            <div className="dk-actions">
               <button
+                type="button"
                 disabled={decide.isPending || needsName || !note.trim()}
                 onClick={() => decide.mutate({ both_valid: true })}
               >
                 Both are valid
               </button>
             </div>
-            {decide.isError && <p className="err">{String(decide.error)}</p>}
+            {decide.isError && <ErrorNote error={decide.error} />}
             {decide.isSuccess && <p className="ok-line">Recorded as {decide.data.reviewer}.</p>}
           </>
         )}
-      </div>
-    </aside>
+      </section>
+    </DetailPanel>
   );
 }

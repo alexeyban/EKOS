@@ -8,6 +8,11 @@ import "@fontsource-variable/inter";
 import "@fontsource/jetbrains-mono/400.css";
 import "@fontsource/jetbrains-mono/600.css";
 import "./index.css";
+// The page pass (RFC 0261 §2.7): each group of pages keeps its rules in its own file, loaded after
+// index.css so a page rule there wins over an older one with the same specificity.
+import "./styles/decide.css";
+import "./styles/forms.css";
+import "./styles/explore.css";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },

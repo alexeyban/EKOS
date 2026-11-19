@@ -6,6 +6,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { apiPost } from "../api/client";
 import type { ProposalCard } from "../api/types";
+import { ErrorNote } from "../ui";
 
 export function TellCard({
   workspace,
@@ -37,16 +38,16 @@ export function TellCard({
 
   return (
     <div className="card tell-card" aria-label="proposal card">
-      <strong>I understood:</strong>
+      <h4 className="dk-sub">I understood</h4>
       {card.items.length === 0 && (
         <p className="muted">
           Nothing to link it to; saving keeps your words alone.
         </p>
       )}
-      <ul className="rel-list">
+      <ul className="dk-said dk-tell-lines">
         {card.lines.map((line, n) => (
           <li key={n}>
-            <label>
+            <label className="dk-check">
               <input
                 type="checkbox"
                 checked={keep[n]}
@@ -70,28 +71,31 @@ export function TellCard({
       )}
       {editing ? (
         <textarea
+          className="dk-textarea"
           aria-label="your words"
           rows={3}
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
       ) : (
-        <p>
+        <p className="dk-quote">
           Saved as your words: <q>{text}</q>
         </p>
       )}
       {state === "open" ? (
-        <div className="btnrow">
+        <div className="dk-actions">
           <button
+            type="button"
+            className="primary"
             disabled={save.isPending || !text.trim()}
             onClick={() => save.mutate()}
           >
             Save
           </button>
-          <button onClick={() => setEditing((e) => !e)}>
+          <button type="button" onClick={() => setEditing((e) => !e)}>
             {editing ? "Done editing" : "Edit"}
           </button>
-          <button disabled={discard.isPending} onClick={() => discard.mutate()}>
+          <button type="button" disabled={discard.isPending} onClick={() => discard.mutate()}>
             Discard
           </button>
         </div>
@@ -102,8 +106,8 @@ export function TellCard({
             : "Discarded."}
         </p>
       )}
-      {save.isError && <p className="err">{String(save.error)}</p>}
-      {discard.isError && <p className="err">{String(discard.error)}</p>}
+      {save.isError && <ErrorNote error={save.error} />}
+      {discard.isError && <ErrorNote error={discard.error} />}
     </div>
   );
 }

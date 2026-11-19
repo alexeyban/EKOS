@@ -10,6 +10,8 @@ import { useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import { api, apiDelete, apiPost } from "../api/client";
 import type { ProposalCard } from "../api/types";
+import { Icon } from "../Icon";
+import { Empty, PageHead } from "../ui";
 import type { Me } from "../WorkspaceShell";
 import { fileToBase64 } from "./people-shared";
 import { TellCard } from "./TellCard";
@@ -72,9 +74,19 @@ function toolMark(ok: boolean | undefined): string {
 function ChatItem({ item, workspace, reviewer }: { item: Item; workspace: string; reviewer: string | null }) {
   switch (item.kind) {
     case "user":
-      return <div className="chat-user">{item.text}</div>;
+      return (
+        <div className="chat-msg chat-msg-user">
+          <span className="chat-who">You</span>
+          <div className="chat-user">{item.text}</div>
+        </div>
+      );
     case "answer":
-      return <div className="chat-answer">{item.text}</div>;
+      return (
+        <div className="chat-msg chat-msg-answer">
+          <span className="chat-who">EKOS</span>
+          <div className="chat-answer">{item.text}</div>
+        </div>
+      );
     case "tool":
       return (
         <details className="chat-tool">
@@ -87,9 +99,13 @@ function ChatItem({ item, workspace, reviewer }: { item: Item; workspace: string
     case "card":
       return <TellCard workspace={workspace} card={item.card} reviewer={reviewer} />;
     case "note":
-      return <p className="muted">{item.text}</p>;
+      return <p className="muted small chat-note">{item.text}</p>;
     default:
-      return <p className="err">{item.text}</p>;
+      return (
+        <p className="err" role="alert">
+          {item.text}
+        </p>
+      );
   }
 }
 
@@ -264,126 +280,201 @@ export function Chat() {
     }
   };
 
+  const startOver = () => {
+    setCurrent(null);
+    setItems([]);
+    setUsage({ input: 0, output: 0 });
+  };
+
+  const remove = async (cid: string) => {
+    await apiDelete(`/workspaces/${id}/chat/${cid}`);
+    if (current === cid) {
+      setCurrent(null);
+      setItems([]);
+    }
+    void qc.invalidateQueries({ queryKey: ["chats", id] });
+  };
+
+  const head = (
+    <PageHead
+      title="Chat"
+      sub="Ask this project questions. A model answers with the project's EKOS tools, and every tool call is shown."
+    />
+  );
+
   if (model.data && !model.data.configured) {
     return (
-      <section className="card">
-        <strong>Chat</strong>
-        <p className="muted">
-          No chat model is set. An owner chooses one on the console's Settings page (Chat), or in <code>ekos setup</code>: a
-          local Ollama model, or a hosted one.
-        </p>
-      </section>
+      <>
+        {head}
+        <section className="card">
+          <Empty title="No chat model yet" icon="chat">
+            <p>
+              No chat model is set. An owner chooses one on the console's Settings page (Chat), or in{" "}
+              <code>ekos setup</code>: a local Ollama model, or a hosted one.
+            </p>
+          </Empty>
+        </section>
+      </>
     );
   }
 
   return (
-    <div className="chat-page">
-      <section className="card chat-list">
-        <button
-          onClick={() => {
-            setCurrent(null);
-            setItems([]);
-            setUsage({ input: 0, output: 0 });
-          }}
-        >
-          New conversation
-        </button>
-        <ul>
-          {(list.data ?? []).map((c) => (
-            <li key={c.id}>
-              <button className={`linkish ${current === c.id ? "on" : ""}`} onClick={() => void open(c.id)}>
-                {c.title || "untitled"}
-              </button>{" "}
-              <button
-                className="linkish muted"
-                aria-label={`delete ${c.title}`}
-                onClick={async () => {
-                  await apiDelete(`/workspaces/${id}/chat/${c.id}`);
-                  if (current === c.id) {
-                    setCurrent(null);
-                    setItems([]);
-                  }
-                  void qc.invalidateQueries({ queryKey: ["chats", id] });
-                }}
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
-      </section>
+    <>
+      {head}
+      <div className="chat-page">
+        <ConversationList
+          list={list.data ?? []}
+          current={current}
+          onNew={startOver}
+          onOpen={(cid) => void open(cid)}
+          onDelete={(cid) => void remove(cid)}
+        />
 
-      <section className="card chat-main">
-        {model.data && (
-          <p className="muted small">
-            {model.data.provider} · {model.data.model}
-            {model.data.metered ? " · paid per call" : " · runs locally, not paid per call"} · answers from this project's EKOS
-            tools only
-            {usage.output > 0 && ` · ${usage.input} tokens in, ${usage.output} out`}
-          </p>
-        )}
-        <div className="chat-items">
-          {items.length === 0 && <p className="muted">Ask about this project: what a table holds, what depends on a module, where a term is defined.</p>}
-          {items.map((it, i) => (
-            <ChatItem key={i} item={it} workspace={id} reviewer={reviewer} />
-          ))}
-        </div>
-        <div className="btnrow chat-tell">
-          <label>
-            <input type="radio" name="chat-mode" checked={mode === "ask"} onChange={() => setMode("ask")} />{" "}
-            Ask
-          </label>
-          <label>
-            <input type="radio" name="chat-mode" checked={mode === "tell"} onChange={() => setMode("tell")} />{" "}
-            Tell EKOS something
-          </label>
-          <label className="linkish">
-            {"Attach a file"}
-            <input
-              type="file"
-              aria-label="attach a file"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                void attach(e.target.files?.[0]);
-                e.target.value = "";
-              }}
-            />
-          </label>
-          {(me != null && me.mode !== "oidc") && (
-            <input aria-label="your name" placeholder="your name" value={name} onChange={(e) => setName(e.target.value)} />
-          )}
-          <span className="muted small">a lone link goes to the project's inbox</span>
-        </div>
-        <form
-          className="chat-input"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void send();
-          }}
-        >
-          <textarea
-            aria-label="message"
-            value={input}
-            placeholder={mode === "tell" ? "What do you know? (you save it in your own words)" : "Ask about this project"}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
+        <section className="card chat-main" aria-label="conversation">
+          {model.data && <ModelLine info={model.data} usage={usage} />}
+          <div className="chat-items" aria-live="polite">
+            {items.length === 0 && (
+              <Empty title="Ask about this project" icon="chat">
+                What a table holds, what depends on a module, where a term is defined.
+              </Empty>
+            )}
+            {items.map((it, i) => (
+              <ChatItem key={i} item={it} workspace={id} reviewer={reviewer} />
+            ))}
+          </div>
+          <div className="chat-composer">
+            <div className="btnrow chat-tell">
+              <div className="x-seg" role="radiogroup" aria-label="mode">
+                <label>
+                  <input type="radio" name="chat-mode" checked={mode === "ask"} onChange={() => setMode("ask")} /> Ask
+                </label>
+                <label>
+                  <input type="radio" name="chat-mode" checked={mode === "tell"} onChange={() => setMode("tell")} />{" "}
+                  Tell EKOS something
+                </label>
+              </div>
+              <label className="chat-attach">
+                <Icon name="file" /> Attach a file
+                <input
+                  type="file"
+                  className="x-visually-hidden"
+                  aria-label="attach a file"
+                  onChange={(e) => {
+                    void attach(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+              {me != null && me.mode !== "oidc" && (
+                <input aria-label="your name" placeholder="your name" value={name} onChange={(e) => setName(e.target.value)} />
+              )}
+              <span className="muted small">a lone link goes to the project's inbox</span>
+            </div>
+            <form
+              className="chat-input"
+              onSubmit={(e) => {
                 e.preventDefault();
                 void send();
-              }
-            }}
-          />
-          {busy ? (
-            <button type="button" onClick={() => abort.current?.abort()}>
-              Stop
+              }}
+            >
+              <textarea
+                aria-label="message"
+                value={input}
+                placeholder={mode === "tell" ? "What do you know? (you save it in your own words)" : "Ask about this project"}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void send();
+                  }
+                }}
+              />
+              <SendButton busy={busy} mode={mode} empty={!input.trim()} onStop={() => abort.current?.abort()} />
+            </form>
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function SendButton({
+  busy,
+  mode,
+  empty,
+  onStop,
+}: {
+  busy: boolean;
+  mode: "ask" | "tell";
+  empty: boolean;
+  onStop: () => void;
+}) {
+  if (busy) {
+    return (
+      <button type="button" onClick={onStop}>
+        Stop
+      </button>
+    );
+  }
+  return (
+    <button type="submit" className="primary" disabled={empty}>
+      {mode === "tell" ? "Tell" : "Send"}
+    </button>
+  );
+}
+
+function ModelLine({ info, usage }: { info: ModelInfo; usage: Usage }) {
+  return (
+    <p className="muted small chat-model">
+      {info.provider} · {info.model}
+      {info.metered ? " · paid per call" : " · runs locally, not paid per call"} · answers from this project's EKOS tools
+      only
+      {usage.output > 0 && ` · ${usage.input} tokens in, ${usage.output} out`}
+    </p>
+  );
+}
+
+function ConversationList({
+  list,
+  current,
+  onNew,
+  onOpen,
+  onDelete,
+}: {
+  list: ConversationRow[];
+  current: string | null;
+  onNew: () => void;
+  onOpen: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <section className="card chat-list" aria-label="conversations">
+      <button type="button" className="chat-new" onClick={onNew}>
+        New conversation
+      </button>
+      {list.length === 0 && <p className="muted small">No saved conversations yet.</p>}
+      <ul>
+        {list.map((c) => (
+          <li key={c.id} className={current === c.id ? "on" : undefined}>
+            <button
+              type="button"
+              className={`linkish chat-open ${current === c.id ? "on" : ""}`}
+              aria-current={current === c.id ? "true" : undefined}
+              onClick={() => onOpen(c.id)}
+            >
+              {c.title || "untitled"}
             </button>
-          ) : (
-            <button type="submit" disabled={!input.trim()}>
-              {mode === "tell" ? "Tell" : "Send"}
+            <button
+              type="button"
+              className="linkish muted chat-delete"
+              aria-label={`delete ${c.title}`}
+              onClick={() => onDelete(c.id)}
+            >
+              ×
             </button>
-          )}
-        </form>
-      </section>
-    </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

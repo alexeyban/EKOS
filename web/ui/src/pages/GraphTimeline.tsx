@@ -53,9 +53,11 @@ export function GraphTimeline({
   );
 
   return (
-    <div className="graph-timeline">
+    <div className="graph-timeline" role="group" aria-label="time travel">
       <button
+        type="button"
         className="gt-play"
+        aria-label={playing ? "pause" : "play the compile history"}
         onClick={() => {
           if (idx >= live) setIdx(0);
           setPlaying((p) => !p);
@@ -95,7 +97,7 @@ export function GraphTimeline({
 
       <span className="gt-label mono">{idx >= live ? "live" : points[idx].t}</span>
       {idx < live && (
-        <button className="gt-latest" onClick={() => setIdx(live)} title="jump to latest">
+        <button type="button" className="gt-latest" onClick={() => setIdx(live)} title="jump to latest">
           ⤒ latest
         </button>
       )}

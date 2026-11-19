@@ -9,6 +9,7 @@ import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import type { XrefDiagnostic, XrefMetrics, XrefReport } from "../api/types";
+import { Empty, ErrorNote, PageHead, Skeleton } from "../ui";
 import { ObjectPanel } from "./ObjectPanel";
 import {
   DEFAULT_FILTERS,
@@ -38,112 +39,127 @@ export function Integrity() {
 
   return (
     <div className="sem-page">
-      {report.isLoading && <p className="muted">loading…</p>}
+      <PageHead
+        title="Integrity"
+        sub="References that resolve to nothing or to several objects, dependency cycles, unused tables and routine reachability, from the last commit."
+      />
+      {report.isPending && <Skeleton tiles={4} label="loading the integrity index" />}
       {report.isError && (
-        <p className="err">
-          {String(report.error)} — the integrity index is written by <code>ekos commit</code>.
-        </p>
+        <>
+          <ErrorNote error={report.error} what="integrity index" />
+          <Empty title="No integrity index yet" icon="integrity">
+            The integrity index is written by <code>ekos commit</code>. Run the pipeline, then come back.
+          </Empty>
+        </>
       )}
       {report.data && <MetricsBar metrics={report.data.metrics} at={report.data.computed_at} />}
-      <div className="sem-views">
-        <select aria-label="kind" value={filters.kind} onChange={(e) => set({ kind: e.target.value })}>
-          <option value="">every kind</option>
-          {Object.entries(KIND_LABEL).map(([k, label]) => (
-            <option key={k} value={k}>
-              {label}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="severity"
-          value={filters.severity}
-          onChange={(e) => set({ severity: e.target.value })}
-        >
-          <option value="">any severity</option>
-          <option value="error">error</option>
-          <option value="warning">warning</option>
-          <option value="info">info</option>
-        </select>
-        <label className="muted">
-          confidence ≥{" "}
-          <input
-            aria-label="minimum confidence"
-            type="number"
-            min={0}
-            max={1}
-            step={0.1}
-            value={filters.minConfidence}
-            onChange={(e) => set({ minConfidence: Number(e.target.value) || 0 })}
-          />
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={filters.crossOnly}
-            onChange={(e) => set({ crossOnly: e.target.checked })}
-          />{" "}
-          cross-system only
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={filters.showGaps}
-            onChange={(e) => set({ showGaps: e.target.checked })}
-          />{" "}
-          coverage gaps
-        </label>
-        <input
-          aria-label="filter"
-          placeholder="name or file"
-          value={filters.text}
-          onChange={(e) => set({ text: e.target.value })}
-        />
-      </div>
-      <div className={current ? "sem-layout with-panel" : "sem-layout"}>
-        <section className="card sem-list">
-          <p className="muted">
-            {shown.length} of {all.length} finding(s)
-            {shown.length > LIMIT && ` — first ${LIMIT} shown`}
-          </p>
-          {report.data && all.length === 0 && (
-            <p className="muted">No findings: every checked reference resolves to one object.</p>
-          )}
-          <ul className="sem-items">
-            {shown.slice(0, LIMIT).map((d) => (
-              <Finding
-                key={d.fingerprint}
-                d={d}
-                selected={selected === d.fingerprint}
-                onPick={() => setSelected(d.fingerprint)}
-              />
-            ))}
-          </ul>
-        </section>
-        {current?.source.object_id && (
-          <aside className="sem-panel sem-panel-stack" aria-label="finding">
-            <section className="card">
-              <p>
-                <span className={severityChip(current.severity)}>{current.severity}</span>{" "}
-                {current.reason}
-              </p>
+      {report.data && (
+        <>
+          <FilterBar filters={filters} set={set} />
+          <div className={current ? "sem-layout with-panel" : "sem-layout"}>
+            <section className="card sem-list" aria-label="findings">
               <p className="muted">
-                {where(current)} · {current.source.extractor} · confidence{" "}
-                {current.confidence.toFixed(1)} · fingerprint{" "}
-                <code>{current.fingerprint.slice(0, 12)}</code>
+                {shown.length} of {all.length} finding(s)
+                {shown.length > LIMIT && ` — first ${LIMIT} shown`}
               </p>
-              <Link to={`../graph?focus=${current.source.object_id}`}>open in the graph</Link>
+              {all.length === 0 && (
+                <Empty title="No findings" icon="check">
+                  No findings: every checked reference resolves to one object.
+                </Empty>
+              )}
+              <ul className="sem-items">
+                {shown.slice(0, LIMIT).map((d) => (
+                  <Finding
+                    key={d.fingerprint}
+                    d={d}
+                    selected={selected === d.fingerprint}
+                    onPick={() => setSelected(d.fingerprint)}
+                  />
+                ))}
+              </ul>
             </section>
-            <ObjectPanel
-              key={current.source.object_id}
-              workspace={id}
-              objectId={current.source.object_id}
-              onClose={() => setSelected(null)}
-              onGoto={() => {}}
-            />
-          </aside>
-        )}
-      </div>
+            {current?.source.object_id && (
+              <FindingPanel workspace={id} current={current} onClose={() => setSelected(null)} />
+            )}
+          </div>
+        </>
+      )}
     </div>
+  );
+}
+
+function FilterBar({ filters, set }: { filters: Filters; set: (patch: Partial<Filters>) => void }) {
+  return (
+    <div className="sem-views x-filters" role="group" aria-label="filters">
+      <select aria-label="kind" value={filters.kind} onChange={(e) => set({ kind: e.target.value })}>
+        <option value="">every kind</option>
+        {Object.entries(KIND_LABEL).map(([k, label]) => (
+          <option key={k} value={k}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <select aria-label="severity" value={filters.severity} onChange={(e) => set({ severity: e.target.value })}>
+        <option value="">any severity</option>
+        <option value="error">error</option>
+        <option value="warning">warning</option>
+        <option value="info">info</option>
+      </select>
+      <label className="muted x-inline">
+        confidence ≥{" "}
+        <input
+          aria-label="minimum confidence"
+          type="number"
+          min={0}
+          max={1}
+          step={0.1}
+          value={filters.minConfidence}
+          onChange={(e) => set({ minConfidence: Number(e.target.value) || 0 })}
+        />
+      </label>
+      <label className="x-inline">
+        <input type="checkbox" checked={filters.crossOnly} onChange={(e) => set({ crossOnly: e.target.checked })} />{" "}
+        cross-system only
+      </label>
+      <label className="x-inline">
+        <input type="checkbox" checked={filters.showGaps} onChange={(e) => set({ showGaps: e.target.checked })} />{" "}
+        coverage gaps
+      </label>
+      <input
+        type="search"
+        aria-label="filter"
+        placeholder="name or file"
+        value={filters.text}
+        onChange={(e) => set({ text: e.target.value })}
+      />
+    </div>
+  );
+}
+
+function FindingPanel({
+  workspace,
+  current,
+  onClose,
+}: {
+  workspace: string;
+  current: XrefDiagnostic;
+  onClose: () => void;
+}) {
+  const objectId = current.source.object_id ?? "";
+  return (
+    <aside className="sem-panel sem-panel-stack" aria-label="finding">
+      <section className="card">
+        <p>
+          <span className={severityChip(current.severity)}>{current.severity}</span> {current.reason}
+        </p>
+        <p className="muted">
+          {where(current)} · {current.source.extractor} · confidence {current.confidence.toFixed(1)} · fingerprint{" "}
+          <code>{current.fingerprint.slice(0, 12)}</code>
+        </p>
+        <Link to={`../graph?focus=${objectId}`}>open in the graph</Link>
+      </section>
+      <ObjectPanel key={objectId} workspace={workspace} objectId={objectId} onClose={onClose} onGoto={() => {}} />
+    </aside>
   );
 }
 
@@ -187,14 +203,16 @@ export function MetricsBar({ metrics: m, at }: { metrics: XrefMetrics; at?: stri
     .map(([k, n]) => `${n} ${k}`)
     .join(", ");
   return (
-    <section className="card" aria-label="integrity metrics">
-      <section className="tiles">
+    <section aria-label="integrity metrics">
+      <div className="tiles">
         <Tile label="resolution" value={pct(m.resolution_rate)} />
         <Tile label="cross-system resolution" value={pct(m.cross_system_resolution_rate)} />
         <Tile label="cycles" value={m.cycles ?? 0} />
         <Tile label="unused tables / views" value={orphans || "none"} />
-      </section>
-      <ul className="muted">
+      </div>
+      <div className="card x-reach">
+        <h2 className="card-label">Reachability</h2>
+        <ul className="kv-list">
         {Object.entries(m.reachability ?? {}).map(([family, r]) => (
           <li key={family}>
             <strong>{family}</strong>:{" "}
@@ -203,8 +221,9 @@ export function MetricsBar({ metrics: m, at }: { metrics: XrefMetrics; at?: stri
               : `reachability unsupported — ${r.unsupported_because ?? ""}`}
           </li>
         ))}
-      </ul>
-      {at && <p className="muted">computed at commit {at.slice(0, 19).replace("T", " ")}</p>}
+        </ul>
+        {at && <p className="muted small">computed at commit {at.slice(0, 19).replace("T", " ")}</p>}
+      </div>
     </section>
   );
 }

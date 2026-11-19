@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
+import { commandTitle, relativeTime } from "../format";
+import { Empty, PageHead, QueryView } from "../ui";
 
 interface RunRow {
   id: string;
@@ -19,18 +21,60 @@ export function Runs() {
 
   return (
     <>
-      <section className="card">
-        <strong>Run history</strong>
-        {runs.data?.length === 0 && <p className="muted">nothing run yet</p>}
-        <ul className="ws-list">
-          {runs.data?.map((r) => (
-            <li key={r.id}>
-              <Link to={`/runs/${r.id}`}>{r.command}</Link>
-              <span className={`chip ${chip(r.status)}`}>{r.status}</span>
-              <code className="path">{r.created_at.replace("T", " ").slice(0, 19)}</code>
-            </li>
-          ))}
-        </ul>
+      <PageHead
+        title="History"
+        sub="Every command run on this project, newest first. Open one for its stages and log."
+        actions={
+          <Link className="button primary" to={`/w/${id}/run`}>
+            Run a command
+          </Link>
+        }
+      />
+      <section className="card" aria-label="run history">
+        <QueryView
+          q={runs}
+          what="run history"
+          rows={5}
+          isEmpty={(r) => r.length === 0}
+          empty={
+            <Empty title="No runs yet" icon="history">
+              Start one from <Link to={`/w/${id}/run`}>Run</Link>, or from the command palette.
+            </Empty>
+          }
+        >
+          {(rows) => (
+            <div className="table-scroll">
+              <table className="lm-table x-table">
+                <thead>
+                  <tr>
+                    <th>command</th>
+                    <th>status</th>
+                    <th>started</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.id}>
+                      <td>
+                        <Link to={`/runs/${r.id}`} className="x-row-link" title={commandTitle(r.command)}>
+                          {r.command}
+                        </Link>
+                      </td>
+                      <td>
+                        <span className={`chip ${chip(r.status)}`}>{r.status}</span>
+                      </td>
+                      <td>
+                        <code className="x-when" title={relativeTime(r.created_at)}>
+                          {r.created_at.replace("T", " ").slice(0, 19)}
+                        </code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </QueryView>
       </section>
     </>
   );

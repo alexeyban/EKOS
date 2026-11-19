@@ -119,6 +119,10 @@ describe("people helpers", () => {
       true,
     );
     expect(isMine(question({ addressee: null }), ann, "")).toBe(false);
+    // Local mode (this machine's console) records a typed name as local:<name>.
+    const localMe: Me = { mode: "local", email: null, role: "write" };
+    expect(isMine(question({ addressee: "local:Ann" }), localMe, "Ann")).toBe(true);
+    expect(isMine(question({ addressee: "token:Ann" }), localMe, "Ann")).toBe(false);
   });
 
   it("shows revealed values or what was withheld", () => {
@@ -173,6 +177,16 @@ describe("Inbox page", () => {
     expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Purge…" })).toBeNull();
     expect(screen.getByRole("button", { name: "Send" })).toBeTruthy();
+  });
+
+  it("asks for a name in local mode before accepting", async () => {
+    vi.spyOn(client, "api").mockResolvedValue([item()] as never);
+    const localMe: Me = { mode: "local", email: null, role: "write", canReview: true, canAdmin: true };
+    renderAt("/w/shop/inbox", <Inbox />, localMe);
+    expect(await screen.findByText("invoice-spec.pdf")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Accept" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("reviewer"), { target: { value: "Ann" } });
+    expect(screen.getByRole("button", { name: "Accept" })).toBeTruthy();
   });
 
   it("sends a link", async () => {

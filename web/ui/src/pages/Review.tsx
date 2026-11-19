@@ -9,6 +9,7 @@ import { useState } from "react";
 import { NavLink, useOutletContext, useParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
 import type { ReviewItem, ReviewSubjectDetail, SubjectStatus } from "../api/types";
+import { Empty, ErrorNote, PageHead, Skeleton } from "../ui";
 import { type Me, mayReview } from "../WorkspaceShell";
 import {
   DECIDED_ELSEWHERE,
@@ -20,6 +21,7 @@ import {
   signLine,
   visibleItems,
 } from "./review-shared";
+import { DetailPanel, ReviewerField, SplitView } from "./decide-kit";
 import { loadReviewer, saveReviewer } from "./semantics-shared";
 
 const SHOWN = 300;
@@ -37,19 +39,28 @@ export function Review() {
     list.data?.subjects.find((s) => s.subject === subject) ?? list.data?.subjects[0];
 
   return (
-    <div className="sem-page">
-      <p className="muted sem-note">
-        Agree to the source model before anything is built on it. Each sign-off is bound to the
-        digest of what this page shows; when a signed fact changes, it turns stale (RFC 0213).
-      </p>
+    <div className="dk-page">
+      <PageHead
+        title="Review"
+        sub="Agree to the source model before anything is built on it. Each sign-off is bound to the digest of what this page shows; when a signed fact changes, it turns stale (RFC 0213)."
+      />
       {list.isLoading && (
-        <p className="muted">
-          computing the review… (the first time after a compile reads the whole ledger)
-        </p>
+        <>
+          <Skeleton rows={4} label="computing the review" />
+          <p className="muted small">
+            Computing the review… (the first time after a compile reads the whole ledger)
+          </p>
+        </>
       )}
-      {list.isError && <p className="err">{String(list.error)}</p>}
-      {list.data && (
-        <div className="review-tabs" role="tablist">
+      {list.isError && <ErrorNote error={list.error} what="review subjects" />}
+      {list.data && list.data.subjects.length === 0 && (
+        <Empty title="Nothing to review yet" icon="review">
+          The review lists what a compile recovered. Run the pipeline through{" "}
+          <code>ekos commit</code>, then come back to agree to the source model.
+        </Empty>
+      )}
+      {list.data && list.data.subjects.length > 0 && (
+        <div className="dk-tabs" role="group" aria-label="subjects">
           {list.data.subjects.map((s) => (
             <button
               key={s.subject}
@@ -92,21 +103,33 @@ function SubjectView({
   const elsewhere = DECIDED_ELSEWHERE[subject];
   const reviewer = useReviewer(me);
   const rows = visibleItems(detail.data?.rows ?? [], filter);
-  const shown = rows.slice(0, SHOWN);
-  const toggle = (item: ReviewItem) =>
-    setPicked((p) => {
-      const n = new Set(p);
-      if (n.has(item.label)) n.delete(item.label);
-      else n.add(item.label);
-      return n;
-    });
 
   return (
-    <div className="sem-layout with-panel">
-      <section className="card sem-list">
-        <p>
-          <strong>{SUBJECT_LABEL[subject] ?? subject}</strong>: {status.items} item(s),{" "}
-          {status.decided} decided, {status.outdated} outdated, {status.blocking} blocking
+    <SplitView
+      panel={
+        <DetailPanel label="decide and sign off">
+          {mayReview(me) && reviewer.field}
+          {!elsewhere && (
+            <Decide
+              workspace={workspace}
+              subject={subject}
+              targets={[...picked]}
+              me={me}
+              r={reviewer}
+              onDone={() => setPicked(new Set())}
+            />
+          )}
+          <SignOffBox workspace={workspace} status={status} me={me} r={reviewer} />
+        </DetailPanel>
+      }
+    >
+      <section className="card dk-list" aria-label="items">
+        <p className="dk-count">
+          <strong>{SUBJECT_LABEL[subject] ?? subject}</strong>
+          <span>{status.items} item(s)</span>
+          <span className="chip ok">{status.decided} decided</span>
+          {status.outdated > 0 && <span className="chip warn">{status.outdated} outdated</span>}
+          {status.blocking > 0 && <span className="chip bad">{status.blocking} blocking</span>}
         </p>
         {elsewhere && (
           <p className="muted">
@@ -115,14 +138,15 @@ function SubjectView({
             the subject off here.
           </p>
         )}
-        <div className="btnrow">
+        <div className="dk-toolbar">
           <input
+            className="dk-search"
             aria-label="filter"
             placeholder="filter"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
           />
-          <label>
+          <label className="dk-check">
             <input
               type="checkbox"
               checked={undecided}
@@ -131,24 +155,74 @@ function SubjectView({
             undecided only
           </label>
         </div>
-        {detail.isLoading && <p className="muted">loading…</p>}
-        {detail.isError && <p className="err">{String(detail.error)}</p>}
-        {rows.length > SHOWN && (
-          <p className="muted">
-            showing {SHOWN} of {rows.length}; narrow with the filter
-          </p>
+        {detail.isPending && <Skeleton rows={6} label="loading the items" />}
+        {detail.isError && <ErrorNote error={detail.error} />}
+        {detail.data && (
+          <ItemTable
+            rows={rows}
+            selectable={!elsewhere}
+            picked={picked}
+            setPicked={setPicked}
+            undecided={undecided}
+          />
         )}
-        <table className="review-table">
+      </section>
+    </SplitView>
+  );
+}
+
+/** The subject's items: signed facts, what is only shown, and the decision. */
+function ItemTable({
+  rows,
+  selectable,
+  picked,
+  setPicked,
+  undecided,
+}: {
+  rows: ReviewItem[];
+  selectable: boolean;
+  picked: Set<string>;
+  setPicked: (f: (p: Set<string>) => Set<string>) => void;
+  undecided: boolean;
+}) {
+  const shown = rows.slice(0, SHOWN);
+  const toggle = (item: ReviewItem) =>
+    setPicked((p) => {
+      const n = new Set(p);
+      if (n.has(item.label)) n.delete(item.label);
+      else n.add(item.label);
+      return n;
+    });
+  if (rows.length === 0) {
+    return (
+      <Empty title={undecided ? "Everything here is decided" : "No items"} icon="check">
+        {undecided
+          ? "Untick “undecided only” to see the decisions, or sign the subject off."
+          : "Nothing matches the filter, or the compile recovered nothing for this subject."}
+      </Empty>
+    );
+  }
+  return (
+    <>
+      {rows.length > SHOWN && (
+        <p className="muted">
+          showing {SHOWN} of {rows.length}; narrow with the filter
+        </p>
+      )}
+      <div className="table-scroll">
+        <table className="dk-table dk-review-table">
           <thead>
             <tr>
-              {!elsewhere && (
+              {selectable && (
                 <th>
                   <input
                     type="checkbox"
                     aria-label="select all shown"
                     checked={shown.length > 0 && shown.every((i) => picked.has(i.label))}
                     onChange={(e) =>
-                      setPicked(e.target.checked ? new Set(shown.map((i) => i.label)) : new Set())
+                      setPicked(() =>
+                        e.target.checked ? new Set(shown.map((i) => i.label)) : new Set(),
+                      )
                     }
                   />
                 </th>
@@ -161,8 +235,8 @@ function SubjectView({
           </thead>
           <tbody>
             {shown.map((i) => (
-              <tr key={i.id}>
-                {!elsewhere && (
+              <tr key={i.id} className={picked.has(i.label) ? "is-selected" : undefined}>
+                {selectable && (
                   <td>
                     <input
                       type="checkbox"
@@ -182,22 +256,8 @@ function SubjectView({
             ))}
           </tbody>
         </table>
-      </section>
-      <aside className="card sem-panel" aria-label="decide and sign off">
-        {mayReview(me) && reviewer.field}
-        {!elsewhere && (
-          <Decide
-            workspace={workspace}
-            subject={subject}
-            targets={[...picked]}
-            me={me}
-            r={reviewer}
-            onDone={() => setPicked(new Set())}
-          />
-        )}
-        <SignOffBox workspace={workspace} status={status} me={me} r={reviewer} />
-      </aside>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -219,20 +279,14 @@ const VERDICTS: Record<string, { verdict: string; label: string }[]> = {
 
 type Reviewer = ReturnType<typeof useReviewer>;
 
-/** One reviewer field per page: token mode has no identity, so the person types a name. */
+/** One reviewer field per page: token and local mode have no identity, so the person types a
+ * name, recorded as `token:<name>` or `local:<name>`. */
 function useReviewer(me: Me) {
   const [reviewer, setReviewer] = useState(loadReviewer());
   const needsName = me.mode !== "oidc" && !reviewer.trim();
   const field =
     me.mode !== "oidc" ? (
-      <label className="sem-field">
-        <span>Reviewer (no signed-in identity here; recorded as token:&lt;name&gt; or local:&lt;name&gt;)</span>
-        <input
-          aria-label="reviewer"
-          value={reviewer}
-          onChange={(e) => setReviewer(e.target.value)}
-        />
-      </label>
+      <ReviewerField ariaLabel="reviewer" value={reviewer} onChange={setReviewer} />
     ) : null;
   const who = me.mode !== "oidc" ? reviewer : null;
   const remember = () => {
@@ -281,10 +335,10 @@ function Decide({
   });
   if (!mayReview(me)) return <p className="muted">Deciding needs the reviewer role.</p>;
   return (
-    <div className="sem-decide" aria-label="decide">
-      <strong className="sem-sub">Decide {targets.length} selected</strong>
+    <section className="dk-section" aria-label="decide">
+      <h4 className="dk-sub">Decide {targets.length} selected</h4>
       {subject === "pii" && (
-        <label className="sem-field">
+        <label className="dk-field">
           <span>Mask downstream</span>
           <select aria-label="mask" value={mask} onChange={(e) => setMask(e.target.value)}>
             <option value="redact">redact</option>
@@ -293,7 +347,7 @@ function Decide({
           </select>
         </label>
       )}
-      <label className="sem-field">
+      <label className="dk-field">
         <span>{subject === "identity" ? "Note (required for “different”)" : "Reason"}</span>
         <textarea
           aria-label="reason"
@@ -302,10 +356,11 @@ function Decide({
           onChange={(e) => setReason(e.target.value)}
         />
       </label>
-      <div className="btnrow">
+      <div className="dk-actions">
         {(VERDICTS[subject] ?? []).map((v) => (
           <button
             key={v.verdict}
+            type="button"
             disabled={decide.isPending || r.needsName || targets.length === 0}
             onClick={() => decide.mutate(v.verdict)}
           >
@@ -313,10 +368,10 @@ function Decide({
           </button>
         ))}
       </div>
-      {decide.isPending && <p className="muted">recording… (reads the whole ledger)</p>}
-      {decide.isError && <p className="err">{String(decide.error)}</p>}
+      {decide.isPending && <p className="muted small">recording… (reads the whole ledger)</p>}
+      {decide.isError && <ErrorNote error={decide.error} />}
       {decide.isSuccess && <p className="ok-line">{decide.data.message}</p>}
-    </div>
+    </section>
   );
 }
 
@@ -364,41 +419,29 @@ function SignOffBox({
   });
   const s = status.signoff;
   const signed = s.state === "valid" || s.state === "stale";
+  const busy = approve.isPending || revoke.isPending;
 
   return (
-    <div className="sem-decide" aria-label="sign-off">
-      <strong className="sem-sub">Sign-off</strong>
+    <section className="dk-section" aria-label="sign-off">
+      <h4 className="dk-sub">Sign-off</h4>
       <p>
         <span className={signChip(s)}>{s.state}</span> {signLine(s)}
       </p>
-      {s.state === "stale" && (
-        <ul className="muted">
-          {[
-            ...s.added.map((x) => `added ${x}`),
-            ...s.removed.map((x) => `removed ${x}`),
-            ...s.changed.map((x) => `changed ${x}`),
-          ]
-            .slice(0, 20)
-            .map((x) => (
-              <li key={x}>{x}</li>
-            ))}
-        </ul>
-      )}
-      <p className="muted">
-        digest <span className="review-digest">{status.digest}</span>
+      {s.state === "stale" && <StaleList s={s} />}
+      <p className="muted small">
+        digest <span className="dk-digest">{status.digest}</span>
       </p>
-      {!mayReview(me) ? (
-        <p className="muted">Signing off needs the reviewer role.</p>
-      ) : (
+      {mayReview(me) ? (
         <>
-          {status.blocking > 0 ? (
+          {status.blocking > 0 && (
             <p className="muted">
               {status.blocking} blocking item(s) must be decided before this subject can be signed
               off.
             </p>
-          ) : (
+          )}
+          {status.blocking === 0 && (
             <>
-              <label className="sem-field">
+              <label className="dk-field">
                 <span>
                   Type <code>{subject}</code> to sign off what this page shows
                 </span>
@@ -408,13 +451,14 @@ function SignOffBox({
                   onChange={(e) => setConfirm(e.target.value)}
                 />
               </label>
-              <label className="sem-field">
+              <label className="dk-field">
                 <span>Note</span>
                 <input aria-label="note" value={note} onChange={(e) => setNote(e.target.value)} />
               </label>
-              <div className="btnrow">
+              <div className="dk-actions">
                 <button
-                  className="save"
+                  type="button"
+                  className="primary"
                   disabled={approve.isPending || r.needsName || confirm.trim() !== subject}
                   onClick={() => approve.mutate()}
                 >
@@ -425,7 +469,7 @@ function SignOffBox({
           )}
           {signed && (
             <>
-              <label className="sem-field">
+              <label className="dk-field">
                 <span>Reason to withdraw</span>
                 <input
                   aria-label="revoke reason"
@@ -433,9 +477,10 @@ function SignOffBox({
                   onChange={(e) => setReason(e.target.value)}
                 />
               </label>
-              <div className="btnrow">
+              <div className="dk-actions">
                 <button
-                  className="danger-btn"
+                  type="button"
+                  className="dk-danger"
                   disabled={revoke.isPending || r.needsName || !reason.trim()}
                   onClick={() => revoke.mutate()}
                 >
@@ -445,15 +490,34 @@ function SignOffBox({
             </>
           )}
           {(approve.isError || revoke.isError) && (
-            <p className="err">{String(approve.error ?? revoke.error)}</p>
+            <ErrorNote error={approve.error ?? revoke.error} />
           )}
-          {(approve.isPending || revoke.isPending) && (
-            <p className="muted">recording… (checks the digest against the whole ledger)</p>
+          {busy && (
+            <p className="muted small">recording… (checks the digest against the whole ledger)</p>
           )}
           {approve.isSuccess && <p className="ok-line">{approve.data.message}</p>}
           {revoke.isSuccess && <p className="ok-line">{revoke.data.message}</p>}
         </>
+      ) : (
+        <p className="muted">Signing off needs the reviewer role.</p>
       )}
-    </div>
+    </section>
+  );
+}
+
+/** What changed since a stale sign-off, at most 20 lines. */
+function StaleList({ s }: { s: SubjectStatus["signoff"] }) {
+  if (s.state !== "stale") return null;
+  const lines = [
+    ...s.added.map((x) => `added ${x}`),
+    ...s.removed.map((x) => `removed ${x}`),
+    ...s.changed.map((x) => `changed ${x}`),
+  ].slice(0, 20);
+  return (
+    <ul className="muted small dk-stale">
+      {lines.map((x) => (
+        <li key={x}>{x}</li>
+      ))}
+    </ul>
   );
 }

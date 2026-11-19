@@ -9,6 +9,8 @@ import { colorFor, SERVER_LAYOUT_THRESHOLD, type GLink, type GNode } from "./gra
 import { impactHopMap, neighborhoodToGraph, type ImpactOut, type NeighborhoodOut } from "./graph-v2";
 import { GraphTimeline, type TimelinePoint } from "./GraphTimeline";
 import { ObjectPanel } from "./ObjectPanel";
+import { Icon } from "../Icon";
+import { Empty, ErrorNote, Skeleton } from "../ui";
 import { type Me, seesAll } from "../WorkspaceShell";
 
 const GraphCanvas = lazy(() => import("./GraphCanvas").then((m) => ({ default: m.GraphCanvas })));
@@ -126,64 +128,59 @@ interface ToolbarProps {
 function ToolbarBack(p: ToolbarProps) {
   if (p.isolated) {
     return (
-      <button className="pill" onClick={p.onBackToFull}>
+      <button type="button" className="pill" onClick={p.onBackToFull}>
         ↑ back to full graph
       </button>
     );
   }
   if (p.expanded) {
     return (
-      <button className="pill" onClick={p.onOverview}>
+      <button type="button" className="pill" onClick={p.onOverview}>
         ↑ overview
       </button>
     );
   }
-  return <span className="muted">click a bubble to drill in</span>;
+  return <span className="muted small">click a bubble to drill in</span>;
 }
 
+/** The graph's head: the page title folded into its toolbar, so the canvas keeps its height. */
 function GraphToolbar(p: ToolbarProps) {
   return (
     <div className="graph-toolbar">
-      <span>
+      <div className="x-graph-nav">
+        <h1 className="page-title x-graph-title">Graph</h1>
         <ToolbarBack {...p} />
         {p.tracing && (
-          <button className="pill" onClick={p.onClearImpact} style={{ marginLeft: "0.4rem" }}>
-            ✕ clear impact trace
+          <button type="button" className="pill" onClick={p.onClearImpact}>
+            <Icon name="close" size={12} /> clear impact trace
           </button>
         )}
-      </span>
-      <span>
+      </div>
+      <div className="x-graph-actions">
         <button
+          type="button"
           className="pill"
           onClick={p.onCopyLink}
           title="copy a link to this exact view (time-travel position + selected object)"
         >
-          {p.linkCopied ? "✓ copied" : "🔗 copy link"}
+          {p.linkCopied ? (
+            <>
+              <Icon name="check" size={12} /> copied
+            </>
+          ) : (
+            "copy link"
+          )}
         </button>
-        <button
-          className="pill"
-          onClick={p.onPng}
-          title="save the current view as a PNG"
-          style={{ marginLeft: "0.4rem" }}
-        >
-          ⬇ PNG
+        <button type="button" className="pill" onClick={p.onPng} title="save the current view as a PNG">
+          <Icon name="download" size={12} /> PNG
         </button>
-        <button
-          className="pill"
-          onClick={p.onGltf}
-          title="save the current view as a glTF model"
-          style={{ marginLeft: "0.4rem" }}
-        >
-          ⬇ glTF
+        <button type="button" className="pill" onClick={p.onGltf} title="save the current view as a glTF model">
+          <Icon name="download" size={12} /> glTF
         </button>
-        <button
-          className="pill"
-          onClick={p.onToggleFullscreen}
-          style={{ marginLeft: "0.4rem" }}
-        >
-          {p.fullscreen ? "✕ exit fullscreen" : "⛶ fullscreen"}
+        <button type="button" className="pill" aria-pressed={p.fullscreen} onClick={p.onToggleFullscreen}>
+          {p.fullscreen ? "exit fullscreen" : "fullscreen"}
         </button>
-      </span>
+      </div>
     </div>
   );
 }
@@ -254,7 +251,7 @@ function SidebarFilters(p: SidebarProps) {
   if (p.isolate) {
     const isolate = p.isolate;
     return (
-      <label className="muted" style={{ display: "block", margin: "0.5rem 0" }}>
+      <label className="muted x-range">
         neighbourhood depth: {isolate.depth}
         <input
           type="range"
@@ -262,7 +259,6 @@ function SidebarFilters(p: SidebarProps) {
           max={3}
           value={isolate.depth}
           onChange={(e) => p.setIsolate({ id: isolate.id, depth: Number(e.target.value) })}
-          style={{ width: "100%" }}
         />
       </label>
     );
@@ -271,7 +267,7 @@ function SidebarFilters(p: SidebarProps) {
   return (
     <>
       {p.expanded && (
-        <label className="muted" style={{ display: "block", margin: "0.5rem 0" }}>
+        <label className="muted x-range">
           min degree: {p.minDegree}
           <input
             type="range"
@@ -279,13 +275,10 @@ function SidebarFilters(p: SidebarProps) {
             max={15}
             value={p.minDegree}
             onChange={(e) => p.setMinDegree(Number(e.target.value))}
-            style={{ width: "100%" }}
           />
         </label>
       )}
-      <p className="muted" style={{ marginTop: "0.75rem" }}>
-        relationship kinds
-      </p>
+      <p className="x-side-label">relationship kinds</p>
       {relKinds.map((rk) => (
         <label key={rk} className="flt">
           <input
@@ -305,17 +298,16 @@ function SidebarKinds(p: SidebarProps) {
   if (p.isolate) return null;
   return (
     <>
-      <p className="muted" style={{ marginTop: "0.75rem" }}>
-        {p.expanded ? "focus a kind" : "click a bubble (or a name) to drill in"}
-      </p>
+      <p className="x-side-label">{p.expanded ? "focus a kind" : "click a bubble (or a name) to drill in"}</p>
       <ul className="kinds">
         {p.overviewNodes.map((n) => (
           <li key={n.id}>
             <button
-              className="linkish"
+              type="button"
+              className="linkish x-kind"
               onClick={() => p.setFocusKind(n.n ?? null)}
-              style={{ color: colorFor(n.k ?? 0) }}
             >
+              <span className="x-kind-dot" style={{ background: colorFor(n.k ?? 0) }} aria-hidden="true" />
               {n.n}
             </button>{" "}
             <span className="muted">{n.count}</span>
@@ -324,9 +316,10 @@ function SidebarKinds(p: SidebarProps) {
         {p.kinds.map((k) => (
           <li key={k}>
             <button
-              className="linkish"
+              type="button"
+              className={`linkish x-kind ${k === p.focusKind ? "on" : ""}`}
+              aria-pressed={k === p.focusKind}
               onClick={() => p.setFocusKind(k)}
-              style={{ fontWeight: k === p.focusKind ? 700 : 400 }}
             >
               {k}
             </button>
@@ -339,24 +332,26 @@ function SidebarKinds(p: SidebarProps) {
 
 function GraphSidebar(p: SidebarProps) {
   return (
-    <aside className="graph-side">
-      <strong>{sidebarTitle(p)}</strong>
+    <aside className="graph-side" aria-label="graph controls">
+      <h2 className="x-side-title">{sidebarTitle(p)}</h2>
       <SidebarNotes {...p} />
       <SidebarFilters {...p} />
 
-      <p className="muted" style={{ marginTop: "0.75rem" }}>
+      <label className="x-side-label" htmlFor="graph-search">
         search
-      </p>
+      </label>
       <input
+        id="graph-search"
+        type="search"
+        className="x-side-input"
         value={p.q}
         onChange={(e) => p.setQ(e.target.value)}
         placeholder="2–3 keywords"
-        style={{ width: "100%" }}
       />
       <ul className="srch">
         {p.matches.map((m) => (
           <li key={m.id}>
-            <button className="linkish" onClick={() => p.gotoObject(m.id)}>
+            <button type="button" className="linkish" onClick={() => p.gotoObject(m.id)}>
               {m.name}
             </button>
           </li>
@@ -371,18 +366,29 @@ function GraphSidebar(p: SidebarProps) {
 /** Load and error lines for whichever fetch feeds the canvas, and for the impact trace. */
 function GraphStatus(p: {
   isolated: boolean;
-  feed: { isError: boolean; isLoading: boolean; error: unknown };
+  feed: { isError: boolean; isLoading: boolean; isSuccess: boolean; error: unknown };
   impactError: unknown;
+  /** Nodes on screen; none after the feed answered is the empty state. */
+  nodeCount: number;
 }) {
   return (
     <>
-      {p.feed.isError && <p className="err">{String(p.feed.error)}</p>}
+      {p.feed.isSuccess && p.nodeCount === 0 && (
+        <div className="x-canvas-note">
+          <Empty title={p.isolated ? "Nothing around this object" : "Nothing to draw yet"} icon="graph">
+            {p.isolated
+              ? "This object has no relationships at this depth."
+              : "The graph shows the compiled ledger. Run the pipeline (build → commit) from Run, or relax the filters."}
+          </Empty>
+        </div>
+      )}
+      {p.feed.isError && <ErrorNote error={p.feed.error} what={p.isolated ? "neighbourhood" : "graph"} />}
       {p.feed.isLoading && (
-        <p className="muted">{p.isolated ? "loading neighbourhood…" : "loading graph…"}</p>
+        <div className="x-canvas-note">
+          <Skeleton rows={3} label={p.isolated ? "loading neighbourhood" : "loading graph"} />
+        </div>
       )}
-      {p.impactError !== null && (
-        <p className="err">impact trace failed: {String(p.impactError)}</p>
-      )}
+      {p.impactError !== null && <ErrorNote error={p.impactError} what="impact trace failed" />}
     </>
   );
 }
@@ -608,9 +614,10 @@ export function Graph() {
             isolated={isolate !== null}
             feed={isolate ? neighborhood : graph}
             impactError={impact?.id && impactQuery.isError ? impactQuery.error : null}
+            nodeCount={nodes.length}
           />
           {nodes.length > 0 && (
-            <Suspense fallback={<p className="muted">loading renderer…</p>}>
+            <Suspense fallback={<p className="muted x-canvas-note">loading renderer…</p>}>
               <GraphCanvas
                 ref={canvasRef}
                 nodes={positionedNodes}
@@ -630,7 +637,7 @@ export function Graph() {
             <div className="graph-asof-banner">
               viewing as of <strong>{asOf.slice(0, 10)}</strong> · {visibleCount} of {nodes.length}{" "}
               nodes
-              <button className="linkish" onClick={() => setAsOf(null)}>
+              <button type="button" className="linkish" onClick={() => setAsOf(null)}>
                 back to live
               </button>
             </div>

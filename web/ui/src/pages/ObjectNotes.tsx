@@ -5,6 +5,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Annotation } from "../api/types";
+import { ErrorNote } from "../ui";
 import { reach, stateChip } from "./annotations-shared";
 
 export function ObjectNotes({
@@ -24,10 +25,10 @@ export function ObjectNotes({
   const shown = (notes.data ?? []).filter((a) => a.state !== "withdrawn");
   if (!enabled || (!notes.isError && shown.length === 0)) return null;
   return (
-    <details open>
+    <details open className="dk-details">
       <summary>Notes from people ({shown.length})</summary>
-      {notes.isError && <p className="err">{String(notes.error)}</p>}
-      <ul className="rel-list">
+      {notes.isError && <ErrorNote error={notes.error} />}
+      <ul className="dk-said">
         {shown.map((a) => (
           <li key={a.id}>
             <span className={stateChip(a.state)}>{a.state}</span>{" "}

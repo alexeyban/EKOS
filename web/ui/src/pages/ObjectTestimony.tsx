@@ -6,6 +6,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Testimony } from "../api/types";
+import { ErrorNote } from "../ui";
 
 export function ObjectTestimony({
   workspace,
@@ -27,10 +28,10 @@ export function ObjectTestimony({
   const shown = (said.data ?? []).filter((t) => t.status !== "withdrawn");
   if (!enabled || (!said.isError && shown.length === 0)) return null;
   return (
-    <details open>
+    <details open className="dk-details">
       <summary>What people said ({shown.length})</summary>
-      {said.isError && <p className="err">{String(said.error)}</p>}
-      <ul className="rel-list">
+      {said.isError && <ErrorNote error={said.error} />}
+      <ul className="dk-said">
         {shown.map((t) => (
           <li key={t.id}>
             <span className="muted">

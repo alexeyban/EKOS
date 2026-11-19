@@ -4,6 +4,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, apiDelete, apiPost, apiPut } from "../api/client";
+import { ErrorNote, PageHead, Skeleton } from "../ui";
 
 export interface SettingField {
   name: string;
@@ -77,17 +78,39 @@ export function Settings() {
   });
   const restart = useMutation({ mutationFn: () => apiPost("/platform/restart") });
 
-  if (view.isError) return <p className="err">{String(view.error)}</p>;
-  if (!view.data) return <p className="muted">loading…</p>;
+  const head = <PageHead title="Settings" sub="This console's own settings, and the model keys it keeps in the keychain." />;
+  if (view.isError)
+    return (
+      <div className="fm-page">
+        {head}
+        <ErrorNote error={view.error} what="Reading the settings" />
+      </div>
+    );
+  if (!view.data)
+    return (
+      <div className="fm-page">
+        {head}
+        <Skeleton rows={6} label="loading the settings" />
+      </div>
+    );
   const data = view.data;
   const byName = new Map(data.fields.map((f) => [f.name, f]));
   const changed = Object.keys(draft).filter((n) => draft[n] !== display(byName.get(n)?.value ?? null));
+  const nothingToSave = changed.length === 0 && Object.keys(secrets).length === 0;
+  const saveAll = () =>
+    save.mutate({
+      values: Object.fromEntries(changed.map((n) => [n, parseInput(byName.get(n)!, draft[n])])),
+      secrets: Object.fromEntries(Object.entries(secrets).filter(([, v]) => v !== "")),
+    });
 
   return (
-    <>
-      <section className="card">
-        <strong>Console settings</strong>
-        <p className="muted">
+    <div className="fm-page">
+      {head}
+      <section className="card" aria-labelledby="settings-console">
+        <h2 className="card-label" id="settings-console">
+          Console settings
+        </h2>
+        <p className="fm-note">
           {data.file ? (
             <>
               Saved to <code>{data.file}</code>. A value set by the environment wins and is shown
@@ -99,78 +122,100 @@ export function Settings() {
         </p>
         {data.error && <p className="err">The saved settings do not start: {data.error}</p>}
         {saved && (
-          <p className="ok-msg">
-            Saved. Restart the console to apply.{" "}
-            {data.supervised ? (
-              <button onClick={() => restart.mutate()} disabled={restart.isPending}>
-                Restart now
-              </button>
-            ) : (
-              <span className="muted">It was not started by a launcher; restart it yourself.</span>
-            )}
-          </p>
+          <SavedNote supervised={data.supervised} onRestart={() => restart.mutate()} restarting={restart.isPending} />
         )}
-        {restart.isSuccess && <p className="muted">Restarting… reload this page in a few seconds.</p>}
-        {restart.isError && <p className="err">{String(restart.error)}</p>}
+        {restart.isSuccess && <p className="fm-hint">Restarting… reload this page in a few seconds.</p>}
+        {restart.isError && <ErrorNote error={restart.error} what="Restarting" />}
       </section>
 
       {grouped(data.fields).map(([group, fields]) => (
-        <section className="card" key={group}>
-          <strong>{group}</strong>
-          <table className="settings">
-            <tbody>
-              {fields.map((f) => (
-                <tr key={f.name}>
-                  <td>
-                    <code>{f.name}</code>
-                    <div className="muted small">{f.help}</div>
-                  </td>
-                  <td>
-                    {f.secret ? (
-                      <SecretInput
-                        field={f}
-                        keychain={data.keychain.available}
-                        value={secrets[f.name] ?? ""}
-                        onChange={(v) => setSecrets({ ...secrets, [f.name]: v })}
-                        onRemove={() => save.mutate({ secrets: { [f.name]: null } })}
-                      />
-                    ) : (
-                      <ValueInput
-                        field={f}
-                        text={draft[f.name] ?? display(f.value)}
-                        onChange={(t) => setDraft({ ...draft, [f.name]: t })}
-                      />
-                    )}
-                  </td>
-                  <td>
-                    <span className={`chip ${f.source === "environment" ? "warn" : ""}`}>{f.source}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <section className="card" key={group} aria-label={group}>
+          <h2 className="card-label">{group}</h2>
+          <div className="fm-grid">
+            {fields.map((f) => (
+              <SettingRow
+                key={f.name}
+                field={f}
+                keychain={data.keychain.available}
+                draft={draft[f.name]}
+                secret={secrets[f.name] ?? ""}
+                onDraft={(t) => setDraft({ ...draft, [f.name]: t })}
+                onSecret={(v) => setSecrets({ ...secrets, [f.name]: v })}
+                onRemoveSecret={() => save.mutate({ secrets: { [f.name]: null } })}
+              />
+            ))}
+          </div>
         </section>
       ))}
 
-      <section className="card">
-        <button
-          disabled={save.isPending || (changed.length === 0 && Object.keys(secrets).length === 0)}
-          onClick={() =>
-            save.mutate({
-              values: Object.fromEntries(changed.map((n) => [n, parseInput(byName.get(n)!, draft[n])])),
-              secrets: Object.fromEntries(Object.entries(secrets).filter(([, v]) => v !== "")),
-            })
-          }
-        >
+      <div className="fm-actions fm-footer">
+        <button className="primary" disabled={save.isPending || nothingToSave} onClick={saveAll}>
           Save settings
-        </button>{" "}
-        {changed.length > 0 && <span className="muted">{changed.length} changed</span>}
-        {save.isError && <p className="err">{String(save.error)}</p>}
-      </section>
+        </button>
+        {changed.length > 0 && <span className="fm-status">{changed.length} changed</span>}
+      </div>
+      {save.isError && <ErrorNote error={save.error} what="Saving the settings" />}
 
       <Keychain />
       <Uninstall />
-    </>
+    </div>
+  );
+}
+
+function SavedNote({
+  supervised,
+  restarting,
+  onRestart,
+}: {
+  supervised: boolean;
+  restarting: boolean;
+  onRestart: () => void;
+}) {
+  return (
+    <div className="fm-actions">
+      <span className="fm-ok">Saved. Restart the console to apply.</span>
+      {supervised ? (
+        <button className="primary" onClick={onRestart} disabled={restarting}>
+          Restart now
+        </button>
+      ) : (
+        <span className="fm-status">It was not started by a launcher; restart it yourself.</span>
+      )}
+    </div>
+  );
+}
+
+/** One setting: its name and where its value comes from above the control, its help under it. */
+function SettingRow({
+  field,
+  keychain,
+  draft,
+  secret,
+  onDraft,
+  onSecret,
+  onRemoveSecret,
+}: {
+  field: SettingField;
+  keychain: boolean;
+  draft: string | undefined;
+  secret: string;
+  onDraft: (t: string) => void;
+  onSecret: (v: string) => void;
+  onRemoveSecret: () => void;
+}) {
+  return (
+    <div className="fm-field">
+      <div className="fm-label">
+        <code>{field.name}</code>
+        <span className={`chip fm-chip ${field.source === "environment" ? "warn" : ""}`}>{field.source}</span>
+      </div>
+      {field.secret ? (
+        <SecretInput field={field} keychain={keychain} value={secret} onChange={onSecret} onRemove={onRemoveSecret} />
+      ) : (
+        <ValueInput field={field} text={draft ?? display(field.value)} onChange={onDraft} />
+      )}
+      {field.help && <div className="fm-hint">{field.help}</div>}
+    </div>
   );
 }
 
@@ -194,21 +239,25 @@ function Uninstall() {
   });
   if (!view.data) return null;
   return (
-    <section className="card">
-      <strong>Uninstall EKOS</strong>
-      <p className="muted">
+    <section className="card" aria-labelledby="settings-uninstall">
+      <h2 className="card-label" id="settings-uninstall">
+        Uninstall EKOS
+      </h2>
+      <p className="fm-note">
         Opens a page that lists what will be removed — the program, the console, its login entry, the
         PATH line and the agent entries setup added — and your projects with their size. You choose
         there whether to keep the projects, and confirm. Nothing is removed before that.
       </p>
       {view.data.available ? (
-        <button onClick={() => start.mutate()} disabled={start.isPending}>
-          {start.isPending ? "Opening…" : "Uninstall EKOS…"}
-        </button>
+        <div className="fm-actions">
+          <button className="danger-outline" onClick={() => start.mutate()} disabled={start.isPending}>
+            {start.isPending ? "Opening…" : "Uninstall EKOS…"}
+          </button>
+        </div>
       ) : (
-        <p className="muted">{view.data.reason}</p>
+        <p className="fm-hint">{view.data.reason}</p>
       )}
-      {start.isError && <p className="err">{String(start.error)}</p>}
+      {start.isError && <ErrorNote error={start.error} what="Opening the uninstall page" />}
       {start.isSuccess && !uninstallTarget(start.data.url) && (
         <p className="err">The uninstall page answered with an address off this machine; not opened.</p>
       )}
@@ -228,13 +277,15 @@ function ValueInput({
   const disabled = !field.editable;
   if (field.type === "bool") {
     return (
-      <input
-        type="checkbox"
-        aria-label={field.name}
-        checked={text === "true"}
-        disabled={disabled}
-        onChange={(e) => onChange(String(e.target.checked))}
-      />
+      <span className="fm-check">
+        <input
+          type="checkbox"
+          aria-label={field.name}
+          checked={text === "true"}
+          disabled={disabled}
+          onChange={(e) => onChange(String(e.target.checked))}
+        />
+      </span>
     );
   }
   const choices = CHOICES[field.name];
@@ -271,11 +322,11 @@ function SecretInput({
   onChange: (v: string) => void;
   onRemove: () => void;
 }) {
-  if (!field.editable) return <span className="muted">{field.set ? "set" : "not set"}</span>;
+  if (!field.editable) return <span className="fm-hint">{field.set ? "set" : "not set"}</span>;
   if (!keychain)
-    return <span className="muted">{field.set ? "set" : "not set"} — no keychain here; use an environment variable</span>;
+    return <span className="fm-hint">{field.set ? "set" : "not set"} — no keychain here; use an environment variable</span>;
   return (
-    <>
+    <span className="fm-inline">
       <input
         type="password"
         aria-label={field.name}
@@ -288,7 +339,7 @@ function SecretInput({
           remove
         </button>
       )}
-    </>
+    </span>
   );
 }
 
@@ -313,31 +364,33 @@ function Keychain() {
   if (!view.data) return null;
 
   return (
-    <section className="card">
-      <strong>Model keys in the keychain</strong>
-      <p className="muted">
+    <section className="card" aria-labelledby="settings-keychain">
+      <h2 className="card-label" id="settings-keychain">
+        Model keys in the keychain
+      </h2>
+      <p className="fm-note">
         A project names the environment variable holding its key (<code>api-key-env</code> in its{" "}
         <code>ekos.toml</code>). A value stored here under that name is given to the commands of a
         tenant granted the name in Admin, while its metered calls are on. Values are never shown
         again. Keychain: {view.data.backend}.
       </p>
       {!view.data.available ? (
-        <p className="muted">No keychain is usable here; set the variables in the console's environment instead.</p>
+        <p className="fm-hint">No keychain is usable here; set the variables in the console's environment instead.</p>
       ) : (
         <>
-          <ul>
+          <ul className="fm-list">
             {view.data.names.map((n) => (
               <li key={n}>
-                <code>{n}</code>{" "}
-                <button className="linkish" onClick={() => del.mutate(n)}>
+                <code className="fm-item">{n}</code>
+                <button className="linkish danger" onClick={() => del.mutate(n)}>
                   remove
                 </button>
               </li>
             ))}
-            {view.data.names.length === 0 && <li className="muted">nothing stored</li>}
+            {view.data.names.length === 0 && <li className="fm-hint">Nothing stored yet. Store a key below.</li>}
           </ul>
           <form
-            className="token-row"
+            className="fm-inline"
             onSubmit={(e) => {
               e.preventDefault();
               put.mutate();
@@ -349,7 +402,7 @@ function Keychain() {
               Store
             </button>
           </form>
-          {put.isError && <p className="err">{String(put.error)}</p>}
+          {put.isError && <ErrorNote error={put.error} what="Storing the key" />}
         </>
       )}
     </section>

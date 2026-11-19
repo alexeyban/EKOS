@@ -114,7 +114,7 @@ describe("EvalDetail", () => {
   it("shows a loading state before the report arrives", () => {
     vi.spyOn(client, "api").mockReturnValue(new Promise(() => {}));
     renderDetail();
-    expect(screen.getByText("loading…")).toBeInTheDocument();
+    expect(screen.getByLabelText("loading eval report")).toHaveAttribute("aria-busy", "true");
   });
 
   it("renders the dataset header with a FAIL chip when the gate didn't pass", async () => {
@@ -170,6 +170,6 @@ describe("EvalDetail", () => {
   it("shows the API error message when the fetch fails", async () => {
     vi.spyOn(client, "api").mockRejectedValue(new Error("no such report"));
     renderDetail();
-    expect(await screen.findByText("Error: no such report")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("no such report");
   });
 });

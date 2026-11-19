@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../api/client";
+import { Empty, PageHead, QueryView } from "../ui";
 import { layoutGraph } from "./extension-view";
 
 export type Observed = {
@@ -98,6 +99,13 @@ export function systemGraph(m: Matrix, flagged: Set<string>, maxTables = 25): Sy
   return { nodes: [...nodes.values()], edges, omitted: rows.length - shown.length };
 }
 
+/** A node's tone: a table with an open finding warns, an observed actor is ok. */
+function badgeClass(badge: unknown): string {
+  if (badge === "warning") return "warn";
+  if (badge === "observed") return "ok";
+  return "";
+}
+
 function InteractionGraph({ g }: { g: SystemGraph }) {
   if (g.nodes.length === 0) return <p className="muted">No system or role touches these tables.</p>;
   const laid = layoutGraph(g.nodes, g.edges);
@@ -105,7 +113,7 @@ function InteractionGraph({ g }: { g: SystemGraph }) {
   const h = 28;
   const pos = new Map(laid.nodes.map((n) => [n.id, n]));
   return (
-    <div className="ext-graph" style={{ overflowX: "auto" }}>
+    <div className="ext-graph x-graph-scroll">
       <svg width={laid.width + 20} height={laid.height + 36} role="img" aria-label="who writes and reads which table">
         <defs>
           <marker id="ia-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
@@ -134,7 +142,7 @@ function InteractionGraph({ g }: { g: SystemGraph }) {
             <g
               key={n.id}
               transform={`translate(${n.x},${n.y})`}
-              className={`ext-node ${n.badge === "warning" ? "warn" : n.badge === "observed" ? "ok" : ""}`}
+              className={`ext-node ${badgeClass(n.badge)}`}
             >
               <rect width={w} height={h} rx={5} />
               <text x={8} y={18}>
@@ -183,40 +191,44 @@ function FindingsList({
   return (
     <>
       {problems.length === 0 && (
-        <p className="muted">No findings. Without an observation of the database (`ekos interaction observe`) none is derived.</p>
+        <Empty title="No findings" icon="check">
+          No findings. Without an observation of the database (<code>ekos interaction observe</code>) none is derived.
+        </Empty>
       )}
       {problems.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>finding</th>
-              <th>table</th>
-              <th>actor</th>
-              <th>operations</th>
-            </tr>
-          </thead>
-          <tbody>
-            {problems.map((f) => (
-              <tr key={f.id}>
-                <td>
-                  <span className="chip warn">{FINDING_LABELS[f.finding] ?? f.finding}</span>
-                </td>
-                <td>
-                  <button type="button" className="linkish" onClick={() => onTable(f.table)}>
-                    {f.table}
-                  </button>
-                </td>
-                <td>
-                  <code>{f.actor ?? "—"}</code>
-                </td>
-                <td>{(f.operations ?? []).join(", ")}</td>
+        <div className="table-scroll">
+          <table className="lm-table x-table">
+            <thead>
+              <tr>
+                <th>finding</th>
+                <th>table</th>
+                <th>actor</th>
+                <th>operations</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {problems.map((f) => (
+                <tr key={f.id}>
+                  <td>
+                    <span className="chip warn">{FINDING_LABELS[f.finding] ?? f.finding}</span>
+                  </td>
+                  <td>
+                    <button type="button" className="linkish" onClick={() => onTable(f.table)}>
+                      {f.table}
+                    </button>
+                  </td>
+                  <td>
+                    <code>{f.actor ?? "—"}</code>
+                  </td>
+                  <td>{(f.operations ?? []).join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {consumers.length > 0 && (
-        <details>
+        <details className="x-details">
           <summary>Read-only consumers of {consumers.length} table(s): who a change breaks</summary>
           <ul>
             {consumers.map((f) => (
@@ -249,7 +261,6 @@ export function Interaction() {
     queryFn: () => api<Finding[]>(`/workspaces/${id}/interaction/findings`),
     enabled: id !== "",
   });
-  const rows = matrix.data?.tables ?? [];
   const [view, setView] = useState<"tables" | "graph">("tables");
   const problems = (findings.data ?? []).filter((f) => ATTENTION.has(f.finding));
   const consumers = (findings.data ?? []).filter((f) => !ATTENTION.has(f.finding));
@@ -257,62 +268,113 @@ export function Interaction() {
 
   return (
     <div className="sem-page">
-      <h2>Findings</h2>
+      <PageHead
+        title="Interaction"
+        sub="Who reads and writes each table: declared by code and observed in the database, with the findings that need a person."
+      />
       {none.map(([db, why]) => (
         <p key={db} className="banner">
           <strong>{db}</strong>: {why}. No finding is derived from the absence of usage statistics.
         </p>
       ))}
-      {findings.isLoading && <p className="muted">Loading…</p>}
-      {findings.error && <p className="err">{String(findings.error)}</p>}
-      {findings.data && <FindingsList problems={problems} consumers={consumers} onTable={setTable} />}
-      <h2>Who reads and writes</h2>
-      <div className="sem-views">
-        <input aria-label="table" placeholder="table" value={table} onChange={(e) => setTable(e.target.value)} />
-        <button type="button" className={`pill ${view === "tables" ? "active" : ""}`} onClick={() => setView("tables")}>
-          Per table
-        </button>
-        <button type="button" className={`pill ${view === "graph" ? "active" : ""}`} onClick={() => setView("graph")}>
-          Systems
-        </button>
-        {matrix.data && <span className="muted sem-note">{matrix.data.observed_note}</span>}
-      </div>
-      {matrix.isLoading && <p className="muted">Loading…</p>}
-      {matrix.error && <p className="err">{String(matrix.error)}</p>}
-      {matrix.data && rows.length === 0 && <p className="muted">No table access found.</p>}
-      {view === "graph" && matrix.data && (
-        <InteractionGraph g={systemGraph(matrix.data, new Set(problems.map((f) => f.table)))} />
-      )}
-      {view === "tables" && rows.map((r) => (
-        <section key={r.table}>
-          <h3>
-            {r.table}{" "}
-            <span className="muted">
+      <section className="card" aria-label="findings">
+        <h2 className="card-label">Findings</h2>
+        <QueryView q={findings} what="interaction findings">
+          {() => <FindingsList problems={problems} consumers={consumers} onTable={setTable} />}
+        </QueryView>
+      </section>
+      <section className="card" aria-label="who reads and writes">
+        <h2 className="card-label">Who reads and writes</h2>
+        <div className="sem-views x-filters">
+          <input
+            type="search"
+            aria-label="table"
+            placeholder="table"
+            value={table}
+            onChange={(e) => setTable(e.target.value)}
+          />
+          <div className="x-seg" role="group" aria-label="view">
+            <button
+              type="button"
+              className={`pill ${view === "tables" ? "active" : ""}`}
+              aria-pressed={view === "tables"}
+              onClick={() => setView("tables")}
+            >
+              Per table
+            </button>
+            <button
+              type="button"
+              className={`pill ${view === "graph" ? "active" : ""}`}
+              aria-pressed={view === "graph"}
+              onClick={() => setView("graph")}
+            >
+              Systems
+            </button>
+          </div>
+          {matrix.data && <span className="muted sem-note">{matrix.data.observed_note}</span>}
+        </div>
+        <QueryView
+          q={matrix}
+          what="the interaction map"
+          rows={5}
+          isEmpty={(m) => !m.tables?.length}
+          empty={
+            <Empty title="No table access found">
+              Recover code that reads or writes tables, or observe the database with{" "}
+              <code>ekos interaction observe</code>.
+            </Empty>
+          }
+        >
+          {(m) =>
+            view === "graph" ? (
+              <InteractionGraph g={systemGraph(m, new Set(problems.map((f) => f.table)))} />
+            ) : (
+              <TableAccess rows={m.tables} />
+            )
+          }
+        </QueryView>
+      </section>
+    </div>
+  );
+}
+
+function TableAccess({ rows }: { rows: MatrixRow[] }) {
+  return (
+    <>
+      {rows.map((r) => (
+        <section key={r.table} className="x-access">
+          <h3 className="x-access-title">
+            <code>{r.table}</code>{" "}
+            <span className="muted small">
               {r.cells.length} actor(s), {r.cells.filter((c) => c.writes).length} writing
             </span>
           </h3>
-          <table>
-            <thead>
-              <tr>
-                <th>kind</th>
-                <th>actor</th>
-                <th>operations</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortCells(r.cells).map((c) => (
-                <tr key={c.actor}>
-                  <td>{c.kind}</td>
-                  <td>
-                    <code>{c.name}</code>
-                  </td>
-                  <td>{opsText(c)}</td>
+          <div className="table-scroll">
+            <table className="lm-table x-table">
+              <thead>
+                <tr>
+                  <th>kind</th>
+                  <th>actor</th>
+                  <th>operations</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {sortCells(r.cells).map((c) => (
+                  <tr key={c.actor}>
+                    <td>
+                      <span className={`chip ${c.writes ? "accent" : ""}`}>{c.kind}</span>
+                    </td>
+                    <td>
+                      <code>{c.name}</code>
+                    </td>
+                    <td>{opsText(c)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ))}
-    </div>
+    </>
   );
 }

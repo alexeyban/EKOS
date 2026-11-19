@@ -6,6 +6,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { type ReactElement, useState } from "react";
 import { useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
+import { Empty, ErrorNote, PageHead, QueryView, Skeleton } from "../ui";
 import type { Me } from "../WorkspaceShell";
 import {
   actionArgs,
@@ -82,7 +83,7 @@ function GraphView({ data, view }: { data: unknown; view: Extract<ExtPanel["view
   const lanes = new Map<string, number>();
   for (const n of g.nodes) lanes.set(n.group, Math.min(lanes.get(n.group) ?? n.y, n.y));
   return (
-    <div className="ext-graph" style={{ overflowX: "auto" }}>
+    <div className="ext-graph x-graph-scroll">
       <svg width={g.width + 20} height={g.height + 36} role="img" aria-label="graph">
         <defs>
           <marker id="ext-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
@@ -183,36 +184,73 @@ function TableView({
 }) {
   const rows = rowsOf(data, view);
   if (rows.length === 0) return empty;
-  const rowProps = (row: unknown) => {
-    if (!sel) return {};
-    const value = show(at(row, sel.key));
-    return {
-      className: chosen[sel.name] === value ? "selectable selected" : "selectable",
-      onClick: () => onSelect(sel, value),
-      title: `choose this ${sel.label.toLowerCase()}`,
-    };
-  };
   return (
-    <table className="lm-table">
-      <thead>
-        <tr>
-          {view.columns.map((c) => (
-            <th key={c.key}>{c.label}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row, i) => (
-          <tr key={i} {...rowProps(row)}>
+    <div className="table-scroll">
+      <table className="lm-table x-table">
+        <thead>
+          <tr>
             {view.columns.map((c) => (
-              <td key={c.key}>
-                <Value col={c} value={at(row, c.key)} />
-              </td>
+              <th key={c.key}>{c.label}</th>
             ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row, i) =>
+            sel ? (
+              <SelectableRow key={i} view={view} row={row} sel={sel} chosen={chosen} onSelect={onSelect} />
+            ) : (
+              <tr key={i}>
+                {view.columns.map((c) => (
+                  <td key={c.key}>
+                    <Value col={c} value={at(row, c.key)} />
+                  </td>
+                ))}
+              </tr>
+            ),
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** A row that chooses a selection: its first cell is the button (whose ::after covers the row,
+ * so a click anywhere on the row still chooses), and the keyboard reaches it too. */
+function SelectableRow({
+  view,
+  row,
+  sel,
+  chosen,
+  onSelect,
+}: {
+  view: ViewOf<"table">;
+  row: unknown;
+  sel: ExtParam;
+  chosen: Chosen;
+  onSelect: (param: ExtParam, value: string) => void;
+}) {
+  const value = show(at(row, sel.key));
+  const on = chosen[sel.name] === value;
+  return (
+    <tr className={on ? "selectable selected" : "selectable"}>
+      {view.columns.map((c, j) => (
+        <td key={c.key}>
+          {j === 0 ? (
+            <button
+              type="button"
+              className="x-row-pick"
+              aria-pressed={on}
+              title={`choose this ${sel.label.toLowerCase()}`}
+              onClick={() => onSelect(sel, value)}
+            >
+              <Value col={c} value={at(row, c.key)} />
+            </button>
+          ) : (
+            <Value col={c} value={at(row, c.key)} />
+          )}
+        </td>
+      ))}
+    </tr>
   );
 }
 
@@ -274,26 +312,32 @@ function PanelCard({
   const labels = (page.params ?? []).filter((p) => missing.includes(p.name)).map((p) => p.label.toLowerCase());
   const selectable = (page.params ?? []).filter((p) => p.source === panel.id);
   return (
-    <section className="card">
+    <section className="card" aria-label={panel.title}>
       <div className="ext-panel-head">
-        <strong>{panel.title}</strong>
+        <h2 className="card-label">{panel.title}</h2>
         {missing.length === 0 && (
-          <button className="linkish small" onClick={() => q.refetch()} disabled={q.isFetching}>
+          <button type="button" className="linkish small" onClick={() => q.refetch()} disabled={q.isFetching}>
             {q.isFetching ? "refreshing…" : "refresh"}
           </button>
         )}
       </div>
       {missing.length > 0 ? (
         <p className="muted">Choose a {labels.join(" and a ")} to see this.</p>
-      ) : q.isError ? (
-        <p className="err">{String(q.error)}</p>
-      ) : q.data === undefined ? (
-        <p className="muted">loading…</p>
       ) : (
-        <PanelView panel={panel} data={q.data} selectable={selectable} chosen={chosen} onSelect={onSelect} />
+        <QueryView q={q} what={panel.title} rows={3}>
+          {(data) => (
+            <PanelView panel={panel} data={data} selectable={selectable} chosen={chosen} onSelect={onSelect} />
+          )}
+        </QueryView>
       )}
     </section>
   );
+}
+
+/** The empty choice of a selector: nothing to choose from yet, none at all, or a prompt. */
+function placeholder(waiting: boolean, count: number): string {
+  if (waiting) return "—";
+  return count === 0 ? "none" : "choose…";
 }
 
 function Selector({
@@ -323,7 +367,7 @@ function Selector({
         disabled={waiting || values.length === 0}
         onChange={(e) => onSelect(param, e.target.value)}
       >
-        <option value="">{waiting ? "—" : values.length === 0 ? "none" : "choose…"}</option>
+        <option value="">{placeholder(waiting, values.length)}</option>
         {values.map((v) => (
           <option key={v} value={v}>
             {v}
@@ -332,6 +376,13 @@ function Selector({
       </select>
     </label>
   );
+}
+
+/** Why an action button is or is not ready, for its tooltip. */
+function actionTitle(entry: CliEntry, unbound: boolean, name: string): string {
+  if (!entry.allowed) return "your role cannot run this here";
+  if (unbound) return "choose what it runs on first";
+  return `ekos ${name} (${entry.class})`;
 }
 
 function ActionButton({
@@ -364,11 +415,7 @@ function ActionButton({
   if (!entry) return null;
   const bound = (action.binds ?? []).map(([, p]) => chosen[p]).filter(Boolean);
   const label = bound.length > 0 ? `${action.label}: ${bound.join(", ")}` : action.label;
-  const title = !entry.allowed
-    ? "your role cannot run this here"
-    : args === null
-      ? "choose what it runs on first"
-      : `ekos ${name} (${entry.class})`;
+  const title = actionTitle(entry, args === null, name);
   const inputs = action.inputs ?? [];
   const needsAsk = entry.confirm || Boolean(action.confirm) || inputs.length > 0;
   if (asking) {
@@ -400,10 +447,15 @@ function ActionButton({
             onChange={(e) => setConfirm(e.target.value)}
           />
         )}
-        <button disabled={!typedOk || !consentOk || run.isPending} onClick={() => run.mutate()}>
+        <button
+          type="button"
+          className="primary"
+          disabled={!typedOk || !consentOk || run.isPending}
+          onClick={() => run.mutate()}
+        >
           Run
         </button>
-        <button className="linkish small" onClick={() => setAsking(false)}>
+        <button type="button" className="linkish small" onClick={() => setAsking(false)}>
           cancel
         </button>
         {run.isError && <span className="err small"> {String(run.error)}</span>}
@@ -413,6 +465,7 @@ function ActionButton({
   return (
     <span>
       <button
+        type="button"
         title={title}
         disabled={!entry.allowed || args === null || run.isPending}
         onClick={() => (needsAsk ? setAsking(true) : run.mutate())}
@@ -434,10 +487,16 @@ export function ExtensionPage() {
     queryFn: () => api<{ commands: CliEntry[] }>(`/workspaces/${id}/cli`),
     enabled: id !== "",
   });
-  if (pages.isError) return <p className="err">{String(pages.error)}</p>;
-  if (!pages.data) return <p className="muted">loading…</p>;
+  if (pages.isError) return <ErrorNote error={pages.error} what="extension pages" />;
+  if (!pages.data) return <Skeleton rows={4} label="loading extension page" />;
   const page = pages.data.pages.find((p) => p.extension === ext && p.id === pageId);
-  if (!page) return <p className="muted">This console's binary declares no page {ext}/{pageId}.</p>;
+  if (!page) {
+    return (
+      <Empty title="No such extension page" icon="extension">
+        This console's binary declares no page {ext}/{pageId}.
+      </Empty>
+    );
+  }
   const entryFor = (a: ExtAction) =>
     cli.data?.commands.find((c) => c.path.join(" ") === a.command.join(" "));
   const select = (param: ExtParam, value: string) => {
@@ -447,29 +506,31 @@ export function ExtensionPage() {
       return next;
     });
   };
+  const params = page.params ?? [];
   return (
     <div className="ext-page">
-      <section className="card">
-        <strong>{page.title}</strong>
-        {page.description && <p className="muted">{page.description}</p>}
-        {(page.params ?? []).length > 0 && (
-          <div className="ext-selectors">
-            {(page.params ?? []).map((p) => (
-              <Selector key={p.name} ws={id} page={page} param={p} chosen={chosen} onSelect={select} />
-            ))}
-          </div>
-        )}
-        {page.actions.length > 0 && (
-          <div className="ext-actions">
-            {page.actions.map((a) => (
-              <ActionButton key={a.label} ws={id} action={a} entry={entryFor(a)} chosen={chosen} />
-            ))}
-            {me?.role === "read" && (
-              <span className="muted small">Running these needs an operator or admin role.</span>
-            )}
-          </div>
-        )}
-      </section>
+      <PageHead title={page.title} sub={page.description || undefined} />
+      {(params.length > 0 || page.actions.length > 0) && (
+        <section className="card x-ext-controls" aria-label="selections and actions">
+          {params.length > 0 && (
+            <div className="ext-selectors">
+              {params.map((p) => (
+                <Selector key={p.name} ws={id} page={page} param={p} chosen={chosen} onSelect={select} />
+              ))}
+            </div>
+          )}
+          {page.actions.length > 0 && (
+            <div className="ext-actions">
+              {page.actions.map((a) => (
+                <ActionButton key={a.label} ws={id} action={a} entry={entryFor(a)} chosen={chosen} />
+              ))}
+              {me?.role === "read" && (
+                <span className="muted small">Running these needs an operator or admin role.</span>
+              )}
+            </div>
+          )}
+        </section>
+      )}
       {page.panels.map((p) => (
         <PanelCard key={p.id} ws={id} page={page} panel={p} chosen={chosen} onSelect={select} />
       ))}

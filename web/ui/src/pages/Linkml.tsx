@@ -18,7 +18,9 @@ import type {
   LinkmlSchema,
   LinkmlYaml,
 } from "../api/types";
+import { Empty, ErrorNote, Skeleton } from "../ui";
 import type { Me } from "../WorkspaceShell";
+import { ReviewerField, words } from "./decide-kit";
 import { sideBySide } from "./line-diff";
 import { SemanticsItemPanel } from "./SemanticsItemPanel";
 import { annotation, loadReviewer, saveReviewer, statusChip } from "./semantics-shared";
@@ -31,19 +33,15 @@ export function Linkml({ me }: { me: Me }) {
   const [filter, setFilter] = useState<Filter>("all");
   return (
     <>
-      <div className="sem-filters lm-bar">
-        <button
-          className={mode === "view" ? "pill active" : "pill"}
-          onClick={() => setMode("view")}
-        >
-          Viewer
-        </button>
-        <button
-          className={mode === "edit" ? "pill active" : "pill"}
-          onClick={() => setMode("edit")}
-        >
-          YAML editor
-        </button>
+      <div className="dk-toolbar dk-viewbar">
+        <div className="dk-tabs dk-tabs-sm" role="group" aria-label="mode">
+          <button type="button" aria-pressed={mode === "view"} onClick={() => setMode("view")}>
+            Viewer
+          </button>
+          <button type="button" aria-pressed={mode === "edit"} onClick={() => setMode("edit")}>
+            YAML editor
+          </button>
+        </div>
         <select
           aria-label="export status"
           value={filter}
@@ -87,22 +85,22 @@ function Viewer({ me, filter }: { me: Me; filter: Filter }) {
   const needle = text.trim().toLowerCase();
   const match = (n: string) => !needle || n.toLowerCase().includes(needle);
 
-  if (q.isLoading) return <p className="muted">loading…</p>;
-  if (q.isError) return <p className="err">{String(q.error)}</p>;
+  if (q.isPending) return <Skeleton rows={8} label="loading the LinkML schema" />;
+  if (q.isError) return <ErrorNote error={q.error} what="LinkML schema" />;
   if (q.data?.empty || !schema || !sec)
     return (
-      <section className="card">
-        <strong>Nothing to show</strong>
-        <p className="muted">{q.data?.reason}</p>
-      </section>
+      <Empty title="Nothing to show" icon="semantics">
+        {q.data?.reason}
+      </Empty>
     );
 
   return (
-    <div className={review ? "lm-layout with-panel" : "lm-layout"}>
-      <section className="card lm-tree">
+    <div className={review ? "dk-browse has-panel" : "dk-browse"}>
+      <section className="card dk-tree" aria-label="schema">
         <strong title={schema.id}>{schema.name}</strong>
-        <p className="muted lm-desc">{schema.description}</p>
+        <p className="muted small">{schema.description}</p>
         <input
+          className="dk-search"
           aria-label="filter schema"
           placeholder="filter elements"
           value={text}
@@ -131,8 +129,8 @@ function Viewer({ me, filter }: { me: Me; filter: Filter }) {
           onSelect={setSel}
         />
       </section>
-      <section className="card lm-detail">
-        {!sel && <p className="muted">Pick a concept, enum or table.</p>}
+      <section className="card dk-detail" aria-label="element">
+        {!sel && <p className="muted">Pick a concept, enum or table on the left.</p>}
         {sel?.section === "class" && schema.classes?.[sel.name] && (
           <ClassView
             name={sel.name}
@@ -174,8 +172,13 @@ function TreeGroup({
 }) {
   const [open, setOpen] = useState(title !== "Tables");
   return (
-    <div className="lm-group">
-      <button className="linkish lm-group-head" onClick={() => setOpen(!open)}>
+    <div className="dk-tree-group">
+      <button
+        type="button"
+        className="dk-tree-head"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+      >
         {open ? "▾" : "▸"} {title} ({entries.length})
       </button>
       {open && (
@@ -186,11 +189,13 @@ function TreeGroup({
             return (
               <li key={n}>
                 <button
-                  className={active ? "lm-node active" : "lm-node"}
+                  type="button"
+                  className={active ? "dk-node is-active" : "dk-node"}
+                  aria-pressed={active}
                   onClick={() => onSelect({ section, name: n })}
                 >
                   {n}
-                  {st && <span className={statusChip(st)}>{st.replace("_", " ")}</span>}
+                  {st && <span className={statusChip(st)}>{words(st)}</span>}
                 </button>
               </li>
             );
@@ -205,7 +210,7 @@ function Annotations({ a }: { a: LinkmlClass["annotations"] }) {
   const rows = Object.entries(a ?? {}).filter(([k]) => k !== "ekos_id");
   if (rows.length === 0) return null;
   return (
-    <dl className="sem-props">
+    <dl className="dk-props">
       {rows.map(([k]) => (
         <div key={k}>
           <dt>{k.replace(/^ekos_/, "").replaceAll("_", " ")}</dt>
@@ -231,25 +236,25 @@ function ClassView({
   const st = annotation(cls.annotations, "ekos_status");
   return (
     <>
-      <div className="sem-item-head">
+      <div className="dk-row-head">
         <span className="chip">{id ? "concept" : "table"}</span>
-        {st && <span className={statusChip(st)}>{st.replace("_", " ")}</span>}
+        {st && <span className={statusChip(st)}>{words(st)}</span>}
         {id && (
-          <button className="lm-review" onClick={() => onReview(id)}>
+          <button type="button" className="dk-push" onClick={() => onReview(id)}>
             Review…
           </button>
         )}
       </div>
-      <h3 className="sem-title">{name}</h3>
+      <h3 className="dk-title">{name}</h3>
       {cls.is_a && (
         <p className="muted">
           is_a{" "}
-          <button className="linkish" onClick={() => onOpen(cls.is_a!)}>
+          <button type="button" className="linkish" onClick={() => onOpen(cls.is_a!)}>
             {cls.is_a}
           </button>
         </p>
       )}
-      {cls.description && <p className="lm-pre">{cls.description}</p>}
+      {cls.description && <p className="dk-pre">{cls.description}</p>}
       {cls.comments?.map((c, n) => (
         <p key={n} className={c.startsWith("GAP") || c.startsWith("CONFLICT") ? "warn-line" : "muted"}>
           {c}
@@ -284,62 +289,64 @@ function SlotTable({
 }) {
   return (
     <>
-      <strong className="sem-sub">{title}</strong>
-      <table className="lm-table">
-        <thead>
-          <tr>
-            <th>slot</th>
-            <th>range</th>
-            <th>rules</th>
-            <th>description / evidence</th>
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(slots).map(([n, s]) => {
-            const en = annotation(s.annotations, "ekos_enum");
-            const sid = annotation(s.annotations, "ekos_id");
-            const rules = [
-              s.identifier && "identifier",
-              s.required && "required",
-              s.minimum_value !== undefined && `≥ ${s.minimum_value}`,
-              s.maximum_value !== undefined && `≤ ${s.maximum_value}`,
-              s.pattern && `pattern ${s.pattern}`,
-            ].filter(Boolean);
-            return (
-              <tr key={n}>
-                <td>
-                  <code>{n}</code>
-                </td>
-                <td>
-                  {s.range ?? annotation(s.annotations, "ekos_sql_type")}
-                  {en && (
-                    <>
-                      {" "}
-                      <button className="linkish" onClick={() => onOpen(`enum:${en}`)}>
-                        codes: {en}
-                      </button>
-                    </>
-                  )}
-                </td>
-                <td>{rules.join(", ")}</td>
-                <td className="muted">
-                  {s.description ??
-                    annotation(s.annotations, "ekos_constraint") ??
-                    annotation(s.annotations, "ekos_sql_type")}
-                  {sid && (
-                    <>
-                      {" "}
-                      <button className="linkish" onClick={() => onReview(sid)}>
-                        review
-                      </button>
-                    </>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <h4 className="dk-sub">{title}</h4>
+      <div className="table-scroll">
+        <table className="dk-table">
+          <thead>
+            <tr>
+              <th>slot</th>
+              <th>range</th>
+              <th>rules</th>
+              <th>description / evidence</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(slots).map(([n, s]) => {
+              const en = annotation(s.annotations, "ekos_enum");
+              const sid = annotation(s.annotations, "ekos_id");
+              const rules = [
+                s.identifier && "identifier",
+                s.required && "required",
+                s.minimum_value !== undefined && `≥ ${s.minimum_value}`,
+                s.maximum_value !== undefined && `≤ ${s.maximum_value}`,
+                s.pattern && `pattern ${s.pattern}`,
+              ].filter(Boolean);
+              return (
+                <tr key={n}>
+                  <td>
+                    <code>{n}</code>
+                  </td>
+                  <td>
+                    {s.range ?? annotation(s.annotations, "ekos_sql_type")}
+                    {en && (
+                      <>
+                        {" "}
+                        <button type="button" className="linkish" onClick={() => onOpen(`enum:${en}`)}>
+                          codes: {en}
+                        </button>
+                      </>
+                    )}
+                  </td>
+                  <td>{rules.join(", ")}</td>
+                  <td className="muted">
+                    {s.description ??
+                      annotation(s.annotations, "ekos_constraint") ??
+                      annotation(s.annotations, "ekos_sql_type")}
+                    {sid && (
+                      <>
+                        {" "}
+                        <button type="button" className="linkish" onClick={() => onReview(sid)}>
+                          review
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
@@ -355,50 +362,52 @@ function EnumView({
 }) {
   return (
     <>
-      <div className="sem-item-head">
+      <div className="dk-row-head">
         <span className="chip">enum</span>
       </div>
-      <h3 className="sem-title">{name}</h3>
+      <h3 className="dk-title">{name}</h3>
       <p className="muted">{en.description}</p>
-      <table className="lm-table">
-        <thead>
-          <tr>
-            <th>code</th>
-            <th>meaning</th>
-            <th>status</th>
-            <th>source</th>
-            <th>used</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {Object.entries(en.permissible_values ?? {}).map(([code, pv]) => {
-            const st = annotation(pv.annotations, "ekos_status") ?? "";
-            const gap = annotation(pv.annotations, "ekos_gap");
-            const id = annotation(pv.annotations, "ekos_id");
-            return (
-              <tr key={code}>
-                <td>
-                  <code>{code}</code>
-                </td>
-                <td>{pv.description ?? <span className="warn-line">unknown</span>}</td>
-                <td>
-                  <span className={statusChip(st)}>{st.replace("_", " ")}</span>
-                </td>
-                <td className="muted">{annotation(pv.annotations, "ekos_source")}</td>
-                <td className="muted">{annotation(pv.annotations, "ekos_usage_sites")}</td>
-                <td>
-                  {id && (
-                    <button className="linkish" onClick={() => onReview(id)} title={gap}>
-                      review
-                    </button>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="table-scroll">
+        <table className="dk-table">
+          <thead>
+            <tr>
+              <th>code</th>
+              <th>meaning</th>
+              <th>status</th>
+              <th>source</th>
+              <th>used</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(en.permissible_values ?? {}).map(([code, pv]) => {
+              const st = annotation(pv.annotations, "ekos_status") ?? "";
+              const gap = annotation(pv.annotations, "ekos_gap");
+              const id = annotation(pv.annotations, "ekos_id");
+              return (
+                <tr key={code}>
+                  <td>
+                    <code>{code}</code>
+                  </td>
+                  <td>{pv.description ?? <span className="warn-line">unknown</span>}</td>
+                  <td>
+                    <span className={statusChip(st)}>{words(st)}</span>
+                  </td>
+                  <td className="muted">{annotation(pv.annotations, "ekos_source")}</td>
+                  <td className="muted">{annotation(pv.annotations, "ekos_usage_sites")}</td>
+                  <td>
+                    {id && (
+                      <button type="button" className="linkish" onClick={() => onReview(id)} title={gap}>
+                        review
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
@@ -485,8 +494,8 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
   };
 
   return (
-    <section className="card">
-      <strong>Edit the schema — edits become review decisions</strong>
+    <section className="card" aria-label="YAML editor">
+      <h2 className="card-label">Edit the schema — edits become review decisions</h2>
       <p className="muted">
         Rename a concept class, rewrite a <code>description</code>, relabel a code (a permissible
         value&apos;s <code>description</code>), or set <code>ekos_status: confirmed</code> /{" "}
@@ -494,26 +503,22 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
         <code>ekos_id</code>, so keep those annotations. New classes and deletions are not
         imported: EKOS records decisions about what it recovered.
       </p>
-      {src.isError && <p className="err">{String(src.error)}</p>}
+      {src.isError && <ErrorNote error={src.error} what="LinkML YAML" />}
+      {src.isPending && <Skeleton rows={3} label="loading the YAML" />}
       {src.data?.empty && <p className="muted">{src.data.reason}</p>}
-      <div className="sem-filters">
-        <button
-          className={pane === "edit" ? "pill active" : "pill"}
-          onClick={() => setPane("edit")}
-        >
+      <div className="dk-tabs dk-tabs-sm" role="group" aria-label="pane">
+        <button type="button" aria-pressed={pane === "edit"} onClick={() => setPane("edit")}>
           Edit
         </button>
-        <button
-          className={pane === "diff" ? "pill active" : "pill"}
-          onClick={() => setPane("diff")}
-        >
+        <button type="button" aria-pressed={pane === "diff"} onClick={() => setPane("diff")}>
           Diff vs current export{text !== baseline ? " •" : ""}
         </button>
       </div>
       {pane === "diff" && diff && <YamlDiff rows={diff.rows} changes={diff.changes} />}
       <textarea
         hidden={pane !== "edit"}
-        className="toml lm-yaml"
+        className="toml dk-yaml"
+        aria-label="LinkML YAML"
         spellCheck={false}
         value={text}
         onChange={(e) => {
@@ -534,23 +539,26 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
         }}
       />
       {me.role === "write" && me.mode !== "oidc" && (
-        <label className="sem-field">
-          <span>Reviewer (recorded as token:&lt;name&gt;)</span>
-          <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
-        </label>
+        <ReviewerField value={reviewer} onChange={setReviewer} />
       )}
-      <div className="btnrow">
-        <button onClick={() => validate.mutate()} disabled={validate.isPending || !text.trim()}>
+      <div className="dk-actions">
+        <button
+          type="button"
+          onClick={() => validate.mutate()}
+          disabled={validate.isPending || !text.trim()}
+        >
           Validate
         </button>
-        <button className="save" onClick={() => apply.mutate()} disabled={!canApply}>
+        <button type="button" className="primary" onClick={() => apply.mutate()} disabled={!canApply}>
           Apply {plan && !dirty ? `${plan.decisions.length} decision(s)` : ""}
         </button>
-        <button onClick={() => void src.refetch()}>Reset</button>
-        <button onClick={download} disabled={!text}>
+        <button type="button" onClick={() => void src.refetch()}>
+          Reset
+        </button>
+        <button type="button" onClick={download} disabled={!text}>
           Download .yaml
         </button>
-        <label className="lm-upload">
+        <label className="dk-upload">
           <span>Load file…</span>
           <input
             type="file"
@@ -561,17 +569,24 @@ function Editor({ me, filter }: { me: Me; filter: Filter }) {
         {me.role !== "write" && <span className="muted">applying needs the write role</span>}
         {plan && dirty && <span className="muted">edited since validation — validate again</span>}
       </div>
-      {validate.isError && <p className="err">{String(validate.error)}</p>}
-      {apply.isError && <p className="err">{String(apply.error)}</p>}
+      {validate.isError && <ErrorNote error={validate.error} />}
+      {apply.isError && <ErrorNote error={apply.error} />}
       {plan && <PlanView plan={plan} />}
     </section>
   );
 }
 
+/** A decision's chip colour. */
+function actionChip(action: string): string {
+  if (action === "reject") return "chip bad";
+  if (action === "edit") return "chip warn";
+  return "chip ok";
+}
+
 /** The decisions, warnings and errors of an import plan — LinkML and Apache Ossie alike. */
 export function PlanView({ plan }: { plan: ImportPlan }) {
   return (
-    <div className="findings">
+    <div className="dk-findings">
       {plan.applied > 0 && (
         <p className="ok-line">Applied {plan.applied} decision(s) to the ledger.</p>
       )}
@@ -589,42 +604,38 @@ export function PlanView({ plan }: { plan: ImportPlan }) {
         <p className="muted">No decisions: the file matches the ledger.</p>
       )}
       {plan.decisions.length > 0 && (
-        <table className="lm-table">
-          <thead>
-            <tr>
-              <th>decision</th>
-              <th>element</th>
-              <th>changes</th>
-              <th>note</th>
-            </tr>
-          </thead>
-          <tbody>
-            {plan.decisions.map((d) => (
-              <tr key={d.id}>
-                <td>
-                  <span
-                    className={
-                      d.action === "reject" ? "chip bad" : d.action === "edit" ? "chip warn" : "chip ok"
-                    }
-                  >
-                    {d.action}
-                  </span>
-                </td>
-                <td>
-                  <code>{d.path}</code>
-                </td>
-                <td>
-                  {Object.entries(d.changes).map(([k, [a, b]]) => (
-                    <div key={k}>
-                      {k}: <s className="muted">{a ?? "∅"}</s> → {b ?? "∅"}
-                    </div>
-                  ))}
-                </td>
-                <td className="muted">{d.note}</td>
+        <div className="table-scroll">
+          <table className="dk-table">
+            <thead>
+              <tr>
+                <th>decision</th>
+                <th>element</th>
+                <th>changes</th>
+                <th>note</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {plan.decisions.map((d) => (
+                <tr key={d.id}>
+                  <td>
+                    <span className={actionChip(d.action)}>{d.action}</span>
+                  </td>
+                  <td>
+                    <code>{d.path}</code>
+                  </td>
+                  <td>
+                    {Object.entries(d.changes).map(([k, [a, b]]) => (
+                      <div key={k}>
+                        {k}: <s className="muted">{a ?? "∅"}</s> → {b ?? "∅"}
+                      </div>
+                    ))}
+                  </td>
+                  <td className="muted">{d.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -638,22 +649,22 @@ function YamlDiff({ rows, changes }: { rows: ReturnType<typeof sideBySide>["rows
       <p className="muted">
         {changes} changed block(s). Left: current export · right: your edits.
       </p>
-      <div className="lm-diff" role="table" aria-label="diff vs current export">
+      <div className="dk-diff" role="table" aria-label="diff vs current export">
         {rows.map((r, i) =>
           r.kind === "gap" ? (
-            <div key={i} className="lm-diff-gap" role="row">
+            <div key={i} className="dk-diff-gap" role="row">
               ⋯ {r.hidden} unchanged line(s)
             </div>
           ) : (
-            <div key={i} className={`lm-diff-row ${r.kind}`} role="row">
-              <span className={r.left && r.kind !== "same" ? "lm-ln lm-old-mark" : "lm-ln"}>
+            <div key={i} className={`dk-diff-row ${r.kind}`} role="row">
+              <span className={r.left && r.kind !== "same" ? "dk-ln dk-old-mark" : "dk-ln"}>
                 {r.left?.n ?? ""}
               </span>
-              <code className={r.left && r.kind !== "same" ? "lm-old" : ""}>{r.left?.text ?? ""}</code>
-              <span className={r.right && r.kind !== "same" ? "lm-ln lm-new-mark" : "lm-ln"}>
+              <code className={r.left && r.kind !== "same" ? "dk-old" : ""}>{r.left?.text ?? ""}</code>
+              <span className={r.right && r.kind !== "same" ? "dk-ln dk-new-mark" : "dk-ln"}>
                 {r.right?.n ?? ""}
               </span>
-              <code className={r.right && r.kind !== "same" ? "lm-new" : ""}>{r.right?.text ?? ""}</code>
+              <code className={r.right && r.kind !== "same" ? "dk-new" : ""}>{r.right?.text ?? ""}</code>
             </div>
           ),
         )}

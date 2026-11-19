@@ -26,7 +26,7 @@ describe("Runs", () => {
   it("shows an empty-state message when there is no run history", async () => {
     vi.spyOn(client, "api").mockResolvedValue([]);
     renderRuns();
-    expect(await screen.findByText("nothing run yet")).toBeInTheDocument();
+    expect(await screen.findByText("No runs yet")).toBeInTheDocument();
   });
 
   it("lists each run with its command, status chip, and truncated timestamp", async () => {
@@ -62,7 +62,7 @@ describe("Runs", () => {
   it("fetches the run list scoped to the workspace id from the route", async () => {
     const apiSpy = vi.spyOn(client, "api").mockResolvedValue([]);
     renderRuns();
-    await screen.findByText("nothing run yet");
+    await screen.findByText("No runs yet");
     expect(apiSpy).toHaveBeenCalledWith("/runs?workspace=ws1&limit=100");
   });
 });

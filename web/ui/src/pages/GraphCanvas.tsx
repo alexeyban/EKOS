@@ -2,6 +2,8 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import ForceGraph2D, { type ForceGraphMethods } from "react-force-graph-2d";
 import { colorFor, impactColorFor, type GLink, type GNode } from "./graph-shared";
 import { exportGltf, exportPng } from "./graph-export";
+import { withAlpha } from "../theme";
+import { useChartColors } from "../useChartColors";
 
 // RFC 0136 §5 — imperative export handle, so the toolbar (in `Graph.tsx`) can trigger a PNG/glTF
 // download without `GraphCanvas` needing to know anything about buttons or file names.
@@ -33,6 +35,8 @@ export const GraphCanvas = forwardRef<
   const fgRef = useRef<ForceGraphMethods<GNode, GLink> | undefined>(undefined);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
+  // RFC 0261 §2.7: the canvas follows the theme; its colours come from the tokens.
+  const theme = useChartColors();
 
   const data = useMemo(() => ({ nodes, links }), [nodes, links]);
   const maxDeg = useMemo(() => Math.max(1, ...nodes.map((n) => n.degree)), [nodes]);
@@ -104,16 +108,16 @@ export const GraphCanvas = forwardRef<
         width={size.w}
         height={size.h}
         graphData={data}
-        backgroundColor="#0b0a12"
+        backgroundColor={theme.bg}
         nodeRelSize={4}
         nodeVal={(n) =>
           n.isAggregate ? 4 + 20 * ((n.count ?? 1) / maxCount) : 1 + 8 * (n.degree / maxDeg)
         }
         nodeColor={(n) => {
-          if (n.id === selectedId) return "#ffffff";
+          if (n.id === selectedId) return theme.ink;
           if (impactHops) {
             const hop = impactHops.get(n.id);
-            return hop === undefined ? "#4b4b5e33" : impactColorFor(hop);
+            return hop === undefined ? withAlpha(theme.text, 0.2) : impactColorFor(hop);
           }
           const c = colorFor(n.kindIdx);
           return dimKind && n.kind !== dimKind ? c + "33" : c;
@@ -140,11 +144,11 @@ export const GraphCanvas = forwardRef<
             return;
           }
           ctx.font = `${12 / scale}px sans-serif`;
-          ctx.fillStyle = "#d6d3e6";
+          ctx.fillStyle = theme.ink;
           ctx.textAlign = "center";
           ctx.fillText(n.label, n.x ?? 0, (n.y ?? 0) + 14 / scale);
         }}
-        linkColor={(l) => (isImpactEdge(l) ? "#f97316cc" : "rgba(160,160,190,0.22)")}
+        linkColor={(l) => (isImpactEdge(l) ? "#f97316cc" : withAlpha(theme.text, 0.3))}
         linkWidth={(l) => (isImpactEdge(l) ? 2.5 : 0.4 + Math.min(4, Math.log2(1 + l.weight)))}
         nodeVisibility={(n) => !asOf || !n.firstSeen || n.firstSeen <= asOf}
         linkVisibility={(l) => !asOf || !l.firstSeen || l.firstSeen <= asOf}
@@ -163,27 +167,27 @@ export const GraphCanvas = forwardRef<
         }}
       />
 
-      <div className="gc-nav">
-        <button onClick={() => zoomBy(1.4)} title="zoom in">
+      <div className="gc-nav" role="group" aria-label="pan and zoom">
+        <button onClick={() => zoomBy(1.4)} type="button" title="zoom in" aria-label="zoom in">
           +
         </button>
-        <button onClick={() => zoomBy(1 / 1.4)} title="zoom out">
+        <button onClick={() => zoomBy(1 / 1.4)} type="button" title="zoom out" aria-label="zoom out">
           −
         </button>
         <div className="gc-pad">
-          <button onClick={() => pan(0, 120)} title="up">
+          <button onClick={() => pan(0, 120)} type="button" title="up" aria-label="up">
             ↑
           </button>
-          <button onClick={() => pan(-120, 0)} title="left">
+          <button onClick={() => pan(-120, 0)} type="button" title="left" aria-label="left">
             ←
           </button>
-          <button onClick={() => fg()?.zoomToFit(400, 40)} title="fit">
+          <button onClick={() => fg()?.zoomToFit(400, 40)} type="button" title="fit" aria-label="fit">
             ⊙
           </button>
-          <button onClick={() => pan(120, 0)} title="right">
+          <button onClick={() => pan(120, 0)} type="button" title="right" aria-label="right">
             →
           </button>
-          <button onClick={() => pan(0, -120)} title="down">
+          <button onClick={() => pan(0, -120)} type="button" title="down" aria-label="down">
             ↓
           </button>
         </div>

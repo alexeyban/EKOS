@@ -5,7 +5,7 @@ import { InitAndCompile } from "./InitAndCompile";
 import { StepBar } from "./StepBar";
 
 export interface Me {
-  mode: "oidc" | "token";
+  mode: "oidc" | "token" | "local";
   email: string | null;
   // The two-value summary: "write" when the caller may change anything anywhere.
   role: "read" | "write";

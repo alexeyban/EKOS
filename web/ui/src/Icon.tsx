@@ -23,6 +23,7 @@ import {
   GitBranch,
   Hexagon,
   Inbox,
+  Info,
   Layers,
   LayoutGrid,
   ListChecks,
@@ -88,6 +89,7 @@ const ICONS = {
   code: Code,
   panel: PanelRight,
   blocks: Blocks,
+  info: Info,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

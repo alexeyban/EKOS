@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
 import type { Annotation, AnnotationKind } from "../api/types";
+import { Empty, ErrorNote, PageHead, QueryView } from "../ui";
 import { type Me, mayOperate, mayReview } from "../WorkspaceShell";
 import {
   KIND_HELP,
@@ -18,7 +19,15 @@ import {
   targetLabel,
   validTarget,
 } from "./annotations-shared";
+import { DetailPanel, PickRow, ReviewerField, SplitView } from "./decide-kit";
 import { loadReviewer, saveReviewer } from "./semantics-shared";
+
+/** Whether an annotation is listed under the chosen state filter. */
+function inState(a: Annotation, state: string): boolean {
+  if (state === "all") return true;
+  if (state === "current") return a.state !== "withdrawn";
+  return a.state === state;
+}
 
 export function Annotations() {
   const me = useOutletContext<Me>();
@@ -30,70 +39,83 @@ export function Annotations() {
     queryFn: () => api<Annotation[]>(`/workspaces/${id}/annotations`),
     enabled: id !== "",
   });
-  const shown = annotationOrder(
-    (list.data ?? []).filter((a) =>
-      state === "all" ? true : state === "current" ? a.state !== "withdrawn" : a.state === state,
-    ),
-  );
+  const shown = annotationOrder((list.data ?? []).filter((a) => inState(a, state)));
   const current = shown.find((a) => a.id === selected) ?? null;
 
   return (
-    <div className="sem-page">
-      <div className="sem-views">
-        <select aria-label="state" value={state} onChange={(e) => setState(e.target.value)}>
-          <option value="current">active and stale</option>
-          <option value="active">active only</option>
-          <option value="stale">stale only</option>
-          <option value="withdrawn">withdrawn</option>
-          <option value="all">all</option>
-        </select>
-        <span className="muted sem-note">
-          Written by people, never by a model. A note goes stale when the entity it describes
-          changes (RFC 0247).
-        </span>
-      </div>
-      <div className={current ? "sem-layout with-panel" : "sem-layout"}>
-        <section className="card sem-list">
-          {mayOperate(me) && <AddForm workspace={id} me={me} />}
-          <p className="muted">{shown.length} annotation(s)</p>
-          {list.isLoading && <p className="muted">loading…</p>}
-          {list.isError && <p className="err">{String(list.error)}</p>}
-          {list.data?.length === 0 && (
-            <p className="muted">
-              No annotations yet. Add a comment, an instruction or a synonym to an entity.
-            </p>
-          )}
-          <ul className="sem-items">
-            {shown.map((a) => (
-              <li key={a.id} className={selected === a.id ? "selected" : ""}>
-                <div className="sem-item-head">
-                  <span className="chip">{a.kind}</span>
-                  <button
-                    type="button"
-                    className="sem-item-pick"
-                    aria-pressed={selected === a.id}
-                    onClick={() => setSelected(a.id)}
-                  >
-                    {a.term ? `“${a.term}” → ` : ""}
-                    {targetLabel(a.target)}
-                  </button>
-                  <span className={stateChip(a.state)}>{a.state}</span>
-                </div>
-                <div className="muted sem-item-sum">{a.text}</div>
-              </li>
-            ))}
-          </ul>
+    <div className="dk-page">
+      <PageHead
+        title="Notes"
+        sub="What people wrote about an entity: comments, instructions and synonyms. Written by people, never by a model; a note goes stale when the entity it describes changes (RFC 0247)."
+      />
+      {mayOperate(me) && (
+        <section className="card" aria-label="new note">
+          <AddForm workspace={id} me={me} title="Add a note" />
         </section>
-        {current && (
-          <AnnotationPanel
-            key={current.id}
-            workspace={id}
-            annotation={current}
-            me={me}
-            onClose={() => setSelected(null)}
-          />
-        )}
-      </div>
+      )}
+      <SplitView
+        panel={
+          current && (
+            <AnnotationPanel
+              key={current.id}
+              workspace={id}
+              annotation={current}
+              me={me}
+              onClose={() => setSelected(null)}
+            />
+          )
+        }
+      >
+        <section className="card dk-list" aria-label="notes">
+          <div className="dk-toolbar">
+            <select aria-label="state" value={state} onChange={(e) => setState(e.target.value)}>
+              <option value="current">active and stale</option>
+              <option value="active">active only</option>
+              <option value="stale">stale only</option>
+              <option value="withdrawn">withdrawn</option>
+              <option value="all">all</option>
+            </select>
+            <span className="dk-count">{shown.length} annotation(s)</span>
+          </div>
+          <QueryView
+            q={list}
+            what="notes"
+            rows={5}
+            isEmpty={(d) => d.length === 0}
+            empty={
+              <Empty title="No notes yet" icon="notes">
+                Add a comment, an instruction or a synonym to an entity
+                {mayOperate(me) ? " with the form above." : "; it needs the operator role."}
+              </Empty>
+            }
+          >
+            {() =>
+              shown.length === 0 ? (
+                <p className="muted">Nothing in this state.</p>
+              ) : (
+                <ul className="dk-rows">
+                  {shown.map((a) => (
+                    <PickRow
+                      key={a.id}
+                      selected={selected === a.id}
+                      onPick={() => setSelected(a.id)}
+                      title={
+                        <>
+                          {a.term ? `“${a.term}” → ` : ""}
+                          {targetLabel(a.target)}
+                        </>
+                      }
+                      before={<span className="chip">{a.kind}</span>}
+                      after={<span className={stateChip(a.state)}>{a.state}</span>}
+                      sub={a.text}
+                    />
+                  ))}
+                </ul>
+              )
+            }
+          </QueryView>
+        </section>
+      </SplitView>
     </div>
   );
 }
@@ -149,21 +171,21 @@ export function AddForm({
 
   return (
     <form
-      className="sem-decide"
+      className="dk-form"
       aria-label="add annotation"
       onSubmit={(e) => {
         e.preventDefault();
         if (ready) add.mutate();
       }}
     >
-      <strong className="sem-sub">{title}</strong>
+      <h4 className="dk-sub">{title}</h4>
       {fixedTarget === undefined && (
-        <label className="sem-field">
+        <label className="dk-field">
           <span>Entity id, or “project”</span>
           <input aria-label="target" value={target} onChange={(e) => setTarget(e.target.value)} />
         </label>
       )}
-      <label className="sem-field">
+      <label className="dk-field">
         <span>Kind</span>
         <select
           aria-label="kind"
@@ -175,19 +197,19 @@ export function AddForm({
           <option value="synonym">synonym</option>
         </select>
       </label>
-      <p className="muted">{KIND_HELP[kind]}</p>
+      <p className="muted small dk-help">{KIND_HELP[kind]}</p>
       {kind === "synonym" && (
-        <label className="sem-field">
+        <label className="dk-field">
           <span>The business word</span>
           <input aria-label="term" value={term} onChange={(e) => setTerm(e.target.value)} />
         </label>
       )}
-      <label className="sem-field">
+      <label className="dk-field">
         <span>Text</span>
         <textarea aria-label="text" rows={2} value={text} onChange={(e) => setText(e.target.value)} />
       </label>
       {kind === "instruction" && (
-        <label className="sem-field">
+        <label className="dk-field">
           <span>Rule (optional JSON; without one the text is a note a model reads as data)</span>
           <textarea
             aria-label="rule"
@@ -199,7 +221,7 @@ export function AddForm({
       )}
       {rule.error && <p className="err">{rule.error}</p>}
       {kind !== "comment" && (
-        <label className="sem-field">
+        <label className="dk-check">
           <input
             type="checkbox"
             aria-label="shared"
@@ -210,21 +232,14 @@ export function AddForm({
         </label>
       )}
       {me.mode !== "oidc" && (
-        <label className="sem-field">
-          <span>Your name (token mode has no identity; recorded as token:&lt;name&gt;)</span>
-          <input
-            aria-label="author"
-            value={reviewer}
-            onChange={(e) => setReviewer(e.target.value)}
-          />
-        </label>
+        <ReviewerField who="Your name" ariaLabel="author" value={reviewer} onChange={setReviewer} />
       )}
-      <div className="btnrow">
+      <div className="dk-actions">
         <button type="submit" disabled={!ready || add.isPending}>
           Add
         </button>
       </div>
-      {add.isError && <p className="err">{String(add.error)}</p>}
+      {add.isError && <ErrorNote error={add.error} />}
       {add.isSuccess && <p className="ok-line">Recorded as {add.data.author}.</p>}
     </form>
   );
@@ -258,19 +273,19 @@ function AnnotationPanel({
   const needsApproval = a.kind !== "comment" && a.scope === "shared" && !a.approved_by;
 
   return (
-    <aside className="card sem-panel" aria-label="annotation">
-      <div className="sem-panel-head">
-        <strong className="sem-title">
+    <DetailPanel
+      label="annotation"
+      title={
+        <h3 className="dk-title">
           {a.kind} on {targetLabel(a.target)}
-        </strong>
-        <button className="linkish" onClick={onClose}>
-          close
-        </button>
-      </div>
-      <p className="sem-summary">
+        </h3>
+      }
+      onClose={onClose}
+    >
+      <p className="dk-summary">
         <span className={stateChip(a.state)}>{a.state}</span> {reach(a)}
       </p>
-      <dl className="sem-props">
+      <dl className="dk-props">
         <div>
           <dt>about</dt>
           <dd>{a.target}</dd>
@@ -295,44 +310,57 @@ function AnnotationPanel({
         )}
       </dl>
       {/* A person's text, shown as text: React escapes it. */}
-      <p className="sem-summary">{a.text}</p>
+      <p className="dk-quote">{a.text}</p>
       {open && (mayOperate(me) || mayReview(me)) && (
-        <div className="sem-decide">
+        <section className="dk-section" aria-label="decision">
           {me.mode !== "oidc" && (
-            <label className="sem-field">
-              <span>Your name (recorded as token:&lt;name&gt;)</span>
-              <input
-                aria-label="reviewer"
-                value={reviewer}
-                onChange={(e) => setReviewer(e.target.value)}
-              />
-            </label>
+            <ReviewerField
+              who="Your name"
+              ariaLabel="reviewer"
+              value={reviewer}
+              onChange={setReviewer}
+            />
           )}
-          <div className="btnrow">
+          <div className="dk-actions">
             {mayReview(me) && needsApproval && a.state === "active" && (
-              <button disabled={act.isPending || needsName} onClick={() => act.mutate("approve")}>
+              <button
+                type="button"
+                className="primary"
+                disabled={act.isPending || needsName}
+                onClick={() => act.mutate("approve")}
+              >
                 Approve for everyone
               </button>
             )}
             {mayReview(me) && a.state === "stale" && (
-              <button disabled={act.isPending || needsName} onClick={() => act.mutate("confirm")}>
+              <button
+                type="button"
+                className="primary"
+                disabled={act.isPending || needsName}
+                onClick={() => act.mutate("confirm")}
+              >
                 Confirm against the entity as it is now
               </button>
             )}
             {mayOperate(me) && (
-              <button disabled={act.isPending || needsName} onClick={() => act.mutate("withdraw")}>
+              <button
+                type="button"
+                className="dk-danger"
+                disabled={act.isPending || needsName}
+                onClick={() => act.mutate("withdraw")}
+              >
                 Withdraw
               </button>
             )}
           </div>
-          <p className="muted">
+          <p className="muted small">
             Only the author can withdraw, and nobody approves their own annotation; EKOS enforces
             both.
           </p>
-          {act.isError && <p className="err">{String(act.error)}</p>}
+          {act.isError && <ErrorNote error={act.error} />}
           {act.isSuccess && <p className="ok-line">Recorded as {act.data.author}.</p>}
-        </div>
+        </section>
       )}
-    </aside>
+    </DetailPanel>
   );
 }

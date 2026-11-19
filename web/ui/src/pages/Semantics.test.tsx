@@ -221,7 +221,7 @@ describe("LinkML editor", () => {
     fireEvent.change(ta, { target: { value: "name: t\nclasses:\n  B: {}\n" } });
     fireEvent.click(screen.getByRole("button", { name: /Diff vs current export/ }));
     expect(await screen.findByText("1 changed block(s). Left: current export · right: your edits.")).toBeInTheDocument();
-    expect(screen.getByText("A: {}")).toHaveClass("lm-old");
-    expect(screen.getByText("B: {}")).toHaveClass("lm-new");
+    expect(screen.getByText("A: {}")).toHaveClass("dk-old");
+    expect(screen.getByText("B: {}")).toHaveClass("dk-new");
   });
 });

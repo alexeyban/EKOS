@@ -15,7 +15,9 @@ import type {
   OssieJson,
   OssieModel,
 } from "../api/types";
+import { Empty, ErrorNote, Skeleton } from "../ui";
 import type { Me } from "../WorkspaceShell";
+import { ReviewerField } from "./decide-kit";
 import { PlanView } from "./Linkml";
 import { loadReviewer, saveReviewer } from "./semantics-shared";
 
@@ -72,7 +74,7 @@ export function Ossie({ me }: { me: Me }) {
   };
   return (
     <>
-      <div className="sem-filters lm-bar">
+      <div className="dk-toolbar dk-viewbar">
         <select
           aria-label="export status"
           value={filter}
@@ -82,10 +84,11 @@ export function Ossie({ me }: { me: Me }) {
           <option value="hypothesis">unreviewed meanings only</option>
           <option value="confirmed">confirmed meanings only</option>
         </select>
-        <button onClick={() => void yamlNow()} disabled={!q.data?.model}>
+        <button type="button" onClick={() => void yamlNow()} disabled={!q.data?.model}>
           Download .ossie.yaml
         </button>
         <button
+          type="button"
           onClick={() =>
             q.data?.model &&
             download(`${id}.ossie.json`, JSON.stringify(q.data.model, null, 2), "application/json")
@@ -94,18 +97,17 @@ export function Ossie({ me }: { me: Me }) {
         >
           Download .json
         </button>
-        <span className="muted sem-note">
+        <span className="muted small dk-note">
           Apache Ossie spec {q.data?.model?.version ?? "0.2.0.dev0"} — tables are observed facts;
           business meanings carry their review status.
         </span>
       </div>
-      {q.isLoading && <p className="muted">loading…</p>}
-      {q.isError && <p className="err">{String(q.error)}</p>}
+      {q.isPending && <Skeleton rows={8} label="loading the Ossie model" />}
+      {q.isError && <ErrorNote error={q.error} what="Ossie model" />}
       {q.data?.empty && (
-        <section className="card">
-          <strong>Nothing to show</strong>
-          <p className="muted">{q.data.reason}</p>
-        </section>
+        <Empty title="Nothing to show" icon="semantics">
+          {q.data.reason}
+        </Empty>
       )}
       {q.data?.model && <Browser model={q.data.model} />}
       <ImportCard me={me} />
@@ -123,25 +125,28 @@ function Browser({ model }: { model: OssieModel }) {
   );
   const current = model.datasets.find((d) => d.name === sel) ?? null;
   return (
-    <div className="lm-layout">
-      <section className="card lm-tree">
+    <div className="dk-browse">
+      <section className="card dk-tree" aria-label="datasets">
         <strong>{model.name}</strong>
-        <p className="muted lm-desc">
+        <p className="muted small">
           {model.datasets.length} dataset(s), {model.relationships?.length ?? 0} relationship(s)
         </p>
         <input
+          className="dk-search"
           aria-label="filter datasets"
           placeholder="filter datasets"
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
-        <ul>
+        <ul className="dk-tree-list">
           {shown.map((d) => {
             const n = meaningCount(d);
             return (
               <li key={d.name}>
                 <button
-                  className={sel === d.name ? "lm-node active" : "lm-node"}
+                  type="button"
+                  className={sel === d.name ? "dk-node is-active" : "dk-node"}
+                  aria-pressed={sel === d.name}
                   onClick={() => setSel(d.name)}
                 >
                   {d.name}
@@ -155,8 +160,8 @@ function Browser({ model }: { model: OssieModel }) {
           })}
         </ul>
       </section>
-      <section className="card lm-detail">
-        {!current && <p className="muted">Pick a dataset.</p>}
+      <section className="card dk-detail" aria-label="dataset">
+        {!current && <p className="muted">Pick a dataset on the left.</p>}
         {current && <DatasetView d={current} model={model} />}
       </section>
     </div>
@@ -169,11 +174,11 @@ function DatasetView({ d, model }: { d: OssieDataset; model: OssieModel }) {
   const rels = (model.relationships ?? []).filter((r) => r.from === d.name || r.to === d.name);
   return (
     <>
-      <div className="sem-item-head">
+      <div className="dk-row-head">
         <span className="chip">{String(ext.kind ?? "dataset")}</span>
         {typeof ext.origin === "string" && <span className="chip">{ext.origin}</span>}
       </div>
-      <h3 className="sem-title">{d.name}</h3>
+      <h3 className="dk-title">{d.name}</h3>
       <p className="muted">
         source <code>{d.source}</code>
         {d.primary_key && (
@@ -183,61 +188,65 @@ function DatasetView({ d, model }: { d: OssieDataset; model: OssieModel }) {
           </>
         )}
       </p>
-      {d.description && <p className="lm-pre">{d.description}</p>}
+      {d.description && <p className="dk-pre">{d.description}</p>}
       {c.synonyms && c.synonyms.length > 0 && <p className="muted">also called: {c.synonyms.join(", ")}</p>}
-      {c.instructions && <p className="lm-pre">{c.instructions}</p>}
-      <strong className="sem-sub">Fields</strong>
-      <table className="lm-table">
-        <thead>
-          <tr>
-            <th>field</th>
-            <th>type</th>
-            <th>description / meanings</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(d.fields ?? []).map((f) => {
-            const fc = ctx(f.ai_context);
-            return (
-              <tr key={f.name}>
-                <td>
-                  <code>{f.name}</code>
-                </td>
-                <td>{f.datatype ?? <span className="muted">—</span>}</td>
-                <td className="muted">
-                  {f.description}
-                  {fc.instructions && <div>{fc.instructions}</div>}
-                  {fc.synonyms && fc.synonyms.length > 0 && <div>also: {fc.synonyms.join(", ")}</div>}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      {c.instructions && <p className="dk-pre">{c.instructions}</p>}
+      <h4 className="dk-sub">Fields</h4>
+      <div className="table-scroll">
+        <table className="dk-table">
+          <thead>
+            <tr>
+              <th>field</th>
+              <th>type</th>
+              <th>description / meanings</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(d.fields ?? []).map((f) => {
+              const fc = ctx(f.ai_context);
+              return (
+                <tr key={f.name}>
+                  <td>
+                    <code>{f.name}</code>
+                  </td>
+                  <td>{f.datatype ?? <span className="muted">—</span>}</td>
+                  <td className="muted">
+                    {f.description}
+                    {fc.instructions && <div>{fc.instructions}</div>}
+                    {fc.synonyms && fc.synonyms.length > 0 && <div>also: {fc.synonyms.join(", ")}</div>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       {(d.metrics?.length ?? 0) > 0 && (
         <>
-          <strong className="sem-sub">Metrics (from Ossie files in the sources)</strong>
-          <table className="lm-table">
-            <tbody>
-              {d.metrics!.map((m) => (
-                <tr key={m.name}>
-                  <td>
-                    <code>{m.name}</code>
-                  </td>
-                  <td>
-                    <code>{m.expression.sql ?? m.expression.dialects?.[0]?.expression}</code>
-                  </td>
-                  <td className="muted">{m.description}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <h4 className="dk-sub">Metrics (from Ossie files in the sources)</h4>
+          <div className="table-scroll">
+            <table className="dk-table">
+              <tbody>
+                {d.metrics!.map((m) => (
+                  <tr key={m.name}>
+                    <td>
+                      <code>{m.name}</code>
+                    </td>
+                    <td>
+                      <code>{m.expression.sql ?? m.expression.dialects?.[0]?.expression}</code>
+                    </td>
+                    <td className="muted">{m.description}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
       {rels.length > 0 && (
         <>
-          <strong className="sem-sub">Relationships</strong>
-          <ul>
+          <h4 className="dk-sub">Relationships</h4>
+          <ul className="dk-evidence">
             {rels.map((r) => (
               <li key={r.name}>
                 <code>
@@ -302,8 +311,8 @@ function ImportCard({ me }: { me: Me }) {
   };
 
   return (
-    <section className="card">
-      <strong>Import an edited export — edits become review decisions</strong>
+    <section className="card" aria-label="import">
+      <h2 className="card-label">Import an edited export — edits become review decisions</h2>
       <p className="muted">
         In a downloaded <code>.ossie.yaml</code>, edit the <code>EKOS</code> extensions:
         a concept&apos;s <code>name</code>, <code>description</code> or <code>status</code>, a
@@ -314,7 +323,7 @@ function ImportCard({ me }: { me: Me }) {
       </p>
       <textarea
         aria-label="edited Ossie model"
-        className="toml lm-yaml"
+        className="toml dk-yaml"
         spellCheck={false}
         value={text}
         placeholder="paste or load an edited .ossie.yaml"
@@ -324,13 +333,10 @@ function ImportCard({ me }: { me: Me }) {
         }}
       />
       {me.role === "write" && me.mode !== "oidc" && (
-        <label className="sem-field">
-          <span>Reviewer (recorded as token:&lt;name&gt;)</span>
-          <input value={reviewer} onChange={(e) => setReviewer(e.target.value)} />
-        </label>
+        <ReviewerField value={reviewer} onChange={setReviewer} />
       )}
-      <div className="btnrow">
-        <label className="lm-upload">
+      <div className="dk-actions">
+        <label className="dk-upload">
           <span>Load file…</span>
           <input
             type="file"
@@ -338,17 +344,21 @@ function ImportCard({ me }: { me: Me }) {
             onChange={(e) => upload(e.target.files?.[0])}
           />
         </label>
-        <button onClick={() => validate.mutate()} disabled={validate.isPending || !text.trim()}>
+        <button
+          type="button"
+          onClick={() => validate.mutate()}
+          disabled={validate.isPending || !text.trim()}
+        >
           Validate
         </button>
-        <button className="save" onClick={() => apply.mutate()} disabled={!canApply}>
+        <button type="button" className="primary" onClick={() => apply.mutate()} disabled={!canApply}>
           Apply {plan && !dirty ? `${plan.decisions.length} decision(s)` : ""}
         </button>
         {me.role !== "write" && <span className="muted">applying needs the write role</span>}
         {plan && dirty && <span className="muted">edited since validation — validate again</span>}
       </div>
-      {validate.isError && <p className="err">{String(validate.error)}</p>}
-      {apply.isError && <p className="err">{String(apply.error)}</p>}
+      {validate.isError && <ErrorNote error={validate.error} />}
+      {apply.isError && <ErrorNote error={apply.error} />}
       {plan && <PlanView plan={plan} />}
     </section>
   );

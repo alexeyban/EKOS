@@ -5,6 +5,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api, apiPost } from "../api/client";
+import { Icon } from "../Icon";
+import { Empty, ErrorNote, PageHead, QueryView } from "../ui";
 
 export interface ArgSpec {
   id: string;
@@ -130,126 +132,197 @@ export function Commands() {
     onSuccess: (r) => navigate(`/runs/${r.run_id}`),
   });
 
-  if (list.isError) return <p className="err">{String(list.error)}</p>;
-  if (!list.data) return <p className="muted">loading…</p>;
+  const choose = (name: string) => {
+    setPicked(name);
+    setValues({});
+    setConfirm("");
+    run.reset();
+  };
 
   return (
-    <div className="commands-page">
-      <section className="card commands-list">
-        <input
-          aria-label="filter commands"
-          placeholder="filter: query, semantics, ledger…"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-        {groupCommands(list.data.commands, filter).map(([group, cmds]) => (
-          <div key={group}>
-            <p className="muted small">{group}</p>
-            <ul>
-              {cmds.map((c) => {
-                const name = c.path.join(" ");
-                return (
-                  <li key={name}>
-                    <button
-                      className={`linkish ${picked === name ? "on" : ""}`}
-                      onClick={() => {
-                        setPicked(name);
-                        setValues({});
-                        setConfirm("");
-                        run.reset();
-                      }}
-                    >
-                      {name}
-                    </button>
-                    {!c.allowed && <span className="muted small"> · not for you</span>}
-                  </li>
-                );
-              })}
-            </ul>
+    <>
+      <PageHead
+        title="Commands"
+        sub="Every ekos command your role may run here, with a form built from its arguments. Nothing runs until you press Run."
+      />
+      <QueryView q={list} what="the command catalogue" tiles={2}>
+        {(data) => (
+          <div className="commands-page">
+            <CommandList commands={data.commands} filter={filter} setFilter={setFilter} picked={picked} choose={choose} />
+            <section className="card commands-form" aria-label="command form">
+              {cmd ? (
+                <CommandForm
+                  cmd={cmd}
+                  values={values}
+                  setValues={setValues}
+                  confirm={confirm}
+                  setConfirm={setConfirm}
+                  run={run}
+                />
+              ) : (
+                <Empty title="Choose a command" icon="commands">
+                  Each one runs on the server as the project's job, like the pipeline, and its output appears in the
+                  run's log.
+                </Empty>
+              )}
+            </section>
           </div>
-        ))}
-      </section>
-
-      <section className="card commands-form">
-        {!cmd ? (
-          <p className="muted">Choose a command. Each one runs on the server as the project's job, like the pipeline, and its output appears in the run's log.</p>
-        ) : (
-          <>
-            <strong>ekos {cmd.path.join(" ")}</strong>
-            <p>{cmd.about}</p>
-            <p>
-              <span className={`chip ${cmd.class === "read" ? "ok" : cmd.class === "write" ? "" : "warn"}`}>{cmd.class}</span>{" "}
-              <span className="muted">{CLASS_HELP[cmd.class]}</span>
-            </p>
-            {cmd.metered && (
-              <p className="warn-line">
-                May call the model configured in this project's <code>ekos.toml</code>. A hosted model is paid per call; a
-                local one (Ollama) is not.
-              </p>
-            )}
-            {visibleArgs(cmd).map((a) => (
-              <div key={a.id} className="arg">
-                <label htmlFor={`arg-${a.id}`}>
-                  {a.long ? `--${a.long}` : (a.value_name ?? a.id).toLowerCase()}
-                  {a.required && " *"}
-                  {a.kind === "path" && <span className="muted small"> (a path in the project or its sources)</span>}
-                </label>
-                {a.kind === "flag" ? (
-                  <input
-                    id={`arg-${a.id}`}
-                    type="checkbox"
-                    checked={values[a.id] === true}
-                    onChange={(e) => setValues({ ...values, [a.id]: e.target.checked })}
-                  />
-                ) : a.possible.length > 0 ? (
-                  <select
-                    id={`arg-${a.id}`}
-                    value={String(values[a.id] ?? "")}
-                    onChange={(e) => setValues({ ...values, [a.id]: e.target.value })}
-                  >
-                    <option value="">{a.default.length ? `(default: ${a.default.join(", ")})` : "—"}</option>
-                    {a.possible.map((p) => (
-                      <option key={p}>{p}</option>
-                    ))}
-                  </select>
-                ) : a.multiple ? (
-                  <textarea
-                    id={`arg-${a.id}`}
-                    placeholder="one per line"
-                    value={String(values[a.id] ?? "")}
-                    onChange={(e) => setValues({ ...values, [a.id]: e.target.value })}
-                  />
-                ) : (
-                  <input
-                    id={`arg-${a.id}`}
-                    placeholder={a.default.length ? `default: ${a.default.join(", ")}` : ""}
-                    value={String(values[a.id] ?? "")}
-                    onChange={(e) => setValues({ ...values, [a.id]: e.target.value })}
-                  />
-                )}
-                {a.help && <div className="muted small">{a.help}</div>}
-              </div>
-            ))}
-            <pre className="argv">{preview(cmd, values)}</pre>
-            {cmd.confirm && (
-              <div className="arg">
-                <label htmlFor="confirm">
-                  Type <code>{cmd.path.join(" ")}</code> to confirm
-                </label>
-                <input id="confirm" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-              </div>
-            )}
-            <button
-              disabled={!cmd.allowed || run.isPending || (cmd.confirm && confirm !== cmd.path.join(" "))}
-              onClick={() => run.mutate()}
-            >
-              Run
-            </button>
-            {!cmd.allowed && <span className="muted"> Your role here does not allow this command.</span>}
-            {run.isError && <p className="err">{String(run.error)}</p>}
-          </>
         )}
-      </section>
-    </div>
+      </QueryView>
+    </>
+  );
+}
+
+function CommandList({
+  commands,
+  filter,
+  setFilter,
+  picked,
+  choose,
+}: {
+  commands: CommandEntry[];
+  filter: string;
+  setFilter: (v: string) => void;
+  picked: string;
+  choose: (name: string) => void;
+}) {
+  const groups = groupCommands(commands, filter);
+  return (
+    <section className="card commands-list" aria-label="commands">
+      <input
+        type="search"
+        aria-label="filter commands"
+        placeholder="filter: query, semantics, ledger…"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+      />
+      {groups.length === 0 && <p className="muted small">No command matches that filter.</p>}
+      {groups.map(([group, cmds]) => (
+        <div key={group} className="x-cmd-group">
+          <p className="card-label">{group}</p>
+          <ul>
+            {cmds.map((c) => {
+              const name = c.path.join(" ");
+              return (
+                <li key={name}>
+                  <button
+                    type="button"
+                    className={`linkish x-cmd ${picked === name ? "on" : ""}`}
+                    aria-current={picked === name ? "true" : undefined}
+                    onClick={() => choose(name)}
+                  >
+                    {name}
+                  </button>
+                  {!c.allowed && <span className="muted small"> · not for you</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function classChip(c: CommandEntry["class"]): string {
+  if (c === "read") return "ok";
+  if (c === "write") return "";
+  return "warn";
+}
+
+function CommandForm({
+  cmd,
+  values,
+  setValues,
+  confirm,
+  setConfirm,
+  run,
+}: {
+  cmd: CommandEntry;
+  values: Values;
+  setValues: (v: Values) => void;
+  confirm: string;
+  setConfirm: (v: string) => void;
+  run: { mutate: () => void; isPending: boolean; isError: boolean; error: unknown };
+}) {
+  const name = cmd.path.join(" ");
+  return (
+    <>
+      <h2 className="card-title">
+        <code>ekos {name}</code>
+      </h2>
+      <p>{cmd.about}</p>
+      <p className="x-class-line">
+        <span className={`chip ${classChip(cmd.class)}`}>{cmd.class}</span>{" "}
+        <span className="muted">{CLASS_HELP[cmd.class]}</span>
+      </p>
+      {cmd.metered && (
+        <p className="warn-line">
+          May call the model configured in this project's <code>ekos.toml</code>. A hosted model is paid per call; a
+          local one (Ollama) is not.
+        </p>
+      )}
+      {visibleArgs(cmd).map((a) => (
+        <div key={a.id} className="arg">
+          <label htmlFor={`arg-${a.id}`}>
+            {a.long ? `--${a.long}` : (a.value_name ?? a.id).toLowerCase()}
+            {a.required && " *"}
+            {a.kind === "path" && <span className="muted small"> (a path in the project or its sources)</span>}
+          </label>
+          <ArgInput a={a} value={values[a.id]} set={(v) => setValues({ ...values, [a.id]: v })} />
+          {a.help && <div className="muted small">{a.help}</div>}
+        </div>
+      ))}
+      <div className="card-label">Will run</div>
+      <pre className="argv">{preview(cmd, values)}</pre>
+      {cmd.confirm && (
+        <div className="arg">
+          <label htmlFor="confirm">
+            Type <code>{name}</code> to confirm
+          </label>
+          <input id="confirm" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+        </div>
+      )}
+      <div className="x-form-foot">
+        <button
+          className="primary"
+          disabled={!cmd.allowed || run.isPending || (cmd.confirm && confirm !== name)}
+          onClick={() => run.mutate()}
+        >
+          <Icon name="run" /> Run
+        </button>
+        {!cmd.allowed && <span className="muted"> Your role here does not allow this command.</span>}
+      </div>
+      {run.isError && <ErrorNote error={run.error} what={`run ekos ${name}`} />}
+    </>
+  );
+}
+
+function ArgInput({ a, value, set }: { a: ArgSpec; value: string | boolean | undefined; set: (v: string | boolean) => void }) {
+  const id = `arg-${a.id}`;
+  if (a.kind === "flag") {
+    return <input id={id} type="checkbox" checked={value === true} onChange={(e) => set(e.target.checked)} />;
+  }
+  const text = String(value ?? "");
+  if (a.possible.length > 0) {
+    return (
+      <select id={id} value={text} onChange={(e) => set(e.target.value)}>
+        <option value="">{a.default.length ? `(default: ${a.default.join(", ")})` : "—"}</option>
+        {a.possible.map((p) => (
+          <option key={p}>{p}</option>
+        ))}
+      </select>
+    );
+  }
+  if (a.multiple) {
+    return <textarea id={id} placeholder="one per line" value={text} onChange={(e) => set(e.target.value)} />;
+  }
+  return (
+    <input
+      id={id}
+      placeholder={a.default.length ? `default: ${a.default.join(", ")}` : ""}
+      value={text}
+      onChange={(e) => set(e.target.value)}
+    />
   );
 }

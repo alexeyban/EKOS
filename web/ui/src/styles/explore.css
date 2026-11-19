@@ -1,0 +1,597 @@
+/* RFC 0261 §2.7 page pass: explore pages (Graph, Chat, Transformations, Interaction), check pages
+   (Integrity, Evals), operate pages (Run, Commands, History) and extension pages. Tokens only:
+   every colour comes from theme.css, so both themes follow. */
+
+/* ── tables on these pages ── */
+.x-table {
+  font-size: var(--fs-body);
+  margin-top: 0;
+}
+.x-table th {
+  font-size: var(--fs-label);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  border-top: 0;
+  padding: var(--sp-2) var(--sp-2);
+  white-space: nowrap;
+}
+.x-table td {
+  border-top: 1px solid var(--border);
+  padding: var(--sp-2) var(--sp-2);
+  vertical-align: middle;
+}
+.x-table tbody tr:hover td {
+  background: var(--surface-soft);
+}
+.x-row-link {
+  font-weight: 600;
+}
+.x-when {
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+.x-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+.x-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+/* ── shared filter rows and segmented choices ── */
+.x-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  margin: 0 0 var(--sp-3);
+}
+.x-filters input[type="search"] {
+  min-width: 0;
+  flex: 1 1 200px;
+  max-width: 360px;
+}
+.x-filters input[type="number"] {
+  width: 5rem;
+}
+.x-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-body);
+}
+.x-seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.x-seg .pill.active,
+.x-seg .pill[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.x-seg label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 28px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  font-size: var(--fs-small);
+  font-weight: 550;
+  cursor: pointer;
+}
+.x-seg label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.x-seg label:has(input:focus-visible) {
+  box-shadow: var(--focus);
+}
+.x-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.x-details > summary {
+  cursor: pointer;
+  margin-top: var(--sp-3);
+  color: var(--text-2);
+}
+.x-graph-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+/* ── Run: one card per command, one form layout ── */
+.x-run-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: var(--sp-4);
+}
+.x-command {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.x-command > p {
+  margin: 0;
+}
+.x-command-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.x-command-head .card-title {
+  margin: 0;
+  font-size: var(--fs-h3);
+  font-weight: 650;
+}
+.x-stage-trail {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+}
+.x-stage-trail li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--text-2);
+  font-size: var(--fs-small);
+}
+.x-stage-trail li + li::before {
+  content: "→";
+  color: var(--text-2);
+}
+.x-stage-trail code {
+  padding: 1px 6px;
+  border-radius: var(--r-chip);
+  background: var(--surface-soft);
+}
+.x-fields {
+  display: grid;
+  gap: var(--sp-3);
+  margin-top: var(--sp-1);
+}
+.x-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.x-field > label {
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+.x-field input:not([type="checkbox"]) {
+  width: 100%;
+}
+.x-field-check > label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.x-hint {
+  color: var(--text-2);
+  font-size: var(--fs-small);
+}
+.x-req {
+  color: var(--text-2);
+  font-weight: 450;
+}
+.x-form-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: auto;
+  padding-top: var(--sp-2);
+}
+
+/* ── Commands: the catalogue list and the generated form ── */
+.commands-list input[type="search"] {
+  width: 100%;
+}
+.x-cmd-group .card-label {
+  margin: var(--sp-3) 0 var(--sp-1);
+}
+.commands-list li {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-1);
+}
+.x-cmd {
+  min-height: 26px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-row);
+  text-align: left;
+  justify-content: flex-start;
+}
+.x-cmd:hover {
+  background: var(--surface-soft);
+}
+.x-cmd.on {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.commands-form .card-title {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-h3);
+  overflow-wrap: anywhere;
+}
+.x-class-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.commands-form .arg {
+  margin: var(--sp-3) 0;
+}
+.commands-form .arg label {
+  margin-bottom: var(--sp-1);
+  font-size: var(--fs-small);
+}
+.commands-form pre.argv {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-inner);
+  background: var(--surface-soft);
+  font-size: var(--fs-small);
+}
+
+/* ── Integrity ── */
+.x-reach .kv-list li {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+/* ── Interaction ── */
+.x-access + .x-access {
+  margin-top: var(--sp-5);
+}
+.x-access-title {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-body);
+  font-weight: 650;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+/* ── Transformations ── */
+.x-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: 2px;
+  font-size: var(--fs-small);
+}
+.x-chain {
+  min-width: 0;
+}
+.x-chain-title {
+  margin: 0;
+  font-size: var(--fs-h3);
+  font-weight: 650;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  overflow-wrap: anywhere;
+}
+.x-source {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ── Chat: conversations beside a message list with the composer docked at its foot ── */
+.chat-page {
+  align-items: stretch;
+}
+.chat-list {
+  margin: 0;
+}
+.chat-list ul {
+  margin: var(--sp-3) 0 0;
+  display: grid;
+  gap: 2px;
+}
+.chat-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  border-radius: var(--r-row);
+}
+.chat-list li:hover,
+.chat-list li.on {
+  background: var(--surface-soft);
+}
+.chat-new {
+  width: 100%;
+}
+.chat-open {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  justify-content: flex-start;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-delete {
+  min-height: 30px;
+  padding: 0 var(--sp-2);
+}
+.chat-main {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 420px;
+  height: calc(100vh - 260px);
+  padding: 0;
+  overflow: hidden;
+}
+.chat-model {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+}
+.chat-items {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-5);
+  gap: var(--sp-3);
+}
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: min(80%, 72ch);
+}
+.chat-msg-user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+.chat-msg-answer {
+  align-self: flex-start;
+}
+.chat-who {
+  font-size: var(--fs-label);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.chat-user {
+  max-width: 100%;
+  border: 0;
+  border-radius: var(--r-inner) var(--r-inner) 2px var(--r-inner);
+  background: var(--accent-soft);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.chat-answer {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-inner) var(--r-inner) var(--r-inner) 2px;
+  background: var(--surface);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.chat-tool {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: var(--sp-1) var(--sp-3);
+  border-left: 2px solid var(--border);
+  font-size: var(--fs-small);
+}
+.chat-tool > summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.chat-tool pre {
+  margin: var(--sp-1) 0 0;
+  padding: var(--sp-2);
+  border-radius: var(--r-row);
+  background: var(--surface-soft);
+}
+.chat-note {
+  margin: 0;
+  text-align: center;
+}
+.chat-composer {
+  border-top: 1px solid var(--border);
+  padding: var(--sp-3) var(--sp-5) var(--sp-4);
+  background: var(--surface);
+}
+.chat-tell {
+  flex-wrap: wrap;
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-small);
+}
+.chat-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 28px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-btn);
+  color: var(--accent-text);
+  cursor: pointer;
+}
+.chat-attach:hover {
+  background: var(--surface-soft);
+}
+.chat-attach:focus-within {
+  box-shadow: var(--focus);
+}
+.chat-input {
+  margin-top: 0;
+  align-items: flex-end;
+}
+.chat-input textarea {
+  min-height: 2.75rem;
+  max-height: 10rem;
+  resize: vertical;
+}
+@media (max-width: 720px) {
+  .chat-main {
+    height: auto;
+    min-height: 70vh;
+  }
+}
+
+/* ── Graph: the title folded into the toolbar ── */
+.graph-toolbar {
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+}
+.x-graph-nav,
+.x-graph-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.x-graph-title {
+  font-size: var(--fs-h2);
+  margin-right: var(--sp-2);
+}
+.x-side-title {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-body);
+  font-weight: 650;
+}
+.x-side-label {
+  display: block;
+  margin: var(--sp-3) 0 var(--sp-1);
+  font-size: var(--fs-label);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.x-side-input {
+  width: 100%;
+}
+.x-range {
+  display: block;
+  margin: var(--sp-2) 0;
+}
+.x-range input[type="range"] {
+  width: 100%;
+}
+.x-kind {
+  min-height: 24px;
+  gap: var(--sp-2);
+  justify-content: flex-start;
+}
+.x-kind.on {
+  font-weight: 700;
+}
+.x-kind-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+}
+.x-canvas-note {
+  padding: var(--sp-4);
+}
+.x-canvas-note .empty,
+.x-canvas-note .skeleton-rows {
+  max-width: 420px;
+  padding: var(--sp-4);
+  border-radius: var(--r-card);
+  background: var(--surface);
+  color: var(--text);
+}
+.graph-canvas > .err {
+  margin: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-inner);
+  background: var(--bad-soft);
+}
+
+/* ── Extension pages ── */
+.x-ext-controls {
+  margin-top: 0;
+}
+.ext-page {
+  gap: 0;
+}
+.ext-panel-head .card-label {
+  margin: 0;
+}
+.ext-page tr.selectable {
+  position: relative;
+}
+.x-row-pick {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-weight: 600;
+  text-align: left;
+  justify-content: flex-start;
+}
+.x-row-pick::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.x-row-pick:focus-visible {
+  outline: none;
+}
+.x-row-pick:focus-visible::after {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.ext-page tr.selected td {
+  background: var(--accent-soft);
+}
+
+/* ── narrow screens: the graph's controls, canvas and evidence panel stack ── */
+@media (max-width: 720px) {
+  .graph-layout,
+  .graph-layout:has(.obj-panel) {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+    resize: none;
+    overflow: visible;
+  }
+  .graph-side {
+    max-height: 40vh;
+  }
+  .graph-canvas {
+    height: 60vh;
+  }
+}

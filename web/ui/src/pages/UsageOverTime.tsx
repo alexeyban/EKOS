@@ -6,6 +6,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { ProfileColumn, ProfileShow } from "../api/types";
+import { Skeleton } from "../ui";
 import { type Bar, bars, describe, peak } from "./usage-chart";
 
 const H = 60;
@@ -83,7 +84,8 @@ export function UsageOverTime({
     queryFn: () =>
       api<ProfileShow>(`/workspaces/${workspace}/profile?table=${encodeURIComponent(table)}`),
   });
-  if (q.isLoading || q.isError || !q.data?.measured) return null;
+  if (q.isLoading) return <Skeleton rows={2} label="loading usage over time" />;
+  if (q.isError || !q.data?.measured) return null;
   const cols = (q.data.columns ?? []).filter(
     (c) => c.column.toLowerCase() === column.toLowerCase() && c.coverage.monthly,
   );
@@ -128,7 +130,7 @@ export function UsageOverTime({
           </div>
         );
       })}
-      <p className="muted">Bars are rows per month; a short grey bar is a month with rows but fewer than the reporting threshold.</p>
+      <p className="muted small">Bars are rows per month; a short grey bar is a month with rows but fewer than the reporting threshold.</p>
     </div>
   );
 }

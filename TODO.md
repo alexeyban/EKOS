@@ -7200,5 +7200,9 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
 - [x] RFC 0261 U1 + U2 (part of U3): tokens and a per-person light/dark/system theme, the sidebar shell from
       one navigation model (`web/ui/src/nav.ts`), badges, status bar, the command palette (Ctrl/⌘ K), and the
       Workspaces, RunDetail and evidence-panel pages; fonts bundled (devlog_337)
-- [ ] RFC 0261 U1 exit: the `deploy/e2e` browser stages in Chromium **and WebKit** against the new shell; U3
-      page pass for the rest (Dashboard, Decide pages' list-and-detail, forms), skeletons and empty states
+- [x] RFC 0261 U3 page pass: every page on `PageHead` / `QueryView` / `Empty` (`web/ui/src/ui.tsx`), one
+      list-and-detail pattern for the Decide pages, one form pattern for Configure, charts and the graph canvas
+      following the theme; ~465 lines of unused CSS removed (devlog_338)
+- [ ] RFC 0261 U1 exit: the `deploy/e2e` browser stages in Chromium **and WebKit** against the new shell
+- [ ] Console: the Graph, Commands, ekos.toml, Settings, Review, Sources and Conflicts pages throw when an API
+      answer lacks a field they read (seen with fixtures, before and after the page pass); read defensively

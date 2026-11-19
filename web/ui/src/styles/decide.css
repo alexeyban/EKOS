@@ -1,0 +1,672 @@
+/* RFC 0261 §2.7 page pass: the Decide pages (Review, Semantics, Conflicts, Questions, Inbox,
+   Notes, and the LinkML / Apache Ossie views inside Semantics). One list-and-detail pattern:
+   a list card whose rows carry status chips, the selected row marked, and a detail panel that
+   stays in view and scrolls on its own; on a phone the panel stacks under the list.
+   Tokens only (theme.css), so both themes follow. Components: pages/decide-kit.tsx. */
+
+/* ── page ── */
+.app-content:has(.dk-page) > * {
+  max-width: none;
+}
+.dk-page {
+  min-width: 0;
+}
+.dk-page .card {
+  margin: 0 0 var(--sp-4);
+}
+
+/* a segmented switch: Semantics views, review subjects, viewer / editor */
+.dk-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin: 0 0 var(--sp-4);
+}
+.dk-tabs button {
+  min-height: 30px;
+  padding: 0 var(--sp-3);
+  background: transparent;
+  color: var(--text-2);
+  border-color: var(--border);
+  font-size: var(--fs-body);
+}
+.dk-tabs button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--surface);
+}
+.dk-tabs button[aria-pressed="true"] {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.dk-tabs-sm {
+  margin: 0;
+}
+.dk-tabs-sm button {
+  min-height: 28px;
+  font-size: var(--fs-small);
+}
+
+/* filters above a list */
+.dk-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+}
+.dk-toolbar select,
+.dk-toolbar input {
+  min-width: 0;
+  max-width: 100%;
+}
+.dk-toolbar input:not([type]) {
+  flex: 1 1 9rem;
+}
+.dk-search {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.dk-viewbar {
+  margin: 0 0 var(--sp-4);
+}
+.dk-note {
+  flex: 1 1 18rem;
+}
+.dk-count {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  color: var(--text-2);
+  font-size: var(--fs-small);
+}
+.dk-toolbar .dk-count {
+  margin: 0 0 0 auto;
+}
+
+/* ── list and detail ── */
+.dk-split,
+.dk-browse {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.dk-split.has-panel {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+}
+.dk-browse {
+  grid-template-columns: minmax(13rem, 0.75fr) minmax(0, 2fr);
+}
+.dk-browse.has-panel {
+  grid-template-columns: minmax(13rem, 0.7fr) minmax(0, 1.6fr) minmax(0, 1.3fr);
+}
+.dk-split > .card,
+.dk-browse > .card {
+  margin: 0;
+  min-width: 0;
+}
+.dk-list {
+  padding: var(--sp-4);
+}
+
+.dk-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.dk-row {
+  position: relative;
+  padding: 10px var(--sp-3);
+  border-radius: var(--r-row);
+  border-bottom: 1px solid var(--border);
+}
+.dk-row:last-child {
+  border-bottom-color: transparent;
+}
+.dk-row:hover {
+  background: var(--surface-soft);
+}
+.dk-row.is-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+  border-bottom-color: transparent;
+}
+.dk-row-static:hover {
+  background: transparent;
+}
+.dk-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px var(--sp-2);
+  min-width: 0;
+}
+/* The row's name is the button that selects it; its ::after covers the row, so a click anywhere
+   on the row selects it and the keyboard reaches it too. */
+.dk-row-pick {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-weight: 650;
+  text-align: left;
+  overflow-wrap: anywhere;
+  display: inline;
+}
+.dk-row-pick:hover:not(:disabled) {
+  border: 0;
+}
+.dk-row-pick::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-row);
+}
+.dk-row-pick:focus-visible {
+  box-shadow: none;
+}
+.dk-row-pick:focus-visible::after {
+  box-shadow: var(--focus);
+}
+.dk-row.is-selected .dk-row-pick {
+  color: var(--accent-text);
+}
+/* controls in a row stay clickable above the row's hit area */
+.dk-row input[type="checkbox"],
+.dk-row-actions,
+.dk-row a {
+  position: relative;
+  z-index: 1;
+}
+.dk-row-sum {
+  margin-top: 3px;
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  overflow-wrap: anywhere;
+}
+.dk-row-name {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.dk-row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+.dk-group {
+  margin: var(--sp-4) 0 var(--sp-1);
+  font-size: var(--fs-body);
+  font-weight: 650;
+  text-transform: capitalize;
+}
+.dk-pickall,
+.dk-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-small);
+}
+.dk-pickall {
+  margin: 0 0 var(--sp-2) var(--sp-3);
+}
+
+/* the detail panel: sticky, scrolls on its own */
+.dk-panel,
+.dk-tree,
+.dk-detail {
+  position: sticky;
+  top: var(--sp-3);
+  max-height: calc(100dvh - 112px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.dk-panel {
+  padding: var(--sp-4) var(--sp-5);
+}
+.dk-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-2);
+}
+.dk-panel-title {
+  min-width: 0;
+  flex: 1;
+}
+.dk-close {
+  flex: none;
+  margin: -6px -8px 0 0;
+}
+.dk-title {
+  margin: var(--sp-1) 0;
+  font-size: var(--fs-h3);
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.dk-summary {
+  margin: var(--sp-2) 0;
+  overflow-wrap: anywhere;
+}
+.dk-quote {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--border);
+  background: var(--surface-soft);
+  border-radius: 0 var(--r-row) var(--r-row) 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.dk-props {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px var(--sp-4);
+  margin: var(--sp-3) 0;
+  font-size: var(--fs-small);
+}
+.dk-props > div {
+  display: contents;
+}
+.dk-props dt {
+  color: var(--text-2);
+}
+.dk-props dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.dk-sub {
+  margin: var(--sp-4) 0 var(--sp-2);
+  font-size: var(--fs-label);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.dk-evidence,
+.dk-said,
+.dk-claims,
+.dk-stale {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-small);
+}
+.dk-evidence li,
+.dk-said li,
+.dk-claims li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--border);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.dk-claims li {
+  gap: 6px;
+}
+.dk-claims li button {
+  margin-top: 2px;
+}
+.dk-chip-gap {
+  margin-left: 6px;
+}
+.dk-stale {
+  margin: 0 0 var(--sp-2);
+}
+.dk-stale li {
+  padding: 2px 0;
+}
+.dk-digest {
+  font-family: var(--font-mono);
+  font-size: var(--fs-label);
+  overflow-wrap: anywhere;
+}
+.dk-details {
+  margin: var(--sp-2) 0;
+}
+.dk-details > summary {
+  cursor: pointer;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.dk-raw {
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-3);
+  max-height: 20rem;
+  overflow: auto;
+  background: var(--surface-soft);
+  border-radius: var(--r-inner);
+  font-size: var(--fs-label);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.dk-raw-toggle {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-small);
+}
+.dk-pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* a decision: fields and its buttons */
+.dk-section {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-1);
+  border-top: 1px solid var(--border);
+}
+.dk-form .dk-sub:first-child {
+  margin-top: 0;
+}
+.dk-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: var(--sp-2) 0;
+  color: var(--text-2);
+  font-size: var(--fs-small);
+}
+.dk-field input,
+.dk-field select,
+.dk-field textarea,
+.dk-textarea {
+  font: inherit;
+  font-size: var(--fs-body);
+  width: 100%;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  background: var(--bg);
+  color: var(--text);
+}
+.dk-field textarea,
+.dk-textarea {
+  resize: vertical;
+}
+.dk-field .dk-check,
+.dk-form .dk-check {
+  margin: var(--sp-2) 0;
+}
+.dk-help {
+  margin: 0 0 var(--sp-2);
+}
+.dk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+.dk-actions input:not([type]) {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+.dk-send input[type="file"] {
+  max-width: 100%;
+  min-width: 0;
+}
+.dk-confirm {
+  margin-top: var(--sp-2);
+}
+button.dk-danger {
+  color: var(--bad);
+  border-color: var(--bad);
+  background: var(--bad-soft);
+}
+button.dk-danger:hover:not(:disabled) {
+  border-color: var(--bad);
+  filter: brightness(1.05);
+}
+.dk-push {
+  margin-left: auto;
+}
+
+/* several items decided at once */
+.dk-bulk {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-inner);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+.dk-bulk > input {
+  flex: 1 1 9rem;
+  min-width: 0;
+}
+.dk-bulk .dk-actions {
+  margin-top: 0;
+}
+
+/* ── tables (review items, LinkML slots, Ossie fields, import plans); wrapped in .table-scroll ── */
+.dk-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-small);
+}
+.dk-table th,
+.dk-table td {
+  padding: 6px var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.dk-table th {
+  color: var(--text-2);
+  font-weight: 600;
+  font-size: var(--fs-label);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.dk-table tbody tr:hover {
+  background: var(--surface-soft);
+}
+.dk-table tr.is-selected {
+  background: var(--accent-soft);
+}
+.dk-review-table {
+  min-width: 34rem;
+}
+.dk-findings {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-small);
+}
+
+/* ── LinkML / Ossie browser ── */
+.dk-tree {
+  padding: var(--sp-4);
+}
+.dk-tree .dk-search {
+  width: 100%;
+  margin: var(--sp-2) 0;
+}
+.dk-tree-group ul,
+.dk-tree-list {
+  list-style: none;
+  margin: var(--sp-1) 0 var(--sp-2);
+  padding: 0;
+}
+.dk-tree-head {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 28px;
+  margin-top: var(--sp-2);
+  padding: 0 var(--sp-1);
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-weight: 650;
+}
+.dk-tree-head:hover:not(:disabled) {
+  background: var(--surface-soft);
+}
+.dk-node {
+  width: 100%;
+  min-height: 28px;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 3px var(--sp-2);
+  border: 0;
+  border-radius: var(--r-row);
+  background: none;
+  color: var(--text);
+  font-weight: 450;
+  font-size: var(--fs-small);
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.dk-node:hover:not(:disabled) {
+  background: var(--surface-soft);
+}
+.dk-node.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.dk-detail {
+  padding: var(--sp-4) var(--sp-5);
+}
+
+/* YAML editor, upload, side-by-side diff */
+textarea.dk-yaml {
+  min-height: 55vh;
+  tab-size: 2;
+}
+.dk-upload {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--h-btn);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  color: var(--accent-text);
+  font-weight: 550;
+  cursor: pointer;
+}
+.dk-upload:hover {
+  border-color: var(--accent);
+}
+.dk-upload:focus-within {
+  box-shadow: var(--focus);
+}
+/* visually hidden but focusable, so the keyboard reaches the file picker */
+.dk-upload input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.dk-diff {
+  margin-top: var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-inner);
+  overflow: auto;
+  max-height: 60vh;
+  font-size: var(--fs-small);
+}
+.dk-diff-row {
+  display: grid;
+  grid-template-columns: 3.2rem minmax(0, 1fr) 3.2rem minmax(0, 1fr);
+}
+.dk-diff-row code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 0 6px;
+}
+.dk-ln {
+  color: var(--text-2);
+  text-align: right;
+  padding-right: 6px;
+  user-select: none;
+  border-right: 1px solid var(--border);
+}
+.dk-diff-row code.dk-old {
+  background: var(--bad-soft);
+}
+.dk-diff-row code.dk-new {
+  background: var(--ok-soft);
+}
+.dk-ln.dk-old-mark::before {
+  content: "− ";
+  color: var(--bad);
+}
+.dk-ln.dk-new-mark::before {
+  content: "+ ";
+  color: var(--ok);
+}
+.dk-diff-gap {
+  padding: 2px var(--sp-3);
+  color: var(--text-2);
+  background: var(--surface-soft);
+  font-style: italic;
+}
+
+/* the chat's proposal card */
+.tell-card .dk-sub:first-child {
+  margin-top: 0;
+}
+.dk-tell-lines li {
+  flex-direction: row;
+}
+
+/* ── narrow screens: one column, the panel under the list ── */
+@media (max-width: 1100px) {
+  .dk-browse.has-panel {
+    grid-template-columns: minmax(12rem, 0.7fr) minmax(0, 1.6fr);
+  }
+  .dk-browse.has-panel > .dk-panel {
+    grid-column: 1 / -1;
+    position: static;
+    max-height: none;
+  }
+}
+@media (max-width: 760px) {
+  .dk-split.has-panel,
+  .dk-browse,
+  .dk-browse.has-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .dk-panel,
+  .dk-tree,
+  .dk-detail {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+  .dk-panel,
+  .dk-detail {
+    padding: var(--sp-4);
+  }
+  .dk-toolbar .dk-count {
+    margin-left: 0;
+  }
+  .dk-props {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .dk-props dd {
+    margin-bottom: 6px;
+  }
+}

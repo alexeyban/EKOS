@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import { api, apiDelete, apiPost, apiPut } from "../api/client";
+import { Empty, ErrorNote, PageHead, QueryView } from "../ui";
 
 interface Me {
   role: "read" | "write";
@@ -29,8 +30,15 @@ interface Schedule {
   last_status: string | null;
 }
 
-const chip = (s: string | null) =>
-  s === "succeeded" ? "ok" : s && ["failed", "timed_out", "interrupted"].includes(s) ? "bad" : "";
+/** The chip colour of a run's last status. */
+function chipOf(s: string | null): string {
+  if (s === "succeeded") return "ok";
+  if (s && ["failed", "timed_out", "interrupted"].includes(s)) return "bad";
+  return "";
+}
+
+const triggerText = (s: Schedule) =>
+  s.trigger_kind === "interval" ? `every ${s.trigger_expr}s` : `cron ${s.trigger_expr}`;
 
 export function Schedules() {
   const me = useOutletContext<Me>();
@@ -55,58 +63,99 @@ export function Schedules() {
   });
 
   if (me.role !== "write")
-    return <p className="muted">Schedules run write commands — sign in with the write token.</p>;
+    return (
+      <div className="fm-page">
+        <PageHead title="Schedules" sub="Pipeline runs that start on a timer." />
+        <Empty title="Schedules need the write role" icon="schedules">
+          Schedules run write commands — sign in with the write token.
+        </Empty>
+      </div>
+    );
 
   return (
-    <>
-      <p className="crumbs">
-        <Link to="/" className="linkish">
-          ← workspaces
-        </Link>
-      </p>
+    <div className="fm-page">
+      <PageHead
+        title="Schedules"
+        sub="Commands that run on a timer, on any project of this console. A failed run is POSTed to the notify URL."
+      />
 
-      <section className="card">
-        <strong>Schedules</strong>
-        {rows.data?.length === 0 && <p className="muted">none yet</p>}
-        <ul className="ws-list">
-          {rows.data?.map((s) => (
-            <li key={s.id}>
-              <code>{s.command}</code>
-              <span className="muted">{s.workspace_id}</span>
-              <span className="muted">
-                {s.trigger_kind === "interval" ? `every ${s.trigger_expr}s` : `cron ${s.trigger_expr}`}
-              </span>
-              <span className="path muted">
-                {s.last_status ? (
-                  <>
-                    <span className={`chip ${chip(s.last_status)}`}>{s.last_status}</span>{" "}
-                    {s.last_run_id && (
-                      <Link to={`/runs/${s.last_run_id}`} className="linkish">
-                        log
-                      </Link>
-                    )}
-                  </>
-                ) : (
-                  "not run yet"
-                )}
-              </span>
-              <button className="linkish" onClick={() => toggle.mutate(s)}>
-                {s.enabled ? "disable" : "enable"}
-              </button>
-              <RunNow id={s.id} />
-              <button className="linkish danger" onClick={() => del.mutate(s.id)}>
-                delete
-              </button>
-            </li>
-          ))}
-        </ul>
+      <section className="card" aria-labelledby="schedules-list">
+        <h2 className="card-label" id="schedules-list">
+          Schedules
+        </h2>
+        <QueryView
+          q={rows}
+          what="schedules"
+          isEmpty={(d) => d.length === 0}
+          empty={
+            <Empty title="No schedules yet" icon="schedules">
+              Schedule a pipeline run below: pick a project and a command, then how often it runs.
+            </Empty>
+          }
+        >
+          {(list) => (
+            <div className="table-scroll">
+              <table className="fm-table">
+                <thead>
+                  <tr>
+                    <th>Command</th>
+                    <th>Project</th>
+                    <th>When</th>
+                    <th>Last run</th>
+                    <th>
+                      <span className="fm-sr">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map((s) => (
+                    <tr key={s.id}>
+                      <td>
+                        <code>{s.command}</code>
+                      </td>
+                      <td>{s.workspace_id}</td>
+                      <td>{triggerText(s)}</td>
+                      <td>
+                        <LastRun s={s} />
+                      </td>
+                      <td>
+                        <span className="fm-item-actions">
+                          <button className="linkish" onClick={() => toggle.mutate(s)}>
+                            {s.enabled ? "disable" : "enable"}
+                          </button>
+                          <RunNow id={s.id} />
+                          <button className="linkish danger" onClick={() => del.mutate(s.id)}>
+                            delete
+                          </button>
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </QueryView>
       </section>
 
       <CreateForm workspaces={workspaces.data ?? []} />
-    </>
+    </div>
   );
 }
 
+function LastRun({ s }: { s: Schedule }) {
+  if (!s.last_status) return <span className="muted">not run yet</span>;
+  return (
+    <>
+      <span className={`chip ${chipOf(s.last_status)}`}>{s.last_status}</span>{" "}
+      {s.last_run_id && (
+        <Link to={`/runs/${s.last_run_id}`} className="linkish">
+          log
+        </Link>
+      )}
+    </>
+  );
+}
 function RunNow({ id }: { id: string }) {
   const nav = useNavigate();
   const m = useMutation({
@@ -154,63 +203,87 @@ function CreateForm({ workspaces }: { workspaces: Workspace[] }) {
   const cmdDef = commands.data?.find((c) => c.name === cmd);
 
   return (
-    <section className="card">
-      <strong>New schedule</strong>
+    <section className="card" aria-labelledby="schedules-new">
+      <h2 className="card-label" id="schedules-new">
+        New schedule
+      </h2>
       <form
-        className="reg-form"
-        style={{ flexDirection: "column", alignItems: "stretch" }}
         onSubmit={(e) => {
           e.preventDefault();
           create.mutate();
         }}
       >
-        <select value={ws} onChange={(e) => setWs(e.target.value)} required>
-          <option value="">workspace…</option>
-          {workspaces.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.name}
-            </option>
-          ))}
-        </select>
-        <select value={cmd} onChange={(e) => setCmd(e.target.value)} required>
-          <option value="">command…</option>
-          {commands.data?.map((c) => (
-            <option key={c.name} value={c.name}>
-              {c.name} — {c.summary}
-            </option>
-          ))}
-        </select>
-        {cmdDef &&
-          Object.entries(cmdDef.params).map(([name, spec]) => (
+        <div className="fm-grid">
+          <label className="fm-field">
+            <span className="fm-label">Project</span>
+            <select value={ws} onChange={(e) => setWs(e.target.value)} required>
+              <option value="">workspace…</option>
+              {workspaces.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="fm-field">
+            <span className="fm-label">Command</span>
+            <select value={cmd} onChange={(e) => setCmd(e.target.value)} required>
+              <option value="">command…</option>
+              {commands.data?.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.name} — {c.summary}
+                </option>
+              ))}
+            </select>
+          </label>
+          {cmdDef &&
+            Object.entries(cmdDef.params).map(([name, spec]) => (
+              <label key={name} className="fm-field">
+                <span className="fm-label">
+                  <code>{name}</code>
+                  {spec.required && <span className="muted">required</span>}
+                </span>
+                <input
+                  placeholder={`${name}${spec.required ? " (required)" : ""}`}
+                  onChange={(e) => setParams((p) => ({ ...p, [name]: e.target.value }))}
+                />
+                {spec.help && <span className="fm-hint">{spec.help}</span>}
+              </label>
+            ))}
+          <label className="fm-field">
+            <span className="fm-label">Trigger</span>
+            <select value={kind} onChange={(e) => setKind(e.target.value as "interval" | "cron")}>
+              <option value="interval">interval (seconds)</option>
+              <option value="cron">cron (UTC)</option>
+            </select>
+          </label>
+          <label className="fm-field">
+            <span className="fm-label">{kind === "cron" ? "Cron expression" : "Every (seconds)"}</span>
             <input
-              key={name}
-              placeholder={`${name}${spec.required ? " (required)" : ""}`}
-              onChange={(e) => setParams((p) => ({ ...p, [name]: e.target.value }))}
+              value={expr}
+              onChange={(e) => setExpr(e.target.value)}
+              placeholder={kind === "cron" ? "0 3 * * *" : "3600"}
+              required
             />
-          ))}
-        <div className="reg-form">
-          <select value={kind} onChange={(e) => setKind(e.target.value as "interval" | "cron")}>
-            <option value="interval">interval (seconds)</option>
-            <option value="cron">cron (UTC)</option>
-          </select>
-          <input
-            value={expr}
-            onChange={(e) => setExpr(e.target.value)}
-            placeholder={kind === "cron" ? "0 3 * * *" : "3600"}
-            required
-          />
+          </label>
+          <label className="fm-field fm-field-wide">
+            <span className="fm-label">Notify URL</span>
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="notify_url (https://… — POSTed on a failed run)"
+              required
+            />
+            <span className="fm-hint">POSTed to when a run fails.</span>
+          </label>
         </div>
-        <input
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="notify_url (https://… — POSTed on a failed run)"
-          required
-        />
-        <button type="submit" disabled={create.isPending}>
-          Create
-        </button>
+        <div className="fm-actions">
+          <button type="submit" disabled={create.isPending}>
+            Create
+          </button>
+        </div>
+        {create.isError && <ErrorNote error={create.error} what="Creating the schedule" />}
       </form>
-      {create.isError && <p className="err">{String(create.error)}</p>}
     </section>
   );
 }

@@ -1,0 +1,390 @@
+/* RFC 0261 §2.7 page pass: forms pages (Sources, Settings, ekos.toml and its generated settings,
+   Admin, Channels, Schedules). One form pattern, every class prefixed `fm-`:
+
+   - a card per section, headed by an `h2.card-label`, with an optional `.fm-note` under it;
+   - labelled fields stacked (`.fm-field`: `.fm-label` above the control, `.fm-hint` and
+     `.fm-error` under it), laid out by `.fm-grid` (columns that wrap) or `.fm-stack` (one column),
+     both capped in width so no field runs across a wide card;
+   - one action row (`.fm-actions`): left-aligned, the primary action first;
+   - lists with per-row actions (`.fm-list`) and tables (`.fm-table`, inside `.table-scroll`). */
+
+.fm-page {
+  min-width: 0;
+}
+.fm-page .card {
+  min-width: 0;
+}
+
+/* ── text inside a card ── */
+.fm-note {
+  margin: 0 0 var(--sp-3);
+  max-width: 72ch;
+  color: var(--text-2);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+.fm-ok {
+  margin: var(--sp-2) 0 0;
+  color: var(--ok);
+  font-size: var(--fs-small);
+}
+.fm-warn {
+  margin: var(--sp-1) 0;
+  color: var(--warn);
+  font-size: var(--fs-small);
+}
+.fm-banner {
+  margin: var(--sp-3) 0 0;
+  padding: 10px 14px;
+  border-radius: var(--r-inner);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: var(--fs-small);
+}
+.fm-sub {
+  margin-top: var(--sp-5);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+}
+.fm-sub-title {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-body);
+  font-weight: 650;
+}
+
+/* ── fields ── */
+.fm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+  gap: var(--sp-3) var(--sp-4);
+  max-width: 54rem;
+}
+.fm-stack {
+  display: grid;
+  gap: var(--sp-3);
+  max-width: 36rem;
+}
+.fm-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.fm-field-wide {
+  grid-column: 1 / -1;
+}
+.fm-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text);
+}
+.fm-field input:not([type="checkbox"], [type="radio"]),
+.fm-field select,
+.fm-field textarea,
+.fm-inline input,
+.fm-inline select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--h-btn);
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-btn);
+  background: var(--surface);
+  color: var(--text);
+}
+.fm-field textarea {
+  min-height: 4.5rem;
+  resize: vertical;
+}
+.fm-field input:disabled,
+.fm-field select:disabled {
+  background: var(--surface-soft);
+  color: var(--text-2);
+}
+.fm-field input:focus-visible,
+.fm-field select:focus-visible,
+.fm-field textarea:focus-visible,
+.fm-inline input:focus-visible,
+.fm-inline select:focus-visible,
+.fm-editor:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus);
+}
+.fm-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  line-height: 1.45;
+}
+.fm-error {
+  margin: 0;
+  color: var(--bad);
+  font-size: var(--fs-small);
+}
+.fm-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--h-btn);
+  font-size: var(--fs-body);
+}
+.fm-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.fm-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+.fm-chip {
+  font-size: var(--fs-label);
+}
+
+/* A short row: an input or two and its button (link a code, store a key, add a member). */
+.fm-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 40rem;
+}
+.fm-inline input,
+.fm-inline select {
+  flex: 1 1 10rem;
+  width: auto;
+}
+
+/* ── the action row ── */
+.fm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+.fm-status {
+  color: var(--text-2);
+  font-size: var(--fs-small);
+}
+.fm-footer {
+  margin: 0 0 var(--sp-4);
+}
+
+/* ── disclosures (a form folded under its section, a settings section) ── */
+.fm-disclosure {
+  margin-top: var(--sp-4);
+  border-top: 1px solid var(--border);
+  padding-top: var(--sp-3);
+}
+.fm-disclosure > summary {
+  cursor: pointer;
+  font-weight: 600;
+  width: fit-content;
+  border-radius: var(--r-row);
+  padding: 2px var(--sp-1);
+}
+.fm-disclosure > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.fm-disclosure[open] > summary {
+  margin-bottom: var(--sp-3);
+}
+
+/* ── lists with actions ── */
+.fm-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--sp-3);
+}
+.fm-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fm-list > li:last-child {
+  border-bottom: 0;
+}
+.fm-item {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.fm-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+/* ── tables ── */
+.fm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-body);
+}
+.fm-table th,
+.fm-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+.fm-table th {
+  font-size: var(--fs-label);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.fm-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.fm-table code {
+  overflow-wrap: anywhere;
+}
+.fm-table .chip {
+  white-space: nowrap;
+}
+.fm-rule {
+  display: block;
+  color: var(--text-2);
+  font-size: var(--fs-small);
+}
+.fm-scroll-y {
+  max-height: 24rem;
+  overflow: auto;
+}
+
+/* ── one-off pieces ── */
+.fm-secret {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-inner);
+  background: var(--accent-soft);
+}
+.fm-secret p {
+  margin: 0;
+}
+.fm-secret code {
+  display: block;
+  margin: var(--sp-2) 0 var(--sp-3);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.fm-editor {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 340px;
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-inner);
+  background: var(--surface-soft);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  line-height: 1.6;
+  resize: vertical;
+}
+.fm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  margin: var(--sp-1) 0 var(--sp-3);
+}
+.fm-scan {
+  list-style: none;
+  padding: 0;
+  margin: var(--sp-2) 0;
+  columns: 2 12rem;
+  font-size: var(--fs-small);
+}
+.fm-db {
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+.fm-db-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.fm-db-line {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-small);
+}
+
+/* The generated settings (ekos.toml) and the console's settings: one section per disclosure. */
+.fm-section {
+  border-top: 1px solid var(--border);
+  padding: var(--sp-2) 0;
+}
+.fm-section > summary {
+  cursor: pointer;
+  width: fit-content;
+  padding: 2px var(--sp-1);
+  border-radius: var(--r-row);
+  font-weight: 600;
+}
+.fm-section > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.fm-section[open] > summary {
+  margin-bottom: var(--sp-2);
+}
+.fm-section .fm-section {
+  margin-left: var(--sp-3);
+}
+.fm-section > .fm-hint {
+  margin-bottom: var(--sp-3);
+  max-width: 72ch;
+}
+.fm-section > .fm-grid {
+  margin-bottom: var(--sp-2);
+}
+
+/* Text for screen readers only (a table's actions column header). */
+.fm-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.fm-findings {
+  margin-top: var(--sp-2);
+}
+.fm-members {
+  display: inline-flex;
+  flex: 1 1 18rem;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  min-width: 0;
+}
+.fm-kind {
+  margin-left: var(--sp-2);
+}

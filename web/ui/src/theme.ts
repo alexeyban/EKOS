@@ -37,3 +37,53 @@ export const THEME_LABEL: Record<ThemeChoice, string> = {
   light: "Theme: light",
   dark: "Theme: dark",
 };
+
+/** Colours a chart needs, read from the tokens so a chart follows the theme like the CSS does. */
+export interface ChartColors {
+  a: string;
+  b: string;
+  /** Secondary text: axis labels, muted lines. */
+  text: string;
+  /** Main text: labels drawn on a canvas, the selected node. */
+  ink: string;
+  grid: string;
+  surface: string;
+  /** The page ground, which a canvas paints behind its drawing. */
+  bg: string;
+}
+
+const CHART_FALLBACK: ChartColors = {
+  a: "#7c3aed",
+  b: "#047857",
+  text: "#5c5578",
+  ink: "#171326",
+  grid: "#e3ddf5",
+  surface: "#ffffff",
+  bg: "#f6f4fc",
+};
+
+export function readChartColors(root: Element = document.documentElement): ChartColors {
+  const css = getComputedStyle(root);
+  const pick = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  return {
+    a: pick("--accent", CHART_FALLBACK.a),
+    b: pick("--ok", CHART_FALLBACK.b),
+    text: pick("--text-2", CHART_FALLBACK.text),
+    ink: pick("--text", CHART_FALLBACK.ink),
+    grid: pick("--border", CHART_FALLBACK.grid),
+    surface: pick("--surface", CHART_FALLBACK.surface),
+    bg: pick("--bg", CHART_FALLBACK.bg),
+  };
+}
+
+/** `color` (#rgb, #rrggbb or rgb()/rgba()) at the given opacity, for a canvas fill or stroke. */
+export function withAlpha(color: string, alpha: number): string {
+  const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim());
+  if (hex) {
+    const h = hex[1].length === 3 ? [...hex[1]].map((x) => x + x).join("") : hex[1];
+    const [r, g, b] = [0, 2, 4].map((i) => Number.parseInt(h.slice(i, i + 2), 16));
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+  const rgb = /^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i.exec(color.trim());
+  return rgb ? `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, ${alpha})` : color;
+}

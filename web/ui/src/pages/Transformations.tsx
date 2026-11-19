@@ -9,8 +9,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useOutletContext, useParams, useSearchParams } from "react-router-dom";
+import { Link, useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
+import { Empty, PageHead, QueryView } from "../ui";
 import { type Me, mayOperate } from "../WorkspaceShell";
 import { AddForm } from "./Annotations";
 import { reach, stateChip } from "./annotations-shared";
@@ -45,8 +46,13 @@ export function Transformations() {
 
   return (
     <div className="sem-page">
-      <div className="sem-views">
+      <PageHead
+        title="Transformations"
+        sub="Views, routines, queries and Kettle jobs EKOS recovered, each drawn as a chain of steps with its source, columns and evidence."
+      />
+      <div className="sem-views x-filters">
         <input
+          type="search"
           aria-label="filter"
           placeholder="view, routine or file name"
           value={filter}
@@ -59,33 +65,58 @@ export function Transformations() {
           </span>
         )}
       </div>
-      {list.isError && <p className="err">{String(list.error)}</p>}
       <div className={object ? "lm-layout" : "sem-layout"}>
         <section className="card lm-tree" aria-label="transformations">
-          {list.isLoading && <p className="muted">loading…</p>}
-          {list.data && list.data.total === 0 && (
-            <p className="muted">
-              No transformation was recovered yet: views, routines and queries get a graph at{" "}
-              <code>ekos recover</code>.
-            </p>
-          )}
-          <ul className="sem-items">
-            {rows.slice(0, 300).map((r) => (
-              <li key={r.key} className={r.object === object ? "selected" : undefined}>
-                <button className="sem-item-pick" onClick={() => open(r.object)}>
-                  {r.name}
-                </button>
-                <div className="muted">
-                  <span className="chip small">{r.kind}</span> {r.steps} step(s)
-                  {r.unmapped > 0 && <span className="chip small warn">{r.unmapped} not understood</span>}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <QueryView
+            q={list}
+            what="transformations"
+            rows={6}
+            isEmpty={(l) => l.total === 0}
+            empty={
+              <Empty title="No transformation recovered yet" icon="transformations">
+                Views, routines and queries get a graph at <code>ekos recover</code>. Run the pipeline from{" "}
+                <Link to={`/w/${id}/run`}>Run</Link>.
+              </Empty>
+            }
+          >
+            {() => <TransformationItems rows={rows} object={object} open={open} />}
+          </QueryView>
         </section>
         {object && <ChainPage workspace={id} object={object} me={me} />}
       </div>
     </div>
+  );
+}
+
+function TransformationItems({
+  rows,
+  object,
+  open,
+}: {
+  rows: TransformationList["transformations"];
+  object: string;
+  open: (o: string) => void;
+}) {
+  if (rows.length === 0) return <p className="muted">No transformation matches that filter.</p>;
+  return (
+    <ul className="sem-items">
+      {rows.slice(0, 300).map((r) => (
+        <li key={r.key} className={r.object === object ? "selected" : undefined}>
+          <button
+            type="button"
+            className="sem-item-pick"
+            aria-current={r.object === object ? "true" : undefined}
+            onClick={() => open(r.object)}
+          >
+            {r.name}
+          </button>
+          <div className="muted x-item-meta">
+            <span className="chip small">{r.kind}</span> {r.steps} step(s)
+            {r.unmapped > 0 && <span className="chip small warn">{r.unmapped} not understood</span>}
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -101,46 +132,77 @@ function ChainPage({ workspace, object, me }: { workspace: string; object: strin
           (expand ? `&expand=${encodeURIComponent(expand)}` : ""),
       ),
   });
-  const g = graph.data;
-  const step = g?.nodes.find((n) => n.id === selected) ?? null;
   return (
-    <section className="card" aria-label="chain">
-      {graph.isLoading && <p className="muted">loading…</p>}
-      {graph.isError && <p className="err">{String(graph.error)}</p>}
-      {g && (
-        <>
-          <h3 style={{ marginTop: 0 }}>
-            <span className="chip">{g.transformation.kind}</span> {g.transformation.name}
-          </h3>
-          <p className="muted">
-            {g.counts.nodes} step(s), {g.counts.unmapped} not understood by recovery · {g.transformation.path}
-            {g.collapsed && " · collapsed by statement: select a statement to see its steps"}
-          </p>
-          {g.collapsed && (
-            <div className="btnrow">
-              <button className="pill" onClick={() => setExpand("all")}>
-                show every step
-              </button>
-            </div>
-          )}
-          <ChainView graph={g} selected={selected} onSelect={setSelected} />
-          <div className="sem-layout with-panel">
-            <SourcePanel graph={g} selected={selected} onSelect={setSelected} />
-            {step ? (
-              <StepPanel
-                workspace={workspace}
-                me={me}
-                step={step}
-                rows={g.rows}
-                onExpand={() => setExpand(expandWith(expand, step.statement))}
-              />
-            ) : (
-              <p className="muted">Select a step to see what it does.</p>
-            )}
-          </div>
-        </>
-      )}
+    <section className="card x-chain" aria-label="chain">
+      <QueryView q={graph} what="the transformation graph" rows={4}>
+        {(g) => (
+          <ChainBody
+            g={g}
+            workspace={workspace}
+            me={me}
+            selected={selected}
+            setSelected={setSelected}
+            onExpandAll={() => setExpand("all")}
+            onExpandStep={(statement) => setExpand(expandWith(expand, statement))}
+          />
+        )}
+      </QueryView>
     </section>
+  );
+}
+
+function ChainBody({
+  g,
+  workspace,
+  me,
+  selected,
+  setSelected,
+  onExpandAll,
+  onExpandStep,
+}: {
+  g: ChainGraph;
+  workspace: string;
+  me: Me;
+  selected: string | null;
+  setSelected: (id: string | null) => void;
+  onExpandAll: () => void;
+  onExpandStep: (statement: ChainNode["statement"]) => void;
+}) {
+  const step = g.nodes.find((n) => n.id === selected) ?? null;
+  return (
+    <>
+      <h2 className="x-chain-title">
+        <span className="chip">{g.transformation.kind}</span> {g.transformation.name}
+      </h2>
+      <p className="muted">
+        {g.counts.nodes} step(s), {g.counts.unmapped} not understood by recovery · {g.transformation.path}
+        {g.collapsed && " · collapsed by statement: select a statement to see its steps"}
+      </p>
+      {g.collapsed && (
+        <div className="btnrow">
+          <button type="button" className="pill" onClick={onExpandAll}>
+            show every step
+          </button>
+        </div>
+      )}
+      <ChainView graph={g} selected={selected} onSelect={setSelected} />
+      <div className="sem-layout with-panel">
+        <SourcePanel graph={g} selected={selected} onSelect={setSelected} />
+        {step ? (
+          <StepPanel
+            workspace={workspace}
+            me={me}
+            step={step}
+            rows={g.rows}
+            onExpand={() => onExpandStep(step.statement)}
+          />
+        ) : (
+          <Empty title="Select a step to see what it does" icon="info">
+            Pick a step in the chain or a highlighted span in the source.
+          </Empty>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -162,7 +224,7 @@ export function ChainView({
   for (const n of layout.nodes) lanes.set(n.group, Math.min(lanes.get(n.group) ?? n.y, n.y));
   const kinds = new Map(graph.edges.map((e) => [`${e.from}>${e.to}`, e.kind]));
   return (
-    <div className="ext-graph" style={{ overflowX: "auto" }}>
+    <div className="ext-graph x-graph-scroll">
       <svg width={layout.width + 20} height={layout.height + 36} role="img" aria-label="transformation chain">
         <defs>
           <marker id="chain-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
@@ -244,7 +306,7 @@ export function SourcePanel({
       <p className="muted">
         {graph.source.path}:{graph.source.start_line} — read-only
       </p>
-      <pre className="props" aria-label="source text" style={{ whiteSpace: "pre-wrap" }}>
+      <pre className="props x-source" aria-label="source text">
         {segs.map((s) => {
           const piece = text.slice(s.start, s.end);
           if (!s.node) return <span key={s.start}>{piece}</span>;

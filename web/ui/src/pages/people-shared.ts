@@ -24,7 +24,8 @@ export function questionChip(s: QuestionStatus): string {
 
 /** Who a person is, as a question's addressee names them (their e-mail when signed in). */
 export function whoAmI(me: Me, typed: string): string {
-  return me.mode === "token" ? `token:${typed.trim()}` : (me.email ?? "");
+  // Token and local mode sign no person in: the typed name, marked as the API records it.
+  return me.mode === "oidc" ? (me.email ?? "") : `${me.mode}:${typed.trim()}`;
 }
 
 /** "Not me" is for the person the question is with, and nobody else. */

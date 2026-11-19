@@ -9,6 +9,7 @@ import { useState } from "react";
 import { useOutletContext } from "react-router-dom";
 import { api, apiDelete, apiPost } from "../api/client";
 import type { ChannelAccount, ChannelsOverview } from "../api/types";
+import { ErrorNote, PageHead, QueryView } from "../ui";
 
 interface Identity {
   owner?: boolean;
@@ -38,54 +39,80 @@ export function Channels() {
   });
 
   return (
-    <div className="sem-page">
-      <section className="card">
-        <strong>Link a chat account</strong>
-        <p className="muted">
+    <div className="fm-page">
+      <PageHead
+        title="Channels"
+        sub="Talk to EKOS from Telegram, Slack or Teams: link your chat account to yourself here."
+      />
+      <section className="card" aria-labelledby="channels-link">
+        <h2 className="card-label" id="channels-link">
+          Link a chat account
+        </h2>
+        <p className="fm-note">
           Write <code>/ekos link</code> to the EKOS bot in Telegram, Slack or
           Teams, then enter the code it sends you. Afterwards the bot answers
           you with your own access, and what you tell it is recorded under your
           name.
         </p>
-        <div className="btnrow">
+        <form
+          className="fm-inline"
+          onSubmit={(e) => {
+            e.preventDefault();
+            link.mutate();
+          }}
+        >
           <input
             aria-label="code"
             placeholder="code"
+            className="fm-mono"
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
           />
           <button
+            type="submit"
             disabled={link.isPending || code.trim().length < 4}
-            onClick={() => link.mutate()}
           >
             Link
           </button>
-        </div>
-        {link.isError && <p className="err">{String(link.error)}</p>}
+        </form>
+        {link.isError && <ErrorNote error={link.error} what="Linking" />}
         {link.isSuccess && (
-          <p className="ok-line">
+          <p className="fm-ok">
             Linked your {link.data.channel} account as {link.data.label}.
           </p>
         )}
-        <strong className="sem-sub">Your linked accounts</strong>
-        {mine.data?.length === 0 && <p className="muted">None yet.</p>}
-        <ul className="rel-list">
-          {(mine.data ?? []).map((a) => (
-            <li key={a.id}>
-              {a.channel} · {a.account}
-              {a.default_workspace
-                ? ` · direct messages use ${a.default_workspace}`
-                : ""}{" "}
-              <button
-                className="linkish"
-                aria-label={`unlink ${a.id}`}
-                onClick={() => unlink.mutate(a.id)}
-              >
-                unlink
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="fm-sub">
+          <h3 className="fm-sub-title">Your linked accounts</h3>
+          <QueryView
+            q={mine}
+            what="your linked accounts"
+            rows={2}
+            isEmpty={(d) => d.length === 0}
+            empty={<p className="fm-hint">None yet. Link one with a code above.</p>}
+          >
+            {(accounts) => (
+              <ul className="fm-list">
+                {accounts.map((a) => (
+                  <li key={a.id}>
+                    <span className="fm-item">
+                      {a.channel} · {a.account}
+                      {a.default_workspace
+                        ? ` · direct messages use ${a.default_workspace}`
+                        : ""}
+                    </span>
+                    <button
+                      className="linkish"
+                      aria-label={`unlink ${a.id}`}
+                      onClick={() => unlink.mutate(a.id)}
+                    >
+                      unlink
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </QueryView>
+        </div>
       </section>
       {me?.owner === true && <OwnerPanel />}
     </div>
@@ -129,77 +156,119 @@ function OwnerPanel() {
     .map(([name]) => name);
 
   return (
-    <section className="card">
-      <strong>Channels (owner)</strong>
-      {overview.isError && <p className="err">{String(overview.error)}</p>}
-      <p className="muted">
+    <section className="card" aria-labelledby="channels-owner">
+      <h2 className="card-label" id="channels-owner">
+        Channels (owner)
+      </h2>
+      {overview.isError && (
+        <ErrorNote error={overview.error} what="Reading the channels" />
+      )}
+      <p className="fm-note">
         Running: {running.length ? running.join(", ") : "none"} — a channel runs
         when its secrets are set on the Settings page (Channels).
         {o?.public && " This is a public deployment: no questions are sent."}
       </p>
-      <strong className="sem-sub">Bindings</strong>
-      <ul className="rel-list">
-        {(o?.bindings ?? []).map((b) => (
-          <li key={b.id}>
-            {b.channel} {b.conversation} → {b.workspace_id}{" "}
-            <button
-              className="linkish"
-              aria-label={`unbind ${b.id}`}
-              onClick={() => unbind.mutate(b.id)}
-            >
-              remove
-            </button>
-          </li>
-        ))}
-      </ul>
-      <div className="btnrow">
-        <select
-          aria-label="channel"
-          value={channel}
-          onChange={(e) => setChannel(e.target.value)}
-        >
-          <option value="slack">Slack channel</option>
-          <option value="teams">Teams channel</option>
-          <option value="telegram">Telegram group</option>
-        </select>
-        <input
-          aria-label="conversation"
-          placeholder="channel or group id"
-          value={conversation}
-          onChange={(e) => setConversation(e.target.value)}
-        />
-        <input
-          aria-label="project"
-          placeholder="project id"
-          value={workspace}
-          onChange={(e) => setWorkspace(e.target.value)}
-        />
-        <button
-          disabled={bind.isPending || !conversation.trim() || !workspace.trim()}
-          onClick={() => bind.mutate()}
-        >
-          Bind
-        </button>
-      </div>
-      {bind.isError && <p className="err">{String(bind.error)}</p>}
-      <strong className="sem-sub">Linked accounts</strong>
-      <ul className="rel-list">
-        {(o?.accounts ?? []).map((a) => (
-          <li key={a.id}>
-            {a.channel} · {a.account} → {a.label}
-          </li>
-        ))}
-      </ul>
-      <div className="btnrow">
-        <button disabled={digest.isPending} onClick={() => digest.mutate()}>
-          Send the questions digest now
-        </button>
-        {digest.isSuccess && (
-          <span className="ok-line">
-            {digest.data.skipped ?? `${digest.data.sent} question(s) sent`}
-          </span>
+
+      <div className="fm-sub">
+        <h3 className="fm-sub-title">Bindings</h3>
+        {o && !o.bindings?.length && (
+          <p className="fm-hint">No channel is bound to a project yet.</p>
         )}
-        {digest.isError && <span className="err">{String(digest.error)}</span>}
+        <ul className="fm-list">
+          {(o?.bindings ?? []).map((b) => (
+            <li key={b.id}>
+              <span className="fm-item">
+                {b.channel} {b.conversation} → {b.workspace_id}
+              </span>
+              <button
+                className="linkish danger"
+                aria-label={`unbind ${b.id}`}
+                onClick={() => unbind.mutate(b.id)}
+              >
+                remove
+              </button>
+            </li>
+          ))}
+        </ul>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            bind.mutate();
+          }}
+        >
+          <div className="fm-grid">
+            <label className="fm-field">
+              <span className="fm-label">Where</span>
+              <select
+                aria-label="channel"
+                value={channel}
+                onChange={(e) => setChannel(e.target.value)}
+              >
+                <option value="slack">Slack channel</option>
+                <option value="teams">Teams channel</option>
+                <option value="telegram">Telegram group</option>
+              </select>
+            </label>
+            <label className="fm-field">
+              <span className="fm-label">Channel or group id</span>
+              <input
+                aria-label="conversation"
+                placeholder="channel or group id"
+                value={conversation}
+                onChange={(e) => setConversation(e.target.value)}
+              />
+            </label>
+            <label className="fm-field">
+              <span className="fm-label">Project</span>
+              <input
+                aria-label="project"
+                placeholder="project id"
+                value={workspace}
+                onChange={(e) => setWorkspace(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="fm-actions">
+            <button
+              type="submit"
+              disabled={bind.isPending || !conversation.trim() || !workspace.trim()}
+            >
+              Bind
+            </button>
+          </div>
+          {bind.isError && <ErrorNote error={bind.error} what="Binding" />}
+        </form>
+      </div>
+
+      <div className="fm-sub">
+        <h3 className="fm-sub-title">Linked accounts</h3>
+        {o && !o.accounts?.length && (
+          <p className="fm-hint">Nobody has linked a chat account yet.</p>
+        )}
+        <ul className="fm-list">
+          {(o?.accounts ?? []).map((a) => (
+            <li key={a.id}>
+              {a.channel} · {a.account} → {a.label}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="fm-sub">
+        <h3 className="fm-sub-title">Questions digest</h3>
+        <div className="fm-actions">
+          <button disabled={digest.isPending} onClick={() => digest.mutate()}>
+            Send the questions digest now
+          </button>
+          {digest.isSuccess && (
+            <span className="fm-ok">
+              {digest.data.skipped ?? `${digest.data.sent} question(s) sent`}
+            </span>
+          )}
+        </div>
+        {digest.isError && (
+          <ErrorNote error={digest.error} what="Sending the digest" />
+        )}
       </div>
     </section>
   );

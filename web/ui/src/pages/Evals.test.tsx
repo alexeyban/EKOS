@@ -51,7 +51,7 @@ describe("Evals", () => {
   it("shows an empty-state message when no reports have been saved", async () => {
     vi.spyOn(client, "api").mockResolvedValue([]);
     renderEvals();
-    expect(await screen.findByText("no eval runs saved yet")).toBeInTheDocument();
+    expect(await screen.findByText("No eval runs saved yet")).toBeInTheDocument();
   });
 
   it("lists a saved report with its dataset, agent, status chip, and pass counts", async () => {
@@ -85,7 +85,7 @@ describe("Evals", () => {
   it("fetches the report list scoped to the workspace id from the route", async () => {
     const apiSpy = vi.spyOn(client, "api").mockResolvedValue([]);
     renderEvals();
-    await screen.findByText("no eval runs saved yet");
+    await screen.findByText("No eval runs saved yet");
     expect(apiSpy).toHaveBeenCalledWith("/workspaces/ws1/evals/reports");
   });
 
