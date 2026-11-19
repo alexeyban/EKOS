@@ -342,6 +342,13 @@ function stepItem(s) {
   return `<li class="${s.ok ? "ok" : "err"}">${s.ok ? "✓" : "✗"} ${escapeLt(s.action)}${note}</li>`;
 }
 
+/** The line under the last page's steps: what to do after a failure, or what comes next. */
+function doneNext(failed, consoleUrl) {
+  if (failed) return "Fix what it says and run <code>ekos setup</code> again; finished steps are not repeated twice.";
+  if (inApp) return "Press Done: EKOS.DEV starts the console and signs you in.";
+  return `The console: <a href="${consoleUrl}">${consoleUrl}</a>. Later: <code>ekos console open</code>, <code>ekos console status</code>.`;
+}
+
 async function install() {
   at = steps.length - 1; show(); $("next").disabled = true;
   try {
@@ -349,9 +356,7 @@ async function install() {
     $("steps").innerHTML = r.steps.map(stepItem).join("");
     const failed = r.steps.some((s) => !s.ok);
     $("done-title").textContent = failed ? "Stopped at a step that failed" : "EKOS is set up";
-    $("done-next").innerHTML = failed ? "Fix what it says and run <code>ekos setup</code> again; finished steps are not repeated twice." :
-      inApp ? "Press Done: EKOS.DEV starts the console and signs you in." :
-      `The console: <a href="${r.console_url}">${r.console_url}</a>. Later: <code>ekos console open</code>, <code>ekos console status</code>.`;
+    $("done-next").innerHTML = doneNext(failed, r.console_url);
   } catch (e) {
     $("done-title").textContent = "Setup failed"; $("steps").innerHTML = `<li class="err">${e.message}</li>`;
   }
