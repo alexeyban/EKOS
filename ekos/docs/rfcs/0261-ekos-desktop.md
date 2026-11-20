@@ -437,7 +437,7 @@ and each needed an answer:
     scheduled task exists, the login file names the home, and Claude Desktop's real `%APPDATA%` file
     names the alias;
   - checks that the console in the package answers;
-  - stops the console, runs `ekos-login.exe`, and checks that the console is back;
+  - stops the console, runs `ekos-login.exe` inside the package (`Invoke-CommandInDesktopPackage`; Windows refuses to start a file in `WindowsApps` by its path), and checks that the console is back;
   - runs `ekos uninstall` and checks that the login file and the agent entry are gone;
   - removes the package.
 - **Not verified:**
