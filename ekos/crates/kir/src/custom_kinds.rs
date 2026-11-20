@@ -484,6 +484,47 @@ prefixes constantly",
         structurally_keyed: true,
         note: "(change or mart, evidence hash, approver) — RFC 0190; approvals of one item differ only by evidence; also the approved extraction plan, one id per project whose versions are its approvals, RFC 0226, and each approved mart requirement, one id per mart, RFC 0215 (written by the ekos-lakehouse extension)",
     },
+    // RFC 0262/0264 — Talend projects, written by `recovery/src/talend_analyzer.rs`.
+    CustomKind {
+        name: "TalendProject",
+        structurally_keyed: true,
+        note: "(scanned root, project directory) — RFC 0264; one per directory holding `talend.project`",
+    },
+    CustomKind {
+        name: "TalendJob",
+        structurally_keyed: true,
+        note: "(project, job name, version) — RFC 0264; every version of a job is its own object",
+    },
+    CustomKind {
+        name: "TalendComponent",
+        structurally_keyed: true,
+        note: "(project, job, version, unique name) — RFC 0264; `tMap_1` and `tDBInput_1` recur in every job",
+    },
+    CustomKind {
+        name: "TalendContext",
+        structurally_keyed: true,
+        note: "(project, context item, version) — RFC 0264; repository context groups",
+    },
+    CustomKind {
+        name: "TalendContextVariable",
+        structurally_keyed: true,
+        note: "(project, context item, group, variable) — RFC 0264; `database`, `port`, `password` recur in every context item",
+    },
+    CustomKind {
+        name: "TalendDbConnection",
+        structurally_keyed: true,
+        note: "(project, connection name, version) — RFC 0264; never a password",
+    },
+    CustomKind {
+        name: "TalendSchema",
+        structurally_keyed: true,
+        note: "(project, item path) — RFC 0264; repository schemas, names recur across metadata folders",
+    },
+    CustomKind {
+        name: "TalendRoutine",
+        structurally_keyed: true,
+        note: "(project, routine name, version) — RFC 0264; custom routines only (system routines are counted, not ledgered)",
+    },
     // RFC 0200 — Pentaho → lakehouse dbt, written by the ekos-lakehouse extension.
     CustomKind {
         name: "PentahoPackage",

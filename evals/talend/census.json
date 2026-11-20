@@ -1,0 +1,71 @@
+{
+  "A": {
+    "commit": "aed50909ea1c18a520983f460504c999668ba826",
+    "projects": {}
+  },
+  "B": {
+    "commit": "3d46b6f22ebbc42d43565fca2c45222bec4a23d1",
+    "projects": {
+      "ALIMENTATION_DATA_WAREHOUSE": {
+        "items": {
+          "code": 10,
+          "context": 6,
+          "metadata": 10,
+          "process": 14,
+          "sqlPatterns": 68
+        },
+        "jobs": 14,
+        "components": 272,
+        "component_types": {
+          "tAggregateRow": 1,
+          "tChronometerStart": 13,
+          "tChronometerStop": 13,
+          "tDie": 7,
+          "tFileInputDelimited": 6,
+          "tFileInputExcel": 1,
+          "tFileList": 7,
+          "tFilterRow": 6,
+          "tHashInput": 2,
+          "tHashOutput": 1,
+          "tJava": 26,
+          "tLogRow": 1,
+          "tMap": 38,
+          "tPostgresqlClose": 5,
+          "tPostgresqlCommit": 11,
+          "tPostgresqlConnection": 18,
+          "tPostgresqlInput": 22,
+          "tPostgresqlOutput": 43,
+          "tPostjob": 13,
+          "tPrejob": 13,
+          "tRowGenerator": 2,
+          "tRunJob": 11,
+          "tSetGlobalVar": 6,
+          "tUniqRow": 6
+        },
+        "links": 232,
+        "row_links": {
+          "DUPLICATE": 6,
+          "FILTER": 6,
+          "FLOW": 72,
+          "LOOKUP": 20,
+          "REJECT": 6,
+          "UNIQUE": 6
+        },
+        "triggers": {
+          "COMPONENT_ERROR": 7,
+          "COMPONENT_OK": 92,
+          "RUN_IF": 6,
+          "SUBJOB_OK": 11
+        },
+        "data_actions": {
+          "INSERT": 17,
+          "INSERT_OR_UPDATE": 19,
+          "UPDATE": 7
+        },
+        "tmap_inputs": 58,
+        "tmap_outputs": 58,
+        "tmap_expressions": 442
+      }
+    }
+  }
+}

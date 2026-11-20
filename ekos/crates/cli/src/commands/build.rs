@@ -33,6 +33,7 @@ use ekos_plugin_rust::RustObserver;
 use ekos_plugin_sqlserver::{
     LiveReader as SqlServerLiveReader, SqlServerConnection, SqlServerObserver,
 };
+use ekos_plugin_talend::TalendObserver;
 use ekos_plugin_treasury::{DEFAULT_EXPLORER_URL, RealTreasuryClient, TreasuryObserver};
 use std::collections::HashMap;
 use std::path::Path;
@@ -229,6 +230,8 @@ fn configured_observers(config: &EkosConfig, ext: &Extensions) -> Vec<Box<dyn Ob
         // RFC 0027 Phase 3: local .ktr/.kjb files, no credential to gate on —
         // runs unconditionally, same as LocalDocsObserver.
         Box::new(PentahoObserver::new()),
+        // RFC 0262: Talend projects (a directory holding `talend.project`); nothing to gate on.
+        Box::new(TalendObserver::new()),
         // RFC 0038/0040 Phase 2: local .py files, no credential to gate on —
         // runs unconditionally, same as PentahoObserver.
         Box::new(PythonObserver::new()),

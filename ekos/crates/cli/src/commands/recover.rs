@@ -18,8 +18,9 @@ use ekos_recovery::{
     PerlAnalyzerPass, PerlStats, PlPgSqlAnalyzerPass, PlPgSqlStats, PlSqlAnalyzerPass, PlSqlStats,
     PythonAnalyzerPass, PythonStats, RequirementsAnalyzerPass, RustAnalyzerPass, RustStats,
     SchemaHistoryPass, SchemaHistoryStats, SqlAnalyzerPass, SqlTransformAnalyzerPass,
-    SqlTransformStats, Task, TreasuryAnalyzerPass, TriggerAnalyzerPass, TriggerStats,
-    ViewAnalyzerPass, ViewStats, build_dialect_registry, llm::LlmProvider, resolve_dialect_name,
+    SqlTransformStats, TalendAnalyzerPass, TalendStats, Task, TreasuryAnalyzerPass,
+    TriggerAnalyzerPass, TriggerStats, ViewAnalyzerPass, ViewStats, build_dialect_registry,
+    llm::LlmProvider, resolve_dialect_name,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -433,6 +434,25 @@ fn print_run_outcome(
 }
 
 /// One `  label: n` line of the report, left out when there is nothing to count.
+/// RFC 0264: one line per run for Talend projects, with what was not understood.
+fn print_talend(s: &TalendStats) {
+    if s.projects == 0 {
+        return;
+    }
+    println!(
+        "  Talend: {} project(s), {} job(s), {} component(s), {} data component(s), {:.0}% mapped, \
+         {} of {} quer(y/ies) folded, {} diagnostic(s), 0 model calls",
+        s.projects,
+        s.jobs,
+        s.components,
+        s.data_components,
+        s.mapped_percent(),
+        s.queries_folded,
+        s.queries,
+        s.diagnostics
+    );
+}
+
 fn count_line(label: &str, n: usize) {
     if n > 0 {
         println!("  {label}: {n}");
@@ -469,6 +489,8 @@ struct RecoverSummary {
     docsem_stats: Option<Arc<std::sync::Mutex<DocumentSemanticsStats>>>,
     pentaho_count: usize,
     pentaho_stats: Option<Arc<std::sync::Mutex<PentahoStats>>>,
+    talend_count: usize,
+    talend_stats: Option<Arc<std::sync::Mutex<TalendStats>>>,
     python_count: usize,
     python_stats: Option<Arc<std::sync::Mutex<PythonStats>>>,
     rust_count: usize,
@@ -502,6 +524,7 @@ impl RecoverSummary {
             ("clickhouse_tables", self.clickhouse_table_count),
             ("local_documents", self.localdocs_count),
             ("pentaho_jobs", self.pentaho_count),
+            ("talend_files", self.talend_count),
             ("python_files", self.python_count),
             ("rust_files", self.rust_count),
             ("elixir_files", self.elixir_count),
@@ -546,6 +569,8 @@ impl RecoverSummary {
             docsem_stats,
             pentaho_count,
             pentaho_stats,
+            talend_count: _,
+            talend_stats,
             python_count,
             python_stats,
             rust_count,
@@ -590,6 +615,9 @@ impl RecoverSummary {
                 s.nodes_total,
                 s.coverage_percent()
             );
+        }
+        if let Some(stats) = &talend_stats {
+            print_talend(&stats.lock().unwrap());
         }
         count_line("Python files analysed", python_count);
         if let Some(stats) = &python_stats {
@@ -1699,6 +1727,26 @@ pub async fn run_with(
         pass_manager.register(Box::new(pentaho_pass));
     }
 
+    // ── Talend projects (RFC 0264) ─────────────────────────────────────────
+    let talend_artifact_ids = present_files(
+        &*artifact_store,
+        collect_artifact_ids_for_connector(&*artifact_store, "talend"),
+        &bases,
+    );
+    let talend_count = talend_artifact_ids.len();
+    let mut talend_stats: Option<Arc<std::sync::Mutex<TalendStats>>> = None;
+    if !talend_artifact_ids.is_empty() {
+        let talend_pass = TalendAnalyzerPass::new(
+            cwd.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .as_ref(),
+            talend_artifact_ids,
+        );
+        talend_stats = Some(talend_pass.stats_handle());
+        pass_manager.register(Box::new(talend_pass));
+    }
+
     // ── Python .py artifacts (RFC 0038/0040 Phase 2) ──────────────────────
     let python_artifact_ids = present_files(
         &*artifact_store,
@@ -1990,6 +2038,8 @@ pub async fn run_with(
         docsem_stats,
         pentaho_count,
         pentaho_stats,
+        talend_count,
+        talend_stats,
         python_count,
         python_stats,
         rust_count,

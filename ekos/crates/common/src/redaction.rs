@@ -49,6 +49,30 @@ const BUILTIN_SECRET_PATTERNS: &[SecretPattern] = &[
         regex_src: r"\bEncrypted\s+[0-9a-fA-F]{8,}",
         skip_dotted_identifier_refs: false,
     },
+    // RFC 0262: Talend encrypts context and component passwords with a key shipped in Studio,
+    // so the string is as good as the password. First, before any pattern that would take part
+    // of it.
+    SecretPattern {
+        label: "talend-encrypted-value",
+        regex_src: r"enc:system\.encryption\.key\.v\d+:[A-Za-z0-9+/=_-]+",
+        skip_dotted_identifier_refs: false,
+    },
+    // RFC 0262: a Talend password stated in plain text, as a component parameter
+    // (`field="PASSWORD" name="PASS" value="…"`) or a context parameter (`type="id_Password" …
+    // value="…"`). Only the value is replaced; a `context.x` reference is a name, kept. A value
+    // already replaced (`[REDACTED:…]`) is left as it is.
+    SecretPattern {
+        label: "talend-password-parameter",
+        regex_src: r#"(?:field="PASSWORD"|type="id_Password")[^>]*?\svalue="(?P<value_bare>[^"\[][^"]*)""#,
+        skip_dotted_identifier_refs: true,
+    },
+    // RFC 0262: a password as an XML attribute (`password="…"` in `talend.project`,
+    // `Password="…"` in a Talend connection item, `rawPassword`, `pass`).
+    SecretPattern {
+        label: "xml-password-attribute",
+        regex_src: r#"(?i)\s(?:[A-Za-z_]*pass(?:word|wd)|pass)="(?P<value_bare>[^"\[][^"]*)""#,
+        skip_dotted_identifier_refs: true,
+    },
     SecretPattern {
         label: "aws-access-key-id",
         regex_src: r"AKIA[0-9A-Z]{16}",
@@ -463,6 +487,40 @@ mod tests {
         );
         // Not a password: the word on its own, and an element named for something else.
         let plain = "<description>Encrypted at rest</description><passes>3</passes>";
+        assert_eq!(redact(plain, &cfg()), plain);
+    }
+
+    /// RFC 0262: Talend's encrypted values and plain-text password parameters and attributes.
+    #[test]
+    fn redacts_talend_passwords_and_keeps_references() {
+        let item = r#"<contextParameter name="password" type="id_Password" value="enc:system.encryption.key.v1:8cS1OPBVa1g6oaQN9f5Kid=="/>
+<contextParameter name="pw2" type="id_Password" value="hunter2!"/>
+<elementParameter field="PASSWORD" name="PASS" value="plain pass"/>
+<elementParameter field="PASSWORD" name="PASS" value="context.password"/>
+<TalendMetadata:DatabaseConnection Username="context.user" Password="context.password" ServerName="h"/>
+<TalendMetadata:DatabaseConnection Password="s3cr3t" ServerName="h"/>
+<TalendProperties:User login="a" password="D41D8CD98F00B204E9800998ECF8427E"/>
+<elementParameter field="TEXT" name="USER" value="postgres"/>"#;
+        let out = redact(item, &cfg());
+        for secret in [
+            "8cS1OPBVa1g6",
+            "hunter2!",
+            "plain pass",
+            "s3cr3t",
+            "D41D8CD98F00B204",
+        ] {
+            assert!(!out.contains(secret), "{secret} survived: {out}");
+        }
+        assert!(
+            out.contains(r#"value="[REDACTED:talend-encrypted-value]""#),
+            "{out}"
+        );
+        assert!(out.contains(r#"value="context.password""#), "{out}");
+        assert!(out.contains(r#"Password="context.password""#), "{out}");
+        assert!(out.contains(r#"name="USER" value="postgres""#), "{out}");
+        assert!(roxmltree_like_balanced(&out), "{out}");
+        // Not a password: other attributes that merely contain the letters.
+        let plain = r#"<x passes="3" passive="true" bypassed="no"/>"#;
         assert_eq!(redact(plain, &cfg()), plain);
     }
 

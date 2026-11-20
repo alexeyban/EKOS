@@ -26,6 +26,26 @@ fn reads_writes_kir_id(kind_label: &str, from: KirId, to: KirId) -> KirId {
     ))
 }
 
+/// The name a table and a transformation node are matched by: lowercased, with SQL identifier
+/// quotes (`"x"`, `` `x` ``, `[x]`) taken off each dot-separated part. DDL keeps the quotes it was
+/// written with (`CREATE TABLE "DIM_CLIENT"`) while an ETL tool names the same table bare
+/// (RFC 0264: Talend's `TABLE` parameter); without this they never matched.
+fn name_key(name: &str) -> String {
+    name.split('.')
+        .map(|part| {
+            let part = part.trim();
+            let unquoted = part
+                .strip_prefix('"')
+                .and_then(|p| p.strip_suffix('"'))
+                .or_else(|| part.strip_prefix('`').and_then(|p| p.strip_suffix('`')))
+                .or_else(|| part.strip_prefix('[').and_then(|p| p.strip_suffix(']')))
+                .unwrap_or(part);
+            unquoted.to_lowercase()
+        })
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 /// For every compiled `Custom("TransformNode")` Source/Sink node, looks up
 /// `properties["object_name"]` (case-insensitively — the same normalization
 /// `sql_analyzer.rs`'s own FK-matching pass already applies internally) against every compiled
@@ -54,10 +74,7 @@ pub fn link_transform_nodes_to_tables(graph: &mut KirGraph) {
             } else {
                 &mut tables_by_name
             };
-            layer
-                .entry(obj.name.to_lowercase())
-                .or_default()
-                .push(obj.id);
+            layer.entry(name_key(&obj.name)).or_default().push(obj.id);
         }
     }
     if tables_by_name.is_empty() && live_by_name.is_empty() {
@@ -77,7 +94,7 @@ pub fn link_transform_nodes_to_tables(graph: &mut KirGraph) {
         let Some(object_name) = obj.properties.get("object_name").and_then(|v| v.as_str()) else {
             continue;
         };
-        let key = object_name.to_lowercase();
+        let key = name_key(object_name);
         let Some(matches) = tables_by_name.get(&key).or_else(|| live_by_name.get(&key)) else {
             continue;
         };
@@ -278,5 +295,26 @@ mod tests {
 
         link_transform_nodes_to_tables(&mut graph);
         assert!(graph.relationships.is_empty());
+    }
+
+    /// RFC 0264: a table defined with quoted identifiers links to a node naming it bare.
+    #[test]
+    fn quoted_table_names_match_bare_node_names() {
+        assert_eq!(
+            name_key(r#""VENTE_ODS"."ODS_VENTE""#),
+            "vente_ods.ods_vente"
+        );
+        assert_eq!(name_key("[dbo].[Orders]"), "dbo.orders");
+        assert_eq!(name_key("`shop`.items"), "shop.items");
+        let mut graph = KirGraph::new();
+        graph.add_object(KirObject::new("\"DIM_CLIENT\"", ObjectKind::Table));
+        graph.add_object(transform_node("talend:0", "Sink", "DIM_CLIENT"));
+        link_transform_nodes_to_tables(&mut graph);
+        let kinds: Vec<String> = graph
+            .relationships
+            .iter()
+            .map(|r| r.kind.to_string())
+            .collect();
+        assert_eq!(kinds, vec!["WritesTo"]);
     }
 }

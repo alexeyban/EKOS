@@ -34,6 +34,7 @@ members = [
     "crates/migrate-report",
     "crates/plpgsql",
     "crates/plsql",
+    "crates/talend",
     "crates/cli",
     "crates/evals",
     "crates/demo-server",
@@ -56,6 +57,7 @@ members = [
     "plugins/governance",
     "plugins/confluence",
     "plugins/pentaho",
+    "plugins/talend",
     "plugins/python",
     "plugins/rust",
     "plugins/elixir",
@@ -135,6 +137,7 @@ ekos-plugin-governance             = { path = "plugins/governance", version = "1
 ekos-plugin-javascript             = { path = "plugins/javascript", version = "1.4.3" }
 ekos-plugin-localdocs              = { path = "plugins/localdocs", version = "1.4.3" }
 ekos-plugin-pentaho                = { path = "plugins/pentaho", version = "1.4.3" }
+ekos-plugin-talend                 = { path = "plugins/talend", version = "1.4.3" }
 ekos-plugin-perl                   = { path = "plugins/perl", version = "1.4.3" }
 ekos-plugin-java                   = { path = "plugins/java", version = "1.4.3" }
 ekos-plugin-python                 = { path = "plugins/python", version = "1.4.3" }
@@ -168,6 +171,7 @@ ekos-migrate-approval              = { path = "crates/migrate-approval", version
 ekos-migrate-report                = { path = "crates/migrate-report", version = "1.4.3" }
 ekos-plpgsql                       = { path = "crates/plpgsql", version = "1.4.3" }
 ekos-plsql                         = { path = "crates/plsql", version = "1.4.3" }
+ekos-talend                        = { path = "crates/talend", version = "1.4.3" }
 ekos-simulation                    = { path = "crates/simulation", version = "1.4.3" }
 ekos-sql-dialect-sdk               = { path = "crates/sql-dialect-sdk", version = "1.4.3" }
 

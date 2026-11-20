@@ -7220,3 +7220,33 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
       (`E2E_BROWSER=webkit`), every stage including chat with a local model (devlog_338)
 - [x] Console: the Graph, Commands, ekos.toml, Settings, Review, Sources and Conflicts pages no longer throw when
       an API answer lacks a list they read; each query fills it in with `select` (devlog_339)
+
+## Talend projects: knowledge path and translation (plan 2026-11-19, RFCs 0262–0268)
+
+Plan: `talend-plugin-plan.md`. Decisions taken as the plan recommends: knowledge path public in EKOS,
+translation in the extension (D1); fixtures fetched by commit hash, never vendored (D7); generated Java under
+`poms/` skipped (D5).
+
+### Slice 1 — metadata and lineage
+- [x] Part 0: fixtures A and B pinned (`scripts/talend-fixtures.sh`), independent census (`scripts/talend-census.py`
+      → `evals/talend/census.json`) (2026-11-21, devlog_343)
+- [ ] Part 0: fixture C (ELT components, joblets, `tDBRow`, `tJavaRow`, several context groups and engines),
+      censused and licence-checked
+- [x] RFC 0262 umbrella, RFC 0263 model, RFC 0264 ledger (2026-11-21)
+- [x] `ekos-talend` reader: jobs, components, TABLE parameters, schemas, tMap, links/triggers, contexts,
+      connections, schemas, routines, `tRunJob` calls, Java string folding; equals the census on fixture B
+      (14 jobs, 272 components, 232 links, 58/58/442 tMap) (2026-11-21)
+- [x] Redaction of Talend secrets (`PIPELINE_LOGIC_VERSION` 7); 0 encrypted strings in fixture B's `.ekos/`
+- [x] `talend` observer and `TalendAnalyzerPass`: 8 keyed kinds, `Calls`/`RowLink`/`Triggers`/`UsesConnection`/
+      `UsesContext`/`UsesRoutine`, IR per job with `column_refs`; fixture B end to end through commit (2026-11-21)
+- [ ] RFC 0264 Phase 2: column lineage across components (tMap, aggregate, hash) and across jobs through tables
+- [ ] Eval set: 20 questions on fixture B with expected citations (`evals/talend/`)
+- [ ] Items-export `.zip` read in place (fixture B's `jGenerateCalendar.zip`); joblets
+- [ ] Generated Java under a Talend project's `poms/` is still read by the Java observer: exclude it when a
+      `talend.project` is present
+### Slice 2 — documents (RFC 0265)
+- [ ] Talend scope in `docs generate --layout estate`; fixture A's "documents only" page
+- [ ] `ekos talend assess`: clone clusters, dead items, environment findings, probable defects (the §1.2 list)
+### Slice 3 — translation (RFC 0266–0268, extension)
+- [ ] Engine-neutral IR extracted from the Kettle crates, Pentaho golden outputs byte-identical
+- [ ] Expressions, component semantics, idioms → dbt, differential run, console tab

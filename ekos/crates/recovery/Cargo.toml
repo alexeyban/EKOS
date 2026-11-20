@@ -35,6 +35,7 @@ anyhow.workspace = true
 sqlparser = { workspace = true }
 reqwest = { workspace = true }
 roxmltree = { workspace = true }
+ekos-talend.workspace = true
 rustpython-parser = { workspace = true }
 rustpython-ast = { workspace = true }
 syn = { workspace = true }

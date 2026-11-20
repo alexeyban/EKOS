@@ -1,0 +1,24 @@
+[package]
+name = "ekos-plugin-talend"
+description = "Talend project observer plugin (RFC 0262)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ekos-artifact.workspace = true
+ekos-observation-sdk.workspace = true
+ekos-talend.workspace = true
+async-trait.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+walkdir.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+tokio.workspace = true

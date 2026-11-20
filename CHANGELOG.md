@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+**Talend projects** (RFC 0262–0264, Slice 1 Phase 1)
+- `ekos build` finds Talend projects (a directory holding `talend.project`) and `ekos recover` reads them:
+  every job version, component, row link, trigger, context, database connection, repository schema and custom
+  routine becomes a `Talend*` object with evidence (file and line), with `Calls` between jobs (`tRunJob`,
+  "Latest" resolved and marked as such), `UsesConnection`, `UsesContext` (with whether the value can change at
+  run time) and `UsesRoutine`.
+- Each job's data components are lowered into the Transformation IR: database and file inputs and outputs
+  (SQL folded from Java strings and the default context, with any unresolved part named), tMap joins, filters and
+  one `Calculate` per output column with the input columns it reads, aggregates, de-duplication. At commit,
+  inputs and outputs link to the tables the DDL beside the project defines.
+- Talend passwords never reach an artifact: encrypted `enc:system.encryption.key.v1:` values, password
+  parameters and `password` attributes are redacted at build (a `context.password` reference is kept), and the
+  model never stores a password value either way.
+- `ekos recover` prints `Talend: N project(s), J job(s), C component(s), D data component(s), X% mapped, F of Q
+  queries folded, 0 model calls`.
+- Not yet: column lineage across components and jobs, documentation, the migration assessment, dbt translation.
+
+**Table links from quoted DDL**
+- A table created with quoted identifiers (`CREATE TABLE "DIM_CLIENT"`) now links to transformation steps that
+  name it bare (`DIM_CLIENT`), so `ReadsFrom` / `WritesTo` appear where they were missing.
+
 **EKOS Setup is an application** (RFC 0261 §8)
 - EKOS Setup opens in EKOS.DEV's own window, not in the browser: from the Start menu, the MSI's last page,
   "EKOS Setup" in Applications (and so after installing the `.pkg`) and the Linux menu. When it is done, the

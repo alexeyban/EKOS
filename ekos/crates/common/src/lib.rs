@@ -42,7 +42,10 @@ use sha2::{Digest, Sha256};
 /// - **v6** (RFC 0253, 2026-11-10): `ekos-plugin-localdocs` reads images (OCR, per-block
 ///   `ocr_confidence`), XLSX/CSV sheets and PPTX slides, and redacts e-mail addresses and payment
 ///   card numbers from text recognised in images.
-pub const PIPELINE_LOGIC_VERSION: u32 = 6;
+/// - **v7** (RFC 0262, 2026-11-20): redaction drops Talend's `enc:system.encryption.key.v1:…`
+///   values, plain-text password parameters and `password="…"` attributes; the `talend` observer
+///   captures Talend projects.
+pub const PIPELINE_LOGIC_VERSION: u32 = 7;
 
 /// SHA-256 content hash used to address artifacts and ledger entries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

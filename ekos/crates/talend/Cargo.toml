@@ -1,0 +1,17 @@
+[package]
+name = "ekos-talend"
+description = "RFC 0263 — the Talend project model: jobs, components, links, contexts, connections, schemas and routines read from a project's files"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+roxmltree.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+walkdir.workspace = true

@@ -53,3 +53,6 @@ scripts/cogc/target/
 
 # Offline install packages (scripts/package-release.sh)
 /dist/
+
+# Third-party Talend projects fetched by scripts/talend-fixtures.sh (RFC 0262): never vendored
+.local/talend-fixtures/

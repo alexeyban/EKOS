@@ -61,6 +61,8 @@ pub mod sql_objects;
 pub mod sql_predicates;
 pub mod sql_transform_analyzer;
 mod statement_repair;
+pub mod talend_analyzer;
+pub mod talend_ir;
 pub mod treasury_analyzer;
 pub mod trigger_analyzer;
 pub mod tsql_routines;
@@ -132,6 +134,7 @@ pub use sql_transform_analyzer::{
     SqlTransformAnalyzerPass, SqlTransformStats, StatementGraph, StatementOwner,
     parse_sql_to_statement_graphs, parse_sql_to_transform_graphs,
 };
+pub use talend_analyzer::{TalendAnalyzerPass, TalendStats};
 pub use treasury_analyzer::TreasuryAnalyzerPass;
 pub use trigger_analyzer::{TriggerAnalyzerPass, TriggerStats};
 pub use view_analyzer::{ViewAnalyzerPass, ViewStats};
