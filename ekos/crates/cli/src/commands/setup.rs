@@ -17,6 +17,16 @@ pub const PATH_MARKER: &str = "# added by ekos setup";
 pub const SERVICE_NAME: &str = "ekos-console";
 pub const LAUNCHD_LABEL: &str = "com.ekos.console";
 pub const WINDOWS_TASK: &str = "EKOS Console";
+
+/// RFC 0262: the Microsoft Store package (`installer.toml` `kind = "msix"`). Its install folder
+/// changes with every update and cannot run installer scripts, so the login start is the
+/// package's own startup task, and agents start `ekos` through its execution alias.
+pub const MSIX: &str = "msix";
+
+/// RFC 0262: the file the Store package's startup task (`ekos-login.exe`) reads at login, under
+/// `%LOCALAPPDATA%`. It holds the EKOS home whose console to start; without it the task does
+/// nothing. `desktop/src-tauri/src/bin/ekos-login.rs` names the same path.
+pub const MSIX_LOGIN_FILE: [&str; 2] = ["EKOS.DEV", "start-at-login"];
 /// Written by an OS installer (MSI, macOS .pkg, .deb, .rpm) beside `bin/`: that installer owns
 /// the program directory and has put the program on `PATH`, so setup neither copies the program
 /// nor adds `PATH` lines, and uninstall leaves the program to the OS uninstaller.
@@ -25,7 +35,7 @@ pub const INSTALLER_FILE: &str = "installer.toml";
 /// What `installer.toml` says.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Installer {
-    /// `msi`, `pkg`, `deb` or `rpm`.
+    /// `msi`, `msix`, `pkg`, `deb` or `rpm`.
     pub kind: String,
     /// How a person removes the program, in words or as a command.
     pub remove: String,
@@ -178,6 +188,8 @@ pub struct Machine {
     pub user_home: PathBuf,
     /// `%APPDATA%` on Windows.
     pub appdata: Option<PathBuf>,
+    /// `%LOCALAPPDATA%` on Windows.
+    pub local_appdata: Option<PathBuf>,
     /// The package this setup runs from: the directory holding `bin/` (and `console/`).
     pub package: PathBuf,
     pub shell: Option<String>,
@@ -201,6 +213,7 @@ impl Machine {
             os: Os::current(),
             user_home,
             appdata: std::env::var_os("APPDATA").map(PathBuf::from),
+            local_appdata: std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
             package,
             shell: std::env::var("SHELL").ok(),
             program: exe
@@ -215,6 +228,32 @@ impl Machine {
     /// The binary's file name on this machine (`ekos`, `ekos.exe`, `ekos-lakehouse`).
     pub fn exe_name(&self) -> String {
         self.os.exe_for(&self.program)
+    }
+
+    /// Whether the Microsoft Store package placed the program (RFC 0262).
+    pub fn is_msix(&self) -> bool {
+        self.installer.as_ref().is_some_and(|i| i.kind == MSIX)
+    }
+
+    fn local_appdata_dir(&self) -> PathBuf {
+        self.local_appdata
+            .clone()
+            .unwrap_or_else(|| self.user_home.join("AppData").join("Local"))
+    }
+
+    /// The Store package's execution alias for the binary: a path that stays the same across
+    /// updates, unlike the package's own folder, and that any program may start.
+    pub fn msix_alias(&self) -> PathBuf {
+        self.local_appdata_dir()
+            .join("Microsoft")
+            .join("WindowsApps")
+            .join(self.exe_name())
+    }
+
+    /// The file the Store package's startup task reads ([`MSIX_LOGIN_FILE`]).
+    pub fn msix_login_file(&self) -> PathBuf {
+        let [dir, file] = MSIX_LOGIN_FILE;
+        self.local_appdata_dir().join(dir).join(file)
     }
 
     pub fn default_home(&self) -> PathBuf {
@@ -374,6 +413,9 @@ pub struct Layout {
     pub home: PathBuf,
     /// The binary's name without extension (RFC 0199: an extension's binary keeps its own).
     pub program: String,
+    /// What other programs start (agents' MCP servers) when it is not [`Layout::exe`]: the Store
+    /// package's execution alias (RFC 0262).
+    pub launch: Option<PathBuf>,
 }
 
 impl Layout {
@@ -389,6 +431,7 @@ impl Layout {
             program_dir,
             home,
             program: m.program.clone(),
+            launch: m.is_msix().then(|| m.msix_alias()),
         }
     }
     pub fn bin_dir(&self) -> PathBuf {
@@ -396,6 +439,10 @@ impl Layout {
     }
     pub fn exe(&self, os: Os) -> PathBuf {
         self.bin_dir().join(os.exe_for(&self.program))
+    }
+    /// The binary as other programs start it: [`Layout::launch`] when set, else [`Layout::exe`].
+    pub fn launch_exe(&self, os: Os) -> PathBuf {
+        self.launch.clone().unwrap_or_else(|| self.exe(os))
     }
 }
 
@@ -511,7 +558,7 @@ fn console_values(c: &ConsoleAnswers, chat: &ChatAnswers) -> BTreeMap<String, to
 /// The MCP server an agent starts: this home's project over stdio.
 pub fn mcp_command(layout: &Layout, os: Os, project: &str) -> (PathBuf, Vec<String>) {
     (
-        layout.exe(os),
+        layout.launch_exe(os),
         vec![
             "--home".into(),
             layout.home.display().to_string(),
@@ -571,6 +618,9 @@ pub fn service_file(os: Os, m: &Machine, layout: &Layout) -> (Option<PathBuf>, S
         // The task runs `console start`, which detaches and returns. `ekos.exe` is a console
         // program, so Windows shows a terminal window while it waits; with EKOS.DEV installed the
         // task runs the app's windowless `--start-console` instead (RFC 0261 §9).
+        // RFC 0262: the Store package's startup task starts the console; this file tells it
+        // which home, and that the person asked for it.
+        Os::Windows if m.is_msix() => (Some(m.msix_login_file()), format!("{}\n", home.display())),
         Os::Windows => (
             None,
             match windows_launcher(m, layout) {
@@ -1253,7 +1303,11 @@ fn apply_one(cx: &ApplyCx<'_>, action: &Action, manifest: &mut Manifest) -> Resu
         }
         Action::InstallService { os, path, content } => {
             install_service(*os, path.as_deref(), content, cx.fx)?;
-            manifest.service = Some(format!("{os:?}").to_lowercase());
+            manifest.service = Some(if *os == Os::Windows && path.is_some() {
+                MSIX.to_string()
+            } else {
+                format!("{os:?}").to_lowercase()
+            });
             manifest.service_file = path.clone();
             Ok(String::new())
         }
@@ -1330,6 +1384,11 @@ fn install_service(os: Os, path: Option<&Path>, content: &str, fx: &dyn Effects)
                 ],
                 None,
             )?;
+        }
+        Os::Windows if path.is_some() => {
+            let path = path.context("no login file path")?;
+            std::fs::create_dir_all(path.parent().context("login file has no directory")?)?;
+            std::fs::write(path, content)?;
         }
         Os::Windows => {
             fx.run(
@@ -1525,6 +1584,9 @@ pub fn uninstall(home: &Path, purge: bool, m: &Machine, fx: &dyn Effects) -> Res
                     )
                 })
                 .map(|_| ()),
+            // RFC 0262: the startup task stays with the package; removing its file below turns
+            // it off.
+            MSIX => Ok(()),
             _ => fx
                 .run(
                     Path::new("schtasks"),

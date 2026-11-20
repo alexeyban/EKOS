@@ -540,6 +540,7 @@ mod tests {
             os: setup::Os::Linux,
             user_home: dir.join("user"),
             appdata: None,
+            local_appdata: None,
             package: dir.join("package"),
             program: "ekos".into(),
             shell: None,

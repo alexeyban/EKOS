@@ -67,6 +67,7 @@ fn machine(root: &Path, os: Os) -> Machine {
         os,
         user_home: user_home.clone(),
         appdata: Some(user_home.join("AppData").join("Roaming")),
+        local_appdata: None,
         package,
         program: "ekos".into(),
         shell: Some("/bin/bash".into()),
@@ -768,4 +769,65 @@ fn path_lines_are_added_once_however_often_setup_runs() {
     }
     let profile = std::fs::read_to_string(m.user_home.join(".profile")).unwrap();
     assert_eq!(profile.matches(PATH_MARKER).count(), 1, "{profile}");
+}
+
+// ── the Microsoft Store package (RFC 0262) ───────────────────────────────────
+
+#[test]
+fn the_store_package_starts_at_login_through_its_startup_task_and_agents_use_the_alias() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = installed_machine(dir.path(), Os::Windows, super::setup::MSIX);
+    m.local_appdata = Some(m.user_home.join("AppData").join("Local"));
+    let mut answers = local_answers();
+    answers.start.at_login = true;
+    let actions = plan(&answers, &m).unwrap();
+    let k = kinds(&actions);
+    assert!(!k.contains(&"add_to_windows_path".to_string()), "{k:?}");
+
+    let fake = Fake::default();
+    let steps = apply(&actions, &answers, &m, &fake).unwrap();
+    assert!(steps.iter().all(|s| s.ok), "{steps:#?}");
+    // No scheduled task: its program would be in a folder the next update replaces.
+    assert!(!fake.programs().contains(&"schtasks".to_string()));
+    let home = Layout::of(&answers, &m).home;
+    let login = m.msix_login_file();
+    assert!(login.ends_with(Path::new("EKOS.DEV").join("start-at-login")));
+    assert_eq!(
+        std::fs::read_to_string(&login).unwrap().trim(),
+        home.display().to_string()
+    );
+
+    // Agents start the execution alias, which survives updates, not the package's own folder.
+    let alias = m.msix_alias();
+    assert!(alias.ends_with(Path::new("Microsoft").join("WindowsApps").join("ekos.exe")));
+    let desktop = std::fs::read_to_string(m.claude_desktop_config()).unwrap();
+    let doc: serde_json::Value = serde_json::from_str(&desktop).unwrap();
+    assert_eq!(
+        doc["mcpServers"]["ekos-shop"]["command"].as_str().unwrap(),
+        alias.display().to_string()
+    );
+
+    // Uninstall turns the login start off by removing the file, again without schtasks.
+    let planned = uninstall_plan(&home, false, &m);
+    let fake = Fake::default();
+    let steps = uninstall(&home, false, &m, &fake).unwrap();
+    assert!(steps.iter().all(|s| s.ok), "{steps:#?}");
+    let done: Vec<String> = steps.iter().map(|s| s.action.clone()).collect();
+    assert_eq!(planned.steps, done);
+    assert!(done.iter().any(|s| s == "remove the login entry"));
+    assert!(!login.exists());
+    assert!(!fake.programs().contains(&"schtasks".to_string()));
+}
+
+#[test]
+fn other_installers_keep_their_login_start_and_installed_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let m = installed_machine(dir.path(), Os::Windows, "msi");
+    assert!(!m.is_msix());
+    let mut answers = local_answers();
+    answers.start.at_login = true;
+    assert_eq!(Layout::of(&answers, &m).launch, None);
+    let (path, content) = service_file(Os::Windows, &m, &Layout::of(&answers, &m));
+    assert_eq!(path, None);
+    assert!(content.contains("console start"), "{content}");
 }

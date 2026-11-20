@@ -224,6 +224,7 @@ jobs:
           path: |
             desktop/target/${{ matrix.target }}/release/ekos-desktop
             desktop/target/${{ matrix.target }}/release/ekos-desktop.exe
+            desktop/target/${{ matrix.target }}/release/ekos-login.exe
           if-no-files-found: error
 
   # RFC 0185 — the full package per target: the binary from `build`, a pinned standalone Python,
@@ -403,13 +404,16 @@ jobs:
           for ($i = 0; $i -lt 30 -and -not $gone; $i++) { Start-Sleep 1; $gone = -not (Test-Path "$prog\bin") }
           Check "the program's bin directory is removed after uninstall exits" { $gone }
 
-  # Microsoft Store package. MSIX, unsigned: Partner Center signs it during certification, so no
-  # certificate lives in this repo or its secrets. Built from the same `ekos.exe` the `build` job
-  # put in the zip — one binary, two channels. Uploaded as a workflow artifact for a manual
-  # Partner Center submission; deliberately NOT attached to the GitHub Release (see `release`).
+  # Microsoft Store package (RFC 0262). MSIX, unsigned: Partner Center signs it during
+  # certification, so no certificate lives in this repo or its secrets. It is the full Windows
+  # package (the same one the MSI installs: ekos.exe, EKOS.DEV and the web console with its
+  # Python) plus bin\ekos-login.exe, the package's startup task, and installer.toml with
+  # kind = "msix". packaging/msix/AppxManifest.xml says what Windows gets. Uploaded as a workflow
+  # artifact for a manual Partner Center submission; deliberately NOT attached to the GitHub
+  # Release (see `release`): an unsigned MSIX cannot be installed outside the Store.
   msix:
     name: Microsoft Store package (MSIX)
-    needs: build
+    needs: [package, desktop]
     runs-on: windows-latest
     permissions:
       contents: read
@@ -417,11 +421,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Download the Windows binary
+      - name: Download the full Windows package
         uses: actions/download-artifact@v7
         with:
-          name: ekos-x86_64-pc-windows-msvc
-          path: bare
+          name: ekos-full-x86_64-pc-windows-msvc
+          path: full
+
+      - name: Download the Windows desktop app (for ekos-login.exe)
+        uses: actions/download-artifact@v7
+        with:
+          name: desktop-x86_64-pc-windows-msvc
+          path: desk
 
       - name: Pack
         shell: pwsh
@@ -432,22 +442,32 @@ jobs:
           # v1.5.0-rc1 packs as 1.5.0.0); a manual run uses the workspace version.
           if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $semver = ($env:GITHUB_REF_NAME -replace '^v','') -replace '-.*$',''
-            $zipver = $env:GITHUB_REF_NAME -replace '^v',''
           } else {
             $m = Select-String -Path ekos/Cargo.toml -Pattern '^version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)' | Select-Object -First 1
             $semver = $m.Matches[0].Groups[1].Value
-            $zipver = 'dev'
           }
           if ($semver -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "cannot derive a Store version from '$semver'" }
           $msixver = "$semver.0"
           Write-Host "MSIX version: $msixver"
 
-          $zip = "bare/ekos-$zipver-x86_64-pc-windows-msvc.zip"
-          Expand-Archive $zip -DestinationPath bare/x
-          $exe = Get-ChildItem bare/x -Recurse -Filter ekos.exe | Select-Object -First 1
+          # The package root is the full package's own top directory.
+          $zip = Get-ChildItem full/*-full.zip | Select-Object -First 1
+          Expand-Archive $zip.FullName -DestinationPath unpacked
+          $src = Get-ChildItem unpacked -Directory | Select-Object -First 1
+          Move-Item $src.FullName pkg
+          foreach ($f in 'bin\ekos.exe', 'bin\ekos-desktop.exe', 'console\python\python.exe', 'console\app\main.py') {
+            if (-not (Test-Path "pkg\$f")) { throw "the full package has no $f" }
+          }
+          $login = Get-ChildItem desk -Recurse -Filter ekos-login.exe | Select-Object -First 1
+          if (-not $login) { throw 'the desktop artifact has no ekos-login.exe' }
+          Copy-Item $login.FullName pkg/bin/
+          # The archive's setup starter has no use in a package nobody unpacks by hand.
+          Remove-Item pkg/setup.cmd -ErrorAction SilentlyContinue
+          # Setup then copies nothing and adds no Path entry; the login start is the startup task.
+          "kind = `"msix`"`nremove = `"Settings, Apps, Installed apps, EKOS.DEV, Uninstall`"`n" |
+            Set-Content -Encoding utf8NoBOM pkg/installer.toml
 
           New-Item -ItemType Directory -Force -Path pkg/Assets | Out-Null
-          Copy-Item $exe.FullName pkg/
           Copy-Item packaging/msix/Assets/* pkg/Assets/
           (Get-Content packaging/msix/AppxManifest.xml -Raw) -replace '__VERSION__', $msixver |
             Set-Content -Encoding utf8 pkg/AppxManifest.xml
@@ -471,13 +491,16 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           & $makeappx.FullName pack /d pkg /p "dist/ekos-$msixver-x64.msix" /o
           if ($LASTEXITCODE -ne 0) { throw "makeappx failed ($LASTEXITCODE)" }
+          Get-ChildItem dist | Format-Table Name, Length
 
-      # Smoke test: install the package as a user would get it, then run the `ekos` alias. Signed
-      # here with a throwaway self-signed certificate only so Windows will install it; the Store
-      # re-signs the unsigned .msix we upload (the one in dist/ is never touched).
+      # Install the package as a user would get it, then use it as a person would: the `ekos`
+      # alias, the pipeline, MCP, then setup from answers with the console started at login,
+      # the console itself, and uninstall. Signed here with a throwaway self-signed certificate
+      # only so Windows will install it; the Store re-signs the unsigned .msix we upload (the one
+      # in dist/ is never touched).
       # PowerShell does not stop on a failing program, so every `ekos` call goes through `Ekos`,
       # which throws on a non-zero exit. `sql check` exits 0 with findings, so its output is read.
-      - name: Install and smoke-test the MSIX
+      - name: Install and test the MSIX
         if: hashFiles('dist/*.msix') != ''
         shell: pwsh
         run: |
@@ -485,6 +508,9 @@ jobs:
           function Ekos {
             & $script:ekos @args
             if ($LASTEXITCODE -ne 0) { throw "ekos $($args -join ' ') failed ($LASTEXITCODE)" }
+          }
+          function Check($what, [scriptblock]$ok) {
+            if (& $ok) { Write-Host "ok   $what" } else { throw "FAIL $what" }
           }
 
           $msix = Get-ChildItem dist/*.msix | Select-Object -First 1
@@ -509,23 +535,21 @@ jobs:
           $installed = Get-AppxPackage -Name $m.Package.Identity.Name
           if (-not $installed) { throw "the package $($m.Package.Identity.Name) is not installed" }
           $installed | Format-List Name, Version, InstallLocation
+          $loc = $installed.InstallLocation
+          foreach ($f in 'bin\ekos.exe', 'bin\ekos-desktop.exe', 'bin\ekos-login.exe', 'console\python\python.exe', 'installer.toml') {
+            Check "the package has $f" { Test-Path (Join-Path $loc $f) }
+          }
+          $apps = Get-AppxPackageManifest $installed
+          $ids = @($apps.Package.Applications.Application | ForEach-Object { $_.Id })
+          Check "the Start menu has EKOS.DEV and EKOS Setup ($($ids -join ', '))" { ($ids -contains 'EKOSDEV') -and ($ids -contains 'Setup') }
 
           # The alias is a zero-byte ekos.exe in WindowsApps that Windows creates for the package.
           # Run it by its full path: on the runner `Get-Command` did not find it although the file
-          # was there. If it is missing, warn and run the package's own ekos.exe, so the binary
-          # that ships is still the one tested.
-          $apps = "$env:LOCALAPPDATA\Microsoft\WindowsApps"
-          $aliasPath = Join-Path $apps 'ekos.exe'
+          # was there. Agents are registered with this same path.
+          $aliasPath = Join-Path "$env:LOCALAPPDATA\Microsoft\WindowsApps" 'ekos.exe'
           for ($i = 0; $i -lt 10 -and -not (Test-Path $aliasPath); $i++) { Start-Sleep -Seconds 1 }
-          if (Test-Path $aliasPath) {
-            $script:ekos = $aliasPath
-            Write-Host "testing through the execution alias $aliasPath"
-          } else {
-            Get-ChildItem $apps -ErrorAction SilentlyContinue | Format-Table Name, Length
-            Write-Host "::warning::the ekos execution alias was not created on this runner; testing the package's ekos.exe directly"
-            $script:ekos = Join-Path $installed.InstallLocation 'ekos.exe'
-            if (-not (Test-Path $script:ekos)) { throw "no ekos.exe in $($installed.InstallLocation)" }
-          }
+          Check "the ekos execution alias exists" { Test-Path $aliasPath }
+          $script:ekos = $aliasPath
 
           Ekos --version
 
@@ -537,6 +561,8 @@ jobs:
           foreach ($step in 'build','recover','resolve','compile','commit','status','coverage','doctor') {
             Write-Host "::group::ekos $step"; Ekos $step; Write-Host '::endgroup::'
           }
+          $doctor = Ekos doctor | Out-String
+          Check "doctor's output is plain ASCII" { $doctor -cmatch '^[\x00-\x7F]*$' }
           $found = Ekos query find orders | Out-String
           Write-Host $found
           if ($found -notmatch '\borders\b') { throw 'query find did not return the orders table' }
@@ -552,7 +578,72 @@ jobs:
           $out = $init | & $script:ekos mcp serve 2>$null | Select-Object -First 1
           Write-Host $out
           if ($out -notmatch '"result"') { throw 'MCP initialize got no result' }
-          # The pipeline above stops `ekos mcp serve` after its first line; that exit code is not ours.
+
+          # Setup from answers, as the wizard in EKOS.DEV writes them: a project, Claude Desktop,
+          # the console started now and at login.
+          $src = "$env:RUNNER_TEMP\src\shop"
+          New-Item -ItemType Directory -Force "$src\db" | Out-Null
+          Set-Content "$src\db\schema.sql" "CREATE TABLE customers (id INT PRIMARY KEY, email TEXT);"
+          $home2 = "$env:RUNNER_TEMP\ekos-home"
+          $port = 18766
+          $answers = "$env:RUNNER_TEMP\answers.toml"
+          @"
+          home = '$home2'
+          [console]
+          mode = "local"
+          port = $port
+          [project]
+          name = "shop"
+          sources = ['$src']
+          detect = true
+          [agents]
+          claude_desktop = true
+          [start]
+          at_login = true
+          now = true
+          open = false
+          "@ -replace '(?m)^\s+', '' | Set-Content $answers
+          # Output to files, and wait for setup itself: the console it leaves running inherits
+          # setup's handles, so a pipe would stay open as long as the console runs.
+          $sp = Start-Process $aliasPath -ArgumentList @('setup', '--answers', "`"$answers`"") `
+            -NoNewWindow -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\setup.txt" -RedirectStandardError "$env:RUNNER_TEMP\setup-err.txt"
+          $null = $sp.Handle
+          if (-not $sp.WaitForExit(600000)) { throw "ekos setup did not finish within 10 minutes" }
+          Get-Content "$env:RUNNER_TEMP\setup.txt", "$env:RUNNER_TEMP\setup-err.txt"
+          if ($sp.ExitCode -ne 0) { throw "ekos setup failed ($($sp.ExitCode))" }
+          Check "setup reports every step ok" { -not (Select-String -Path "$env:RUNNER_TEMP\setup.txt" -Pattern '^FAIL' -Quiet) }
+          Check "setup made no scheduled task" { -not (schtasks /Query /TN 'EKOS Console' 2>$null) }
+          $loginFile = "$env:LOCALAPPDATA\EKOS.DEV\start-at-login"
+          Check "the startup task's file names the home" { (Get-Content $loginFile -Raw).Trim() -eq $home2 }
+          $claude = Get-Content "$env:APPDATA\Claude\claude_desktop_config.json" -Raw | ConvertFrom-Json
+          Check "Claude Desktop starts the alias, in the real %APPDATA%" { $claude.mcpServers.'ekos-shop'.command -eq $aliasPath }
+
+          $up = $false
+          for ($i = 0; $i -lt 90 -and -not $up; $i++) {
+            try { $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/api/health" -TimeoutSec 5; $up = $r.StatusCode -eq 200 } catch { Start-Sleep 2 }
+          }
+          Check "the console in the package answers /api/health" { $up }
+
+          # What the startup task runs at login: stop the console, run ekos-login.exe, and it
+          # comes back. Run here by its path; Windows starts it itself only at a real login.
+          Ekos --home $home2 console stop
+          Start-Process (Join-Path $loc 'bin\ekos-login.exe') -Wait
+          $up = $false
+          for ($i = 0; $i -lt 90 -and -not $up; $i++) {
+            try { $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$port/api/health" -TimeoutSec 5; $up = $r.StatusCode -eq 200 } catch { Start-Sleep 2 }
+          }
+          Check "ekos-login.exe starts the console" { $up }
+
+          Ekos --home $home2 console stop
+          Ekos --home $home2 uninstall --purge --yes
+          Check "uninstall turns the login start off" { -not (Test-Path $loginFile) }
+          Check "uninstall removes the Claude Desktop entry" {
+            -not ((Get-Content "$env:APPDATA\Claude\claude_desktop_config.json" -Raw | ConvertFrom-Json).mcpServers.'ekos-shop')
+          }
+          Check "the program stays (the Store removes it)" { Test-Path (Join-Path $loc 'bin\ekos.exe') }
+          Remove-AppxPackage $installed.PackageFullName
+          Check "the package is removed" { -not (Get-AppxPackage -Name $m.Package.Identity.Name) }
+          # The pipeline above stopped `ekos mcp serve` after its first line; that exit code is not ours.
           exit 0
 
       - name: Upload

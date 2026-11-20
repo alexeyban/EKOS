@@ -411,3 +411,40 @@ browser and without a terminal window. Where EKOS.DEV is installed:
 - **The MSI stops the console without a window** (WiX's quiet-exec custom action).
 - Kept on purpose: "Open in browser" in the tray and on the start-up screen are choices a person makes.
   Links to outside pages open in the browser. The command line is unchanged.
+
+## 10. D5: the app in the Microsoft Store package (2026-11-20)
+
+The owner asked for an `.msix` to submit, and chose the whole app over the command alone (§2.8 D5). The
+Store package is now the full Windows package, the same one the MSI installs, packed by the `msix` job
+of `release.yml` from `packaging/msix/AppxManifest.xml`. A Store app differs from the MSI in four ways,
+and each needed an answer:
+
+| A Store app… | So |
+|---|---|
+| runs no installer scripts, and its folder (`WindowsApps\<package>_<version>_…`) changes with every update | No scheduled task. The package declares a **startup task**, `bin\ekos-login.exe`. That small windowless program starts the console only when `%LOCALAPPDATA%\EKOS.DEV\start-at-login` exists, and the file holds the home. `ekos setup` writes the file when "start at login" is chosen (`installer.toml` `kind = "msix"`), and `ekos uninstall` removes it. The task can also be turned off in Task Manager → Startup apps |
+| is started by other programs through its **execution alias** | Agents (Claude Code, Claude Desktop, VS Code) are registered with `%LOCALAPPDATA%\Microsoft\WindowsApps\ekos.exe`, not the package folder (`Layout::launch`) |
+| gets a private copy of `%APPDATA%` and `HKCU` writes by default | Write virtualization is off (`desktop6:FileSystemWriteVirtualization`, `RegistryWriteVirtualization`, restricted capability `unvirtualizedResources`): Claude Desktop and VS Code must read the configuration setup wrote. The EKOS home under `%USERPROFILE%\.ekos` was never virtualized |
+| has a Start menu entry per `Application`, with no arguments unless declared | Two applications on the same `bin\ekos-desktop.exe`: **EKOS.DEV**, and **EKOS Setup** with `uap10:Parameters="--setup"`. The minimum Windows version becomes 10.0.19041 (2004) for `uap10` and `desktop6` |
+
+- **The package is read-only.** The console's Python cannot write `__pycache__` beside its modules. It
+  runs without them, as from any read-only directory. Everything EKOS writes is in the home.
+- **Uninstall.** Removing the app (Settings → Apps) ends its processes and removes the startup task with
+  it. As with the MSI, the home stays. `ekos uninstall` names the Store as the way to remove the program.
+- **Tested in CI on a real Windows runner.** The `msix` job installs the package (signed with a
+  throwaway certificate) and then:
+  - through the alias, runs the pipeline, MCP, and `ekos doctor`, whose output is checked to be ASCII;
+  - runs setup from answers with a project, Claude Desktop and "start at login", and checks that no
+    scheduled task exists, the login file names the home, and Claude Desktop's real `%APPDATA%` file
+    names the alias;
+  - checks that the console in the package answers;
+  - stops the console, runs `ekos-login.exe`, and checks that the console is back;
+  - runs `ekos uninstall` and checks that the login file and the agent entry are gone;
+  - removes the package.
+- **Not verified:**
+  - the startup task firing at a real login;
+  - the Windows App Certification Kit, which is the D5 exit criterion;
+  - certification itself.
+
+  Submission is the owner's. Notes for certification name the two restricted capabilities and why:
+  `runFullTrust` because it is a desktop app, and `unvirtualizedResources` for the agents' configuration
+  files.

@@ -15,6 +15,13 @@
 - Windows: the console's login start no longer shows a terminal window (the task runs EKOS.DEV's windowless
   `--start-console`), and uninstalling the MSI stops the console without one.
 
+**EKOS.DEV in the Microsoft Store** (RFC 0261 §10)
+- The Store package (`.msix`) is now the whole desktop install, not the command alone: **EKOS.DEV** and
+  **EKOS Setup** in the Start menu, the web console with its Python, and the `ekos` command in every terminal.
+- "Start the console at login" works through the package's startup task (no window), and agents are
+  registered with the `ekos` alias, which stays the same across Store updates.
+- Needs Windows 10 2004 or later.
+
 **Plain ASCII terminal output on Windows**
 - `ekos` writes its rules, dashes and arrows as ASCII on Windows (`-`, `--`, `->`), so output captured by
   PowerShell (`ekos doctor > log.txt`) no longer shows `â”€â”€` and `â€”`. This covers command output, help

@@ -7201,6 +7201,12 @@ Plan: `ekos-demo-public/docs/PLAN.md` (private repo `alexeyban/ekos-demo-public`
       `ekos-desktop --setup`, falling back to the browser wizard (devlog_340)
 - [x] RFC 0261 §9: no browser and no terminal on a desktop install: no EKOS Console entry beside the app,
       uninstall in the window, Windows login start and MSI stop without a window (devlog_340)
+- [x] RFC 0261 §10 (D5): the Microsoft Store MSIX holds the full app (EKOS.DEV, EKOS Setup, the console and its
+  Python, the `ekos` alias); a startup task `ekos-login.exe` for start at login; agents through the alias; write
+  virtualization off. Tested in CI by installing it on a Windows runner (devlog_342)
+- [ ] RFC 0261 D5: the Windows App Certification Kit on the MSIX; the startup task at a real login; Store
+  certification (submission is the owner's)
+- [x] Plain ASCII terminal output on Windows (`ekos::ascii`, devlog_341)
 - [ ] RFC 0261 §9 on a real Windows: the login task's start and the MSI's quiet stop seen without a window
 - [ ] RFC 0261 D1: the app started on a fresh Windows and macOS by a person (Linux: the setup-first screen and
       single instance seen under Xvfb, devlog_339); notification app name "EKOS.DEV" through the `.desktop` entry

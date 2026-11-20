@@ -5,6 +5,7 @@ edition = "2024"
 description = "EKOS.DEV desktop shell around the EKOS console (RFC 0261)"
 license = "Apache-2.0"
 publish = false
+default-run = "ekos-desktop"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

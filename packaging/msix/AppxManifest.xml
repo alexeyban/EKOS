@@ -1,23 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  MSIX manifest for the Microsoft Store build of the `ekos` command.
+  MSIX manifest for the Microsoft Store package of EKOS (RFC 0262).
 
   Identity/@Name, Identity/@Publisher and PublisherDisplayName MUST match
   Partner Center → EKOS → Product management → Product identity, character for character.
   __VERSION__ is filled in by the `msix` job in .github/workflows/release.yml (X.Y.Z.0 —
   the Store requires the fourth part to be 0).
 
-  The package carries only the self-contained `ekos.exe` (built with a static CRT, so no
-  VCLibs dependency). The execution alias puts `ekos` on PATH for every terminal and for MCP
-  clients that launch it by name.
+  The package is the full Windows package (scripts/package-full.sh): bin\ekos.exe, the EKOS.DEV
+  app bin\ekos-desktop.exe, the web console with its own Python in console\, plus
+  bin\ekos-login.exe and installer.toml (kind = "msix"). As with the MSI, nothing opens a browser
+  or a terminal window (RFC 0261 §9):
+  - "EKOS.DEV" in the Start menu is the app; "EKOS Setup" is the same app with setup parameter
+    (the set-up wizard in the app's window, RFC 0261 §8).
+  - The `ekos` execution alias puts the command on PATH for terminals, and agents start it by that
+    path: the package's own folder changes with every update.
+  - The startup task runs bin\ekos-login.exe at login. It starts the console only when the person
+    chose "start the console at login" in setup (a file setup writes, ekos uninstall removes), and
+    shows no window.
+  - File system and registry write virtualization are off (the unvirtualizedResources capability):
+    setup writes Claude Desktop's and VS Code's configuration under %APPDATA%, and those programs
+    must see the real files, not a copy private to this package.
 -->
 <Package
   xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
   xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:desktop6="http://schemas.microsoft.com/appx/manifest/desktop/windows10/6"
   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-  IgnorableNamespaces="uap uap5 desktop4 rescap">
+  IgnorableNamespaces="uap uap5 uap10 desktop desktop4 desktop6 rescap">
 
   <Identity
     Name="AlexeyBanaev.EKOS.DEV"
@@ -29,10 +43,13 @@
     <DisplayName>EKOS.DEV</DisplayName>
     <PublisherDisplayName>Alexey Banaev</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
+    <desktop6:FileSystemWriteVirtualization>disabled</desktop6:FileSystemWriteVirtualization>
+    <desktop6:RegistryWriteVirtualization>disabled</desktop6:RegistryWriteVirtualization>
   </Properties>
 
   <Dependencies>
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+    <!-- 10.0.19041 (Windows 10 2004): uap10:Parameters and the desktop6 virtualization switches. -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
   </Dependencies>
 
   <Resources>
@@ -40,32 +57,48 @@
   </Resources>
 
   <Applications>
-    <Application Id="EKOS" Executable="ekos.exe" EntryPoint="Windows.FullTrustApplication"
-      desktop4:SupportsMultipleInstances="true">
+    <Application Id="EKOSDEV" Executable="bin\ekos-desktop.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
         DisplayName="EKOS.DEV"
-        Description="A compiler for enterprise knowledge: an evidence-backed ledger served to AI agents over MCP."
+        Description="EKOS, a compiler for enterprise knowledge: its console in its own window, with a tray icon and run notifications."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png" />
       <Extensions>
         <uap5:Extension
           Category="windows.appExecutionAlias"
-          Executable="ekos.exe"
+          Executable="bin\ekos.exe"
           EntryPoint="Windows.FullTrustApplication">
           <uap5:AppExecutionAlias desktop4:Subsystem="console">
             <uap5:ExecutionAlias Alias="ekos.exe" />
           </uap5:AppExecutionAlias>
         </uap5:Extension>
+        <desktop:Extension
+          Category="windows.startupTask"
+          Executable="bin\ekos-login.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="EkosConsoleAtLogin" Enabled="true" DisplayName="EKOS console" />
+        </desktop:Extension>
       </Extensions>
+    </Application>
+    <Application Id="Setup" Executable="bin\ekos-desktop.exe" EntryPoint="Windows.FullTrustApplication"
+      uap10:Parameters="--setup">
+      <uap:VisualElements
+        DisplayName="EKOS Setup"
+        Description="Set up EKOS: its home, the web console, a first project and your AI agents."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
     </Application>
   </Applications>
 
   <Capabilities>
     <!-- LLM APIs, remote databases, GitHub/Confluence plugins. -->
     <Capability Name="internetClient" />
-    <!-- Local MCP over TCP and connections to databases on the LAN. -->
+    <!-- The console on 127.0.0.1, local MCP over TCP, databases on the LAN. -->
     <Capability Name="privateNetworkClientServer" />
     <rescap:Capability Name="runFullTrust" />
+    <!-- Write virtualization off (see Properties): agents' configuration files must be the real ones. -->
+    <rescap:Capability Name="unvirtualizedResources" />
   </Capabilities>
 </Package>
