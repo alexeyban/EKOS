@@ -13,8 +13,8 @@
   or a terminal window (RFC 0261 §9):
   - "EKOS.DEV" in the Start menu is the app; "EKOS Setup" is the same app with setup parameter
     (the set-up wizard in the app's window, RFC 0261 §8).
-  - The `ekos` execution alias (on a third application, "Cli", with no Start menu entry) puts the
-    command on PATH for terminals, and agents start it by that path: the package's own folder
+  - The `ekos` execution alias (declared on the EKOS.DEV application; the Store refuses a hidden
+    application without a waiver) puts the command on PATH for terminals, and agents start it by that path: the package's own folder
     changes with every update.
   - The startup task runs bin\ekos-login.exe at login. It starts the console only when the person
     chose "start the console at login" in setup (a file setup writes, ekos uninstall removes), and
@@ -58,7 +58,11 @@
   </Resources>
 
   <Applications>
-    <Application Id="EKOSDEV" Executable="bin\ekos-desktop.exe" EntryPoint="Windows.FullTrustApplication">
+    <!-- SupportsMultipleInstances: the `ekos` console alias below requires it. The app keeps one window
+         itself (tauri-plugin-single-instance). The Store refuses a hidden application (AppListEntry="none")
+         without a waiver, so the alias cannot live on an application of its own. -->
+    <Application Id="EKOSDEV" Executable="bin\ekos-desktop.exe" EntryPoint="Windows.FullTrustApplication"
+      desktop4:SupportsMultipleInstances="true">
       <uap:VisualElements
         DisplayName="EKOS.DEV"
         Description="EKOS, a compiler for enterprise knowledge: its console in its own window, with a tray icon and run notifications."
@@ -72,6 +76,14 @@
           EntryPoint="Windows.FullTrustApplication">
           <desktop:StartupTask TaskId="EkosConsoleAtLogin" Enabled="true" DisplayName="EKOS console" />
         </desktop:Extension>
+        <uap5:Extension
+          Category="windows.appExecutionAlias"
+          Executable="bin\ekos.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias desktop4:Subsystem="console">
+            <uap5:ExecutionAlias Alias="ekos.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
       </Extensions>
     </Application>
     <Application Id="Setup" Executable="bin\ekos-desktop.exe" EntryPoint="Windows.FullTrustApplication"
@@ -82,28 +94,6 @@
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png" />
-    </Application>
-    <!-- The `ekos` command: no Start menu entry, only the execution alias. A console-subsystem alias
-         needs an application that allows several instances, which EKOS.DEV (one window) is not. -->
-    <Application Id="Cli" Executable="bin\ekos.exe" EntryPoint="Windows.FullTrustApplication"
-      desktop4:SupportsMultipleInstances="true">
-      <uap:VisualElements
-        DisplayName="EKOS command"
-        Description="The ekos command line."
-        BackgroundColor="transparent"
-        Square150x150Logo="Assets\Square150x150Logo.png"
-        Square44x44Logo="Assets\Square44x44Logo.png"
-        AppListEntry="none" />
-      <Extensions>
-        <uap5:Extension
-          Category="windows.appExecutionAlias"
-          Executable="bin\ekos.exe"
-          EntryPoint="Windows.FullTrustApplication">
-          <uap5:AppExecutionAlias desktop4:Subsystem="console">
-            <uap5:ExecutionAlias Alias="ekos.exe" />
-          </uap5:AppExecutionAlias>
-        </uap5:Extension>
-      </Extensions>
     </Application>
   </Applications>
 

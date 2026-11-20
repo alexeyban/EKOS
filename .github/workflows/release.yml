@@ -483,6 +483,11 @@ jobs:
             }
             throw $why
           }
+          # Partner Center refuses a "headless app" (an application with AppListEntry="none") unless
+          # the publisher holds Microsoft's HeadlessAppBypass waiver; makeappx accepts it.
+          if (Select-String -Path pkg/AppxManifest.xml -Pattern 'AppListEntry="none"' -Quiet) {
+            throw 'AppxManifest.xml has an application with AppListEntry="none": the Store refuses it without the HeadlessAppBypass waiver'
+          }
 
           $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\makeappx.exe" |
                       Sort-Object FullName -Descending | Select-Object -First 1
@@ -541,7 +546,7 @@ jobs:
           }
           $apps = Get-AppxPackageManifest $installed
           $ids = @($apps.Package.Applications.Application | ForEach-Object { $_.Id })
-          Check "the Start menu has EKOS.DEV and EKOS Setup ($($ids -join ', '))" { ($ids -contains 'EKOSDEV') -and ($ids -contains 'Setup') -and ($ids -contains 'Cli') }
+          Check "the Start menu has EKOS.DEV and EKOS Setup ($($ids -join ', '))" { ($ids -contains 'EKOSDEV') -and ($ids -contains 'Setup') -and ($ids.Count -eq 2) }
 
           # The alias is a zero-byte ekos.exe in WindowsApps that Windows creates for the package.
           # Run it by its full path: on the runner `Get-Command` did not find it although the file
