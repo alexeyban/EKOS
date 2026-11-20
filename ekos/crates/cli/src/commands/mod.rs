@@ -103,10 +103,14 @@ pub fn init_logging_with(config: &EkosConfig, run_log: Option<&crate::run_log::R
     let terminal = if format == "json" {
         tracing_subscriber::fmt::layer()
             .json()
+            .with_writer(crate::ascii::stdout)
             .with_filter(filter)
             .boxed()
     } else {
-        tracing_subscriber::fmt::layer().with_filter(filter).boxed()
+        tracing_subscriber::fmt::layer()
+            .with_writer(crate::ascii::stdout)
+            .with_filter(filter)
+            .boxed()
     };
     tracing_subscriber::registry()
         .with(terminal)
@@ -129,7 +133,7 @@ pub fn init_logging_stderr_with(config: &EkosConfig, run_log: Option<&crate::run
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::fmt::layer()
-                .with_writer(std::io::stderr)
+                .with_writer(crate::ascii::stderr)
                 .with_filter(filter),
         )
         .with(run_log.map(|log| log.layer()))

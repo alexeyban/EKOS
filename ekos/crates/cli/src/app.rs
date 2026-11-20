@@ -2862,13 +2862,31 @@ fn emits_machine_output(command: &Commands) -> bool {
 
 /// Parses the arguments against the built-in commands plus every extension's (RFC 0191). On a
 /// usage error or `--help` it prints and exits, as `Cli::parse` does.
+/// What `clap`'s own `exit` does for help, `--version` and usage errors, with the text in ASCII
+/// on Windows (`crate::ascii`). Elsewhere it is `clap`'s `exit`, colours and all.
+fn exit_for_clap(e: &clap::Error) -> ! {
+    if !crate::ascii::active() {
+        e.exit();
+    }
+    let text = e.render().to_string();
+    if e.use_stderr() {
+        eprint!("{text}");
+    } else {
+        print!("{text}");
+    }
+    std::process::exit(e.exit_code());
+}
+
 fn parse_cli<I, T>(extensions: &Extensions, args: I) -> Result<Cli>
 where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
     let root = extensions.extend_cli(cli_command())?;
-    let matches = root.get_matches_from(args);
+    let matches = match root.try_get_matches_from(args) {
+        Ok(matches) => matches,
+        Err(e) => exit_for_clap(&e),
+    };
     let mut command_path = Vec::new();
     let mut at = &matches;
     while let Some((name, sub)) = at.subcommand() {

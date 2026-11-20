@@ -180,6 +180,12 @@ cannot check it"): right-click the .pkg → **Open** → **Open**, or System Set
 Security → **Open Anyway**. The checksums in `SHA256SUMS` and the signed build provenance below
 cover the installers too.
 
+**Plain ASCII output on Windows.** On Windows `ekos` writes its rules, dashes and arrows as ASCII
+(`-`, `--`, `->`), so `ekos doctor > log.txt` reads the same in any shell: PowerShell would decode
+the UTF-8 symbols with its own code page and turn `─` into `â”€`. Other text, such as paths and
+names, and JSON output are not changed. `EKOS_ASCII=0` keeps the symbols; `EKOS_ASCII=1` asks for
+ASCII on other systems.
+
 **Removing.** First `ekos uninstall` if you want to undo what setup did for you (the login entry,
 agent entries; `--purge --yes` also deletes your projects) — it leaves the program to the OS
 uninstaller and says how to run it. Then: Windows — Settings → Apps → Installed apps → EKOS →

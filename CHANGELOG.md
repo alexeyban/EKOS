@@ -15,6 +15,12 @@
 - Windows: the console's login start no longer shows a terminal window (the task runs EKOS.DEV's windowless
   `--start-console`), and uninstalling the MSI stops the console without one.
 
+**Plain ASCII terminal output on Windows**
+- `ekos` writes its rules, dashes and arrows as ASCII on Windows (`-`, `--`, `->`), so output captured by
+  PowerShell (`ekos doctor > log.txt`) no longer shows `â”€â”€` and `â€”`. This covers command output, help
+  and usage errors, logs and the final error line. Paths and names in other scripts, and JSON output, are
+  not changed. `EKOS_ASCII=0` turns it off; `EKOS_ASCII=1` turns it on elsewhere.
+
 ## v1.6.1 — 2026-11-19
 
 **The refreshed console** (RFC 0261, in the browser and in EKOS.DEV)

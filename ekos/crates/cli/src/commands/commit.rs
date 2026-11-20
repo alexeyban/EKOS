@@ -896,7 +896,7 @@ impl ProgressLine {
             &eta,
         );
 
-        let mut err = std::io::stderr();
+        let mut err = crate::ascii::stderr();
         if self.is_tty {
             // Truncate the trailing name so the line cannot wrap; a wrapped line defeats `\r`.
             let tail: String = current.chars().take(38).collect();
@@ -912,7 +912,7 @@ impl ProgressLine {
         use std::io::Write;
         if self.is_tty {
             // Clear the in-place line so it does not collide with the report that follows.
-            let _ = write!(std::io::stderr(), "\r\x1b[2K");
+            let _ = write!(crate::ascii::stderr(), "\r\x1b[2K");
             let _ = std::io::stderr().flush();
         }
     }
@@ -932,7 +932,7 @@ struct PhaseNote {
 fn phase_note(label: &'static str) -> PhaseNote {
     use std::io::{IsTerminal, Write};
     let is_tty = std::io::stderr().is_terminal();
-    let mut err = std::io::stderr();
+    let mut err = crate::ascii::stderr();
     let _ = write!(err, "  {label}…");
     if !is_tty {
         let _ = writeln!(err);
@@ -949,7 +949,7 @@ impl PhaseNote {
     fn done(self) {
         use std::io::Write;
         let secs = format_secs(self.started.elapsed().as_secs_f64());
-        let mut err = std::io::stderr();
+        let mut err = crate::ascii::stderr();
         if self.is_tty {
             let _ = write!(err, "\r\x1b[2K  {} — {secs}\n", self.label);
         } else {

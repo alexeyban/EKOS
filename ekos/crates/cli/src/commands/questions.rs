@@ -190,7 +190,7 @@ pub fn summary_line(s: &QuestionStats) -> String {
 /// Writes `text` to stdout. A reader that closed the pipe early (`ekos questions show … | head`)
 /// is not an error: the command stops writing and succeeds.
 pub(crate) fn emit(text: &str) -> Result<()> {
-    emit_to(&mut std::io::stdout().lock(), text)
+    emit_to(&mut std::io::stdout().lock(), &crate::ascii::console(text))
 }
 
 fn emit_to(w: &mut dyn std::io::Write, text: &str) -> Result<()> {
