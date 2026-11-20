@@ -541,7 +541,7 @@ jobs:
           }
           $apps = Get-AppxPackageManifest $installed
           $ids = @($apps.Package.Applications.Application | ForEach-Object { $_.Id })
-          Check "the Start menu has EKOS.DEV and EKOS Setup ($($ids -join ', '))" { ($ids -contains 'EKOSDEV') -and ($ids -contains 'Setup') }
+          Check "the Start menu has EKOS.DEV and EKOS Setup ($($ids -join ', '))" { ($ids -contains 'EKOSDEV') -and ($ids -contains 'Setup') -and ($ids -contains 'Cli') }
 
           # The alias is a zero-byte ekos.exe in WindowsApps that Windows creates for the package.
           # Run it by its full path: on the runner `Get-Command` did not find it although the file

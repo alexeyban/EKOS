@@ -70,6 +70,7 @@ So three things the MSI does would have broken:
   `desktop6:FileSystemWriteVirtualization` plus the restricted capability `unvirtualizedResources`,
   and Windows 10 2004 or later.
 - **An `Application` per Start menu entry.** Arguments come only from `uap10:Parameters`.
+- **A console-subsystem execution alias** (`desktop4:Subsystem="console"`) is refused by `makeappx` (error 80080204) unless its `Application` declares `desktop4:SupportsMultipleInstances="true"`. So the alias has its own hidden application (`AppListEntry="none"`) on `ekos.exe`.
 - **Not verified:** the Windows App Certification Kit (D5's exit), the startup task at a real login
   (CI runs `ekos-login.exe` by its path) and certification.
 

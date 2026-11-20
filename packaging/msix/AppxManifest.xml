@@ -13,8 +13,9 @@
   or a terminal window (RFC 0261 §9):
   - "EKOS.DEV" in the Start menu is the app; "EKOS Setup" is the same app with setup parameter
     (the set-up wizard in the app's window, RFC 0261 §8).
-  - The `ekos` execution alias puts the command on PATH for terminals, and agents start it by that
-    path: the package's own folder changes with every update.
+  - The `ekos` execution alias (on a third application, "Cli", with no Start menu entry) puts the
+    command on PATH for terminals, and agents start it by that path: the package's own folder
+    changes with every update.
   - The startup task runs bin\ekos-login.exe at login. It starts the console only when the person
     chose "start the console at login" in setup (a file setup writes, ekos uninstall removes), and
     shows no window.
@@ -65,14 +66,6 @@
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png" />
       <Extensions>
-        <uap5:Extension
-          Category="windows.appExecutionAlias"
-          Executable="bin\ekos.exe"
-          EntryPoint="Windows.FullTrustApplication">
-          <uap5:AppExecutionAlias desktop4:Subsystem="console">
-            <uap5:ExecutionAlias Alias="ekos.exe" />
-          </uap5:AppExecutionAlias>
-        </uap5:Extension>
         <desktop:Extension
           Category="windows.startupTask"
           Executable="bin\ekos-login.exe"
@@ -89,6 +82,28 @@
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+    <!-- The `ekos` command: no Start menu entry, only the execution alias. A console-subsystem alias
+         needs an application that allows several instances, which EKOS.DEV (one window) is not. -->
+    <Application Id="Cli" Executable="bin\ekos.exe" EntryPoint="Windows.FullTrustApplication"
+      desktop4:SupportsMultipleInstances="true">
+      <uap:VisualElements
+        DisplayName="EKOS command"
+        Description="The ekos command line."
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png"
+        AppListEntry="none" />
+      <Extensions>
+        <uap5:Extension
+          Category="windows.appExecutionAlias"
+          Executable="bin\ekos.exe"
+          EntryPoint="Windows.FullTrustApplication">
+          <uap5:AppExecutionAlias desktop4:Subsystem="console">
+            <uap5:ExecutionAlias Alias="ekos.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+      </Extensions>
     </Application>
   </Applications>
 
