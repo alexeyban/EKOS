@@ -485,7 +485,8 @@ jobs:
           }
           # Partner Center refuses a "headless app" (an application with AppListEntry="none") unless
           # the publisher holds Microsoft's HeadlessAppBypass waiver; makeappx accepts it.
-          if (Select-String -Path pkg/AppxManifest.xml -Pattern 'AppListEntry="none"' -Quiet) {
+          [xml]$built = Get-Content pkg/AppxManifest.xml
+          if ($built.SelectNodes('//*[@AppListEntry="none"]').Count -gt 0) {
             throw 'AppxManifest.xml has an application with AppListEntry="none": the Store refuses it without the HeadlessAppBypass waiver'
           }
 

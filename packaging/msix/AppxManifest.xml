@@ -59,7 +59,7 @@
 
   <Applications>
     <!-- SupportsMultipleInstances: the `ekos` console alias below requires it. The app keeps one window
-         itself (tauri-plugin-single-instance). The Store refuses a hidden application (AppListEntry="none")
+         itself (tauri-plugin-single-instance). The Store refuses a hidden application (no Start menu entry)
          without a waiver, so the alias cannot live on an application of its own. -->
     <Application Id="EKOSDEV" Executable="bin\ekos-desktop.exe" EntryPoint="Windows.FullTrustApplication"
       desktop4:SupportsMultipleInstances="true">
