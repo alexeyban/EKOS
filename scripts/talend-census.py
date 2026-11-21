@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / ".local" / "talend-fixtures"
 OUT = ROOT / "evals" / "talend" / "census.json"
 SKIPPED_DIRS = {"poms", "temp", "target", ".git"}
+ITEM_GLOB = "*.item"
 TRIGGERS = {"COMPONENT_OK", "COMPONENT_ERROR", "SUBJOB_OK", "SUBJOB_ERROR", "RUN_IF"}
 
 
@@ -34,7 +35,7 @@ def projects(fixture: Path) -> list[Path]:
 
 def item_kinds(project: Path) -> dict[str, int]:
     kinds: collections.Counter[str] = collections.Counter()
-    for item in project.rglob("*.item"):
+    for item in project.rglob(ITEM_GLOB):
         parts = item.relative_to(project).parts
         if not SKIPPED_DIRS.intersection(parts):
             kinds[parts[0]] += 1
@@ -98,12 +99,12 @@ def project_census(project: Path) -> dict:
         "tmap_outputs": 0,
         "tmap_expressions": 0,
     }
-    jobs = sorted((project / "process").rglob("*.item")) if (project / "process").is_dir() else []
+    jobs = sorted((project / "process").rglob(ITEM_GLOB)) if (project / "process").is_dir() else []
     for job in jobs:
         job_census(job, totals)
     components = totals.pop("components")
     joblet_items = (
-        sorted((project / "joblets").rglob("*.item")) if (project / "joblets").is_dir() else []
+        sorted((project / "joblets").rglob(ITEM_GLOB)) if (project / "joblets").is_dir() else []
     )
     joblet_names = {j.name.rsplit("_", 1)[0] for j in joblet_items if process_root(j) is not None}
     joblet_uses = sum(n for t, n in components.items() if t in joblet_names)

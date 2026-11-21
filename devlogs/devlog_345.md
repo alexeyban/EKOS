@@ -122,6 +122,17 @@ To grade answers with a local model (no paid calls):
 `[llm] provider = "ollama"`, `model = "llama3:latest"` in the workspace's `ekos.toml`, then
 `ekos eval run --datasets-dir evals/talend --dataset talend-20`.
 
+**Graded with llama3 (8B, local):**
+
+| Workspace | Passed | Notes |
+|---|---|---|
+| Built before the security fix | 16/20 | tla-001 printed the escaped encrypted password value |
+| Clean rebuild after `60413938` | 12/20 | tla-001 refuses and no value is stored. 6 generation misses (the fact was shown and the answer left it out), 5 answers uncited. tla-003 made up a description of a joblet that does not exist |
+
+All 17 answerable questions had their facts in evidence in both runs. The drop between the two runs comes from
+the 8B model's answers, not from retrieval, so it does not measure EKOS. A stronger model is needed for a score
+that does.
+
 ---
 
 ## Fixtures C and D: joblets as Studio writes them
