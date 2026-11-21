@@ -115,3 +115,35 @@ Coverage is claimed only for component types present in a real fixture (RFC 0262
   `FAIT_VENTE.NB_MT_VENTE`'s node reads `sum(QTE_VENTE * PRIX_VENTE)`.
 - **Coverage** on fixtures B–E is reported in the devlog, by component type and by gap reason.
 - **Pure:** a test checks that `talend-rel` reads no file.
+
+## Result (phase 1, 2026-11-21, devlog_349; lakehouse `28dee30`)
+
+| Fixture | Data components lowered | Expressions lowered / gaps |
+|---|---|---|
+| B | 116 / 125 (93%) | 475 / 11 |
+| C | 79 / 91 (87%) | 144 / 6 |
+| D | 26 / 42 (62%) | 40 / 2 |
+| E | 199 / 274 (73%) | 337 / 12 |
+
+Fixture B's exit holds: every DWH tMap lowers, and `NB_MT_VENTE` is written from a `sum` over a column a map
+computes as `QTE_VENTE * PRIX_VENTE`.
+
+**Amendments from the run:**
+- **`jobName`** is the job's own name, a literal.
+- **`globalMap` keys:**
+  - a key every `tSetGlobalVar` sets to a constant becomes that constant;
+  - a `tFileList`'s `CURRENT_FILEPATH` / `CURRENT_FILE` is read from the landed table's `$path`, `rewritten`;
+  - any other key is a gap naming it.
+- **tUniqRow's DUPLICATE output** is a per-key row number above 1, `rewritten`: arrival order has to be stated.
+- **Disconnected components.** A component with no row link in that produces no rows is outside the data flow and
+  goes on the skipped list, not counted as a gap. A SQL statement component (`tDBRow`, `tSnowflakeRow`, ELT) never
+  is, because it changes data from a trigger.
+- **`ekos-talend`** now lifts a component-framework input's manual query into `QUERY` (EKOS `89cedb25`).
+
+**Left for phase 2:**
+- ELT maps (21 in E);
+- `tSnowflakeRow` / `tDBRow` statements (42 in E);
+- `Numeric.sequence` (row order);
+- custom routines (`HashUtils.generateMD5`, `HashUtil.*`);
+- `tNormalize`, `tSampleRow`, `tMysqlSCD`.
+

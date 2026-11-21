@@ -7283,6 +7283,10 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
 - [x] RFC 0266: engine-neutral IR extracted from the Kettle crates (`etl-expr`, `etl-rel` in ekos-lakehouse); Pentaho
       golden manifests byte-identical on bench-gold, Pentaho's samples and AdventureWorks (2026-11-21, devlog_348,
       lakehouse a16af69)
-- [ ] RFC 0267: Talend expressions (Java over `etl-expr`'s parser, Talend's null rules), component semantics, the
-      Talend → `etl-rel` lowering
+- [x] RFC 0267 phase 1: Talend expressions (Java over `etl-expr`'s parser, Talend's rules, routine and `java.lang`
+      catalogue) and the component lowering to `etl-rel` (lakehouse `talend-rel`); fixtures B 93%, C 87%, D 62%, E 73%
+      of data components (2026-11-21, devlog_349, lakehouse 28dee30)
+- [ ] RFC 0267 phase 2: ELT maps through sqlparser, `tDBRow` / `tSnowflakeRow` statements, tJavaRow
+      `output_row.x = …`, custom routines (a pure single-expression static method inlined), `Numeric.sequence` with the
+      flow's order; check tMap `UNIQUE_MATCH` (last match) against fixture B's generated Java
 - [ ] Expressions, component semantics, idioms → dbt, differential run, console tab
