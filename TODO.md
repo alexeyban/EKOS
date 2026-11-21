@@ -7280,5 +7280,9 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
 - [ ] Publish fixture B's Talend pages to a sandbox wiki (Confluence / Azure DevOps / GitHub) through the
       lakehouse-docs publishers
 ### Slice 3 — translation (RFC 0266–0268, extension)
-- [ ] Engine-neutral IR extracted from the Kettle crates, Pentaho golden outputs byte-identical
+- [x] RFC 0266: engine-neutral IR extracted from the Kettle crates (`etl-expr`, `etl-rel` in ekos-lakehouse); Pentaho
+      golden manifests byte-identical on bench-gold, Pentaho's samples and AdventureWorks (2026-11-21, devlog_348,
+      lakehouse a16af69)
+- [ ] RFC 0267: Talend expressions (Java over `etl-expr`'s parser, Talend's null rules), component semantics, the
+      Talend → `etl-rel` lowering
 - [ ] Expressions, component semantics, idioms → dbt, differential run, console tab
