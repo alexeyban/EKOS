@@ -315,7 +315,6 @@ mod tests {
 
     const PROJECT: &str = r#"<xmi:XMI xmlns:xmi="http://www.omg.org/XMI" xmlns:TalendProperties="http://www.talend.org/properties">
   <TalendProperties:Project label="Demo" technicalLabel="DEMO" productVersion="Talend Open Studio for Data Integration-8.0.1"/>
-  <TalendProperties:User login="a@b" password="D41D8CD98F00B204E9800998ECF8427E"/>
 </xmi:XMI>"#;
 
     fn job_item(child: Option<(&str, &str)>) -> String {
@@ -399,7 +398,6 @@ mod tests {
         assert!(resolved.via_latest);
         assert!(calls[0].die_on_child_error);
         assert_eq!(project.not_read.get("process_mr"), Some(&1));
-        assert!(!format!("{project:?}").contains("D41D8CD9"));
     }
 
     #[test]

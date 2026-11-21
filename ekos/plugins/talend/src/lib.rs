@@ -92,7 +92,7 @@ impl Observer for TalendObserver {
                 continue;
             }
             let text = if file_role.keeps_text() {
-                match std::fs::read_to_string(ctx.workspace_root.join(path)) {
+                match tokio::fs::read_to_string(ctx.workspace_root.join(path)).await {
                     Ok(t) => Some(t),
                     Err(err) => {
                         tracing::warn!("talend observer: cannot read {path}: {err}");

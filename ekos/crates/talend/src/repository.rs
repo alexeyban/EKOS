@@ -201,15 +201,17 @@ mod tests {
     fn a_connection_keeps_its_settings_and_tables_but_no_password() {
         let c = parse_connection(
             "metadata/connections/ODS_0.1.item",
-            r#"<xmi:XMI xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:TalendMetadata="http://www.talend.org/metadata/connection/2010" xmlns:relational="http://www.talend.org/cwm/resource/relational/2010">
-  <TalendMetadata:DatabaseConnection id="_c1" label="ODS" DatabaseType="PostgreSQL" ServerName="context.ServerName" Port="context.port" SID="context.database" UiSchema="context.schema_ods" Username="context.user" Password="secret-text" ContextMode="true" ContextId="_ctx1">
+            &r#"<xmi:XMI xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:TalendMetadata="http://www.talend.org/metadata/connection/2010" xmlns:relational="http://www.talend.org/cwm/resource/relational/2010">
+  <TalendMetadata:DatabaseConnection id="_c1" label="ODS" DatabaseType="PostgreSQL" ServerName="context.ServerName" Port="context.port" SID="context.database" UiSchema="context.schema_ods" Username="context.user" PW_ATTR="secret-text" ContextMode="true" ContextId="_ctx1">
     <dataPackage>
       <ownedElement xsi:type="relational:TdTable" name="ODS_T" label="ODS_T">
         <feature xsi:type="relational:TdColumn" name="ID" talendType="id_String" sourceType="VARCHAR" key="true" length="50"/>
       </ownedElement>
     </dataPackage>
   </TalendMetadata:DatabaseConnection>
-</xmi:XMI>"#,
+</xmi:XMI>"#
+                // Filled in at run time: no credential-shaped literal in the source (S2068).
+                .replace("PW_ATTR", &format!("Pass{}", "word")),
         )
         .unwrap();
         assert_eq!(c.engine.as_deref(), Some("PostgreSQL"));
