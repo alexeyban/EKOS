@@ -20,6 +20,8 @@ pub struct Project {
     pub connections: Vec<DbConnection>,
     pub schemas: Vec<RepoSchema>,
     pub routines: Vec<Routine>,
+    /// Joblet versions (`joblets/**`), read like jobs, latest marked (RFC 0263 §Joblets).
+    pub joblets: Vec<Job>,
     /// Items recognised and not read in v1, by top-level folder (`process_mr`, `services`, …),
     /// and generated or vendor files skipped (`system_sql_patterns`, `system_routines`, …).
     pub not_read: BTreeMap<String, usize>,
@@ -99,6 +101,21 @@ pub struct Component {
     pub mapper: Option<Mapper>,
     /// 1-based line of the `node` element in the item file.
     pub line: u32,
+    /// Set on a component an expanded job took from a joblet (RFC 0263 §Joblets).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joblet: Option<JobletOrigin>,
+}
+
+/// Where an expanded component came from: the joblet, its version, and the chain of uses that
+/// inlined it (outermost first).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobletOrigin {
+    pub name: String,
+    pub version: String,
+    /// The use's unique name in the job, then any nested use inside the joblet.
+    pub uses: Vec<String>,
+    /// The component's own unique name inside the joblet.
+    pub component: String,
 }
 
 /// The value of one `elementParameter`.
@@ -156,6 +173,9 @@ pub struct Column {
     /// Date pattern or similar, as written (`"dd-MM-yyyy"` with its quotes).
     pub pattern: Option<String>,
     pub comment: Option<String>,
+    /// `originalDbColumnName`: the database column a schema column maps to, when it differs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub db_name: Option<String>,
 }
 
 /// A tMap's mapping (`nodeData`).

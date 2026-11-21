@@ -17,6 +17,9 @@ pub struct Folded {
     pub holes: Vec<String>,
     /// `context.*` variables the value was folded from.
     pub context_used: Vec<String>,
+    /// `globalMap` keys the value was folded from (constants a `tSetGlobalVar` sets).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub globals_used: Vec<String>,
 }
 
 impl Folded {
@@ -26,7 +29,11 @@ impl Folded {
     }
 }
 
-/// Folds `expr`. `context` resolves a context variable's name to its value.
+/// The resolver name [`fold`] asks for a `globalMap.get("key")` operand: `globalMap:key`.
+pub const GLOBAL_PREFIX: &str = "globalMap:";
+
+/// Folds `expr`. `context` resolves a context variable's name to its value, and a
+/// `globalMap.get("key")` operand (cast or not) as `globalMap:key` ([`GLOBAL_PREFIX`]).
 pub fn fold(expr: &str, context: &dyn Fn(&str) -> Option<String>) -> Folded {
     let mut out = Folded::default();
     for operand in split_concat(expr) {
@@ -61,10 +68,34 @@ fn fold_operand(operand: &str, context: &dyn Fn(&str) -> Option<String>, out: &m
         }
         return;
     }
+    if let Some(key) = global_ref(operand)
+        && let Some(value) = context(&format!("{GLOBAL_PREFIX}{key}"))
+    {
+        out.text.push_str(&value);
+        if !out.globals_used.contains(&key) {
+            out.globals_used.push(key);
+        }
+        return;
+    }
     out.text.push_str("{{");
     out.text.push_str(operand);
     out.text.push_str("}}");
     out.holes.push(operand.to_string());
+}
+
+/// The key of `globalMap.get("key")`, with or without a `(String)`-style cast.
+pub fn global_ref(operand: &str) -> Option<String> {
+    let mut s = strip_parens(operand.trim());
+    if let Some(rest) = s.strip_prefix('(')
+        && let Some(close) = rest.find(')')
+        && rest[..close]
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '.' || c == '_')
+    {
+        s = strip_parens(rest[close + 1..].trim());
+    }
+    let inner = s.strip_prefix("globalMap.get(")?.strip_suffix(')')?;
+    string_literal(inner.trim())
 }
 
 /// `context.name` (a plain identifier after `context.`), else `None`.
@@ -122,6 +153,42 @@ pub fn context_refs(text: &str) -> Vec<String> {
 /// preceded by `.` or an identifier character is a member of something else and is skipped.
 pub fn qualified_refs(text: &str, qualifiers: &[&str]) -> Vec<(String, String)> {
     let mut found: Vec<(String, String)> = Vec::new();
+    for (_, qualifier, member) in qualified_spans(text, qualifiers) {
+        let pair = (qualifier.to_string(), member.to_string());
+        if !found.contains(&pair) {
+            found.push(pair);
+        }
+    }
+    found
+}
+
+/// `text` with every reference [`qualified_refs`] finds replaced by what `replace` returns for
+/// it (`None` keeps the reference as written).
+pub fn replace_qualified(
+    text: &str,
+    qualifiers: &[&str],
+    replace: &mut dyn FnMut(&str, &str) -> Option<String>,
+) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    for (range, qualifier, member) in qualified_spans(text, qualifiers) {
+        out.push_str(&text[at..range.start]);
+        match replace(qualifier, member) {
+            Some(r) => out.push_str(&r),
+            None => out.push_str(&text[range.clone()]),
+        }
+        at = range.end;
+    }
+    out.push_str(&text[at..]);
+    out
+}
+
+/// Every occurrence of `qualifier.member`: its byte range, qualifier and member.
+fn qualified_spans<'t>(
+    text: &'t str,
+    qualifiers: &[&str],
+) -> Vec<(std::ops::Range<usize>, &'t str, &'t str)> {
+    let mut found = Vec::new();
     let bytes = text.as_bytes();
     let mut quote: Option<u8> = None;
     let mut escaped = false;
@@ -157,10 +224,7 @@ pub fn qualified_refs(text: &str, qualifiers: &[&str]) -> Vec<(String, String)> 
             let member = &text[end + 1..member_end];
             let called = text[member_end..].trim_start().starts_with('(');
             if !member.is_empty() && !called {
-                let pair = (qualifier.to_string(), member.to_string());
-                if !found.contains(&pair) {
-                    found.push(pair);
-                }
+                found.push((i..member_end, qualifier, member));
             }
             i = member_end.max(end + 1);
             continue;
@@ -346,6 +410,11 @@ mod tests {
         assert_eq!(f.holes.len(), 1);
         // An unknown context variable is a hole too: its value is not in the project.
         assert_eq!(fold("context.missing", &ctx).holes, vec!["context.missing"]);
+        let globals = |n: &str| (n == "globalMap:mask").then(|| "A_*.csv".to_string());
+        let g = fold(r#""/in/" + ((String)globalMap.get("mask"))"#, &globals);
+        assert_eq!(g.text, "/in/A_*.csv");
+        assert_eq!(g.globals_used, ["mask"]);
+        assert!(fold(r#"globalMap.get("other")"#, &globals).holes.len() == 1);
     }
 
     #[test]

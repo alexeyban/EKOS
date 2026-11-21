@@ -122,7 +122,8 @@ repo, 1,600 real issues/PRs — RFC 0062), Confluence, local documents
 images through local Tesseract OCR — text, tables, image OCR; RFC 0253), Pentaho Kettle (`.ktr`/`.kjb` —
 RFC 0027), Talend projects (a directory holding `talend.project` — jobs, components, links, contexts,
 connections and schemas as `Talend*` objects, `tRunJob` calls, SQL folded from Java strings, each job's data
-components in the Transformation IR; passwords redacted — RFC 0262–0264), Python/PySpark source (real AST parsing, DataFrame chains recovered into the
+components in the Transformation IR, joblets inlined, column lineage per target column back through tMap,
+aggregates and jobs to the first source; passwords redacted — RFC 0262–0264), Python/PySpark source (real AST parsing, DataFrame chains recovered into the
 Transformation IR — RFC 0038/0040), Rust source (real AST parsing, real function-call graph —
 RFC 0041), Elixir and JavaScript/TypeScript source (real AST + `Calls` recovery — RFC 0081/0082),
 Perl source (`.pl`/`.pm`/`.t`/`.psgi`, plus `.cgi` with a real `perl` shebang — packages, subs,

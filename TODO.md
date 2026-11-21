@@ -7239,9 +7239,22 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
 - [x] Redaction of Talend secrets (`PIPELINE_LOGIC_VERSION` 7); 0 encrypted strings in fixture B's `.ekos/`
 - [x] `talend` observer and `TalendAnalyzerPass`: 8 keyed kinds, `Calls`/`RowLink`/`Triggers`/`UsesConnection`/
       `UsesContext`/`UsesRoutine`, IR per job with `column_refs`; fixture B end to end through commit (2026-11-21)
-- [ ] RFC 0264 Phase 2: column lineage across components (tMap, aggregate, hash) and across jobs through tables
+- [x] RFC 0264 Phase 2: column lineage across components (tMap with variables and joins, aggregate, hash,
+      tJavaRow, filters) and across jobs through tables: one `TalendColumnLineage` per target column with steps,
+      origins, gaps and a formula, `ColumnFeeds` between jobs and `upstream` back to the first sources; fixture B
+      368 lineages, 0 gaps, `FAIT_VENTE.NB_MT_VENTE = sum(ODS_VENTE.QTE_VENTE*ODS_VENTE.PRIX_VENTE)` (2026-11-21,
+      devlog_344)
+- [x] Joblets: `joblets/**` read (`TalendJoblet`, its components, `UsesJoblet`) and inlined into each job's IR and
+      lineage (`Project::expand`); synthetic tests only (2026-11-21, devlog_344)
+- [ ] Joblets checked against a Studio-written joblet (fixture C): port element names, how a caller's link names
+      the port of a multi-port joblet, `PROCESS_TYPE_VERSION` on a use
+- [ ] `ekos check refs` reports fixture B's job inputs and outputs as unresolved (83 of 83) while `data_lineage`
+      links them: the xref `NameIndex` keeps the quotes of quoted DDL names (`"DIM_CLIENT"`); align it with
+      `data_lineage::name_key`, measured on LedgerSMB as RFC 0233 requires
+- [ ] Lineage through `tBufferOutput` into the calling job (`tRunJob` with rows), and through file outputs read
+      back by another job
 - [ ] Eval set: 20 questions on fixture B with expected citations (`evals/talend/`)
-- [ ] Items-export `.zip` read in place (fixture B's `jGenerateCalendar.zip`); joblets
+- [ ] Items-export `.zip` read in place (fixture B's `jGenerateCalendar.zip`)
 - [ ] Generated Java under a Talend project's `poms/` is still read by the Java observer: exclude it when a
       `talend.project` is present
 ### Slice 2 — documents (RFC 0265)

@@ -56,5 +56,6 @@ pub(crate) fn column(node: &Node) -> crate::Column {
         precision: attr_i64(node, "precision").filter(|n| *n >= 0),
         pattern: attr_string(node, "pattern"),
         comment: attr_string(node, "comment"),
+        db_name: attr_string(node, "originalDbColumnName"),
     }
 }

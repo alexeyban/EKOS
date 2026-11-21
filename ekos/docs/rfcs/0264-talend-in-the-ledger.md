@@ -1,6 +1,6 @@
 # RFC 0264 — Talend in the ledger: objects, relationships, Transformation IR, column references
 
-**Status:** Accepted (2026-11-20); Phase 1 below is what Slice 1 builds first
+**Status:** Accepted (2026-11-20); Phase 1 shipped 2026-11-21; Phase 2 (column lineage, joblets) amended 2026-11-21
 **Umbrella:** RFC 0262 · **Model:** RFC 0263 · **Plan:** Part II
 
 ## Pass
@@ -78,15 +78,77 @@ Every `Calculate`, `Filter` and `Join` node from a tMap records `column_refs`: t
 expression names (`row1.QTE_VENTE`), each resolved to the component that feeds that input. `Aggregate` records
 its input columns. This is enough to walk lineage one component at a time.
 
-**Phase 2** (next): lineage across components and jobs: an output column's chain back through tMap and
-aggregate steps, across `tHashOutput` → `tHashInput`, and between jobs through the tables one writes and
-another reads; plus the eval set of RFC 0262. Not built in Phase 1.
+## Phase 2 (amendment, 2026-11-21): column lineage and joblets
+
+### Joblets in the ledger
+
+| Kind | Key | Name | Main properties |
+|---|---|---|---|
+| `TalendJoblet` | `joblet:` + name + version | `<joblet>` | version, latest, folder, path, components, ports |
+
+A joblet's components are `TalendComponent` objects keyed `joblet:<name>@<version>:<unique name>`, contained by
+the joblet, with their `RowLink`s and `Triggers`. A use is `UsesJoblet` (`Custom`): the using component →
+`TalendJoblet`, with `via_latest`. The IR of a job is built from the **expanded** job (RFC 0263 §Joblets), so a
+job's graph runs through every joblet it uses; each node from a joblet carries `joblet: {name, version, use}`.
+Data component counts and the mapped percentage are over the expanded job.
+
+### Column lineage inside a job
+
+`ekos_talend::lineage::job_lineage(&expanded_job, &dyn QueryReader) -> Vec<ColumnLineage>`, pure. For every
+column of every **target** — a database output (`Table`), a file output (`File`), a `tBufferOutput` (`Buffer`,
+rows handed to the calling job) — it walks back from the target column to where the value came from, one
+component at a time. A column on a component is addressed as `(component, output, column)`; `output` is the tMap
+output name, empty elsewhere.
+
+| Component | How a column is derived |
+|---|---|
+| tMap | the output entry's expression; each `input.column` it names resolves through the link with that label **into this tMap**; `Var.x` is replaced by the variable's own expression and references; conditions: the output's filter, and the key expressions and join mode of every lookup the expression reads from |
+| tAggregateRow / tAggregateSortedRow | an operation output → `function(input column)`; a group-by output → its input column; condition: `grouped by …` |
+| tJavaRow | `output_row.X = <expr>;` statements of `CODE`, references `input_row.Y` |
+| tFilterRow, tUniqRow, tSortRow, tReplicate, tUnite, tConvertType, tLogRow, tFlowMeter, tHashOutput, tBufferOutput, joblet ports | pass-through by column name from every row input; conditions: the filter, the unique keys |
+| tHashInput | pass-through from the `tHashOutput` its `LIST` names (every one in the job when `LINK_WITH` is off) |
+| database input | **origin** `Table`: when the folded query parses (`QueryReader`, sqlparser in `recovery`), the select item at the column's position — a plain column gives `table.column`, an expression gives its text and every column it names; else the component's table and the column's own name (`by_name: true`); the query's `WHERE` is a condition |
+| file input | **origin** `File`: the folded file name, the column |
+| tRowGenerator, tFixedFlowInput | **origin** `Generated`, with the value expression when the component states one |
+| anything else | a **gap**: the component and its type; the walk stops there, nothing is invented |
+
+Each `ColumnLineage` holds the target, the target component and data action (`update_key: true` for a key an
+`UPDATE` matches on), the **steps** (each `{component, component_type, output, column, kind, expression, inputs,
+conditions, joblet}`, deduplicated, target first), the **origins** and the **gaps**, plus a `formula`: the
+target written over its origins by substituting each step's references (`sum(ODS_VENTE.QTE_VENTE*ODS_VENTE.PRIX_VENTE)`),
+capped at 400 characters (`formula_truncated`). A cycle or a walk deeper than 64 steps stops with a gap.
+
+### In the ledger
+
+| Kind | Key | Name | Main properties |
+|---|---|---|---|
+| `TalendColumnLineage` | job + version + target component + column | `<target>.<column>` | job, job_version, latest, component, target `{kind, name, schema, column}`, data_action, update_key, formula, steps, origins, gaps, `upstream` origins across jobs, `description` (searchable: the target, the formula, the job) |
+
+Relationships: the target `TalendComponent` `Contains` its lineages; `ColumnFeeds` (`Custom`) from a lineage
+whose target is table column `T.c` to every lineage of another **latest** job version in the same project with
+an origin `T.c` (names compared as `data_lineage::name_key` does: case, quotes and a schema missing on one side
+ignored). `upstream` is the transitive set of origins across those links (cycle-guarded), so one object answers
+"where does `FAIT_VENTE.NB_MT_VENTE` come from" back to the files. Lineage is computed for every job version;
+links cross jobs only between latest versions.
+
+### Exit (Phase 2)
+
+On fixture B: every database and file output column has a `TalendColumnLineage`; the plan's acceptance examples
+hold — `FAIT_VENTE.NB_MT_VENTE` has formula `sum(ODS_VENTE.QTE_VENTE*ODS_VENTE.PRIX_VENTE)` and its `upstream`
+reaches the sales CSV columns; `FAIT_VENTE.NB_QTE_VENTE` shows `count(…ID_DIM_PRODUIT)`. Gaps are counted and
+printed on the `Talend:` line. Joblets: synthetic tests in the shapes above, until fixture C. The 20-question
+eval set stays open.
+
+**Result (2026-11-21, devlog_344):** fixture B — 368 target columns, 368 lineages, 0 with a gap, 107
+`ColumnFeeds` between jobs; `FAIT_VENTE.NB_MT_VENTE = sum(ODS_VENTE.QTE_VENTE*ODS_VENTE.PRIX_VENTE)` (the SQL
+select lists parsed), `NB_QTE_VENTE = count(DIM_PRODUIT.ID_DIM_PRODUIT)`, and `ODS_VENTE.QTE_VENTE` back to
+`ICOM_*_VENTE.csv` (the `tFileList` mask, set through `tSetGlobalVar`). Joblets: 0 in fixture B.
 
 ## Registry and guards
 
-All eight kinds are structurally keyed rows in `custom_kinds::REGISTRY`; `every_pipeline_custom_kind_is_registered`
-covers them. Identity never merges them. `RowLink`, `Triggers`, `UsesConnection`, `UsesContext`, `UsesRoutine`
-are new `Custom` relationship kinds. Row links are not `FeedsInto`: that kind joins `TransformNode`s, and ten
+All ten kinds (`TalendJoblet` and `TalendColumnLineage` from Phase 2) are structurally keyed rows in `custom_kinds::REGISTRY`; `every_pipeline_custom_kind_is_registered`
+covers them. Identity never merges them. `RowLink`, `Triggers`, `UsesConnection`, `UsesContext`, `UsesRoutine`,
+`UsesJoblet`, `ColumnFeeds` are new `Custom` relationship kinds. Row links are not `FeedsInto`: that kind joins `TransformNode`s, and ten
 consumers (dbt generation, docs, `transformation explain`) assume so; the IR's own `FeedsInto` edges are
 unchanged.
 

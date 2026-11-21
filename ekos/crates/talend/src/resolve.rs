@@ -1,11 +1,11 @@
 //! What a static reader can resolve (RFC 0263 §"Resolution"): context values with how they were
 //! resolved, Java strings folded over them, and `tRunJob` calls.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::java::{Folded, fold};
+use crate::java::{Folded, GLOBAL_PREFIX, fold, string_literal};
 use crate::model::{Component, ContextVar, Job, Param, Project};
 
 /// A context value as the job would see it by default.
@@ -99,11 +99,54 @@ impl Job {
         })
     }
 
-    /// Folds a Java expression over this job's default context.
+    /// Folds a Java expression over this job's default context and its `globalMap` constants
+    /// ([`Job::global_constants`]).
     pub fn fold(&self, expr: &str) -> Folded {
-        fold(expr, &|name| {
-            self.context_var(name).and_then(|v| v.value.clone())
+        let globals = self.global_constants();
+        fold(expr, &|name| match name.strip_prefix(GLOBAL_PREFIX) {
+            Some(key) => globals.get(key).cloned(),
+            None => self.context_var(name).and_then(|v| v.value.clone()),
         })
+    }
+
+    /// `globalMap` keys every `tSetGlobalVar` of the job sets to the same constant (a string
+    /// literal, or one that folds completely over the default context). A key set to two
+    /// values, or to anything not constant, is left out: which value a reader sees depends on
+    /// the run.
+    pub fn global_constants(&self) -> BTreeMap<String, String> {
+        let mut seen: BTreeMap<String, Option<String>> = BTreeMap::new();
+        let context = |name: &str| self.context_var(name).and_then(|v| v.value.clone());
+        for c in self
+            .components
+            .iter()
+            .filter(|c| c.component_type == "tSetGlobalVar")
+        {
+            for row in c
+                .params
+                .get("VARIABLES")
+                .map(Param::rows)
+                .unwrap_or_default()
+            {
+                let (Some(key), Some(value)) = (row.get("KEY"), row.get("VALUE")) else {
+                    continue;
+                };
+                let Some(key) = string_literal(key.trim()) else {
+                    continue;
+                };
+                let f = fold(value, &context);
+                let value = f.complete().then_some(f.text);
+                seen.entry(key)
+                    .and_modify(|v| {
+                        if *v != value {
+                            *v = None;
+                        }
+                    })
+                    .or_insert(value);
+            }
+        }
+        seen.into_iter()
+            .filter_map(|(k, v)| Some((k, v?)))
+            .collect()
     }
 
     pub fn component(&self, unique_name: &str) -> Option<&Component> {

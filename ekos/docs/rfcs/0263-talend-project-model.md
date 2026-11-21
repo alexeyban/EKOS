@@ -18,7 +18,7 @@ not yet seen in a real project".
 | `metadata/connections/*.item` | a database connection: engine, host, port, database, schema (values often `context.*`) |
 | `metadata/genericSchema/*.item`, other `metadata/**` | repository schemas: name and columns |
 | `code/routines/**/*.item` | a routine; `system/` routines are Talend's own and are counted apart |
-| `joblets/**` *(doc)* | joblets |
+| `joblets/**/<Name>_<ver>.item` + `.properties` *(doc)* | one joblet version (see [Joblets](#joblets-amendment-2026-11-21)) |
 | `process_mr/`, `process_storm/`, `services/`, routes *(doc)* | recognised and counted as out of scope |
 
 The input to the model is a list of `(relative path, text)` pairs for **one** project. Finding projects and reading
@@ -73,17 +73,58 @@ parameter. An unknown type is kept with its parameters, never an error.
 - **Java strings.** Parameters holding a Java string expression (SQL, table names, file names) are folded:
   string literals (with Java escapes), `+`, and resolved `context.*`. The result is `Folded { text, holes }`: a
   hole is an operand that is not a literal or a resolved context variable (`globalMap.get(...)`, a method call),
-  written into the text as `{{hole}}` and listed. A fully folded value has no holes. A parameter that is not a
+  written into the text as `{{hole}}` and listed. A fully folded value has no holes. *Amendment (2026-11-21):*
+  `globalMap.get("k")` (cast or not) folds to the value every `tSetGlobalVar` of the job gives `k`, when that
+  value is one constant (a literal, or one that folds completely over the default context); a key set to two
+  values stays a hole (`Job::global_constants`, `Folded::globals_used`). A file name read from a `tFileList`'s
+  current file is named, for lineage, by the list's folded directory joined to each mask. A parameter that is not a
   Java expression at all is returned as `NotJava`.
 - **Calls.** `tRunJob` gives `{child name, child id, version ("Latest" resolves to the highest version present,
   and says so), context, transmit whole context, die on child error}`.
 - **Passwords.** The model never stores a value from a `PASSWORD` element parameter, an `id_Password` context
   parameter or a `password` attribute: it records only that one is set.
 
+## Joblets (amendment, 2026-11-21)
+
+*(doc)* — no fixture holds a joblet yet (fixture C is still to assemble). The shape below is taken from Talend's own
+EMF model (`joblet.ecore`: `JobletProcess` extends `ProcessType`, `jobletNodes` are `NodeType`s) and from two
+independent open-source readers of Studio files. Every rule here is checked again against the first
+Studio-written joblet, and a difference is a bug in this section, not in the project.
+
+- **The item.** `joblets/**/<Name>_<ver>.item`, root `model:JobletProcess`, with the same `context`, `node`,
+  `connection` and `nodeData` children as a job. Its boundary ports may be written as `jobletNodes` instead of
+  `node`; both are read. The `.properties` file (`JobletProcessItem`) gives id, label, version and folder, as for a
+  job. A joblet is read into the same `Job` structure and kept in `Project::joblets`, all versions, latest marked.
+- **Ports.** Components `INPUT`, `OUTPUT` (Studio's names; `tJobletInput` / `tJobletOutput` also accepted) are row
+  ports: category `flow`, logical `joblet_input` / `joblet_output`, pass-through. `TRIGGER_INPUT`,
+  `TRIGGER_OUTPUT` (and `tJobletTrigger*`) are trigger ports, category `orchestration`.
+- **A use.** In a job (or another joblet), a `node` whose `componentName` is the name of a joblet in the project is
+  a joblet use: category `joblet`, logical `joblet`. It resolves to the latest version, and says so (`via_latest`),
+  unless the node names a version in `PROCESS_TYPE_VERSION`.
+- **Expansion.** `Project::expand(&job)` returns the job with every use inlined, as Studio does at code
+  generation: each joblet component is copied in as `<use>__<component>` (a nested joblet's as
+  `<use>__<inner use>__<component>`), its internal links copied with both ends renamed, link labels kept, and
+  a parameter whose whole value names one of the joblet's components (`LIST`, `CONNECTION`) renamed with it.
+  Ports are not copied: a link into the use is joined to the joblet's links out of the input port it enters (the
+  only one, else the port its connector or `metaname` names), and a link out of the use to the joblet's links
+  into the output port it leaves (the port its connector or `metaname` names, else the only one). A joined link
+  takes its source end (`from`, `metaname`) from the upstream link and its target end (`to`, `label`) from the
+  downstream one, so every tMap still finds its inputs by the labels it was written with. A port that cannot be
+  chosen is diagnostic `TALEND005` and the link is dropped from the expanded job, never guessed.
+  Joblet context variables the job does not define are added to the job's default group. Nesting deeper than 8,
+  or a joblet that uses itself, is `TALEND006` and that use is left unexpanded. Each expanded component records
+  `joblet: {name, version, use}`.
+- **Labels.** Because two inlined copies keep the same link labels, a label is resolved only among the links
+  into the component that reads it (`(target, label)`), never project-wide.
+
+The un-expanded job is what the ledger's `TalendComponent` objects describe (a use is one component); the
+expanded job is what the Transformation IR and column lineage are built from (RFC 0264).
+
 ## Diagnostics
 
 A file that does not parse is a diagnostic with its path; the rest of the project is still read. Every diagnostic
-has a code (`TALEND001`…) listed in the crate docs.
+has a code (`TALEND001`…) listed in the crate docs. `TALEND005` (a joblet port that cannot be chosen) and
+`TALEND006` (joblet nesting too deep or cyclic) come from expansion.
 
 ## Exit (gate for Slice 1's reader)
 

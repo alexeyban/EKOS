@@ -45,7 +45,9 @@ use sha2::{Digest, Sha256};
 /// - **v7** (RFC 0262, 2026-11-20): redaction drops Talend's `enc:system.encryption.key.v1:…`
 ///   values, plain-text password parameters and `password="…"` attributes; the `talend` observer
 ///   captures Talend projects.
-pub const PIPELINE_LOGIC_VERSION: u32 = 7;
+/// - **v8** (RFC 0264 Phase 2, 2026-11-21): the `talend` observer captures joblet items
+///   (`joblets/**`), which it used to count without their text.
+pub const PIPELINE_LOGIC_VERSION: u32 = 8;
 
 /// SHA-256 content hash used to address artifacts and ledger entries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

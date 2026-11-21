@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+**Talend column lineage and joblets** (RFC 0264 Phase 2)
+- Every column a Talend job writes (database and file outputs, `tBufferOutput`) gets a `TalendColumnLineage`
+  object: the steps back to where the value came from (tMap expressions with their variables, lookups and
+  filters, aggregates, `tHashOutput` → `tHashInput`, `tJavaRow` assignments, pass-through components), the
+  origin columns (a database input's SQL is read item by item; files; generated rows), and a formula over them,
+  such as `sum(ODS_VENTE.QTE_VENTE*ODS_VENTE.PRIX_VENTE)`. A component without a rule is a named gap, never a
+  guess.
+- Jobs link through the tables one writes and another reads (`ColumnFeeds`), and each lineage lists its
+  `upstream` origins across jobs, back to the first source.
+- Joblets (`joblets/**`) are read as `TalendJoblet` objects with their components, a use is `UsesJoblet`, and each
+  job's Transformation IR and lineage run through the joblets it uses, inlined as Studio does.
+- `ekos recover`'s `Talend:` line also counts joblets, lineages, gaps and cross-job links.
+
 **Talend projects** (RFC 0262–0264, Slice 1 Phase 1)
 - `ekos build` finds Talend projects (a directory holding `talend.project`) and `ekos recover` reads them:
   every job version, component, row link, trigger, context, database connection, repository schema and custom
@@ -17,7 +30,7 @@
   model never stores a password value either way.
 - `ekos recover` prints `Talend: N project(s), J job(s), C component(s), D data component(s), X% mapped, F of Q
   queries folded, 0 model calls`.
-- Not yet: column lineage across components and jobs, documentation, the migration assessment, dbt translation.
+- Not yet: documentation, the migration assessment, dbt translation (column lineage and joblets: see above).
 
 **Table links from quoted DDL**
 - A table created with quoted identifiers (`CREATE TABLE "DIM_CLIENT"`) now links to transformation steps that

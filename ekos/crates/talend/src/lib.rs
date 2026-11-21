@@ -13,11 +13,15 @@
 //! - `TALEND002`: a file under `process/` is not a job item;
 //! - `TALEND003`: a job item has no `.properties` file (its id is unknown, so a `tRunJob` that
 //!   names it by id cannot be resolved);
-//! - `TALEND004`: the project has no `talend.project`.
+//! - `TALEND004`: the project has no `talend.project`;
+//! - `TALEND005`: a link into or out of a joblet use whose port cannot be chosen (expansion);
+//! - `TALEND006`: joblet nesting deeper than [`joblet::MAX_DEPTH`], or a joblet that uses itself.
 
 pub mod catalogue;
 pub mod java;
 mod job;
+pub mod joblet;
+pub mod lineage;
 pub mod model;
 mod repository;
 pub mod resolve;
@@ -41,7 +45,6 @@ pub const OUT_OF_SCOPE_FOLDERS: &[&str] = &[
     "process_storm",
     "services",
     "routes",
-    "joblets",
     "jobletsMr",
     "businessProcess",
 ];
@@ -62,6 +65,8 @@ pub struct ProjectFile {
 pub enum Role {
     ProjectFile,
     Job,
+    /// A joblet item (`joblets/**`, RFC 0263 §Joblets).
+    Joblet,
     Context,
     Connection,
     Schema,
@@ -83,6 +88,7 @@ impl Role {
         match self {
             Self::ProjectFile => "project",
             Self::Job => "job",
+            Self::Joblet => "joblet",
             Self::Context => "context",
             Self::Connection => "connection",
             Self::Schema => "schema",
@@ -126,6 +132,7 @@ pub fn role(path: &str) -> Role {
 fn item_role(parts: &[&str]) -> Role {
     match parts {
         ["process", ..] => Role::Job,
+        ["joblets", ..] => Role::Joblet,
         ["context", ..] => Role::Context,
         ["metadata", "connections", ..] => Role::Connection,
         ["metadata", ..] => Role::Schema,
@@ -158,14 +165,17 @@ pub fn read_project(root: &str, files: &[ProjectFile]) -> Project {
             "no talend.project in the project",
         );
     }
-    mark_latest(&mut project.jobs);
-    project.jobs.sort_by(|a, b| {
-        (&a.folder, &a.name, version_key(&a.version)).cmp(&(
-            &b.folder,
-            &b.name,
-            version_key(&b.version),
-        ))
-    });
+    for jobs in [&mut project.jobs, &mut project.joblets] {
+        mark_latest(jobs);
+        jobs.sort_by(|a, b| {
+            (&a.folder, &a.name, version_key(&a.version)).cmp(&(
+                &b.folder,
+                &b.name,
+                version_key(&b.version),
+            ))
+        });
+    }
+    joblet::mark_uses(&mut project);
     project
 }
 
@@ -192,7 +202,8 @@ fn read_file(file: &ProjectFile, properties: &BTreeMap<String, Properties>, proj
             project.technical_label = t;
             project.product_version = v;
         }),
-        Role::Job => read_job(file, props, project),
+        Role::Job => read_job(file, props, project, false),
+        Role::Joblet => read_job(file, props, project, true),
         Role::Context => repository::parse_context_item(path, &file.text).map(|mut c| {
             c.id = props.and_then(|p| p.id.clone());
             project.contexts.push(c);
@@ -245,6 +256,7 @@ fn read_job(
     file: &ProjectFile,
     props: Option<&Properties>,
     project: &mut Project,
+    joblet: bool,
 ) -> Result<(), String> {
     let mut job = job::parse_job(&file.path, &file.text)?;
     match props {
@@ -265,7 +277,11 @@ fn read_job(
             "job item without a .properties file",
         ),
     }
-    project.jobs.push(job);
+    if joblet {
+        project.joblets.push(job);
+    } else {
+        project.jobs.push(job);
+    }
     Ok(())
 }
 
@@ -352,6 +368,7 @@ mod tests {
             Role::SqlPattern
         );
         assert_eq!(role("process_mr/spark_0.1.item"), Role::OutOfScope);
+        assert_eq!(role("joblets/common/jlAudit_0.1.item"), Role::Joblet);
         assert_eq!(role("poms/jobs/process/x_0.1.item"), Role::Other);
     }
 

@@ -236,3 +236,65 @@ fn fixture_b_queries_fold_to_sql_over_the_default_context() {
     // 22 tPostgresqlInput components, each a literal + context.schema_* concatenation.
     assert_eq!((complete, partial), (22, 0));
 }
+
+/// RFC 0264 Phase 2 exit: every target column has a lineage, and the plan's acceptance examples
+/// hold (read by name here; `ekos-recovery` reads the SQL itself).
+#[test]
+fn fixture_b_column_lineage_reaches_the_acceptance_examples() {
+    use ekos_talend::lineage::{NoQueries, job_lineage};
+    let Some(root) = fixture() else { return };
+    let p = &projects(&root)[0];
+    assert!(p.joblets.is_empty(), "fixture B has no joblet");
+    let mut all = Vec::new();
+    for job in &p.jobs {
+        all.extend(job_lineage(&p.expand(job).job, &NoQueries));
+    }
+    let formula = |table: &str, column: &str| {
+        all.iter()
+            .find(|l| l.target.name == table && l.target.column == column)
+            .unwrap_or_else(|| panic!("no lineage for {table}.{column}"))
+            .formula
+            .clone()
+    };
+    assert_eq!(
+        formula("FAIT_VENTE", "NB_MT_VENTE"),
+        "sum(ODS_VENTE.QTE_VENTE*ODS_VENTE.PRIX_VENTE)"
+    );
+    // The probable defect the plan names: the quantity measure counts product keys.
+    assert_eq!(
+        formula("FAIT_VENTE", "NB_QTE_VENTE"),
+        "count(DIM_PRODUIT.ID_DIM_PRODUIT)"
+    );
+    // The sales loader reads files a tFileList iterates: named by directory and mask.
+    let ods = all
+        .iter()
+        .find(|l| l.target.name == "ODS_VENTE" && l.target.column == "QTE_VENTE")
+        .expect("ODS_VENTE.QTE_VENTE");
+    let files: Vec<String> = ods
+        .origins
+        .iter()
+        .filter_map(|o| match o {
+            ekos_talend::lineage::Origin::File {
+                file,
+                iterated_by: Some(_),
+                ..
+            } => Some(file.clone()),
+            _ => None,
+        })
+        .collect();
+    eprintln!("ODS_VENTE.QTE_VENTE from {files:?} as {}", ods.formula);
+    assert!(
+        files.iter().any(|f| f.contains("VENTE") && f.contains('*')),
+        "{files:?}"
+    );
+    let gaps: Vec<String> = all
+        .iter()
+        .flat_map(|l| &l.gaps)
+        .map(|g| format!("{} {} {}", g.component_type, g.column, g.reason))
+        .collect();
+    eprintln!(
+        "{} lineages, {} with a gap: {gaps:#?}",
+        all.len(),
+        all.iter().filter(|l| !l.gaps.is_empty()).count()
+    );
+}

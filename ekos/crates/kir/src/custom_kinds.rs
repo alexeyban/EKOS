@@ -525,6 +525,16 @@ prefixes constantly",
         structurally_keyed: true,
         note: "(project, routine name, version) — RFC 0264; custom routines only (system routines are counted, not ledgered)",
     },
+    CustomKind {
+        name: "TalendJoblet",
+        structurally_keyed: true,
+        note: "(project, joblet name, version) — RFC 0264 Phase 2; its components are TalendComponents keyed joblet:<name>@<version>:<unique name>",
+    },
+    CustomKind {
+        name: "TalendColumnLineage",
+        structurally_keyed: true,
+        note: "(project, job, version, target component, column) — RFC 0264 Phase 2; one per target column, ColumnFeeds between jobs",
+    },
     // RFC 0200 — Pentaho → lakehouse dbt, written by the ekos-lakehouse extension.
     CustomKind {
         name: "PentahoPackage",

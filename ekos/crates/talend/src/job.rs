@@ -19,7 +19,7 @@ const LOOKUP_LINE_STYLE: &str = "8";
 pub(crate) fn parse_job(path: &str, text: &str) -> Result<Job, String> {
     let doc = Document::parse(text).map_err(|e| e.to_string())?;
     let root = doc.root_element();
-    if root.tag_name().name() != "ProcessType" {
+    if !matches!(root.tag_name().name(), "ProcessType" | "JobletProcess") {
         return Err(format!(
             "not a job item: root element is <{}>",
             root.tag_name().name()
@@ -41,7 +41,10 @@ pub(crate) fn parse_job(path: &str, text: &str) -> Result<Job, String> {
     job.implicit_context_load = children(&root, "parameters")
         .flat_map(|p| children(&p, "elementParameter").collect::<Vec<_>>())
         .any(|p| p.attribute("name") == Some("IMPLICIT_TCONTEXTLOAD") && attr_bool(&p, "value"));
-    job.components = children(&root, "node")
+    // A joblet may write its boundary ports as `jobletNodes` (RFC 0263 §Joblets).
+    job.components = root
+        .children()
+        .filter(|n| n.is_element() && matches!(n.tag_name().name(), "node" | "jobletNodes"))
         .map(|n| component(&doc, &n))
         .collect();
     for c in children(&root, "connection") {
@@ -121,6 +124,7 @@ fn component(doc: &Document, node: &Node) -> Component {
         line: line(doc, node),
         component_type,
         params,
+        joblet: None,
     }
 }
 

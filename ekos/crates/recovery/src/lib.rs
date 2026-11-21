@@ -63,6 +63,7 @@ pub mod sql_transform_analyzer;
 mod statement_repair;
 pub mod talend_analyzer;
 pub mod talend_ir;
+pub mod talend_lineage;
 pub mod treasury_analyzer;
 pub mod trigger_analyzer;
 pub mod tsql_routines;

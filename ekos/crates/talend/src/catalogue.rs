@@ -25,6 +25,8 @@ pub enum Category {
     Connection,
     File,
     Logging,
+    /// A use of a joblet of the project (RFC 0263 §Joblets): set once the joblets are known.
+    Joblet,
     #[default]
     Unknown,
 }
@@ -44,6 +46,7 @@ impl Category {
             Self::Connection => "connection",
             Self::File => "file",
             Self::Logging => "logging",
+            Self::Joblet => "joblet",
             Self::Unknown => "unknown",
         }
     }
@@ -59,6 +62,7 @@ impl Category {
                 | Self::Join
                 | Self::Flow
                 | Self::Elt
+                | Self::Joblet
         )
     }
 }
@@ -205,6 +209,35 @@ const FIXED: &[(&str, Category)] = &[
     ("tAssertCatcher", Category::Logging),
 ];
 
+/// A joblet's boundary ports (RFC 0263 §Joblets) → (category, logical name). Studio writes
+/// `INPUT` / `OUTPUT`; the `tJoblet*` spellings are accepted too.
+const JOBLET_PORTS: &[(&str, Category, &str)] = &[
+    ("INPUT", Category::Flow, "joblet_input"),
+    ("OUTPUT", Category::Flow, "joblet_output"),
+    ("tJobletInput", Category::Flow, "joblet_input"),
+    ("tJobletOutput", Category::Flow, "joblet_output"),
+    (
+        "TRIGGER_INPUT",
+        Category::Orchestration,
+        "joblet_trigger_input",
+    ),
+    (
+        "TRIGGER_OUTPUT",
+        Category::Orchestration,
+        "joblet_trigger_output",
+    ),
+    (
+        "tJobletTriggerInput",
+        Category::Orchestration,
+        "joblet_trigger_input",
+    ),
+    (
+        "tJobletTriggerOutput",
+        Category::Orchestration,
+        "joblet_trigger_output",
+    ),
+];
+
 /// A component type, classified.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Classified {
@@ -217,6 +250,15 @@ pub struct Classified {
 /// Classifies a component type. `db_type` is the component's `TYPE` parameter, which names the
 /// engine of the generic `tDB*` components.
 pub fn classify(component_type: &str, db_type: Option<&str>) -> Classified {
+    if let Some(&(_, category, logical)) =
+        JOBLET_PORTS.iter().find(|(n, _, _)| *n == component_type)
+    {
+        return Classified {
+            category,
+            logical: logical.to_string(),
+            engine: None,
+        };
+    }
     if let Some(&(_, category)) = FIXED.iter().find(|(name, _)| *name == component_type) {
         return Classified {
             category,
@@ -345,6 +387,17 @@ mod tests {
         );
         // A fixed name wins over the engine rule: `tDie` is not a `tD…` database component.
         assert_eq!(classify("tDie", None).category, Category::Orchestration);
+    }
+
+    #[test]
+    fn joblet_ports_are_flow_or_orchestration() {
+        assert_eq!(classify("INPUT", None).logical, "joblet_input");
+        assert_eq!(classify("tJobletOutput", None).logical, "joblet_output");
+        assert_eq!(classify("OUTPUT", None).category, Category::Flow);
+        assert_eq!(
+            classify("TRIGGER_INPUT", None).category,
+            Category::Orchestration
+        );
     }
 
     #[test]

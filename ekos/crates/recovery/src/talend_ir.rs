@@ -44,8 +44,9 @@ struct Builder<'a> {
     nodes: Vec<TransformNode>,
     extra: Vec<BTreeMap<String, Value>>,
     edges: Vec<(NodeId, NodeId)>,
-    /// Incoming link label → the component it comes from (for column references).
-    label_source: HashMap<String, String>,
+    /// (reading component, incoming link label) → the component the link comes from. Keyed by
+    /// the reader because two inlined copies of a joblet keep the same labels (RFC 0263 §Joblets).
+    label_source: HashMap<(String, String), String>,
 }
 
 impl Builder<'_> {
@@ -59,6 +60,9 @@ impl Builder<'_> {
         props.insert("component".into(), json!(component.unique_name));
         props.insert("component_type".into(), json!(component.component_type));
         props.insert("line".into(), json!(component.line));
+        if let Some(origin) = &component.joblet {
+            props.insert("joblet".into(), json!(origin));
+        }
         self.nodes.push(node);
         self.extra.push(props);
         self.nodes.len() - 1
@@ -74,13 +78,19 @@ impl Builder<'_> {
     /// `[{input, column, component}]` for the `qualifier.column` references in `text`. A
     /// qualifier that is a link label resolves to the component the link comes from; any other
     /// (`input_row`) to `upstream`.
-    fn column_refs(&self, text: &str, qualifiers: &[&str], upstream: Option<&str>) -> Value {
+    fn column_refs(
+        &self,
+        reader: &str,
+        text: &str,
+        qualifiers: &[&str],
+        upstream: Option<&str>,
+    ) -> Value {
         let refs: Vec<Value> = qualified_refs(text, qualifiers)
             .into_iter()
             .map(|(input, column)| {
                 let component = self
                     .label_source
-                    .get(&input)
+                    .get(&(reader.to_string(), input.clone()))
                     .map(String::as_str)
                     .or(upstream);
                 json!({
@@ -104,7 +114,7 @@ pub fn lower_job(job: &Job) -> LoweredJob {
         label_source: job
             .links
             .iter()
-            .filter_map(|l| Some((l.label.clone()?, l.from.clone())))
+            .filter_map(|l| Some(((l.to.clone(), l.label.clone()?), l.from.clone())))
             .collect(),
     };
     let data: Vec<&Component> = job
@@ -166,6 +176,13 @@ fn lower_component(b: &mut Builder, c: &Component) -> Segment {
         "tRowGenerator" | "tFixedFlowInput" => generated_source(b.job, c),
         "tHashInput" | "tBufferInput" => hash(b.job, c, true),
         "tHashOutput" | "tBufferOutput" => hash(b.job, c, false),
+        _ if c.category == Category::Joblet => (
+            TransformNode::Unmapped {
+                raw: c.component_type.clone(),
+                reason: "joblet use not expanded (see TALEND006)".into(),
+            },
+            BTreeMap::new(),
+        ),
         _ if c.category == Category::Input => file_io(b.job, c, true),
         _ if c.category == Category::Output => file_io(b.job, c, false),
         _ => (
@@ -404,7 +421,7 @@ fn filter_row(b: &Builder, c: &Component) -> (TransformNode, BTreeMap<String, Va
     let mut extra = BTreeMap::new();
     extra.insert(
         "column_refs".into(),
-        b.column_refs(&condition, &["input_row"], upstream),
+        b.column_refs(&c.unique_name, &condition, &["input_row"], upstream),
     );
     (TransformNode::Filter { condition }, extra)
 }
@@ -524,7 +541,7 @@ fn lower_tmap(b: &mut Builder, c: &Component, mapper: &Mapper) -> Segment {
         extra.insert("lookup_mode".into(), json!(lookup.lookup_mode));
         extra.insert(
             "column_refs".into(),
-            b.column_refs(&key_text, &qualifiers, None),
+            b.column_refs(&c.unique_name, &key_text, &qualifiers, None),
         );
         if let Some(f) = &lookup.filter {
             extra.insert("lookup_filter".into(), json!(f));
@@ -603,7 +620,7 @@ fn lower_tmap_output(
         let mut extra = flags.clone();
         extra.insert(
             "column_refs".into(),
-            b.column_refs(condition, qualifiers, None),
+            b.column_refs(&c.unique_name, condition, qualifiers, None),
         );
         b.push(
             c,
@@ -633,7 +650,10 @@ fn lower_tmap_output(
     for entry in &output.entries {
         let expr = entry.expression.clone().unwrap_or_default();
         let mut extra = flags.clone();
-        extra.insert("column_refs".into(), b.column_refs(&expr, qualifiers, None));
+        extra.insert(
+            "column_refs".into(),
+            b.column_refs(&c.unique_name, &expr, qualifiers, None),
+        );
         let node = TransformNode::Calculate {
             output: format!("{}.{}", output.name, entry.name),
             expr,
@@ -743,19 +763,28 @@ fn link_hash_tables(b: &mut Builder, data: &[&Component]) {
             .iter()
             .position(|e| e.get("component").and_then(Value::as_str) == Some(name))
     };
-    let outputs: Vec<usize> = data
+    let outputs: Vec<(usize, String)> = data
         .iter()
         .filter(|c| matches!(c.component_type.as_str(), "tHashOutput" | "tBufferOutput"))
-        .filter_map(|c| index_of(b, &c.unique_name))
+        .filter_map(|c| Some((index_of(b, &c.unique_name)?, c.unique_name.clone())))
         .collect();
-    let inputs: Vec<usize> = data
+    // The tHashOutput a tHashInput names (`LINK_WITH` + `LIST`), else every one in the job.
+    let inputs: Vec<(usize, Option<String>)> = data
         .iter()
         .filter(|c| matches!(c.component_type.as_str(), "tHashInput" | "tBufferInput"))
-        .filter_map(|c| index_of(b, &c.unique_name))
+        .filter_map(|c| {
+            let linked = param_text(c, "LINK_WITH") == Some("true");
+            let list = linked
+                .then(|| param_text(c, "LIST").map(str::to_string))
+                .flatten();
+            Some((index_of(b, &c.unique_name)?, list))
+        })
         .collect();
-    for &o in &outputs {
-        for &i in &inputs {
-            b.edge(o, i);
+    for &(o, ref name) in &outputs {
+        for &(i, ref list) in &inputs {
+            if list.as_ref().is_none_or(|l| l == name) {
+                b.edge(o, i);
+            }
         }
     }
 }

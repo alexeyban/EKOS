@@ -18,11 +18,15 @@ use ekos_kir::{
 use ekos_semantic::merge_graphs;
 use ekos_semantic::transform_ir::lower_to_kir;
 use ekos_talend::java::context_refs;
-use ekos_talend::{Component, Job, Param, Project, ProjectFile, RuntimeContext, read_project};
+use ekos_talend::lineage::{ColumnLineage, job_lineage};
+use ekos_talend::{
+    Component, Diagnostic, Job, Param, Project, ProjectFile, RuntimeContext, read_project,
+};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::talend_ir::lower_job;
+use crate::talend_lineage::{JobLineages, SqlQueries, link_jobs};
 
 /// Every object kind this pass writes besides `TransformNode`. Built from strings, which
 /// `every_pipeline_custom_kind_is_registered` cannot see: `every_talend_kind_has_a_keyed_registry_row`
@@ -36,6 +40,8 @@ pub const KINDS: &[&str] = &[
     "TalendDbConnection",
     "TalendSchema",
     "TalendRoutine",
+    "TalendJoblet",
+    "TalendColumnLineage",
 ];
 
 /// What one run read, for `ekos recover`'s summary line.
@@ -49,6 +55,14 @@ pub struct TalendStats {
     pub queries: usize,
     pub queries_folded: usize,
     pub diagnostics: usize,
+    /// Joblet versions read, and uses inlined into jobs (nested ones included).
+    pub joblets: usize,
+    pub joblet_uses: usize,
+    /// Target columns with a lineage, and how many of them stop at a gap.
+    pub lineages: usize,
+    pub lineage_gaps: usize,
+    /// Lineage links between jobs through a table.
+    pub column_feeds: usize,
 }
 
 impl TalendStats {
@@ -69,6 +83,11 @@ impl TalendStats {
         self.queries += other.queries;
         self.queries_folded += other.queries_folded;
         self.diagnostics += other.diagnostics;
+        self.joblets += other.joblets;
+        self.joblet_uses += other.joblet_uses;
+        self.lineages += other.lineages;
+        self.lineage_gaps += other.lineage_gaps;
+        self.column_feeds += other.column_feeds;
     }
 }
 
@@ -99,7 +118,8 @@ impl CompilerPass for TalendAnalyzerPass {
     }
 
     fn version(&self) -> &str {
-        "v1"
+        // v2: joblets and column lineage (RFC 0264 Phase 2).
+        "v2"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -146,7 +166,13 @@ impl CompilerPass for TalendAnalyzerPass {
                     format!("{}: {}", workspace_path(root, &d.path), d.message),
                 );
             }
-            let (graph, project_stats) = project_kir(&project);
+            let (graph, project_stats, expansion) = project_kir(&project);
+            for d in &expansion {
+                ctx.diagnostics.lock().unwrap().warning(
+                    &d.code,
+                    format!("{}: {}", workspace_path(root, &d.path), d.message),
+                );
+            }
             stats.add(&project_stats);
             merge_graphs(&mut combined, graph);
         }
@@ -245,12 +271,23 @@ fn job_key(job: &Job) -> String {
     format!("{}@{}", job.name, job.version)
 }
 
-fn component_key(job: &Job, c: &Component) -> String {
-    format!("{}:{}", job_key(job), c.unique_name)
+/// The key scope of a job's components (`<job>@<version>`) or a joblet's
+/// (`joblet:<joblet>@<version>`).
+fn scope(job: &Job, joblet: bool) -> String {
+    if joblet {
+        format!("joblet:{}", job_key(job))
+    } else {
+        job_key(job)
+    }
 }
 
-/// Every object, relationship and IR graph for one project.
-pub fn project_kir(project: &Project) -> (KirGraph, TalendStats) {
+fn component_key(scope: &str, c: &Component) -> String {
+    format!("{scope}:{}", c.unique_name)
+}
+
+/// Every object, relationship and IR graph for one project, and the diagnostics of joblet
+/// expansion (`TALEND005`/`TALEND006`).
+pub fn project_kir(project: &Project) -> (KirGraph, TalendStats, Vec<Diagnostic>) {
     let mut e = Emit {
         project,
         kir: KirGraph::new(),
@@ -278,10 +315,22 @@ pub fn project_kir(project: &Project) -> (KirGraph, TalendStats) {
         ("talend.project", None),
     );
     emit_repository(&mut e, project_id);
-    for job in &project.jobs {
-        emit_job(&mut e, project_id, job, &mut stats);
+    for joblet in &project.joblets {
+        emit_joblet(&mut e, project_id, joblet, &mut stats);
     }
-    (e.kir, stats)
+    let mut diagnostics = Vec::new();
+    let mut lineages: Vec<(&Job, Job, Vec<ColumnLineage>)> = Vec::new();
+    for job in &project.jobs {
+        let expanded = project.expand(job);
+        stats.joblet_uses += expanded.inlined;
+        diagnostics.extend(expanded.diagnostics);
+        emit_job(&mut e, project_id, job, &expanded.job, &mut stats);
+        let found = job_lineage(&expanded.job, &SqlQueries);
+        lineages.push((job, expanded.job, found));
+    }
+    emit_lineages(&mut e, &lineages, &mut stats);
+    stats.diagnostics += diagnostics.len();
+    (e.kir, stats, diagnostics)
 }
 
 fn emit_repository(e: &mut Emit, project_id: KirId) {
@@ -334,7 +383,42 @@ fn emit_repository(e: &mut Emit, project_id: KirId) {
     }
 }
 
-fn emit_job(e: &mut Emit, project_id: KirId, job: &Job, stats: &mut TalendStats) {
+fn emit_joblet(e: &mut Emit, project_id: KirId, joblet: &Job, stats: &mut TalendStats) {
+    let ports: Vec<&str> = joblet
+        .components
+        .iter()
+        .filter(|c| c.logical.starts_with("joblet_"))
+        .map(|c| c.unique_name.as_str())
+        .collect();
+    let props = json!({
+        "joblet": joblet.name,
+        "version": joblet.version,
+        "latest": joblet.latest,
+        "repository_id": joblet.id,
+        "folder": joblet.folder,
+        "purpose": joblet.purpose,
+        "description": joblet.description,
+        "components": joblet.components.len(),
+        "ports": ports,
+    });
+    let id = e.object(
+        "TalendJoblet",
+        &job_key(joblet),
+        &joblet.name,
+        props,
+        (&joblet.path, None),
+    );
+    e.relate("Contains", project_id, id, "", Value::Null);
+    stats.joblets += 1;
+    let scope = scope(joblet, true);
+    for c in &joblet.components {
+        let cid = emit_component(e, joblet, &scope, c);
+        e.relate("Contains", id, cid, "", Value::Null);
+    }
+    emit_flow(e, joblet, &scope);
+}
+
+fn emit_job(e: &mut Emit, project_id: KirId, job: &Job, expanded: &Job, stats: &mut TalendStats) {
     let project = e.project;
     let calls = project.calls(job);
     let unresolved: Vec<&str> = calls
@@ -368,11 +452,13 @@ fn emit_job(e: &mut Emit, project_id: KirId, job: &Job, stats: &mut TalendStats)
     );
     e.relate("Contains", project_id, job_id, "", Value::Null);
     stats.jobs += 1;
+    let scope = scope(job, false);
     for c in &job.components {
-        let cid = emit_component(e, job, c, stats);
+        count_component(job, c, stats);
+        let cid = emit_component(e, job, &scope, c);
         e.relate("Contains", job_id, cid, "", Value::Null);
     }
-    emit_flow(e, job);
+    emit_flow(e, job, &scope);
     for call in &calls {
         let Some(target) = &call.resolved else {
             continue;
@@ -390,10 +476,10 @@ fn emit_job(e: &mut Emit, project_id: KirId, job: &Job, stats: &mut TalendStats)
         e.relate("Calls", job_id, to, &call.component, props);
     }
     emit_uses(e, job, job_id);
-    emit_ir(e, job, stats);
+    emit_ir(e, job, expanded, stats);
 }
 
-fn emit_component(e: &mut Emit, job: &Job, c: &Component, stats: &mut TalendStats) -> KirId {
+fn count_component(job: &Job, c: &Component, stats: &mut TalendStats) {
     stats.components += 1;
     if c.logical == "db_input" && c.params.contains_key("QUERY") {
         stats.queries += 1;
@@ -403,6 +489,9 @@ fn emit_component(e: &mut Emit, job: &Job, c: &Component, stats: &mut TalendStat
             stats.queries_folded += 1;
         }
     }
+}
+
+fn emit_component(e: &mut Emit, job: &Job, scope: &str, c: &Component) -> KirId {
     let props = json!({
         "job": job.name,
         "job_version": job.version,
@@ -417,11 +506,12 @@ fn emit_component(e: &mut Emit, job: &Job, c: &Component, stats: &mut TalendStat
         "parameters": c.params,
         "schemas": c.schemas,
         "mapper": c.mapper,
+        "in_joblet": scope.starts_with("joblet:"),
     });
     let name = format!("{}.{}", job.name, c.unique_name);
     let id = e.object(
         "TalendComponent",
-        &component_key(job, c),
+        &component_key(scope, c),
         &name,
         props,
         (&job.path, Some(c.line)),
@@ -438,6 +528,16 @@ fn emit_component(e: &mut Emit, job: &Job, c: &Component, stats: &mut TalendStat
             &format!("{}@{}", target.name, target.version),
         );
         e.relate("UsesConnection", id, to, "", Value::Null);
+    }
+    if let Some((joblet, via_latest)) = e.project.joblet_for(c) {
+        let to = e.id("TalendJoblet", &job_key(joblet));
+        e.relate(
+            "UsesJoblet",
+            id,
+            to,
+            "",
+            json!({ "version": joblet.version, "via_latest": via_latest }),
+        );
     }
     id
 }
@@ -461,10 +561,10 @@ fn repository_connection<'a>(job: &'a Job, c: &'a Component) -> Option<&'a str> 
     })
 }
 
-fn emit_flow(e: &mut Emit, job: &Job) {
+fn emit_flow(e: &mut Emit, job: &Job, scope: &str) {
     let cid = |e: &Emit, name: &str| {
         let c = job.component(name)?;
-        Some(e.id("TalendComponent", &component_key(job, c)))
+        Some(e.id("TalendComponent", &component_key(scope, c)))
     };
     for link in &job.links {
         let (Some(from), Some(to)) = (cid(e, &link.from), cid(e, &link.to)) else {
@@ -588,8 +688,8 @@ fn calls_routine(text: &str, routine: &str) -> bool {
     })
 }
 
-fn emit_ir(e: &mut Emit, job: &Job, stats: &mut TalendStats) {
-    let mut lowered = lower_job(job);
+fn emit_ir(e: &mut Emit, job: &Job, expanded: &Job, stats: &mut TalendStats) {
+    let mut lowered = lower_job(expanded);
     stats.data_components += lowered.data_components;
     stats.mapped_components += lowered.mapped_components;
     if lowered.graph.nodes.is_empty() {
@@ -606,6 +706,129 @@ fn emit_ir(e: &mut Emit, job: &Job, stats: &mut TalendStats) {
         }
     }
     merge_graphs(&mut e.kir, kir);
+}
+
+/// The ledger key of the `TalendComponent` a component of an expanded job stands for: the job's
+/// own, or the joblet's it was inlined from.
+fn origin_component_key(job: &Job, c: &Component) -> String {
+    match &c.joblet {
+        Some(o) => format!("joblet:{}@{}:{}", o.name, o.version, o.component),
+        None => component_key(&job_key(job), c),
+    }
+}
+
+/// One `TalendColumnLineage` per target column, `Contains` from its target component, and
+/// `ColumnFeeds` between jobs (RFC 0264 §"Phase 2").
+fn emit_lineages(e: &mut Emit, all: &[(&Job, Job, Vec<ColumnLineage>)], stats: &mut TalendStats) {
+    let views: Vec<JobLineages> = all
+        .iter()
+        .map(|(job, _, l)| JobLineages {
+            job: &job.name,
+            latest: job.latest,
+            lineages: l,
+        })
+        .collect();
+    let linked = link_jobs(&views);
+    let mut ids: BTreeMap<(usize, usize), KirId> = BTreeMap::new();
+    for (j, (job, expanded, lineages)) in all.iter().enumerate() {
+        for (i, l) in lineages.iter().enumerate() {
+            let key = format!("{}:{}:{}", job_key(job), l.component, l.target.column);
+            let id = e.id("TalendColumnLineage", &key);
+            if e.kir.objects.iter().any(|o| o.id == id) {
+                continue;
+            }
+            let Some(c) = expanded.component(&l.component) else {
+                continue;
+            };
+            let upstream = linked.upstream.get(&(j, i));
+            let path = match &c.joblet {
+                Some(o) => e
+                    .project
+                    .joblets
+                    .iter()
+                    .find(|x| x.name == o.name && x.version == o.version)
+                    .map_or(job.path.as_str(), |x| x.path.as_str()),
+                None => job.path.as_str(),
+            };
+            let name = format!("{}.{}", l.target.name, l.target.column);
+            let props = json!({
+                "job": job.name,
+                "job_version": job.version,
+                "latest": job.latest,
+                "component": l.component,
+                "target": l.target,
+                "data_action": l.data_action,
+                "update_key": l.update_key,
+                "formula": l.formula,
+                "formula_truncated": l.formula_truncated,
+                "steps": l.steps,
+                "origins": l.origins,
+                "gaps": l.gaps,
+                "upstream": upstream.map(|u| &u.0),
+                "upstream_jobs": upstream.map(|u| &u.1),
+                "description": lineage_description(job, l, upstream.map(|u| u.0.as_slice())),
+            });
+            let id = e.object(
+                "TalendColumnLineage",
+                &key,
+                &name,
+                props,
+                (path, Some(c.line)),
+            );
+            ids.insert((j, i), id);
+            let owner = e.id("TalendComponent", &origin_component_key(job, c));
+            e.relate("Contains", owner, id, &key, Value::Null);
+            stats.lineages += 1;
+            if !l.gaps.is_empty() {
+                stats.lineage_gaps += 1;
+            }
+        }
+    }
+    for f in &linked.feeds {
+        let (Some(&from), Some(&to)) = (ids.get(&f.from), ids.get(&f.to)) else {
+            continue;
+        };
+        e.relate("ColumnFeeds", from, to, &f.via, json!({ "via": f.via }));
+        stats.column_feeds += 1;
+    }
+}
+
+/// The searchable sentence of a lineage: target, job, formula, origins, and where those came
+/// from across jobs.
+fn lineage_description(
+    job: &Job,
+    l: &ColumnLineage,
+    upstream: Option<&[ekos_talend::lineage::Origin]>,
+) -> String {
+    let labels = |o: &[ekos_talend::lineage::Origin]| {
+        o.iter()
+            .map(ekos_talend::lineage::Origin::label)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let mut text = format!(
+        "{}.{} is written by Talend job {} ({}) as {}.",
+        l.target.name,
+        l.target.column,
+        job.name,
+        l.data_action.as_deref().unwrap_or("write"),
+        l.formula
+    );
+    if !l.origins.is_empty() {
+        text.push_str(&format!(" It comes from {}.", labels(&l.origins)));
+    }
+    if let Some(u) = upstream.filter(|u| *u != l.origins.as_slice() && !u.is_empty()) {
+        text.push_str(&format!(" Across jobs, from {}.", labels(u)));
+    }
+    if !l.gaps.is_empty() {
+        let at: Vec<String> = l
+            .gaps
+            .iter()
+            .map(|g| format!("{} ({})", g.component, g.reason))
+            .collect();
+        text.push_str(&format!(" Not traced through {}.", at.join("; ")));
+    }
+    text
 }
 
 #[cfg(test)]
@@ -685,6 +908,89 @@ mod tests {
         ]
     }
 
+    /// [`demo`] plus a joblet and a report job that reads the child's table through it.
+    fn demo_with_joblet() -> Vec<ProjectFile> {
+        let mut files = demo();
+        let joblet = r#"<model:JobletProcess xmlns:model="http://www.talend.com/joblet.ecore" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:TalendMapper="http://www.talend.org/mapper" defaultContext="Default">
+  <jobletNodes componentName="INPUT"><elementParameter field="TEXT" name="UNIQUE_NAME" value="INPUT_1"/></jobletNodes>
+  <node componentName="tMap"><elementParameter field="TEXT" name="UNIQUE_NAME" value="tMap_1"/>
+    <nodeData xsi:type="TalendMapper:MapperData"><outputTables name="o"><mapperTableEntries name="AMT" expression="row1.AMOUNT * 2"/></outputTables><inputTables name="row1"/></nodeData>
+  </node>
+  <jobletNodes componentName="OUTPUT"><elementParameter field="TEXT" name="UNIQUE_NAME" value="OUTPUT_1"/></jobletNodes>
+  <connection connectorName="FLOW" label="row1" lineStyle="0" source="INPUT_1" target="tMap_1"/>
+  <connection connectorName="FLOW" label="o" lineStyle="0" metaname="o" source="tMap_1" target="OUTPUT_1"/>
+</model:JobletProcess>"#;
+        let report = r#"<talendfile:ProcessType xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd" defaultContext="Default">
+  <node componentName="tPostgresqlInput"><elementParameter field="TEXT" name="UNIQUE_NAME" value="tDBInput_1"/><elementParameter field="DBTABLE" name="TABLE" value="&quot;FACT&quot;"/><metadata connector="FLOW" name="tDBInput_1"><column name="ID"/><column name="AMOUNT"/></metadata></node>
+  <node componentName="jlDouble"><elementParameter field="TEXT" name="UNIQUE_NAME" value="jlDouble_1"/></node>
+  <node componentName="tPostgresqlOutput"><elementParameter field="TEXT" name="UNIQUE_NAME" value="tDBOutput_1"/><elementParameter field="DBTABLE" name="TABLE" value="&quot;REPORT&quot;"/><elementParameter field="CLOSED_LIST" name="DATA_ACTION" value="INSERT"/><metadata connector="FLOW" name="tDBOutput_1"><column name="AMT"/></metadata></node>
+  <connection connectorName="FLOW" label="row1" lineStyle="0" source="tDBInput_1" target="jlDouble_1"/>
+  <connection connectorName="FLOW" label="row2" lineStyle="0" source="jlDouble_1" target="tDBOutput_1"/>
+</talendfile:ProcessType>"#;
+        files.push(file("joblets/jlDouble_0.1.item", joblet));
+        files.push(file("process/RPT/jReport_0.1.item", report));
+        files
+    }
+
+    #[test]
+    fn lineage_runs_through_a_joblet_and_across_jobs_to_the_first_source() {
+        let project = read_project("", &demo_with_joblet());
+        let (kir, stats, diagnostics) = project_kir(&project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!((stats.joblets, stats.joblet_uses), (1, 1));
+        let lineage = |name: &str| {
+            kir.objects
+                .iter()
+                .find(|o| o.kind.to_string() == "TalendColumnLineage" && o.name == name)
+                .unwrap_or_else(|| panic!("no lineage {name}"))
+        };
+        let fact = lineage("FACT.AMOUNT");
+        assert_eq!(fact.properties["formula"], "SALES.QTY * SALES.PRICE");
+        let report = lineage("REPORT.AMT");
+        assert_eq!(report.properties["formula"], "FACT.AMOUNT * 2");
+        let map = report.properties["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["kind"] == "map")
+            .unwrap();
+        assert_eq!(map["component"], "jlDouble_1__tMap_1");
+        assert_eq!(map["joblet"]["name"], "jlDouble");
+        // Across jobs: the report's amount comes from the sales columns the child job reads.
+        let upstream: Vec<String> = report.properties["upstream"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| {
+                format!(
+                    "{}.{}",
+                    o["table"].as_str().unwrap(),
+                    o["column"].as_str().unwrap()
+                )
+            })
+            .collect();
+        assert_eq!(upstream, ["SALES.PRICE", "SALES.QTY"]);
+        assert_eq!(report.properties["upstream_jobs"], json!(["jChild"]));
+        let feeds = rels(&kir, "ColumnFeeds");
+        assert_eq!(feeds.len(), 1);
+        assert_eq!((feeds[0].from, feeds[0].to), (fact.id, report.id));
+        // The lineage hangs off the target component; the joblet use points at the joblet.
+        assert!(
+            rels(&kir, "Contains")
+                .iter()
+                .any(|r| r.to == report.id && by_id(&kir, r.from).name == "jReport.tDBOutput_1")
+        );
+        let uses = rels(&kir, "UsesJoblet");
+        assert_eq!(uses.len(), 1);
+        assert_eq!(by_id(&kir, uses[0].to).name, "jlDouble");
+        assert!(
+            report.properties["description"]
+                .as_str()
+                .unwrap()
+                .contains("Across jobs, from SALES.PRICE, SALES.QTY.")
+        );
+    }
+
     fn rels<'a>(kir: &'a KirGraph, kind: &str) -> Vec<&'a KirRelationship> {
         kir.relationships
             .iter()
@@ -700,7 +1006,7 @@ mod tests {
     fn a_project_becomes_objects_relationships_and_ir() {
         let project = read_project("etl/demo", &demo());
         assert!(project.diagnostics.is_empty(), "{:?}", project.diagnostics);
-        let (kir, stats) = project_kir(&project);
+        let (kir, stats, _) = project_kir(&project);
         let kinds: BTreeMap<String, usize> =
             kir.objects.iter().fold(BTreeMap::new(), |mut m, o| {
                 *m.entry(o.kind.to_string()).or_insert(0) += 1;
@@ -839,12 +1145,12 @@ mod tests {
 
     #[test]
     fn every_emitted_kind_is_listed() {
-        let mut files = demo();
+        let mut files = demo_with_joblet();
         files.push(file(
             "metadata/genericSchema/S_0.1.item",
             r#"<xmi:XMI xmlns:xmi="http://www.omg.org/XMI"/>"#,
         ));
-        let (kir, _) = project_kir(&read_project("", &files));
+        let (kir, _, _) = project_kir(&read_project("", &files));
         let emitted: BTreeSet<String> = kir
             .objects
             .iter()
