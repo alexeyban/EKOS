@@ -335,13 +335,15 @@ impl LocalDocsObserver {
     }
 }
 
-/// Whether a walked entry is a directory named by one of the scan's ignore patterns.
+/// Whether a walked entry is a directory named by one of the scan's ignore patterns, or one a
+/// tool generated from sources another observer reads (Talend's `documentations/generated/`).
 fn is_ignored_dir(entry: &walkdir::DirEntry, ctx: &ScanContext) -> bool {
     entry.file_type().is_dir()
-        && entry
+        && (entry
             .file_name()
             .to_str()
             .is_some_and(|name| ctx.ignore_patterns.iter().any(|p| name == p.as_str()))
+            || ekos_observation_sdk::is_generated_tool_output(entry.path()))
 }
 
 /// `abs_path` relative to `root`, with forward slashes; `None` when it is not under `root`.

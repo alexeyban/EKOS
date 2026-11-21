@@ -45,6 +45,7 @@ fn link_name(kind: &LinkKind) -> String {
         LinkKind::Unique => "UNIQUE".into(),
         LinkKind::Duplicate => "DUPLICATE".into(),
         LinkKind::Iterate => "ITERATE".into(),
+        LinkKind::Table => "TABLE".into(),
         LinkKind::Other(o) => o.clone(),
     }
 }

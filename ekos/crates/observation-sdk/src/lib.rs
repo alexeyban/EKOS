@@ -107,6 +107,34 @@ impl ScanContext {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fingerprint(pub String);
 
+/// A directory a tool generated from sources another observer reads (RFC 0262 D5). Content
+/// observers skip it. ([`walk_observed`] does not: it feeds the build fingerprint, which must stay
+/// byte-identical.)
+///
+/// - Talend Studio's `poms/` beside a `talend.project` holds the Java, contexts and keys it builds
+///   from the job items: derived text, and `routines/system/keys.properties` holds the key that
+///   decrypts every password in the project.
+/// - Talend's `documentations/generated/` beside a `talend.project` holds the HTML and PDF pages
+///   Studio renders from the same items. Read as documents, their tables became `Table` objects
+///   that made a workspace without any schema look as if it had one (fixture E, devlog_346).
+pub fn is_generated_tool_output(dir: &std::path::Path) -> bool {
+    let name = dir.file_name().and_then(std::ffi::OsStr::to_str);
+    let beside_project = |d: Option<&std::path::Path>| {
+        d.is_some_and(|project| project.join("talend.project").is_file())
+    };
+    match name {
+        Some("poms") => beside_project(dir.parent()),
+        Some("generated") => {
+            let docs = dir.parent();
+            docs.and_then(std::path::Path::file_name)
+                .and_then(std::ffi::OsStr::to_str)
+                == Some("documentations")
+                && beside_project(docs.and_then(std::path::Path::parent))
+        }
+        _ => false,
+    }
+}
+
 /// Walk the source tree under `ctx.workspace_root` the way every connector does: `walkdir` with
 /// `filter_entry` pruning any **directory whose name** matches an `ignore_patterns` entry (name
 /// equality — not a glob, not a path prefix), plus a per-component `is_ignored` check on files.
@@ -115,18 +143,6 @@ pub struct Fingerprint(pub String);
 /// once per directory pruned by an ignore pattern. Both are `FnMut` so the caller accumulates.
 /// This is the single source of "what would `ekos build` observe" — `source_fingerprint` and
 /// `ekos config preview-scan` (RFC 0130) both go through it so they cannot drift.
-/// A directory a tool generated from sources another observer reads: Talend Studio's `poms/`
-/// beside a `talend.project` (RFC 0262 D5) holds the Java, contexts and keys it builds from the job
-/// items — derived text, and `routines/system/keys.properties` holds the key that decrypts every
-/// password in the project. Content observers skip it. ([`walk_observed`] does not: it feeds the
-/// build fingerprint, which must stay byte-identical.)
-pub fn is_generated_tool_output(dir: &std::path::Path) -> bool {
-    dir.file_name().and_then(std::ffi::OsStr::to_str) == Some("poms")
-        && dir
-            .parent()
-            .is_some_and(|project| project.join("talend.project").is_file())
-}
-
 pub fn walk_observed(
     ctx: &ScanContext,
     mut on_file: impl FnMut(&str, &std::fs::Metadata),
@@ -281,6 +297,26 @@ pub use ObserveError as ObserverError;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_talend_generated_directories_beside_a_project_are_generated_output() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("P");
+        for d in ["poms", "documentations/generated", "documentations/mine"] {
+            std::fs::create_dir_all(p.join(d)).unwrap();
+        }
+        std::fs::create_dir_all(dir.path().join("other/documentations/generated")).unwrap();
+        std::fs::write(p.join("talend.project"), "<x/>").unwrap();
+        assert!(is_generated_tool_output(&p.join("poms")));
+        assert!(is_generated_tool_output(
+            &p.join("documentations/generated")
+        ));
+        assert!(!is_generated_tool_output(&p.join("documentations/mine")));
+        assert!(!is_generated_tool_output(&p.join("documentations")));
+        assert!(!is_generated_tool_output(
+            &dir.path().join("other/documentations/generated")
+        ));
+    }
 
     /// RFC 0171 moved the walk into `source_manifest`; the hash must be byte-identical to the
     /// pre-0171 tuple-based one, or every workspace's `fingerprints.json` would miss once.

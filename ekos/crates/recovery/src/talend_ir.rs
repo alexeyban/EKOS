@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashMap};
 use ekos_semantic::transform_ir::{
     AggExpr, JoinKind, NodeId, TransformGraph, TransformNode, TransformOrigin,
 };
-use ekos_talend::{Category, Component, Job, LinkKind, Mapper, Param, qualified_refs};
+use ekos_talend::{Category, Component, EltMap, Job, LinkKind, Mapper, Param, qualified_refs};
 use serde_json::{Value, json};
 
 /// The IR source kind of a Talend job graph.
@@ -165,8 +165,13 @@ fn lower_component(b: &mut Builder, c: &Component) -> Segment {
     if let Some(mapper) = &c.mapper {
         return lower_tmap(b, c, mapper);
     }
+    if let Some(map) = &c.elt {
+        return lower_elt_map(b, c, map);
+    }
     let (node, extra) = match c.logical.as_str() {
         "db_input" => db_source(b.job, c),
+        "elt_input" => elt_io(b.job, c, true),
+        "elt_output" => elt_io(b.job, c, false),
         "db_output" | "db_output_bulk" | "db_output_bulk_exec" | "db_bulk_exec" | "db_scd" => {
             db_sink(b.job, c)
         }
@@ -232,15 +237,22 @@ pub fn data_io(job: &Job) -> DataIo {
     let mut sets: [std::collections::BTreeSet<String>; 4] = Default::default();
     for c in job.components.iter().filter(|c| c.mapper.is_none()) {
         let slot = match c.logical.as_str() {
-            "db_input" => 0,
-            "db_output" | "db_output_bulk" | "db_output_bulk_exec" | "db_bulk_exec" | "db_scd" => 1,
+            "db_input" | "elt_input" => 0,
+            "db_output"
+            | "db_output_bulk"
+            | "db_output_bulk_exec"
+            | "db_bulk_exec"
+            | "db_scd"
+            | "elt_output" => 1,
             "tRowGenerator" | "tFixedFlowInput" | "tHashInput" | "tBufferInput" | "tHashOutput"
             | "tBufferOutput" => continue,
             _ if c.category == Category::Input => 2,
             _ if c.category == Category::Output => 3,
             _ => continue,
         };
-        let name = if slot < 2 {
+        let name = if c.category == Category::Elt {
+            elt_table(job, c).0
+        } else if slot < 2 {
             db_table(job, c, &mut BTreeMap::new())
         } else {
             param_text(c, "FILENAME")
@@ -338,6 +350,179 @@ fn db_sink(job: &Job, c: &Component) -> (TransformNode, BTreeMap<String, Value>)
         },
         extra,
     )
+}
+
+/// The table an ELT input or output names (RFC 0264 §ELT): `ELT_TABLE_NAME`, or on an output
+/// with `USE_DIFFERENT_TABLE` the `DIFFERENT_TABLE_NAME`, and `ELT_SCHEMA_NAME`.
+fn elt_table(job: &Job, c: &Component) -> (Option<String>, Option<String>) {
+    let param = if param_text(c, "USE_DIFFERENT_TABLE") == Some("true") {
+        "DIFFERENT_TABLE_NAME"
+    } else {
+        "ELT_TABLE_NAME"
+    };
+    let table = param_text(c, param)
+        .map(|e| folded(job, e).0)
+        .filter(|t| !t.is_empty());
+    let schema = param_text(c, "ELT_SCHEMA_NAME")
+        .map(|e| job.fold(e))
+        .filter(|f| f.complete() && !f.text.is_empty())
+        .map(|f| f.text);
+    (table, schema)
+}
+
+/// `tELTInput` → `Source`, `tELTOutput` → `Sink` (the statement runs in the database).
+fn elt_io(job: &Job, c: &Component, input: bool) -> (TransformNode, BTreeMap<String, Value>) {
+    let (table, schema) = elt_table(job, c);
+    let mut extra = BTreeMap::new();
+    extra.insert("elt".into(), json!(true));
+    if let Some(engine) = &c.engine {
+        extra.insert("engine".into(), json!(engine));
+    }
+    if let Some(schema) = schema {
+        extra.insert("schema".into(), json!(schema));
+    }
+    if let Some(action) = param_text(c, "DATA_ACTION").filter(|_| !input) {
+        extra.insert("data_action".into(), json!(action));
+    }
+    let Some(object_name) = table else {
+        return unmapped(c, "ELT component without a table name", extra);
+    };
+    let columns = schema_columns(c);
+    let node = if input {
+        TransformNode::Source {
+            object_name,
+            columns,
+            alias: None,
+        }
+    } else {
+        TransformNode::Sink {
+            object_name,
+            columns,
+        }
+    };
+    (node, extra)
+}
+
+/// A `tELTMap`: a `Join` per joined input, then per output an optional `Filter` (its WHERE
+/// filters) and a `Calculate` per column. Rows enter by the link labelled with an input's table;
+/// expressions name inputs by alias. The text is SQL, recorded as written.
+fn lower_elt_map(b: &mut Builder, c: &Component, map: &EltMap) -> Segment {
+    let mut segment = Segment::default();
+    let aliases: Vec<&str> = map.inputs.iter().map(|i| i.alias.as_str()).collect();
+    let refs = |b: &Builder, text: &str| -> Value {
+        let refs: Vec<Value> = qualified_refs(text, &aliases)
+            .into_iter()
+            .map(|(alias, column)| {
+                let component = map.inputs.iter().find(|i| i.alias == alias).and_then(|i| {
+                    b.label_source
+                        .get(&(c.unique_name.clone(), i.table.clone()))
+                });
+                json!({"input": alias, "column": column, "component": component})
+            })
+            .collect();
+        Value::Array(refs)
+    };
+    let main = map.inputs.first().map(|i| i.table.clone());
+    let mut core: Option<usize> = None;
+    for joined in map.inputs.iter().skip(1) {
+        let keys: Vec<(String, String)> = joined
+            .join_keys
+            .iter()
+            .map(|(column, _, e)| (e.clone(), format!("{}.{column}", joined.alias)))
+            .collect();
+        let key_text = keys
+            .iter()
+            .map(|(l, _)| l.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let mut extra = BTreeMap::new();
+        extra.insert("elt".into(), json!(true));
+        extra.insert("lookup".into(), json!(joined.alias));
+        extra.insert("table".into(), json!(joined.table));
+        extra.insert("column_refs".into(), refs(b, &key_text));
+        let kind = match joined.join_type.as_str() {
+            "INNER_JOIN" => JoinKind::Inner,
+            "LEFT_OUTER_JOIN" => JoinKind::Left,
+            "RIGHT_OUTER_JOIN" => JoinKind::Right,
+            "FULL_OUTER_JOIN" => JoinKind::Full,
+            _ => JoinKind::Cross,
+        };
+        let node = TransformNode::Join {
+            left: NodeId(0),
+            right: NodeId(0),
+            keys,
+            kind,
+        };
+        let index = b.push(c, node, extra);
+        let left_label = match core {
+            Some(prev) => {
+                b.edge(prev, index);
+                segment.joins.push((index, None, joined.table.clone()));
+                None
+            }
+            None => main.clone(),
+        };
+        if let Some(label) = &left_label {
+            segment
+                .entries
+                .entry(label.clone())
+                .or_default()
+                .push(index);
+            segment
+                .joins
+                .push((index, Some(label.clone()), joined.table.clone()));
+        }
+        segment
+            .entries
+            .entry(joined.table.clone())
+            .or_default()
+            .push(index);
+        core = Some(index);
+    }
+    for output in &map.outputs {
+        let mut flags = BTreeMap::new();
+        flags.insert("elt".to_string(), json!(true));
+        flags.insert("elt_output".to_string(), json!(output.name));
+        if !output.clauses.is_empty() {
+            flags.insert("clauses".into(), json!(output.clauses));
+        }
+        let head = (!output.filters.is_empty()).then(|| {
+            let condition = output.filters.join(" and ");
+            let mut extra = flags.clone();
+            extra.insert("column_refs".into(), refs(b, &condition));
+            b.push(c, TransformNode::Filter { condition }, extra)
+        });
+        let feed = |b: &mut Builder, segment: &mut Segment, target: usize| match (head, core) {
+            (Some(h), _) if h != target => b.edge(h, target),
+            (_, Some(j)) => b.edge(j, target),
+            (_, None) => {
+                if let Some(m) = &main {
+                    segment.entries.entry(m.clone()).or_default().push(target);
+                }
+            }
+        };
+        if let Some(h) = head {
+            feed(b, &mut segment, h);
+        }
+        let mut exits = Vec::new();
+        for entry in &output.entries {
+            let expr = entry.expression.clone().unwrap_or_default();
+            let mut extra = flags.clone();
+            extra.insert("column_refs".into(), refs(b, &expr));
+            let node = TransformNode::Calculate {
+                output: format!("{}.{}", output.name, entry.name),
+                expr,
+            };
+            let index = b.push(c, node, extra);
+            feed(b, &mut segment, index);
+            exits.push(index);
+        }
+        if exits.is_empty() {
+            exits.extend(head);
+        }
+        segment.exits.insert(output.name.clone(), exits);
+    }
+    segment
 }
 
 /// The key columns an output updates by: the field options when they are used, else the

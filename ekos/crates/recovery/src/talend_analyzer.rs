@@ -120,7 +120,8 @@ impl CompilerPass for TalendAnalyzerPass {
     fn version(&self) -> &str {
         // v2: joblets and column lineage (RFC 0264 Phase 2).
         // v3: lineage through `tBufferOutput` → `tRunJob` and through files between jobs.
-        "v3"
+        // v4: ELT maps (RFC 0264 §ELT): IR, lineage, reads and writes.
+        "v4"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -542,6 +543,7 @@ fn emit_component(e: &mut Emit, job: &Job, scope: &str, c: &Component) -> KirId 
         "parameters": c.params,
         "schemas": c.schemas,
         "mapper": c.mapper,
+        "elt": c.elt,
         "in_joblet": scope.starts_with("joblet:"),
     });
     let name = format!("{}.{}", job.name, c.unique_name);
@@ -1126,6 +1128,121 @@ mod tests {
         assert_eq!(
             source.properties["query"]["text"],
             "SELECT ID, QTY, PRICE FROM ODS.SALES"
+        );
+    }
+
+    /// Synthetic, in fixture E's shape (RFC 0264 §ELT): two ELT inputs joined, one insert.
+    fn elt_project() -> Vec<ProjectFile> {
+        let input = |name: &str, schema: &str, table: &str, cols: &str| {
+            format!(
+                r#"<node componentName="tELTInput"><elementParameter field="TEXT" name="UNIQUE_NAME" value="{name}"/><elementParameter field="TEXT" name="ELT_TABLE_NAME" value="&quot;{table}&quot;"/><elementParameter field="TEXT" name="ELT_SCHEMA_NAME" value="&quot;{schema}&quot;"/><elementParameter field="MAPPING_TYPE" name="MAPPING" value="snowflake_id"/><metadata connector="TABLE" name="{name}">{cols}</metadata></node>"#
+            )
+        };
+        let job = format!(
+            r#"<talendfile:ProcessType xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd" defaultContext="Default"><context name="Default"/>{}{}
+  <node componentName="tELTMap"><elementParameter field="TEXT" name="UNIQUE_NAME" value="tELTMap_1"/>
+    <nodeData xsi:type="TalendDBMap:DBMapData">
+      <InputTables alias="S" joinType="NO_JOIN" name="S" tableName="STG.SALES"><DBMapperTableEntries name="PID"/><DBMapperTableEntries name="QTY"/></InputTables>
+      <InputTables alias="P" joinType="INNER_JOIN" name="P" tableName="ODS.PRODUCT"><DBMapperTableEntries expression="S.PID" join="true" name="ID" operator="="/><DBMapperTableEntries name="PRICE"/></InputTables>
+      <OutputTables name="table3" tableName="FACT"><DBMapperTableEntries expression="sum(S.QTY * P.PRICE)" name="AMOUNT"/><FilterEntries expression="S.QTY &gt; 0" filterKind="WHERE_FILTER" name="f"/><FilterEntries expression="GROUP BY S.PID" filterKind="OTHER_FILTER" name="g"/></OutputTables>
+    </nodeData>
+  </node>
+  <node componentName="tELTOutput"><elementParameter field="TEXT" name="UNIQUE_NAME" value="tELTOutput_1"/><elementParameter field="CLOSED_LIST" name="DATA_ACTION" value="INSERT"/><elementParameter field="TEXT" name="ELT_TABLE_NAME" value="&quot;FACT&quot;"/><elementParameter field="TEXT" name="ELT_SCHEMA_NAME" value="&quot;DWH&quot;"/><metadata connector="TABLE" name="tELTOutput_1"><column name="AMOUNT"/></metadata></node>
+  <connection connectorName="TABLE" label="STG.SALES" lineStyle="9" metaname="t1" source="tELTInput_1" target="tELTMap_1"/>
+  <connection connectorName="TABLE" label="ODS.PRODUCT" lineStyle="9" metaname="t2" source="tELTInput_2" target="tELTMap_1"/>
+  <connection connectorName="TABLE" label="FACT" lineStyle="9" metaname="table3" source="tELTMap_1" target="tELTOutput_1"/>
+</talendfile:ProcessType>"#,
+            input(
+                "tELTInput_1",
+                "STG",
+                "SALES",
+                r#"<column name="PID"/><column name="QTY"/>"#
+            ),
+            input(
+                "tELTInput_2",
+                "ODS",
+                "PRODUCT",
+                r#"<column name="ID"/><column name="PRICE"/>"#
+            ),
+        );
+        vec![
+            ProjectFile {
+                path: "talend.project".into(),
+                text: r#"<xmi:XMI xmlns:xmi="http://www.omg.org/XMI" xmlns:TalendProperties="http://www.talend.org/properties"><TalendProperties:Project label="E" technicalLabel="E"/></xmi:XMI>"#.into(),
+            },
+            ProjectFile {
+                path: "process/jElt_0.1.properties".into(),
+                text: r#"<xmi:XMI xmlns:xmi="http://www.omg.org/XMI" xmlns:TalendProperties="http://www.talend.org/properties"><TalendProperties:Property id="_elt" label="jElt" version="0.1"/><TalendProperties:ItemState path=""/></xmi:XMI>"#.into(),
+            },
+            ProjectFile {
+                path: "process/jElt_0.1.item".into(),
+                text: job,
+            },
+        ]
+    }
+
+    #[test]
+    fn an_elt_job_lowers_to_a_join_filter_and_sink_and_names_its_tables() {
+        use ekos_semantic::transform_ir::{JoinKind, TransformNode};
+        let project = read_project("", &elt_project());
+        assert!(project.diagnostics.is_empty(), "{:?}", project.diagnostics);
+        let job = &project.jobs[0];
+        let lowered = lower_job(job);
+        assert_eq!(lowered.mapped_components, lowered.data_components);
+        let g = &lowered.graph;
+        let name = |i: u32| {
+            lowered.extra[i as usize]["component"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let join = g
+            .nodes
+            .iter()
+            .find_map(|n| match n {
+                TransformNode::Join {
+                    left,
+                    right,
+                    kind,
+                    keys,
+                } => Some((*left, *right, *kind, keys)),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            (name(join.0.0), name(join.1.0)),
+            ("tELTInput_1".into(), "tELTInput_2".into())
+        );
+        assert_eq!(join.2, JoinKind::Inner);
+        assert_eq!(join.3, &vec![("S.PID".to_string(), "P.ID".to_string())]);
+        assert!(
+            g.nodes.iter().any(
+                |n| matches!(n, TransformNode::Filter { condition } if condition == "S.QTY > 0")
+            )
+        );
+        assert!(g.nodes.iter().any(
+            |n| matches!(n, TransformNode::Sink { object_name, .. } if object_name == "FACT")
+        ));
+        let calc = g
+            .nodes
+            .iter()
+            .position(|n| matches!(n, TransformNode::Calculate { .. }))
+            .unwrap();
+        assert_eq!(lowered.extra[calc]["clauses"], json!(["GROUP BY S.PID"]));
+        assert_eq!(
+            lowered.extra[calc]["column_refs"][1],
+            json!({"input": "P", "column": "PRICE", "component": "tELTInput_2"})
+        );
+        let io = crate::talend_ir::data_io(job);
+        assert_eq!(io.reads, ["PRODUCT", "SALES"]);
+        assert_eq!(io.writes, ["FACT"]);
+        let (kir, _, diagnostics) = project_kir(&project);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert!(
+            kir.objects
+                .iter()
+                .any(|o| o.properties.get("formula").and_then(Value::as_str)
+                    == Some("sum(SALES.QTY * PRODUCT.PRICE)"))
         );
     }
 

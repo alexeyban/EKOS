@@ -64,9 +64,14 @@
           "INSERT_OR_UPDATE": 19,
           "UPDATE": 7
         },
+        "elt_joins": {},
         "tmap_inputs": 58,
         "tmap_outputs": 58,
-        "tmap_expressions": 442
+        "tmap_expressions": 442,
+        "elt_inputs": 0,
+        "elt_outputs": 0,
+        "elt_expressions": 0,
+        "elt_filters": 0
       }
     }
   },
@@ -108,9 +113,14 @@
           "COMPONENT_OK": 2
         },
         "data_actions": {},
+        "elt_joins": {},
         "tmap_inputs": 3,
         "tmap_outputs": 4,
-        "tmap_expressions": 15
+        "tmap_expressions": 15,
+        "elt_inputs": 0,
+        "elt_outputs": 0,
+        "elt_expressions": 0,
+        "elt_filters": 0
       },
       "ACCOUNT5": {
         "items": {
@@ -154,9 +164,14 @@
           "SUBJOB_OK": 3
         },
         "data_actions": {},
+        "elt_joins": {},
         "tmap_inputs": 12,
         "tmap_outputs": 9,
-        "tmap_expressions": 66
+        "tmap_expressions": 66,
+        "elt_inputs": 0,
+        "elt_outputs": 0,
+        "elt_expressions": 0,
+        "elt_filters": 0
       },
       "AKHIL": {
         "items": {
@@ -211,9 +226,14 @@
           "COMPONENT_OK": 3
         },
         "data_actions": {},
+        "elt_joins": {},
         "tmap_inputs": 13,
         "tmap_outputs": 11,
-        "tmap_expressions": 61
+        "tmap_expressions": 61,
+        "elt_inputs": 0,
+        "elt_outputs": 0,
+        "elt_expressions": 0,
+        "elt_filters": 0
       }
     }
   },
@@ -247,9 +267,14 @@
           "SUBJOB_OK": 2
         },
         "data_actions": {},
+        "elt_joins": {},
         "tmap_inputs": 0,
         "tmap_outputs": 0,
-        "tmap_expressions": 0
+        "tmap_expressions": 0,
+        "elt_inputs": 0,
+        "elt_outputs": 0,
+        "elt_expressions": 0,
+        "elt_filters": 0
       },
       "SSS1": {
         "items": {
@@ -276,9 +301,14 @@
         },
         "triggers": {},
         "data_actions": {},
+        "elt_joins": {},
         "tmap_inputs": 0,
         "tmap_outputs": 0,
-        "tmap_expressions": 0
+        "tmap_expressions": 0,
+        "elt_inputs": 0,
+        "elt_outputs": 0,
+        "elt_expressions": 0,
+        "elt_filters": 0
       },
       "SSS_SOURCE": {
         "items": {
@@ -344,9 +374,115 @@
         "data_actions": {
           "INSERT": 2
         },
+        "elt_joins": {},
         "tmap_inputs": 2,
         "tmap_outputs": 3,
-        "tmap_expressions": 15
+        "tmap_expressions": 15,
+        "elt_inputs": 0,
+        "elt_outputs": 0,
+        "elt_expressions": 0,
+        "elt_filters": 0
+      }
+    }
+  },
+  "E": {
+    "commit": "facebc7cf8375707e159ab01c7d43cd0cbbedf20",
+    "projects": {
+      "POC_DATACLOUD": {
+        "items": {
+          "code": 11,
+          "context": 1,
+          "documentations": 3,
+          "metadata": 13,
+          "process": 66,
+          "sqlPatterns": 68
+        },
+        "jobs": 66,
+        "joblets": 0,
+        "joblet_uses": 0,
+        "components": 458,
+        "component_types": {
+          "tDie": 18,
+          "tELTInput": 75,
+          "tELTMap": 21,
+          "tELTOutput": 41,
+          "tFileInputDelimited": 4,
+          "tFileList": 3,
+          "tJavaRow": 14,
+          "tMap": 27,
+          "tOracleClose": 13,
+          "tOracleConnection": 2,
+          "tOracleInput": 19,
+          "tPostgresqlClose": 1,
+          "tPostgresqlConnection": 1,
+          "tPostgresqlInput": 4,
+          "tPostjob": 6,
+          "tPrejob": 6,
+          "tRunJob": 59,
+          "tSQLTemplate": 1,
+          "tSQLTemplateCommit": 1,
+          "tSQLTemplateFilterColumns": 1,
+          "tSQLTemplateFilterRows": 1,
+          "tSQLTemplateRollback": 1,
+          "tSnowflakeClose": 16,
+          "tSnowflakeConnection": 4,
+          "tSnowflakeInput": 14,
+          "tSnowflakeOutput": 27,
+          "tSnowflakeRow": 42,
+          "tWarn": 36
+        },
+        "links": 348,
+        "row_links": {
+          "FLOW": 54,
+          "ITERATE": 3,
+          "MAIN": 14,
+          "TABLE": 116
+        },
+        "triggers": {
+          "COMPONENT_ERROR": 6,
+          "COMPONENT_OK": 106,
+          "SUBJOB_ERROR": 36,
+          "SUBJOB_OK": 13
+        },
+        "data_actions": {
+          "DELETE": 20,
+          "INSERT": 21
+        },
+        "elt_joins": {
+          "INNER_JOIN": 13,
+          "LEFT_OUTER_JOIN": 44,
+          "NO_JOIN": 21
+        },
+        "tmap_inputs": 27,
+        "tmap_outputs": 30,
+        "tmap_expressions": 376,
+        "elt_inputs": 78,
+        "elt_outputs": 41,
+        "elt_expressions": 723,
+        "elt_filters": 25
+      },
+      "POC_DATACLOUD_GITHUB": {
+        "items": {
+          "code": 10,
+          "sqlPatterns": 68
+        },
+        "jobs": 0,
+        "joblets": 0,
+        "joblet_uses": 0,
+        "components": 0,
+        "component_types": {},
+        "links": 0,
+        "row_links": {},
+        "triggers": {},
+        "data_actions": {},
+        "elt_joins": {},
+        "tmap_inputs": 0,
+        "tmap_outputs": 0,
+        "tmap_expressions": 0,
+        "elt_inputs": 0,
+        "elt_outputs": 0,
+        "elt_expressions": 0,
+        "elt_filters": 0
       }
     }
   }

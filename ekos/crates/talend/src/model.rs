@@ -99,6 +99,10 @@ pub struct Component {
     /// Output schemas by connector (`FLOW`, `REJECT`, a tMap output's name, …).
     pub schemas: Vec<ConnectorSchema>,
     pub mapper: Option<Mapper>,
+    /// An ELT map's SQL mapping (`TalendDBMap:DBMapData`, RFC 0263 §ELT maps). Kept apart from
+    /// `mapper`: its expressions are SQL, not Java.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elt: Option<EltMap>,
     /// 1-based line of the `node` element in the item file.
     pub line: u32,
     /// Set on a component an expanded job took from a joblet (RFC 0263 §Joblets).
@@ -223,6 +227,40 @@ pub struct MapperOutput {
     pub entries: Vec<MapperEntry>,
 }
 
+/// A `tELTMap`'s mapping: a SELECT the database runs over the input tables.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct EltMap {
+    /// The first input is the FROM table; the others are joined to it, in the item's order.
+    pub inputs: Vec<EltInput>,
+    pub outputs: Vec<EltOutput>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct EltInput {
+    pub name: String,
+    /// The name expressions use for this input (`A`, `SUPPLY_WASTE`); the name when not set.
+    pub alias: String,
+    /// The table as the map names it (`STG.DIM_MATERIAL`): the `label` of the link that brings it.
+    pub table: String,
+    /// `NO_JOIN` (the FROM table), `INNER_JOIN`, `LEFT_OUTER_JOIN`, `RIGHT_OUTER_JOIN`, …
+    pub join_type: String,
+    /// Join keys: `(column, operator, expression)`, read `alias.column operator expression`.
+    pub join_keys: Vec<(String, String, String)>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct EltOutput {
+    /// The output's name: the `metaname` of the link that carries it to a `tELTOutput`.
+    pub name: String,
+    pub table: Option<String>,
+    /// Columns with their SQL expression (trimmed; `None` when empty).
+    pub entries: Vec<MapperEntry>,
+    /// `WHERE_FILTER` expressions, in order.
+    pub filters: Vec<String>,
+    /// `OTHER_FILTER` text (`GROUP BY …`, `ORDER BY …`), whitespace collapsed.
+    pub clauses: Vec<String>,
+}
+
 /// A row link between two components.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Link {
@@ -246,6 +284,8 @@ pub enum LinkKind {
     Unique,
     Duplicate,
     Iterate,
+    /// Between ELT components (`connectorName="TABLE"`): a table name handed on, no rows.
+    Table,
     /// Any other row connector, by its Talend name.
     Other(String),
 }

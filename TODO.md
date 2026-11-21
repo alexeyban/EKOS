@@ -7233,7 +7233,10 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
 - [x] Part 0: fixtures C (`KompallyAkhil/Talend2`) and D (`singhSurajsehwag/Talend_SQL`): Studio-written joblets,
       component-framework components, `tJavaRow`, `tJoin`; pinned, censused, no licence file (fetched, never
       vendored) (2026-11-21, devlog_345)
-- [ ] A fixture with ELT components and several database engines in one project
+- [x] A fixture with ELT components and several database engines in one project: fixture E
+      (`magrcrsdg/POC_DataCloudTalend`); ELT maps read, lowered to the IR and traced (911 lineages, 0 gaps, 85% of
+      data components mapped); Studio's `documentations/generated/` no longer read as documents (2026-11-21,
+      devlog_346)
 - [x] RFC 0262 umbrella, RFC 0263 model, RFC 0264 ledger (2026-11-21)
 - [x] `ekos-talend` reader: jobs, components, TABLE parameters, schemas, tMap, links/triggers, contexts,
       connections, schemas, routines, `tRunJob` calls, Java string folding; equals the census on fixture B

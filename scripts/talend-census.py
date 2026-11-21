@@ -67,6 +67,18 @@ def process_root(path: Path) -> ET.Element | None:
     return root
 
 
+def elt_census(mapper: ET.Element, totals: dict) -> None:
+    """An ELT map (`TalendDBMap:DBMapData`): SQL the database runs, not rows through Java."""
+    totals["elt_inputs"] += len(mapper.findall("InputTables"))
+    totals["elt_outputs"] += len(mapper.findall("OutputTables"))
+    totals["elt_expressions"] += sum(
+        1 for e in mapper.iter("DBMapperTableEntries") if (e.get("expression") or "").strip()
+    )
+    totals["elt_filters"] += sum(1 for _ in mapper.iter("FilterEntries"))
+    for table in mapper.findall("InputTables"):
+        totals["elt_joins"][table.get("joinType", "NO_JOIN")] += 1
+
+
 def job_census(job: Path, totals: dict) -> None:
     tree = ET.parse(job).getroot()
     for node in tree.findall("node"):
@@ -75,7 +87,9 @@ def job_census(job: Path, totals: dict) -> None:
             if param.get("name") == "DATA_ACTION":
                 totals["data_actions"][param.get("value")] += 1
         mapper = node.find("nodeData")
-        if mapper is not None:
+        if mapper is not None and mapper.find("InputTables") is not None:
+            elt_census(mapper, totals)
+        elif mapper is not None:
             totals["tmap_inputs"] += len(mapper.findall("inputTables"))
             totals["tmap_outputs"] += len(mapper.findall("outputTables"))
             totals["tmap_expressions"] += sum(
@@ -98,6 +112,11 @@ def project_census(project: Path) -> dict:
         "tmap_inputs": 0,
         "tmap_outputs": 0,
         "tmap_expressions": 0,
+        "elt_inputs": 0,
+        "elt_outputs": 0,
+        "elt_expressions": 0,
+        "elt_filters": 0,
+        "elt_joins": collections.Counter(),
     }
     jobs = sorted((project / "process").rglob(ITEM_GLOB)) if (project / "process").is_dir() else []
     for job in jobs:
@@ -119,6 +138,7 @@ def project_census(project: Path) -> dict:
         "row_links": dict(sorted(totals.pop("row_links").items())),
         "triggers": dict(sorted(totals.pop("triggers").items())),
         "data_actions": dict(sorted(totals.pop("data_actions").items())),
+        "elt_joins": dict(sorted(totals.pop("elt_joins").items())),
         **totals,
     }
 

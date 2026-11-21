@@ -55,7 +55,9 @@ use sha2::{Digest, Sha256};
 /// - **v10** (RFC 0262, 2026-11-21): the `file` observer also skips Talend's generated `poms/`, and
 ///   redaction covers the escaped `enc\:routine.…\:` form in generated context files and the
 ///   project's encryption key (`routine.encryption.key.v1=…`), both stored by earlier versions.
-pub const PIPELINE_LOGIC_VERSION: u32 = 10;
+/// - **v11** (RFC 0262, 2026-11-21): the `localdocs` observer skips Talend's generated
+///   `documentations/generated/` (pages Studio renders from the job items).
+pub const PIPELINE_LOGIC_VERSION: u32 = 11;
 
 /// SHA-256 content hash used to address artifacts and ledger entries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

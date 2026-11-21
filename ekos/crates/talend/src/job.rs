@@ -6,8 +6,8 @@ use roxmltree::{Document, Node};
 
 use crate::catalogue::classify;
 use crate::model::{
-    Component, ConnectorSchema, ContextGroup, ContextVar, Job, Link, LinkKind, Mapper, MapperEntry,
-    MapperInput, MapperOutput, Param, Trigger, TriggerKind,
+    Component, ConnectorSchema, ContextGroup, ContextVar, EltInput, EltMap, EltOutput, Job, Link,
+    LinkKind, Mapper, MapperEntry, MapperInput, MapperOutput, Param, Trigger, TriggerKind,
 };
 use crate::xml::{attr, attr_bool, attr_string, children, column, line, xsi_type};
 
@@ -125,12 +125,17 @@ fn component(doc: &Document, node: &Node) -> Component {
         type_version: attr_string(node, "componentVersion"),
         category: classified.category,
         logical: classified.logical,
-        engine: classified.engine,
+        engine: classified
+            .engine
+            .or_else(|| elt_engine(classified.category, &params)),
         label: text("LABEL").filter(|l| !l.is_empty()),
         schemas: children(node, "metadata").map(|m| schema(&m)).collect(),
         mapper: children(node, "nodeData")
             .find(|d| xsi_type(d).is_some_and(|t| t.ends_with("MapperData")))
             .map(|d| mapper(&d)),
+        elt: children(node, "nodeData")
+            .find(|d| xsi_type(d).is_some_and(|t| t.ends_with("DBMapData")))
+            .map(|d| elt_map(&d)),
         line: line(doc, node),
         component_type,
         params,
@@ -293,6 +298,82 @@ fn mapper(node: &Node) -> Mapper {
     }
 }
 
+/// A generic ELT component's engine is its `MAPPING` (`snowflake_id` → `snowflake`).
+fn elt_engine(
+    category: crate::catalogue::Category,
+    params: &BTreeMap<String, Param>,
+) -> Option<String> {
+    if category != crate::catalogue::Category::Elt {
+        return None;
+    }
+    let mapping = params.get("MAPPING").and_then(Param::text)?;
+    let engine = mapping.strip_suffix("_id").unwrap_or(mapping);
+    (!engine.is_empty()).then(|| engine.to_ascii_lowercase())
+}
+
+/// An ELT map (`TalendDBMap:DBMapData`, RFC 0263 §ELT maps).
+fn elt_map(node: &Node) -> EltMap {
+    let entries = |t: &Node| -> Vec<MapperEntry> {
+        children(t, "DBMapperTableEntries")
+            .map(|e| MapperEntry {
+                name: attr_string(&e, "name").unwrap_or_default(),
+                talend_type: None,
+                expression: attr(&e, "expression")
+                    .map(str::trim)
+                    .filter(|x| !x.is_empty())
+                    .map(str::to_string),
+                operator: attr_string(&e, "operator"),
+            })
+            .collect()
+    };
+    let filters = |t: &Node, kind: &str| -> Vec<String> {
+        children(t, "FilterEntries")
+            .filter(|f| attr(f, "filterKind") == Some(kind))
+            .filter_map(|f| attr(&f, "expression"))
+            .map(|e| e.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|e| !e.is_empty())
+            .collect()
+    };
+    EltMap {
+        inputs: children(node, "InputTables")
+            .map(|t| {
+                let name = attr_string(&t, "name").unwrap_or_default();
+                let join_keys = children(&t, "DBMapperTableEntries")
+                    .filter(|e| attr_bool(e, "join"))
+                    .filter_map(|e| {
+                        let expression = attr(&e, "expression")?.trim();
+                        (!expression.is_empty()).then(|| {
+                            (
+                                attr_string(&e, "name").unwrap_or_default(),
+                                attr_string(&e, "operator").unwrap_or_else(|| "=".into()),
+                                expression.to_string(),
+                            )
+                        })
+                    })
+                    .collect();
+                EltInput {
+                    alias: attr_string(&t, "alias")
+                        .filter(|a| !a.is_empty())
+                        .unwrap_or_else(|| name.clone()),
+                    table: attr_string(&t, "tableName").unwrap_or_else(|| name.clone()),
+                    join_type: attr_string(&t, "joinType").unwrap_or_else(|| "NO_JOIN".into()),
+                    name,
+                    join_keys,
+                }
+            })
+            .collect(),
+        outputs: children(node, "OutputTables")
+            .map(|t| EltOutput {
+                name: attr_string(&t, "name").unwrap_or_default(),
+                table: attr_string(&t, "tableName"),
+                entries: entries(&t),
+                filters: filters(&t, "WHERE_FILTER"),
+                clauses: filters(&t, "OTHER_FILTER"),
+            })
+            .collect(),
+    }
+}
+
 /// A mapper table's expression filter, when it is switched on and not empty.
 fn table_filter(node: &Node) -> Option<String> {
     if !attr_bool(node, "activateExpressionFilter") {
@@ -352,6 +433,7 @@ fn connection(doc: &Document, node: &Node, job: &mut Job) {
         "UNIQUE" => LinkKind::Unique,
         "DUPLICATE" => LinkKind::Duplicate,
         "ITERATE" => LinkKind::Iterate,
+        "TABLE" => LinkKind::Table,
         other => LinkKind::Other(other.to_string()),
     };
     job.links.push(Link {

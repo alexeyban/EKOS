@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+**Talend: ELT maps and several engines in one project** (RFC 0262–0264)
+- `tELTInput` → `tELTMap` → `tELTOutput` jobs (SQL the database runs) are read: the map's inputs with alias,
+  table, join type and keys, its outputs with SQL expressions, WHERE filters and `GROUP BY` clauses. They are
+  lowered into the Transformation IR (joins, filters, a `Calculate` per column, sinks) and given column lineage:
+  each `alias.column` binds to the input table its link brings, joins and filters are the step's conditions, and an
+  ELT `DELETE` matches on every column it names. A generic ELT component's engine comes from its `MAPPING`.
+- Fixture E (`magrcrsdg/POC_DataCloudTalend`, Talend Cloud 8.0.1; Snowflake, Oracle, PostgreSQL, MySQL and
+  SingleStore in one project): every count equals the census; data components mapped 35% → 85%; 911 column
+  lineages, none with a gap, 771 links between jobs; 1,538 secret values in the sources, 0 stored.
+- The documents observer no longer reads the HTML and PDF pages Studio generates under
+  `documentations/generated/`. Their tables became `Table` objects, so a project without any DDL looked as if it
+  had a schema and `ekos check refs` reported its 136 table names as errors instead of coverage gaps.
+  `PIPELINE_LOGIC_VERSION` 11.
+
 **Security: secrets in Talend component JSON** (RFC 0043)
 - Talend's newer components (Snowflake, cloud storage, …) keep their settings as JSON inside one attribute.
   A password written there in plain text was stored by `ekos build`; it is now removed (`json-secret-property`),

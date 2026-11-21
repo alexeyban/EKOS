@@ -51,12 +51,16 @@ its command line; `scripts/talend-census.py` counts what each contains; the comm
 | B | `BelkacemYerfa/talend-project-big-data` @ `3d46b6f2` | a real Talend Open Studio 8.0.1 project: 14 jobs, 272 components of 24 types, 232 links |
 | C | `KompallyAkhil/Talend2` @ `8e8887c0` | joblets as Studio writes them (9; a data joblet used twice, once as a lookup; trigger joblets chained), component-framework (Snowflake) components, `tJavaRow`, `tJoin`, 3 projects, 30 jobs |
 | D | `singhSurajsehwag/Talend_SQL` @ `3f98d699` | a two-output joblet used through its second port; 3 projects, 26 jobs |
+| E | `magrcrsdg/POC_DataCloudTalend` @ `facebc7c` | ELT components (`tELTInput`/`tELTMap`/`tELTOutput`, 75/21/41) and several engines in one project (Snowflake, Oracle, PostgreSQL, a file input); Talend Cloud 8.0.1; 66 jobs, 458 components |
 
 C and D were chosen from the seven public repositories holding joblet items (GitHub code search for
 `model:JobletProcess`, 2026-11-21) as the ones whose jobs use them; none has a licence file, so they are fetched
-like A and B. ELT components and several engines in one project are still not covered by a fixture.
+like A and B. E is the only public project found with generic ELT maps (code search for `tELTMap`,
+`tELTPostgresqlMap`, `tELTMysqlMap`, `tELTOracleMap`, `tELTMSSqlMap`, 2026-11-21); it has no licence file, and its
+items name a real database account (URL, user), so nothing from it is quoted in public material beyond counts and
+table or column names.
 
-Tests that need a fixture read its path from `EKOS_TALEND_FIXTURE_B` (`_C`, `_D`) and skip, saying so, when it is unset.
+Tests that need a fixture read its path from `EKOS_TALEND_FIXTURE_B` (`_C`, `_D`, `_E`) and skip, saying so, when it is unset.
 Everything else is tested on small synthetic items written for the test, each marked as such.
 
 ## Ledger kinds

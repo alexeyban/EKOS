@@ -151,6 +151,27 @@ component has none, and keeps the JSON with the `storedValue` of every setting n
 values from the text (RFC 0043, `json-secret-property`): the regex rules could not tie a value to the name written
 after it, and one candidate project held a plain-text password there.
 
+## ELT maps (amendment, 2026-11-21)
+
+An ELT job does not move rows through Java: `tELTInput` names a table, `tELTMap` writes a SELECT over its inputs
+and `tELTOutput` runs it into a table (`INSERT … SELECT`, `DELETE … WHERE`) inside the database. Fixture E shows the
+item shape:
+
+- `tELTMap`'s `nodeData` is `TalendDBMap:DBMapData`: `InputTables` (`name`, `alias`, `tableName`, `joinType`
+  `NO_JOIN` | `INNER_JOIN` | `LEFT_OUTER_JOIN` | …, entries with `join="true"`, `operator` and the join
+  `expression`) and `OutputTables` (`name`, `tableName`, entries with an SQL `expression`, `FilterEntries` with
+  `filterKind` `WHERE_FILTER` | `OTHER_FILTER` — the second holds `GROUP BY …` text).
+- Links between ELT components are `connectorName="TABLE"`, line style 9. A link into the map carries the input's
+  `tableName` as its `label`; a link out carries the output's `name` as its `metaname`.
+- `tELTInput` / `tELTOutput` name their table in `ELT_TABLE_NAME` / `ELT_SCHEMA_NAME` (Java strings, folded);
+  `tELTOutput` has `DATA_ACTION` and, with `USE_DIFFERENT_TABLE`, writes `DIFFERENT_TABLE_NAME` instead.
+- The engine of a generic ELT component is its `MAPPING` (`snowflake_id` → `snowflake`); an engine form
+  (`tELTOracleMap`) names it in the type.
+
+The model keeps the map as `Component.elt` (`EltMap`: inputs with alias, table, join type and join keys; outputs
+with table, entries, WHERE filters and other clauses) beside `mapper`, never inside it: expressions are SQL, not
+Java, and the translation path must not read one as the other. A `TABLE` link is `LinkKind::Table`.
+
 ## Diagnostics
 
 A file that does not parse is a diagnostic with its path; the rest of the project is still read. Every diagnostic

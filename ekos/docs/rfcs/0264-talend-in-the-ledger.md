@@ -167,6 +167,20 @@ facts in the evidence a model would be shown (16 of 17 before the job `reads`/`w
 select lists parsed), `NB_QTE_VENTE = count(DIM_PRODUIT.ID_DIM_PRODUIT)`, and `ODS_VENTE.QTE_VENTE` back to
 `ICOM_*_VENTE.csv` (the `tFileList` mask, set through `tSetGlobalVar`). Joblets: 0 in fixture B.
 
+### ELT lineage (2026-11-21)
+
+`tELTOutput` is a table target (`ELT_TABLE_NAME`, or `DIFFERENT_TABLE_NAME`; schema `ELT_SCHEMA_NAME`). Each of its
+columns comes from the map output its link names (`metaname`): the entry's SQL expression, with every
+`alias.column` bound to the input of that alias, and that input to the `tELTInput` whose link label is the input's
+`tableName`. The step is kind `elt_map`; its conditions are the joins (`inner join B on B.K = A.K`), the WHERE
+filters (`where …`) and the other clauses (`group by …`) as written. `tELTInput` is a `read` step whose origin is its
+table's column, `by_name: false` (the map names the column). A `DELETE` writes no values: every column it names is
+a match key (`update_key`), whatever the schema's key flags say. A reference whose alias no input declares, or an
+input no link brings, is a gap with its text — never a guess. Quoted identifiers (`"A"."X"`) are not read in this
+amendment; fixture E has none.
+
+The job's `reads` / `writes` include ELT tables, so ELT jobs join `ColumnFeeds` like any other.
+
 ## Registry and guards
 
 All ten kinds (`TalendJoblet` and `TalendColumnLineage` from Phase 2) are structurally keyed rows in `custom_kinds::REGISTRY`; `every_pipeline_custom_kind_is_registered`

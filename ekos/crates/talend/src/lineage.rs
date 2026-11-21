@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::catalogue::Category;
 use crate::java::{qualified_refs, replace_qualified};
-use crate::model::{Component, Job, JobletOrigin, Link, LinkKind, Mapper, Param};
+use crate::model::{Component, EltMap, Job, JobletOrigin, Link, LinkKind, Mapper, Param};
 
 /// Longest walk back from one target column, in components.
 pub const MAX_DEPTH: usize = 64;
@@ -276,7 +276,8 @@ pub fn job_lineage(job: &Job, queries: &dyn QueryReader) -> Vec<ColumnLineage> {
 }
 
 fn target_kind(c: &Component) -> Option<TargetKind> {
-    if c.logical.starts_with("db_output") || matches!(c.logical.as_str(), "db_bulk_exec" | "db_scd")
+    if c.logical.starts_with("db_output")
+        || matches!(c.logical.as_str(), "db_bulk_exec" | "db_scd" | "elt_output")
     {
         return Some(TargetKind::Table);
     }
@@ -338,17 +339,20 @@ impl<'a> Walker<'a> {
         kind: TargetKind,
         column: &crate::model::Column,
     ) -> ColumnLineage {
+        let (name, schema) = if c.logical == "elt_output" {
+            self.elt_table(c)
+        } else {
+            let param = if kind == TargetKind::File {
+                "FILENAME"
+            } else {
+                "TABLE"
+            };
+            (self.folded_name(c, param), self.db_schema(c))
+        };
         let target = Target {
             kind,
-            name: self.folded_name(
-                c,
-                if kind == TargetKind::File {
-                    "FILENAME"
-                } else {
-                    "TABLE"
-                },
-            ),
-            schema: self.db_schema(c),
+            name,
+            schema,
             column: column
                 .db_name
                 .clone()
@@ -358,10 +362,10 @@ impl<'a> Walker<'a> {
                 .flatten(),
         };
         let data_action = param_text(c, "DATA_ACTION").map(str::to_string);
-        let update_key = column.key
-            && data_action
-                .as_deref()
-                .is_some_and(|a| a.contains("UPDATE") || a.contains("DELETE"));
+        let action = data_action.as_deref().unwrap_or_default();
+        // An ELT `DELETE` writes no value: every column it names is matched on (RFC 0264 §ELT).
+        let update_key = (c.logical == "elt_output" && action == "DELETE")
+            || (column.key && (action.contains("UPDATE") || action.contains("DELETE")));
         let inputs = self.pass_inputs(c, &column.name);
         let mut steps = vec![Step {
             component: c.unique_name.clone(),
@@ -516,8 +520,12 @@ impl<'a> Walker<'a> {
         if let Some(m) = &c.mapper {
             return self.tmap(c, m, &port.output, col);
         }
+        if let Some(m) = &c.elt {
+            return self.elt_map(c, m, &port.output, col);
+        }
         match c.logical.as_str() {
             "db_input" => self.db_input(c, col),
+            "elt_input" => self.elt_input(c, col),
             "tAggregateRow" | "tAggregateSortedRow" => self.aggregate(c, col),
             "tJavaRow" => self.java_row(c, col),
             "tRowGenerator" | "tFixedFlowInput" => generated(c, col),
@@ -543,15 +551,22 @@ impl<'a> Walker<'a> {
 
     /// The upstream port a row link brings `column` from.
     fn upstream(&self, link: &Link, column: &str) -> Port {
-        let output = match self
-            .job
-            .component(&link.from)
-            .and_then(|c| c.mapper.as_ref())
-        {
-            Some(m) => link
+        let from = self.job.component(&link.from);
+        let outputs: Option<Vec<&str>> = from.and_then(|c| {
+            c.mapper
+                .as_ref()
+                .map(|m| m.outputs.iter().map(|o| o.name.as_str()).collect())
+                .or_else(|| {
+                    c.elt
+                        .as_ref()
+                        .map(|m| m.outputs.iter().map(|o| o.name.as_str()).collect())
+                })
+        });
+        let output = match outputs {
+            Some(names) => link
                 .metaname
                 .clone()
-                .or_else(|| (m.outputs.len() == 1).then(|| m.outputs[0].name.clone()))
+                .or_else(|| (names.len() == 1).then(|| names[0].to_string()))
                 .unwrap_or_default(),
             None => String::new(),
         };
@@ -776,6 +791,113 @@ impl<'a> Walker<'a> {
             ));
         }
         d
+    }
+
+    /// One column of an ELT map output: its SQL expression, each `alias.column` bound to the
+    /// input of that alias and through the link labelled with the input's table (RFC 0264 §ELT).
+    fn elt_map(&self, c: &Component, m: &EltMap, output: &str, col: &str) -> Derived {
+        let out = m
+            .outputs
+            .iter()
+            .find(|o| o.name == output)
+            .or_else(|| (m.outputs.len() == 1).then(|| &m.outputs[0]));
+        let Some(out) = out else {
+            return gapped(c, col, &format!("ELT map has no output {output}"));
+        };
+        let Some(text) = out
+            .entries
+            .iter()
+            .find(|e| e.name == col)
+            .and_then(|e| e.expression.clone())
+        else {
+            return gapped(
+                c,
+                col,
+                &format!("ELT map output {} has no expression for {col}", out.name),
+            );
+        };
+        let qualifiers: Vec<String> = m.inputs.iter().map(|i| i.alias.clone()).collect();
+        // Every `x.column` the SQL names, an alias or not: one no input declares is a gap.
+        let named = sql_qualifiers(&text);
+        let q: Vec<&str> = named.iter().map(String::as_str).collect();
+        let mut inputs = Vec::new();
+        let mut refs = BTreeMap::new();
+        let mut unresolved = Vec::new();
+        for (alias, column) in qualified_refs(&text, &q) {
+            let link = m
+                .inputs
+                .iter()
+                .find(|i| i.alias == alias)
+                .and_then(|i| self.link_into(c, &i.table));
+            match link {
+                Some(l) => {
+                    refs.insert((alias, column.clone()), inputs.len());
+                    inputs.push(self.upstream(l, &column));
+                }
+                None => unresolved.push(format!("{alias}.{column}")),
+            }
+        }
+        let mut d = Derived {
+            step: Some(step(
+                c,
+                Some(&out.name),
+                col,
+                "elt_map",
+                Some(&text),
+                &inputs,
+                elt_conditions(m, out),
+            )),
+            inputs,
+            template: Template::Expression {
+                text,
+                qualifiers,
+                refs,
+            },
+            ..Derived::default()
+        };
+        if !unresolved.is_empty() {
+            d.gap = Some(gap(
+                c,
+                col,
+                &format!("no ELT input brings {}", unresolved.join(", ")),
+            ));
+        }
+        d
+    }
+
+    /// A `tELTInput` column: the table's column, named by the map.
+    fn elt_input(&self, c: &Component, col: &str) -> Derived {
+        let (table, schema) = self.elt_table(c);
+        let o = Origin::Table {
+            table,
+            schema,
+            column: col.to_string(),
+            component: c.unique_name.clone(),
+            by_name: false,
+        };
+        let mut s = step(c, None, col, "read", None, &[], Vec::new());
+        s.inputs = vec![o.label()];
+        Derived {
+            step: Some(s),
+            template: Template::Text(o.label()),
+            origins: vec![o],
+            ..Derived::default()
+        }
+    }
+
+    /// The table an ELT input or output names: `ELT_TABLE_NAME` (or, on an output with
+    /// `USE_DIFFERENT_TABLE`, `DIFFERENT_TABLE_NAME`) in `ELT_SCHEMA_NAME`.
+    fn elt_table(&self, c: &Component) -> (String, Option<String>) {
+        let param = if param_text(c, "USE_DIFFERENT_TABLE") == Some("true") {
+            "DIFFERENT_TABLE_NAME"
+        } else {
+            "ELT_TABLE_NAME"
+        };
+        let schema = param_text(c, "ELT_SCHEMA_NAME")
+            .map(|e| self.job.fold(e))
+            .filter(|f| f.complete() && !f.text.is_empty())
+            .map(|f| f.text);
+        (self.folded_name(c, param), schema)
     }
 
     /// The row link into `c` whose label is `label`.
@@ -1162,6 +1284,73 @@ fn join_conditions(m: &Mapper, used: &HashSet<&str>) -> Vec<String> {
             text
         })
         .collect()
+}
+
+/// Every identifier in SQL `text` that qualifies another (`A` in `A.ID`), outside quotes, once.
+fn sql_qualifiers(text: &str) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$';
+    let (mut found, mut quote, mut i) = (Vec::<String>::new(), None::<u8>, 0);
+    while i < bytes.len() {
+        let c = bytes[i];
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if c == b'\'' || c == b'"' => quote = Some(c),
+            None if (c.is_ascii_alphabetic() || c == b'_') && (i == 0 || !ident(bytes[i - 1])) => {
+                let end = (i..bytes.len())
+                    .find(|&j| !ident(bytes[j]))
+                    .unwrap_or(bytes.len());
+                let word = &text[i..end];
+                let qualifies = bytes.get(end) == Some(&b'.')
+                    && bytes
+                        .get(end + 1)
+                        .is_some_and(|&b| b.is_ascii_alphabetic() || b == b'_')
+                    && (i == 0 || bytes[i - 1] != b'.');
+                if qualifies && !found.iter().any(|f| f == word) {
+                    found.push(word.to_string());
+                }
+                i = end;
+                continue;
+            }
+            None => {}
+        }
+        i += 1;
+    }
+    found
+}
+
+/// What decides an ELT output's rows: every join (in SQL each one shapes the row set), the WHERE
+/// filters and the other clauses (`GROUP BY …`), as written.
+fn elt_conditions(m: &EltMap, out: &crate::model::EltOutput) -> Vec<String> {
+    let mut conditions: Vec<String> = m
+        .inputs
+        .iter()
+        .skip(1)
+        .map(|i| {
+            let kind = match i.join_type.as_str() {
+                "INNER_JOIN" => "inner join".to_string(),
+                "LEFT_OUTER_JOIN" => "left join".to_string(),
+                "RIGHT_OUTER_JOIN" => "right join".to_string(),
+                "FULL_OUTER_JOIN" => "full join".to_string(),
+                "NO_JOIN" | "CROSS_JOIN" => "cross join".to_string(),
+                other => other.to_ascii_lowercase().replace('_', " "),
+            };
+            let mut text = format!("{kind} {} {}", i.table, i.alias);
+            let keys: Vec<String> = i
+                .join_keys
+                .iter()
+                .map(|(column, op, e)| format!("{}.{column} {op} {e}", i.alias))
+                .collect();
+            if !keys.is_empty() {
+                text.push_str(&format!(" on {}", keys.join(" and ")));
+            }
+            text
+        })
+        .collect();
+    conditions.extend(out.filters.iter().map(|f| format!("where {f}")));
+    conditions.extend(out.clauses.iter().cloned());
+    conditions
 }
 
 fn filter_condition(c: &Component) -> Option<String> {
@@ -1556,6 +1745,140 @@ mod tests {
             Origin::File { file, iterated_by: Some(l), .. }
                 if file == "/data/in/SALES_*.csv" && l == "tFileList_1"
         ));
+    }
+
+    /// Synthetic, in the shape of fixture E's `copy_stg_to_ods_*` jobs (RFC 0264 §ELT): two ELT
+    /// inputs, a map with a left join, one output deleting matched rows and one inserting.
+    fn elt_job() -> crate::Job {
+        let input = |name: &str, schema: &str, cols: &[&str]| {
+            node(
+                "tELTInput",
+                name,
+                &format!(
+                    r#"<elementParameter field="TEXT" name="ELT_TABLE_NAME" value="&quot;DIM_M&quot;"/><elementParameter field="TEXT" name="ELT_SCHEMA_NAME" value="&quot;{schema}&quot;"/><elementParameter field="MAPPING_TYPE" name="MAPPING" value="snowflake_id"/>{}"#,
+                    meta(cols)
+                ),
+            )
+        };
+        let output = |name: &str, action: &str, cols: &[&str]| {
+            node(
+                "tELTOutput",
+                name,
+                &format!(
+                    r#"<elementParameter field="CLOSED_LIST" name="DATA_ACTION" value="{action}"/><elementParameter field="TEXT" name="ELT_TABLE_NAME" value="&quot;DIM_M&quot;"/><elementParameter field="TEXT" name="ELT_SCHEMA_NAME" value="&quot;ODS&quot;"/>{}"#,
+                    meta(cols)
+                ),
+            )
+        };
+        let map = node(
+            "tELTMap",
+            "tELTMap_1",
+            r#"<nodeData xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="TalendDBMap:DBMapData">
+              <InputTables alias="A" joinType="NO_JOIN" name="A" tableName="STG.DIM_M">
+                <DBMapperTableEntries join="true" name="ID"/><DBMapperTableEntries name="NAME"/>
+              </InputTables>
+              <InputTables alias="B" joinType="LEFT_OUTER_JOIN" name="B" tableName="ODS.DIM_M">
+                <DBMapperTableEntries expression="A.ID " join="true" name="ID" operator="="/><DBMapperTableEntries name="PK"/>
+              </InputTables>
+              <OutputTables name="table3" tableName="DIM_M">
+                <DBMapperTableEntries expression="B.PK" name="PK"/>
+                <FilterEntries expression="B.PK is not null" filterKind="WHERE_FILTER" name="f1"/>
+              </OutputTables>
+              <OutputTables name="table5" tableName="DIM_M">
+                <DBMapperTableEntries expression="upper(A.NAME) || 'x.y'" name="NAME"/>
+                <DBMapperTableEntries expression="hash(to_variant(A.ID)) " name="PK"/>
+                <DBMapperTableEntries expression="current_date()" name="LOADED"/>
+                <DBMapperTableEntries expression="C.GONE" name="LOST"/>
+                <FilterEntries expression="GROUP BY&#13;&#10;  A.NAME, A.ID" filterKind="OTHER_FILTER" name="f2"/>
+              </OutputTables>
+            </nodeData>"#,
+        );
+        let table_link = |label: &str, meta: &str, from: &str, to: &str| {
+            format!(
+                r#"<connection connectorName="TABLE" label="{label}" lineStyle="9" metaname="{meta}" source="{from}" target="{to}"/>"#
+            )
+        };
+        let body = [
+            input("tELTInput_1", "STG", &["ID", "NAME"]),
+            input("tELTInput_2", "ODS", &["ID", "PK"]),
+            map,
+            output("tELTOutput_1", "INSERT", &["NAME", "PK", "LOADED", "LOST"]),
+            output("tELTOutput_2", "DELETE", &["PK"]),
+            table_link("STG.DIM_M", "table1", "tELTInput_1", "tELTMap_1"),
+            table_link("ODS.DIM_M", "table2", "tELTInput_2", "tELTMap_1"),
+            table_link("DIM_M", "table5", "tELTMap_1", "tELTOutput_1"),
+            table_link("DIM_M", "table3", "tELTMap_1", "tELTOutput_2"),
+        ]
+        .concat();
+        one_job("process/ODS/copy_stg_to_ods_DIM_M_0.1.item", &body)
+    }
+
+    #[test]
+    fn an_elt_map_binds_each_alias_to_the_input_table_its_link_brings() {
+        let job = elt_job();
+        let map = job.component("tELTMap_1").unwrap();
+        assert_eq!(
+            map.engine.as_deref(),
+            None,
+            "a map without MAPPING has none"
+        );
+        assert_eq!(
+            job.component("tELTInput_1").unwrap().engine.as_deref(),
+            Some("snowflake")
+        );
+        assert!(job.links.iter().all(|l| l.kind == LinkKind::Table));
+        let all = job_lineage(&job, &NoQueries);
+        let insert: Vec<&ColumnLineage> = all
+            .iter()
+            .filter(|l| l.component == "tELTOutput_1")
+            .collect();
+        let name = insert.iter().find(|l| l.target.column == "NAME").unwrap();
+        assert_eq!(
+            (name.target.name.as_str(), name.target.schema.as_deref()),
+            ("DIM_M", Some("ODS"))
+        );
+        assert_eq!(name.formula, "upper(DIM_M.NAME) || 'x.y'");
+        assert!(matches!(
+            name.origins.as_slice(),
+            [Origin::Table { table, schema: Some(s), column, by_name: false, .. }]
+                if table == "DIM_M" && s == "STG" && column == "NAME"
+        ));
+        let step = name.steps.iter().find(|s| s.kind == "elt_map").unwrap();
+        assert_eq!(step.output.as_deref(), Some("table5"));
+        assert_eq!(
+            step.conditions,
+            [
+                "left join ODS.DIM_M B on B.ID = A.ID",
+                "GROUP BY A.NAME, A.ID"
+            ]
+        );
+        assert!(name.gaps.is_empty());
+        let loaded = insert.iter().find(|l| l.target.column == "LOADED").unwrap();
+        assert_eq!(loaded.formula, "current_date()");
+        assert!(loaded.origins.is_empty() && loaded.gaps.is_empty());
+        let lost = insert.iter().find(|l| l.target.column == "LOST").unwrap();
+        assert!(
+            lost.gaps[0].reason.contains("no ELT input brings C.GONE"),
+            "{:?}",
+            lost.gaps
+        );
+    }
+
+    #[test]
+    fn an_elt_delete_matches_on_every_column_it_names() {
+        let all = job_lineage(&elt_job(), &NoQueries);
+        let delete = all.iter().find(|l| l.component == "tELTOutput_2").unwrap();
+        assert_eq!(delete.data_action.as_deref(), Some("DELETE"));
+        assert!(delete.update_key);
+        assert!(matches!(
+            delete.origins.as_slice(),
+            [Origin::Table { schema: Some(s), column, .. }] if s == "ODS" && column == "PK"
+        ));
+        let step = delete.steps.iter().find(|s| s.kind == "elt_map").unwrap();
+        assert!(
+            step.conditions
+                .contains(&"where B.PK is not null".to_string())
+        );
     }
 
     /// A job from `nodes` and `links`, read alone.
