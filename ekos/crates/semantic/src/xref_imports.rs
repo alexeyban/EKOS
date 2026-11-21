@@ -338,18 +338,16 @@ fn js_missing(file: &str, base: &str) -> Finding {
 }
 
 /// Where an import is written: its evidence's location, else the importing object's file.
+///
+/// One importing object can stand for many files (every `old/bin/*.pl` is package `main`), so the
+/// same import has several evidence records in no fixed order. The first location in path order
+/// is taken: a different pick per run would change the file, and with it the fingerprint.
 fn import_location(
-    opts: &Options<'_>,
-    rel: &ekos_kir::KirRelationship,
+    located: Option<&(String, Option<u32>)>,
     from: &KirObject,
     declaring: &HashMap<uuid::Uuid, String>,
 ) -> (Option<String>, Option<u32>) {
-    let located = rel
-        .evidence
-        .first()
-        .and_then(|e| opts.locate.and_then(|f| f(e)));
     let file = located
-        .as_ref()
         .map(|l| l.0.clone())
         .or_else(|| str_prop(from, "source_path"))
         .or_else(|| declaring.get(&from.id.0).cloned())
@@ -357,10 +355,37 @@ fn import_location(
     (file, located.and_then(|l| l.1))
 }
 
+/// The first location, in path then line order, of every evidence record of every import edge.
+fn import_locations(
+    opts: &Options<'_>,
+) -> HashMap<(uuid::Uuid, uuid::Uuid), (String, Option<u32>)> {
+    let mut out: HashMap<(uuid::Uuid, uuid::Uuid), (String, Option<u32>)> = HashMap::new();
+    let Some(locate) = opts.locate else {
+        return out;
+    };
+    for rel in opts
+        .relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::DependsOn)
+    {
+        for at in rel.evidence.iter().filter_map(locate) {
+            out.entry((rel.from.0, rel.to.0))
+                .and_modify(|best| {
+                    if at < *best {
+                        *best = at.clone();
+                    }
+                })
+                .or_insert(at);
+        }
+    }
+    out
+}
+
 pub(crate) fn check<'a>(objects: &'a [KirObject], opts: &Options<'_>) -> Imports<'a> {
     let by_id: HashMap<KirId, &KirObject> = objects.iter().map(|o| (o.id, o)).collect();
     let declaring = crate::xref::declaring_files(objects, opts.relationships);
     let ws = Workspace::build(objects, opts);
+    let located = import_locations(opts);
 
     let mut out = Imports {
         results: Vec::new(),
@@ -374,7 +399,7 @@ pub(crate) fn check<'a>(objects: &'a [KirObject], opts: &Options<'_>) -> Imports
         let (Some(from), Some(to)) = (by_id.get(&rel.from), by_id.get(&rel.to)) else {
             continue;
         };
-        let (file, line) = import_location(opts, rel, from, &declaring);
+        let (file, line) = import_location(located.get(&(rel.from.0, rel.to.0)), from, &declaring);
         let (extractor, outcome, finding) = match ws.verdict(to, file.as_deref()) {
             Verdict::Checked(extractor, outcome, finding) => (extractor, outcome, finding),
             Verdict::External => {
@@ -553,6 +578,37 @@ mod tests {
         assert_eq!(d.severity, Severity::Error);
         assert_eq!(d.candidates[0].name, "LedgerSMB::Report");
         assert_eq!(r.metrics.external, 1);
+    }
+
+    #[test]
+    fn a_package_declared_in_several_files_is_reported_in_the_first_whatever_the_order() {
+        // Every legacy script is `package lsmb_legacy`; which file the finding names (part of its
+        // fingerprint) must not depend on the order the ledger hands the edges back in.
+        let scripts = [
+            file("old/bin/is.pl"),
+            file("old/bin/aa.pl"),
+            file("old/bin/pe.pl"),
+        ];
+        let legacy = pkg("PerlPackage", "lsmb_legacy");
+        let own = pkg("PerlPackage", "LedgerSMB::Form");
+        let missing = pkg("PerlPackage", "LedgerSMB::Tax");
+        let mut rels: Vec<_> = scripts.iter().map(|f| contains(f, &legacy)).collect();
+        rels.push(contains(&scripts[0], &own));
+        rels.push(dep(&legacy, &missing));
+        let mut objects = scripts.to_vec();
+        objects.extend([legacy, own, missing]);
+        let forward = run(&objects, &rels);
+        rels.reverse();
+        objects.reverse();
+        let backward = run(&objects, &rels);
+        let [d] = forward.diagnostics.as_slice() else {
+            panic!("{:?}", forward.diagnostics)
+        };
+        assert_eq!(d.source.file.as_deref(), Some("old/bin/aa.pl"));
+        assert_eq!(
+            serde_json::to_value(&forward.diagnostics).unwrap(),
+            serde_json::to_value(&backward.diagnostics).unwrap()
+        );
     }
 
     #[test]

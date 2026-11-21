@@ -30,7 +30,7 @@ fn reads_writes_kir_id(kind_label: &str, from: KirId, to: KirId) -> KirId {
 /// quotes (`"x"`, `` `x` ``, `[x]`) taken off each dot-separated part. DDL keeps the quotes it was
 /// written with (`CREATE TABLE "DIM_CLIENT"`) while an ETL tool names the same table bare
 /// (RFC 0264: Talend's `TABLE` parameter); without this they never matched.
-fn name_key(name: &str) -> String {
+pub(crate) fn name_key(name: &str) -> String {
     name.split('.')
         .map(|part| {
             let part = part.trim();

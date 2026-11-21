@@ -1,0 +1,7 @@
+# RFC 0262 Slice 1 eval: 20 questions on fixture B (`scripts/talend-fixtures.sh`), with expected
+# citations. Run from a workspace built over the fixture:
+#   ekos eval run --datasets-dir <repo>/evals/talend --dataset talend-20 [--evidence-only]
+version: 1
+datasets:
+  talend-20:
+    files: [structure.yaml, lineage.yaml, adversarial.yaml]

@@ -35,7 +35,8 @@ impl Observer for JavaObserver {
             if e.file_type().is_dir()
                 && let Some(name) = e.file_name().to_str()
             {
-                return !ctx.ignore_patterns.iter().any(|p| name == p.as_str());
+                return !ctx.ignore_patterns.iter().any(|p| name == p.as_str())
+                    && !is_talend_generated(e.path(), name);
             }
             true
         }) {
@@ -108,6 +109,16 @@ impl Observer for JavaObserver {
     }
 }
 
+/// Talend Studio writes the code it generates for every job under `<project>/poms/` (RFC 0262 D5).
+/// That Java is derived from the job items, which the Talend observer reads; reading it again as
+/// source would duplicate every job as Java types and slow the pipeline down.
+fn is_talend_generated(dir: &std::path::Path, name: &str) -> bool {
+    name == "poms"
+        && dir
+            .parent()
+            .is_some_and(|project| project.join("talend.project").is_file())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +187,26 @@ mod tests {
         let b = JavaObserver::new().scan(&ctx).await.unwrap();
 
         assert_eq!(a.artifacts[0].id, b.artifacts[0].id);
+    }
+
+    #[tokio::test]
+    async fn generated_java_under_a_talend_project_is_skipped() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("P");
+        std::fs::create_dir_all(p.join("poms/jobs/process/j/src")).unwrap();
+        std::fs::create_dir_all(p.join("code/routines")).unwrap();
+        std::fs::create_dir_all(dir.path().join("other/poms")).unwrap();
+        std::fs::write(p.join("talend.project"), "<x/>").unwrap();
+        std::fs::write(p.join("poms/jobs/process/j/src/Main.java"), SAMPLE).unwrap();
+        std::fs::write(p.join("code/routines/R.java"), SAMPLE).unwrap();
+        std::fs::write(dir.path().join("other/poms/Kept.java"), SAMPLE).unwrap();
+        let ctx = ScanContext::new(dir.path());
+        let pkg = JavaObserver::new().scan(&ctx).await.unwrap();
+        let mut paths = paths_of(&pkg);
+        paths.sort_unstable();
+        assert_eq!(
+            paths,
+            vec!["P/code/routines/R.java", "other/poms/Kept.java"]
+        );
     }
 }

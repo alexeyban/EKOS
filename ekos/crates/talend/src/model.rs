@@ -259,6 +259,10 @@ pub struct Trigger {
     /// The `RUN_IF` condition, as written (Java).
     pub condition: Option<String>,
     pub line: u32,
+    /// The joblet port the connector names, when the link leaves a joblet use
+    /// (`TRIGGER_OUTPUT_1`); Studio then marks the trigger by its line style alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

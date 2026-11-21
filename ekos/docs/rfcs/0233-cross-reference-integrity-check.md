@@ -277,3 +277,20 @@ table/routine name now — resolved / ambiguous / unresolved / built_in — for 
 
 The ≤ 10 % false `UnreachableSymbol` criterion is met vacuously on both: every unreached routine is dynamic. The
 check claims dead code only where no dynamic caller exists, which on these estates is nowhere.
+
+## 12. Amendment (2026-11-21): quoted names, Talend steps, stable output
+
+- **Quoted names.** `NameIndex` compared names lower-cased only, so a table defined as `"DIM_CLIENT"` never
+  matched an ETL step naming `DIM_CLIENT` — Talend fixture B reported all 83 of its job inputs and outputs
+  unresolved (53 after dedup) while `data_lineage` linked them. It now uses `data_lineage::name_key` (each
+  dot-separated part unquoted — `"x"`, `` `x` ``, `[x]` — then lower-cased), the rule lineage links by. Fixture B:
+  53 errors → 0, 65 of 65 Talend references resolved. LedgerSMB (unquoted DDL): 155 findings before and after.
+- **Talend steps.** A `TransformNode` from a `.item` is extractor `talend` and cross-system, like Pentaho. Its
+  in-memory hand-overs (`in_memory`, `tHashOutput` → `tHashInput`), generated rows (`generated_rows`) and file
+  components name no relation and are not checked.
+- **Stable output.** Measuring LedgerSMB showed the report changing from run to run: the file of a finding on an
+  object declared in many files (Perl `package lsmb_legacy` in every `old/bin/*.pl`) came from whichever `Contains`
+  edge was read first, and the file is part of the fingerprint, so baselines broke. The declaring file is now the
+  first in path order, an import's location the first of all its evidence in path order, and of several findings
+  with one fingerprint the one earliest in its file is kept. Four consecutive runs on LedgerSMB now give
+  byte-identical reports (they differed before).

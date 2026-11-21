@@ -11,7 +11,7 @@
 //! ledger — `ekos commit` writes them to the integrity index file and `ekos check refs` recomputes.
 //!
 //! Phase 1 sources (RFC 0233 §4): `Procedure`/`View` `reads`/`writes` (lines from their
-//! `ProcedureStatement`s), Pentaho and SQL `TransformNode` Source/Sink `object_name`, `JavaMethod`
+//! `ProcedureStatement`s), Pentaho, Talend and SQL `TransformNode` Source/Sink `object_name`, `JavaMethod`
 //! `sql[]`, and dbt `source()` tables against the schemas other systems define. Routine calls are
 //! Phase 2: built-ins (`coalesce`, `now`) are recorded as calls and are not yet told apart.
 
@@ -302,8 +302,17 @@ pub(crate) fn declaring_files(
         .iter()
         .filter(|r| r.kind == ekos_kir::RelationshipKind::Contains)
     {
+        // An object declared in several files (Perl's `package main` in every script) keeps the
+        // first in path order, whatever order the relationships come in: the file is part of a
+        // finding's fingerprint.
         if let Some(f) = files.get(&r.from.0) {
-            out.entry(r.to.0).or_insert_with(|| (*f).to_string());
+            out.entry(r.to.0)
+                .and_modify(|kept: &mut String| {
+                    if *f < kept.as_str() {
+                        *kept = (*f).to_string();
+                    }
+                })
+                .or_insert_with(|| (*f).to_string());
         }
     }
     out
@@ -950,6 +959,13 @@ fn transform_ref<'a>(o: &'a KirObject, out: &mut Vec<Reference<'a>>) {
         Some("Sink") => "write",
         _ => return,
     };
+    // A Talend in-memory hand-over (`tHashOutput` → `tHashInput`) or generated rows name no
+    // relation of any schema (RFC 0264).
+    let flagged =
+        |key: &str| o.properties.get(key).and_then(serde_json::Value::as_bool) == Some(true);
+    if flagged("in_memory") || flagged("generated_rows") {
+        return;
+    }
     let Some(written) = str_prop(o, "object_name") else {
         return;
     };
@@ -959,17 +975,29 @@ fn transform_ref<'a>(o: &'a KirObject, out: &mut Vec<Reference<'a>>) {
         .rsplit_once(':')
         .map(|(f, _)| f.split('#').next().unwrap_or(f).to_string())
         .or_else(|| str_prop(o, "source_path"));
-    let pentaho = file
-        .as_deref()
-        .is_some_and(|f| f.ends_with(".ktr") || f.ends_with(".kjb"));
+    let ends = |exts: &[&str]| {
+        file.as_deref()
+            .is_some_and(|f| exts.iter().any(|e| f.ends_with(e)))
+    };
+    let extractor = if ends(&[".ktr", ".kjb"]) {
+        "pentaho"
+    } else if ends(&[".item"]) {
+        "talend"
+    } else {
+        "sql-transform"
+    };
+    // A Talend file component reads or writes a file, not a relation.
+    if extractor == "talend" && o.properties.contains_key("file") {
+        return;
+    }
     out.push(Reference {
         source: o,
         written,
         access,
-        extractor: if pentaho { "pentaho" } else { "sql-transform" },
+        extractor,
         file,
         line: None,
-        cross_system: pentaho,
+        cross_system: extractor != "sql-transform",
         uncertain: false,
         against_foreign: false,
         expects: Expect::Relation,
@@ -1139,12 +1167,20 @@ pub fn check(objects: &[KirObject], opts: &Options<'_>) -> Report {
     }
 }
 
-/// Keeps a diagnostic under its fingerprint (the first one wins), with `[xref.severity]` applied.
+/// Keeps one diagnostic per fingerprint, with `[xref.severity]` applied: the earliest in its file
+/// (line, then object name), so the one shown does not depend on the order objects were read in.
 fn record(found: &mut BTreeMap<String, Diagnostic>, opts: &Options<'_>, mut d: Diagnostic) {
     if let Some(s) = opts.severity.get(&d.kind) {
         d.severity = *s;
     }
-    found.entry(d.fingerprint.clone()).or_insert(d);
+    let order = |d: &Diagnostic| (d.source.line, d.source.object_name.clone());
+    match found.get_mut(&d.fingerprint) {
+        Some(kept) if order(&d) < order(kept) => *kept = d,
+        Some(_) => {}
+        None => {
+            found.insert(d.fingerprint.clone(), d);
+        }
+    }
 }
 
 /// Counts one judged reference, overall and for its extractor.
@@ -1722,6 +1758,30 @@ mod tests {
         assert_eq!(d.source.extractor, "pentaho");
         assert_eq!(d.source.access, "write");
         assert_eq!(d.source.file.as_deref(), Some("etl/load.ktr"));
+        assert!(d.cross_system);
+    }
+
+    #[test]
+    fn a_talend_step_is_checked_unless_it_names_no_relation() {
+        let node = |index: u32, object: &str| {
+            KirObject::new(
+                format!("p/process/jLoad_0.1.item:{index}"),
+                ObjectKind::Custom("TransformNode".into()),
+            )
+            .with_property("node_type", json!("Sink"))
+            .with_property("object_name", json!(object))
+        };
+        let table_step = node(1, "DIM_GONE");
+        let hash = node(2, "hash:jLoad").with_property("in_memory", json!(true));
+        let generated =
+            node(3, "jLoad.tRowGenerator_1").with_property("generated_rows", json!(true));
+        let file = node(4, "out/report.csv").with_property("file", json!("out/report.csv"));
+        let r = run(&[table("t"), table_step, hash, generated, file]);
+        let [d] = r.diagnostics.as_slice() else {
+            panic!("{:?}", r.diagnostics)
+        };
+        assert_eq!(d.target_spec.written, "DIM_GONE");
+        assert_eq!(d.source.extractor, "talend");
         assert!(d.cross_system);
     }
 

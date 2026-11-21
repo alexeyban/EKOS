@@ -74,6 +74,10 @@ pub struct Target {
     pub name: String,
     pub schema: Option<String>,
     pub column: String,
+    /// The column's place in the target's schema, for a file or a buffer: what another job reads
+    /// back is bound by position, not by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<usize>,
 }
 
 /// Where a value enters the job.
@@ -97,6 +101,19 @@ pub enum Origin {
         /// The `tFileList` whose current file this is.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         iterated_by: Option<String>,
+        /// The column's place in the input's schema (a delimited file is read by position).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<usize>,
+    },
+    /// A row a called job handed back through its `tBufferOutput` (`tRunJob` with an output).
+    Job {
+        /// The called job, as the `tRunJob` names it.
+        job: String,
+        column: String,
+        component: String,
+        /// The column's place in the `tRunJob` schema, which binds to the buffer's by position.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        position: Option<usize>,
     },
     Generated {
         column: String,
@@ -114,6 +131,7 @@ impl Origin {
                 let base = file.rsplit(['/', '\\']).next().unwrap_or(file);
                 format!("{base}.{column}")
             }
+            Self::Job { job, column, .. } => format!("{job}.{column}"),
             Self::Generated {
                 expression: Some(e),
                 ..
@@ -234,6 +252,10 @@ const PASS_THROUGH: &[&str] = &[
     "tBufferOutput",
     "tSampleRow",
     "tFilterColumns",
+    // Validates rows; its main output passes them on unchanged.
+    "tSchemaComplianceCheck",
+    // Logs a message; rows pass through.
+    "tWarn",
     "joblet_input",
     "joblet_output",
 ];
@@ -331,6 +353,9 @@ impl<'a> Walker<'a> {
                 .db_name
                 .clone()
                 .unwrap_or_else(|| column.name.clone()),
+            position: (kind != TargetKind::Table)
+                .then(|| position_of(c, &column.name))
+                .flatten(),
         };
         let data_action = param_text(c, "DATA_ACTION").map(str::to_string);
         let update_key = column.key
@@ -497,6 +522,8 @@ impl<'a> Walker<'a> {
             "tJavaRow" => self.java_row(c, col),
             "tRowGenerator" | "tFixedFlowInput" => generated(c, col),
             "tHashInput" | "tBufferInput" => self.hash_input(c, col),
+            _ if c.component_type == "tRunJob" => run_job(c, col),
+            _ if c.component_type == "tJoin" => self.join(c, col),
             l if PASS_THROUGH.contains(&l) => self.pass(c, col),
             _ if c.category == Category::Input && c.component_type.starts_with("tFileInput") => {
                 self.file_input(c, col)
@@ -579,6 +606,61 @@ impl<'a> Walker<'a> {
             step: Some(step(c, None, col, "pass", None, &inputs, conditions)),
             inputs,
             template,
+            ..Derived::default()
+        }
+    }
+
+    /// `tJoin`: a column comes from the lookup when `LOOKUP_COLS` maps it there, else from the
+    /// main row under its own name. An inner join decides which rows reach every column; a left
+    /// join only the columns read from the lookup.
+    fn join(&self, c: &Component, col: &str) -> Derived {
+        let links = self
+            .inbound
+            .get(c.unique_name.as_str())
+            .cloned()
+            .unwrap_or_default();
+        let main = links.iter().find(|l| l.kind != LinkKind::Lookup);
+        let lookup = links.iter().find(|l| l.kind == LinkKind::Lookup);
+        let flag = |name: &str| param_text(c, name) == Some("true");
+        let from_lookup = if flag("USE_LOOKUP_COLS") {
+            rows(c, "LOOKUP_COLS")
+                .iter()
+                .find(|r| r.get("OUTPUT_COLUMN").map(String::as_str) == Some(col))
+                .and_then(|r| r.get("LOOKUP_COLUMN").cloned())
+        } else {
+            None
+        };
+        let port = match (&from_lookup, main, lookup) {
+            (Some(column), _, Some(l)) => self.upstream(l, column),
+            (None, Some(m), _) => self.upstream(m, col),
+            _ => return gapped(c, col, "no row link brings this column in"),
+        };
+        let inner = flag("USE_INNER_JOIN");
+        let mut conditions = Vec::new();
+        if inner || from_lookup.is_some() {
+            let on: Vec<String> = rows(c, "JOIN_KEY")
+                .iter()
+                .filter_map(|r| {
+                    Some(format!(
+                        "{} = {}",
+                        r.get("INPUT_COLUMN")?,
+                        r.get("LOOKUP_COLUMN")?
+                    ))
+                })
+                .collect();
+            let with = lookup
+                .and_then(|l| l.label.clone())
+                .unwrap_or_else(|| "lookup".into());
+            conditions.push(format!(
+                "{} join {with} on {}",
+                if inner { "inner" } else { "left" },
+                on.join(" and ")
+            ));
+        }
+        let inputs = vec![port];
+        Derived {
+            step: Some(step(c, None, col, "pass", None, &inputs, conditions)),
+            inputs,
             ..Derived::default()
         }
     }
@@ -865,6 +947,7 @@ impl<'a> Walker<'a> {
             column: col.to_string(),
             component: c.unique_name.clone(),
             iterated_by,
+            position: position_of(c, col),
         };
         let mut s = step(c, None, col, "read", None, &[], Vec::new());
         s.inputs = vec![o.label()];
@@ -952,6 +1035,36 @@ fn gap(c: &Component, column: &str, reason: &str) -> Gap {
         component_type: c.component_type.clone(),
         column: column.to_string(),
         reason: reason.to_string(),
+    }
+}
+
+/// A column's index in a component's main schema.
+fn position_of(c: &Component, column: &str) -> Option<usize> {
+    flow_columns(c).iter().position(|k| k.name == column)
+}
+
+/// A `tRunJob` output column: the called job's `tBufferOutput` column at the same position,
+/// linked across jobs by the caller of [`job_lineage`] (the walk stays inside one job).
+fn run_job(c: &Component, col: &str) -> Derived {
+    let Some(job) = param_text(c, "PROCESS") else {
+        return gapped(c, col, "tRunJob names no job");
+    };
+    let Some(position) = position_of(c, col) else {
+        return gapped(c, col, "column not in the tRunJob schema");
+    };
+    let o = Origin::Job {
+        job: job.to_string(),
+        column: col.to_string(),
+        component: c.unique_name.clone(),
+        position: Some(position),
+    };
+    let mut s = step(c, None, col, "read", None, &[], Vec::new());
+    s.inputs = vec![o.label()];
+    Derived {
+        step: Some(s),
+        template: Template::Text(o.label()),
+        origins: vec![o],
+        ..Derived::default()
     }
 }
 
@@ -1443,6 +1556,175 @@ mod tests {
             Origin::File { file, iterated_by: Some(l), .. }
                 if file == "/data/in/SALES_*.csv" && l == "tFileList_1"
         ));
+    }
+
+    /// A job from `nodes` and `links`, read alone.
+    fn one_job(path: &str, body: &str) -> crate::Job {
+        let xml = format!(
+            r#"<talendfile:ProcessType xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd" defaultContext="Default"><context name="Default"/>{body}</talendfile:ProcessType>"#
+        );
+        let p = read_project(
+            "",
+            &[ProjectFile {
+                path: path.into(),
+                text: xml,
+            }],
+        );
+        p.jobs[0].clone()
+    }
+
+    #[test]
+    fn a_buffer_and_a_file_target_record_positions_and_a_run_job_is_an_origin() {
+        // Child: a table read handed back through `tBufferOutput` and written to a file.
+        let child = one_job(
+            "process/jChild_0.1.item",
+            &format!(
+                "{}{}{}{}{}",
+                node(
+                    "tPostgresqlInput",
+                    "tDBInput_1",
+                    &format!(
+                        r#"<elementParameter field="DBTABLE" name="TABLE" value="&quot;SRC&quot;"/>{}"#,
+                        meta(&["A", "B"])
+                    )
+                ),
+                node("tBufferOutput", "tBufferOutput_1", &meta(&["A", "B"])),
+                node(
+                    "tFileOutputDelimited",
+                    "tFileOutputDelimited_1",
+                    &format!(
+                        r#"<elementParameter field="FILE" name="FILENAME" value="&quot;/out/x.csv&quot;"/>{}"#,
+                        meta(&["A", "B"])
+                    )
+                ),
+                link("row1", "tDBInput_1", "tBufferOutput_1", ""),
+                link("row2", "tBufferOutput_1", "tFileOutputDelimited_1", ""),
+            ),
+        );
+        let lineages = job_lineage(&child, &NoQueries);
+        let buffer: Vec<_> = lineages
+            .iter()
+            .filter(|l| l.target.kind == TargetKind::Buffer)
+            .map(|l| (l.target.column.as_str(), l.target.position))
+            .collect();
+        assert_eq!(buffer, [("A", Some(0)), ("B", Some(1))]);
+        let file = lineages
+            .iter()
+            .find(|l| l.target.kind == TargetKind::File && l.target.column == "B")
+            .unwrap();
+        assert_eq!(
+            (file.target.name.as_str(), file.target.position),
+            ("/out/x.csv", Some(1))
+        );
+        assert_eq!(file.formula, "SRC.B");
+
+        // Parent: the called job's rows, under the parent's own column names, into a table.
+        let parent = one_job(
+            "process/jParent_0.1.item",
+            &format!(
+                "{}{}{}",
+                node(
+                    "tRunJob",
+                    "tRunJob_1",
+                    &format!(
+                        r#"<elementParameter field="PROCESS_TYPE" name="PROCESS" value="jChild"/>{}"#,
+                        meta(&["X", "Y"])
+                    )
+                ),
+                node(
+                    "tPostgresqlOutput",
+                    "tDBOutput_1",
+                    &format!(
+                        r#"<elementParameter field="DBTABLE" name="TABLE" value="&quot;DST&quot;"/>{}"#,
+                        meta(&["X", "Y"])
+                    )
+                ),
+                link("row1", "tRunJob_1", "tDBOutput_1", ""),
+            ),
+        );
+        let y = job_lineage(&parent, &NoQueries)
+            .into_iter()
+            .find(|l| l.target.column == "Y")
+            .unwrap();
+        assert!(y.gaps.is_empty(), "{:?}", y.gaps);
+        assert_eq!(y.formula, "jChild.Y");
+        assert_eq!(
+            y.origins,
+            [Origin::Job {
+                job: "jChild".into(),
+                column: "Y".into(),
+                component: "tRunJob_1".into(),
+                position: Some(1),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_join_takes_lookup_columns_from_the_lookup_and_says_how_it_joins() {
+        let job = one_job(
+            "process/jJoin_0.1.item",
+            &format!(
+                "{}{}{}{}{}{}{}",
+                node(
+                    "tPostgresqlInput",
+                    "tDBInput_1",
+                    &format!(
+                        r#"<elementParameter field="DBTABLE" name="TABLE" value="&quot;ORDERS&quot;"/>{}"#,
+                        meta(&["ID", "CUST"])
+                    )
+                ),
+                node(
+                    "tPostgresqlInput",
+                    "tDBInput_2",
+                    &format!(
+                        r#"<elementParameter field="DBTABLE" name="TABLE" value="&quot;CUSTOMERS&quot;"/>{}"#,
+                        meta(&["CUST_ID", "NAME"])
+                    )
+                ),
+                node(
+                    "tJoin",
+                    "tJoin_1",
+                    &format!(
+                        r#"<elementParameter field="CHECK" name="USE_INNER_JOIN" value="true"/><elementParameter field="CHECK" name="USE_LOOKUP_COLS" value="true"/>{}{}{}"#,
+                        table(
+                            "JOIN_KEY",
+                            &[&[("INPUT_COLUMN", "CUST"), ("LOOKUP_COLUMN", "CUST_ID")]]
+                        ),
+                        table(
+                            "LOOKUP_COLS",
+                            &[&[("OUTPUT_COLUMN", "CUSTOMER"), ("LOOKUP_COLUMN", "NAME")]]
+                        ),
+                        meta(&["ID", "CUSTOMER"])
+                    )
+                ),
+                node(
+                    "tPostgresqlOutput",
+                    "tDBOutput_1",
+                    &format!(
+                        r#"<elementParameter field="DBTABLE" name="TABLE" value="&quot;DST&quot;"/>{}"#,
+                        meta(&["ID", "CUSTOMER"])
+                    )
+                ),
+                link("row1", "tDBInput_1", "tJoin_1", ""),
+                link("row2", "tDBInput_2", "tJoin_1", r#"lineStyle="8""#),
+                link("row3", "tJoin_1", "tDBOutput_1", ""),
+            ),
+        );
+        let all = job_lineage(&job, &NoQueries);
+        let get = |c: &str| all.iter().find(|l| l.target.column == c).unwrap();
+        assert_eq!(get("CUSTOMER").formula, "CUSTOMERS.NAME");
+        assert_eq!(get("ID").formula, "ORDERS.ID");
+        for c in ["ID", "CUSTOMER"] {
+            let l = get(c);
+            assert!(l.gaps.is_empty(), "{:?}", l.gaps);
+            assert!(
+                l.steps
+                    .iter()
+                    .any(|s| s.conditions == ["inner join row2 on CUST = CUST_ID"]),
+                "{:?}",
+                l.steps
+            );
+        }
     }
 
     #[test]

@@ -2334,6 +2334,7 @@ dependencies = [
  "tokio",
  "tracing",
  "walkdir",
+ "zip",
 ]
 
 [[package]]

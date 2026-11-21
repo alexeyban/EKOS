@@ -7,6 +7,11 @@
 //! and items in folders v1 does not read, are recorded by path only, so the model can count them.
 //! Generated code (`poms/`, `temp/`, `target/`) and screenshots are never captured.
 //!
+//! A project exported with Studio's "Export items" is a `.zip` holding the project directory. It
+//! is read in place: each member is an artifact at `<archive>!/<member>` (the JAR URL
+//! convention), so nothing is unpacked into the workspace. Members are read up to
+//! [`MAX_MEMBER_BYTES`], archives up to [`MAX_ARCHIVE_BYTES`].
+//!
 //! No XML is parsed here: the analyzer reads the artifacts into `ekos_talend::Project`. Secrets are
 //! removed from the text by `ekos build`'s redaction pass (RFC 0043) before the artifacts are
 //! stored, and the model never keeps a password value either way.
@@ -21,6 +26,84 @@ use sha2::{Digest, Sha256};
 
 /// The connector name every Talend artifact carries.
 pub const CONNECTOR: &str = "talend";
+
+/// Separates an archive's path from a member's path in an artifact path.
+pub const ARCHIVE_SEPARATOR: &str = "!/";
+/// Largest archive opened.
+pub const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
+/// Largest member read out of an archive (uncompressed).
+pub const MAX_MEMBER_BYTES: u64 = 32 * 1024 * 1024;
+
+/// Items-export archives among the observed paths, opened: archive path → its bytes and the
+/// members of a Talend project it holds, as `<archive>!/<member>` paths.
+async fn project_archives(
+    ctx: &ScanContext,
+    paths: &[String],
+    errors: &mut usize,
+) -> Vec<(String, Vec<u8>, Vec<String>)> {
+    let mut out = Vec::new();
+    for path in paths.iter().filter(|p| is_archive(p)) {
+        let file = ctx.workspace_root.join(path);
+        let too_big = tokio::fs::metadata(&file)
+            .await
+            .map_or(true, |m| m.len() > MAX_ARCHIVE_BYTES);
+        if too_big {
+            tracing::warn!(
+                "talend observer: {path} is unreadable or over {MAX_ARCHIVE_BYTES} bytes"
+            );
+            *errors += 1;
+            continue;
+        }
+        let bytes = match tokio::fs::read(&file).await {
+            Ok(b) => b,
+            Err(err) => {
+                tracing::warn!("talend observer: cannot read {path}: {err}");
+                *errors += 1;
+                continue;
+            }
+        };
+        let Ok(archive) = zip::ZipArchive::new(std::io::Cursor::new(bytes.as_slice())) else {
+            continue; // not a zip: not ours to report
+        };
+        let members: Vec<String> = archive
+            .file_names()
+            .filter_map(Result::ok)
+            .filter(|n| !n.ends_with('/'))
+            .map(|n| format!("{path}{ARCHIVE_SEPARATOR}{n}"))
+            .collect();
+        let holds_project = members.iter().any(|m| {
+            m.rsplit_once(ARCHIVE_SEPARATOR).is_some_and(|(_, n)| {
+                n == PROJECT_MARKER || n.ends_with(&format!("/{PROJECT_MARKER}"))
+            })
+        });
+        if holds_project {
+            out.push((path.clone(), bytes, members));
+        }
+    }
+    out
+}
+
+/// A `.zip` outside generated directories (Studio builds zips under `poms/…/target/`).
+fn is_archive(path: &str) -> bool {
+    path.to_ascii_lowercase().ends_with(".zip")
+        && !path.split('/').any(|part| SKIPPED_DIRS.contains(&part))
+}
+
+/// One member's text, `None` when it is missing, too large or not UTF-8.
+fn member_text(bytes: &[u8], member: &str) -> Option<String> {
+    use std::io::Read;
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
+    let entry = archive.by_name(member).ok()?;
+    if entry.size() > MAX_MEMBER_BYTES {
+        return None;
+    }
+    let mut text = String::new();
+    entry
+        .take(MAX_MEMBER_BYTES)
+        .read_to_string(&mut text)
+        .ok()?;
+    Some(text)
+}
 
 #[derive(Debug, Default)]
 pub struct TalendObserver;
@@ -78,6 +161,14 @@ impl Observer for TalendObserver {
         let mut pkg = ObservationPackage::new(CONNECTOR, ctx.workspace_root.display().to_string());
         let mut paths: Vec<String> = Vec::new();
         walk_observed(ctx, |rel, _| paths.push(rel.to_string()), |_| {});
+        let mut errors = 0;
+        let archives = project_archives(ctx, &paths, &mut errors).await;
+        pkg.meta.error_count += errors;
+        paths.extend(
+            archives
+                .iter()
+                .flat_map(|(_, _, members)| members.iter().cloned()),
+        );
         paths.sort();
         let roots = project_roots(&paths);
         if roots.is_empty() {
@@ -91,7 +182,26 @@ impl Observer for TalendObserver {
             if file_role == Role::Other {
                 continue;
             }
-            let text = if file_role.keeps_text() {
+            let member = path.split_once(ARCHIVE_SEPARATOR).and_then(|(zip, name)| {
+                archives
+                    .iter()
+                    .find(|(p, _, _)| p == zip)
+                    .map(|(_, bytes, _)| (bytes, name))
+            });
+            let text = if !file_role.keeps_text() {
+                None
+            } else if let Some((bytes, name)) = member {
+                match member_text(bytes, name) {
+                    Some(t) => Some(t),
+                    None => {
+                        tracing::warn!(
+                            "talend observer: cannot read {path} (missing, not UTF-8 or too large)"
+                        );
+                        pkg.meta.error_count += 1;
+                        continue;
+                    }
+                }
+            } else {
                 match tokio::fs::read_to_string(ctx.workspace_root.join(path)).await {
                     Ok(t) => Some(t),
                     Err(err) => {
@@ -100,8 +210,6 @@ impl Observer for TalendObserver {
                         continue;
                     }
                 }
-            } else {
-                None
             };
             let data = serde_json::json!({
                 "path": path,
@@ -235,6 +343,63 @@ mod tests {
                 .iter()
                 .all(|a| a.content.data["project_root"] == "")
         );
+    }
+
+    fn zip_with(path: &Path, members: &[(&str, &str)]) {
+        use std::io::Write;
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for (name, text) in members {
+            z.start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            z.write_all(text.as_bytes()).unwrap();
+        }
+        z.finish().unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_items_export_zip_is_read_in_place() {
+        let dir = TempDir::new().unwrap();
+        zip_with(
+            &dir.path().join("exports/jCal.zip"),
+            &[
+                ("P/talend.project", "<x/>"),
+                ("P/process/DWH/jCal_0.2.item", "<job/>"),
+                ("P/process/DWH/jCal_0.2.screenshot", "png"),
+            ],
+        );
+        // A zip with no project, and Studio's build output, are left alone.
+        zip_with(&dir.path().join("docs.zip"), &[("readme.txt", "hi")]);
+        zip_with(
+            &dir.path().join("Q/poms/jobs/target/j.zip"),
+            &[("Q2/talend.project", "<x/>")],
+        );
+        let pkg = TalendObserver::new()
+            .scan(&ScanContext::new(dir.path()))
+            .await
+            .unwrap();
+        assert_eq!(
+            roles(&pkg),
+            [
+                (
+                    "exports/jCal.zip!/P/process/DWH/jCal_0.2.item".into(),
+                    "job".into(),
+                    true
+                ),
+                (
+                    "exports/jCal.zip!/P/talend.project".into(),
+                    "project".into(),
+                    true
+                ),
+            ]
+        );
+        let job = pkg
+            .artifacts
+            .iter()
+            .find(|a| a.content.data["role"] == "job")
+            .unwrap();
+        assert_eq!(job.content.data["project_root"], "exports/jCal.zip!/P");
+        assert_eq!(job.content.data["text"], "<job/>");
     }
 
     #[test]

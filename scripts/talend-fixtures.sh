@@ -22,7 +22,15 @@ fetch() {
 
 fetch A AymaneSab/Data-Integration-Project-with-Talend aed50909ea1c18a520983f460504c999668ba826
 fetch B BelkacemYerfa/talend-project-big-data 3d46b6f22ebbc42d43565fca2c45222bec4a23d1
+# Fixture C (RFC 0262 Part 0): joblets as Studio writes them — a data joblet (INPUT → tMap →
+# OUTPUT) used twice, one as a lookup; trigger joblets chained; component-framework (Snowflake)
+# components; tJavaRow; three projects.
+fetch C KompallyAkhil/Talend2 8e8887c0b503bc29f8d8aceffe2ad31a56599c7c
+# Fixture D: a joblet with two output ports, its second port used by a caller.
+fetch D singhSurajsehwag/Talend_SQL 3f98d69965a29a8c9a29704649643a737a98aa3d
 
 echo
 echo "export EKOS_TALEND_FIXTURE_A=$dest/A"
 echo "export EKOS_TALEND_FIXTURE_B=$dest/B"
+echo "export EKOS_TALEND_FIXTURE_C=$dest/C"
+echo "export EKOS_TALEND_FIXTURE_D=$dest/D"

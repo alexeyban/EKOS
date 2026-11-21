@@ -269,7 +269,7 @@ pub fn is_excluded_path(rel_path: &str, config: &RedactionConfig) -> bool {
 /// (config-driven, so a typo there must not be able to disable the built-in baseline by erroring
 /// out the whole call).
 pub fn redact(content: &str, config: &RedactionConfig) -> String {
-    let mut out = content.to_string();
+    let mut out = redact_json_attributes(content);
     for (label, regex, skip_dotted_identifier_refs) in compiled_builtin_patterns() {
         out = redact_with_pattern(&out, label, regex, *skip_dotted_identifier_refs);
     }
@@ -281,6 +281,136 @@ pub fn redact(content: &str, config: &RedactionConfig) -> String {
         }
     }
     out
+}
+
+/// The label of a secret found inside JSON held in an XML attribute.
+const JSON_PROPERTY_LABEL: &str = "json-secret-property";
+/// The label of a JSON attribute that does not parse, removed whole.
+const JSON_UNREADABLE_LABEL: &str = "unparsed-json-attribute";
+
+/// RFC 0262: Talend's component-framework components (Snowflake, cloud storage, …) keep their
+/// settings as JSON in one attribute (`name="PROPERTIES" value="{&quot;…"`), each setting an
+/// object `{…, "storedValue": …, …, "name": "password"}`. The value comes before the name it
+/// belongs to, which no regular expression can tie together safely, so the JSON is read: every
+/// string `storedValue` of a property whose name says it is a secret is replaced where it is
+/// written, the rest of the text left byte for byte. A `context.x` reference is a name, kept. An
+/// attribute that does not parse is removed whole — a secret must never be stored.
+fn redact_json_attributes(content: &str) -> String {
+    static ATTRIBUTE: OnceLock<Regex> = OnceLock::new();
+    let attribute = ATTRIBUTE.get_or_init(|| {
+        Regex::new(r#"\svalue="(\{&quot;[^"]*)""#).expect("valid JSON-attribute regex")
+    });
+    if !content.contains("{&quot;") {
+        return content.to_string();
+    }
+    attribute
+        .replace_all(content, |caps: &regex::Captures| {
+            let whole = caps.get(0).expect("whole match").as_str();
+            let escaped = caps.get(1).expect("value group").as_str();
+            let Ok(json) = serde_json::from_str::<serde_json::Value>(&xml_unescape(escaped)) else {
+                return format!(r#" value="[REDACTED:{JSON_UNREADABLE_LABEL}]""#);
+            };
+            let mut secrets = Vec::new();
+            secret_values(&json, &mut secrets);
+            let mut out = whole.to_string();
+            for secret in secrets {
+                let written = xml_escape(&serde_json::Value::String(secret).to_string());
+                let pattern = format!(
+                    r"&quot;storedValue&quot;\s*:\s*{}",
+                    regex::escape(&written)
+                );
+                if let Ok(re) = Regex::new(&pattern) {
+                    out = re
+                        .replace_all(
+                            &out,
+                            format!("&quot;storedValue&quot;:&quot;[REDACTED:{JSON_PROPERTY_LABEL}]&quot;"),
+                        )
+                        .into_owned();
+                }
+            }
+            out
+        })
+        .into_owned()
+}
+
+/// Every string `storedValue` of an object whose `name` names a secret.
+fn secret_values(v: &serde_json::Value, out: &mut Vec<String>) {
+    match v {
+        serde_json::Value::Object(map) => {
+            let secret_name = map
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(names_a_secret);
+            if secret_name
+                && let Some(value) = map.get("storedValue").and_then(serde_json::Value::as_str)
+                && !value.is_empty()
+                && !value.starts_with("[REDACTED")
+                && !looks_like_code_reference(value)
+            {
+                out.push(value.to_string());
+            }
+            map.values().for_each(|x| secret_values(x, out));
+        }
+        serde_json::Value::Array(items) => items.iter().for_each(|x| secret_values(x, out)),
+        _ => {}
+    }
+}
+
+fn names_a_secret(name: &str) -> bool {
+    let n = name.to_ascii_lowercase();
+    [
+        "pass",
+        "secret",
+        "token",
+        "apikey",
+        "api_key",
+        "privatekey",
+        "private_key",
+    ]
+    .iter()
+    .any(|k| n.contains(k))
+}
+
+fn xml_unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(at) = rest.find('&') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        let Some(end) = rest.find(';') else { break };
+        let entity = &rest[1..end];
+        let ch = match entity {
+            "quot" => Some('"'),
+            "amp" => Some('&'),
+            "lt" => Some('<'),
+            "gt" => Some('>'),
+            "apos" => Some('\''),
+            _ => entity
+                .strip_prefix("#x")
+                .and_then(|h| u32::from_str_radix(h, 16).ok())
+                .or_else(|| entity.strip_prefix('#').and_then(|d| d.parse().ok()))
+                .and_then(char::from_u32),
+        };
+        match ch {
+            Some(c) => {
+                out.push(c);
+                rest = &rest[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = &rest[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn redact_with_pattern(
@@ -526,6 +656,53 @@ mod tests {
         // Not a password: other attributes that merely contain the letters.
         let plain = r#"<x passes="3" passive="true" bypassed="no"/>"#;
         assert_eq!(redact(plain, &cfg()), plain);
+    }
+
+    /// RFC 0262: a secret in a component-framework component's JSON settings, as Studio writes
+    /// them (the value before the name it belongs to, XML-escaped inside one attribute).
+    #[test]
+    fn redacts_secrets_inside_json_component_properties() {
+        // Filled in at run time so no credential-shaped literal sits in the source (S2068).
+        let secret = format!("S{}&<{}", "nowP", "x\"9");
+        let reference = "context.sf_pwd";
+        let props = serde_json::json!({
+            "@type": "org.talend.components.snowflake.TSnowflakeConnectionProperties",
+            "userPassword": {
+                "userId": {"storedValue": "\"loader\"", "name": "userId"},
+                "password": {"storedValue": secret, "children": {"a": 1}, "name": "password"},
+            },
+            "other": {"storedValue": reference, "name": "passphrase"},
+            "table": {"tableName": {"storedValue": "\"Example3\"", "name": "tableName"}},
+        })
+        .to_string();
+        let item = format!(
+            r#"<elementParameter field="TECHNICAL" name="PROPERTIES" value="{}" show="false"/>"#,
+            props
+                .replace('&', "&amp;")
+                .replace('"', "&quot;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+        );
+        let out = redact(&item, &cfg());
+        assert!(!out.contains("nowP"), "{out}");
+        assert!(out.contains("[REDACTED:json-secret-property]"), "{out}");
+        assert!(out.contains(reference), "a reference is kept: {out}");
+        assert!(out.contains("Example3") && out.contains("loader"), "{out}");
+        // Still one attribute of valid JSON.
+        let value = out
+            .split(r#"value=""#)
+            .nth(1)
+            .unwrap()
+            .split('"')
+            .next()
+            .unwrap();
+        assert!(serde_json::from_str::<serde_json::Value>(&xml_unescape(value)).is_ok());
+        // JSON that does not parse is removed whole.
+        let broken = r#"<e name="PROPERTIES" value="{&quot;password&quot;: &quot;x"/>"#;
+        assert_eq!(
+            redact(broken, &cfg()),
+            r#"<e name="PROPERTIES" value="[REDACTED:unparsed-json-attribute]"/>"#
+        );
     }
 
     /// Every `<tag>` opened is closed — enough to show only element text was replaced.

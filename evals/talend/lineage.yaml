@@ -1,0 +1,67 @@
+# Column lineage inside a job and across jobs (RFC 0264 Phase 2).
+version: 1
+category: talend-lineage
+scenarios:
+  - id: tll-001
+    question: "How is FAIT_VENTE.NB_MT_VENTE computed?"
+    mode: reason
+    expected_facts:
+      - "sum"
+      - "QTE_VENTE"
+      - "PRIX_VENTE"
+    expected_evidence_contains: ["jDwhVente_0.1.item"]
+    difficulty: medium
+
+  - id: tll-002
+    question: "What does the column FAIT_VENTE.NB_QTE_VENTE actually count?"
+    mode: reason
+    expected_facts:
+      - "count"
+      - "ID_DIM_PRODUIT"
+    expected_evidence_contains: ["jDwhVente_0.1.item"]
+    difficulty: hard
+
+  - id: tll-003
+    question: "How is FAIT_VENTE.NB_MT_ACHAT computed?"
+    mode: reason
+    expected_facts:
+      - "sum"
+      - "QTE_VENTE"
+      - "PRIX_ACHAT"
+    expected_evidence_contains: ["jDwhVente_0.1.item"]
+    difficulty: medium
+
+  - id: tll-004
+    question: "Which job loads the ODS_VENTE table that feeds FAIT_VENTE.NB_MT_VENTE, and from which files?"
+    mode: reason
+    expected_facts:
+      - "jOdsVente"
+      - any_of: ["ICOM_*_VENTE.csv", "VENTE.csv"]
+    expected_evidence_contains: ["jOdsVente_0.1.item"]
+    difficulty: hard
+
+  - id: tll-005
+    question: "Where does DIM_CLIENT.LB_TYPE_CLIENT come from?"
+    mode: reason
+    expected_facts:
+      - "ODS_TYPE_CLIENT"
+      - "LB_TYPE_CLIENT"
+    expected_evidence_contains: ["jDwhClient_0.1.item"]
+    difficulty: medium
+
+  - id: tll-006
+    question: "How is the holiday flag DIM_CALENDRIER.BL_JOUR_FERIE derived?"
+    mode: reason
+    expected_facts:
+      - "joursFeries.xlsx"
+      - "DT_JOUR"
+    expected_evidence_contains: ["jGenerateCalendar_0.2.item"]
+    difficulty: hard
+
+  - id: tll-007
+    question: "Where does DIM_PRODUIT.LB_CATEGORIE come from?"
+    mode: reason
+    expected_facts:
+      - "ODS_CATEGORIE"
+    expected_evidence_contains: ["jDwhProduit_0.1.item"]
+    difficulty: medium

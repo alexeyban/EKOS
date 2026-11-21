@@ -41,11 +41,29 @@ def item_kinds(project: Path) -> dict[str, int]:
     return dict(sorted(kinds.items()))
 
 
+# Studio's line styles (`EConnectionType`), measured on fixture B and the joblet fixtures.
+LINE_STYLES = {"1": "SUBJOB_OK", "3": "COMPONENT_OK", "4": "SUBJOB_ERROR", "5": "COMPONENT_ERROR",
+               "6": "RUN_IF", "7": "ITERATE", "8": "LOOKUP"}
+PORT_CONNECTORS = ("INPUT", "OUTPUT", "TRIGGER_INPUT", "TRIGGER_OUTPUT")
+
+
 def link_kind(connection: ET.Element) -> str:
     name = connection.get("connectorName", "")
-    if name == "FLOW" and connection.get("lineStyle") == "8":
+    style = connection.get("lineStyle")
+    if name == "FLOW" and style == "8":
         return "LOOKUP"
+    # A link out of a joblet use is named after the port; its line style says what it is.
+    if name.rstrip("0123456789").rstrip("_") in PORT_CONNECTORS:
+        return LINE_STYLES.get(style, "FLOW")
     return name
+
+
+def process_root(path: Path) -> ET.Element | None:
+    """The `ProcessType` / `JobletProcess` of an item; Studio wraps a joblet in `xmi:XMI`."""
+    root = ET.parse(path).getroot()
+    if root.tag.endswith("XMI"):
+        return next((c for c in root if c.tag.endswith(("ProcessType", "JobletProcess"))), None)
+    return root
 
 
 def job_census(job: Path, totals: dict) -> None:
@@ -84,9 +102,16 @@ def project_census(project: Path) -> dict:
     for job in jobs:
         job_census(job, totals)
     components = totals.pop("components")
+    joblet_items = (
+        sorted((project / "joblets").rglob("*.item")) if (project / "joblets").is_dir() else []
+    )
+    joblet_names = {j.name.rsplit("_", 1)[0] for j in joblet_items if process_root(j) is not None}
+    joblet_uses = sum(n for t, n in components.items() if t in joblet_names)
     return {
         "items": item_kinds(project),
         "jobs": len(jobs),
+        "joblets": len(joblet_items),
+        "joblet_uses": joblet_uses,
         "components": sum(components.values()),
         "component_types": dict(sorted(components.items())),
         "links": sum(totals["row_links"].values()) + sum(totals["triggers"].values()),

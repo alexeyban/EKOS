@@ -442,6 +442,25 @@ fn is_expected_cross_namespace_group<'a>(group: impl Iterator<Item = &'a KirObje
         // RFC 0256: an application process is named after the table it maintains or the
         // procedure it runs (`C_AcctSchema_Default_Copy`); the interaction map links them.
         ("appdictionary", &["AppProcess"]),
+        // RFC 0262 (kept in step with `ekos_recovery::talend_analyzer::KINDS`): a Talend routine
+        // is a Java class, and a project's jobs, contexts and
+        // connections are often named after the tables they load (fixture B: `customCode` as a
+        // `TalendRoutine` in two projects and as the `JavaType` of a copy beside them).
+        (
+            "talend",
+            &[
+                "TalendProject",
+                "TalendJob",
+                "TalendComponent",
+                "TalendContext",
+                "TalendContextVariable",
+                "TalendDbConnection",
+                "TalendSchema",
+                "TalendRoutine",
+                "TalendJoblet",
+                "TalendColumnLineage",
+            ],
+        ),
     ];
     const ROUTINES: &[&str] = &["View", "Procedure", "Trigger"];
     // namespace → distinct kinds seen in it
@@ -1369,6 +1388,31 @@ mod tests {
         ]);
         let result = DefaultResolver::new().resolve(&g);
         assert_eq!(result.conflicts.len(), 1);
+    }
+
+    /// RFC 0262, found live on fixture B: the routine `customCode` in two Talend projects and
+    /// the Java class of a copy of it beside them.
+    #[test]
+    fn a_talend_routine_and_its_java_class_do_not_conflict() {
+        let g = make_graph(&[
+            (
+                "customCode",
+                ObjectKind::Custom("TalendRoutine".to_string()),
+            ),
+            (
+                "customCode",
+                ObjectKind::Custom("TalendRoutine".to_string()),
+            ),
+            ("customCode", ObjectKind::Custom("JavaType".to_string())),
+        ]);
+        let result = DefaultResolver::new().resolve(&g);
+        assert!(result.conflicts.is_empty(), "{:?}", result.conflicts);
+        // A Talend job beside an unrelated kind still conflicts.
+        let g = make_graph(&[
+            ("jLoad", ObjectKind::Custom("TalendJob".to_string())),
+            ("jload", ObjectKind::Custom("Technology".to_string())),
+        ]);
+        assert_eq!(DefaultResolver::new().resolve(&g).conflicts.len(), 1);
     }
 
     /// RFC 0169, found live on LedgerSMB: the view `employee_search` and two functions named

@@ -47,7 +47,12 @@ use sha2::{Digest, Sha256};
 ///   captures Talend projects.
 /// - **v8** (RFC 0264 Phase 2, 2026-11-21): the `talend` observer captures joblet items
 ///   (`joblets/**`), which it used to count without their text.
-pub const PIPELINE_LOGIC_VERSION: u32 = 8;
+/// - **v9** (RFC 0262 D5, 2026-11-21): the `java` observer skips `poms/` beside a `talend.project`
+///   (code Talend Studio generated from the job items); the `talend` observer reads items-export
+///   `.zip` archives in place (`<archive>!/<member>`); redaction reads JSON held in an XML
+///   attribute and replaces secret `storedValue`s (Talend component-framework `PROPERTIES`), which
+///   earlier versions stored in plain text.
+pub const PIPELINE_LOGIC_VERSION: u32 = 9;
 
 /// SHA-256 content hash used to address artifacts and ledger entries.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

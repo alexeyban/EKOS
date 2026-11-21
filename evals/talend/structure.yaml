@@ -1,0 +1,94 @@
+# Jobs, orchestration, tables read and written, contexts and routines.
+version: 1
+category: talend-structure
+scenarios:
+  - id: tls-001
+    question: "Which Talend jobs does jChargeODS run?"
+    mode: reason
+    expected_facts:
+      - "jOdsVente"
+      - "jOdsClient"
+      - "jOdsProduit"
+      - any_of: ["jOdsCategorie", "jOdsSousCategorie", "jOdsTypeClient"]
+    expected_evidence_contains: ["jChargeODS_0.1.item"]
+    difficulty: easy
+
+  - id: tls-002
+    question: "Which jobs does the Talend job jChargeDWH call?"
+    mode: reason
+    expected_facts:
+      - "jDwhClient"
+      - "jDwhProduit"
+      - "jDwhVente"
+    expected_evidence_contains: ["jChargeDWH_0.1.item"]
+    difficulty: easy
+
+  - id: tls-003
+    question: "What does the top-level Talend job jAlimentationBDD orchestrate?"
+    mode: reason
+    expected_facts:
+      - "jChargeODS"
+      - "jChargeDWH"
+    expected_evidence_contains: ["jAlimentationBDD_0.1.item"]
+    difficulty: medium
+
+  - id: tls-004
+    question: "Which Talend job loads the fact table FAIT_VENTE?"
+    mode: reason
+    expected_facts:
+      - "jDwhVente"
+    expected_evidence_contains: ["jDwhVente_0.1.item"]
+    difficulty: easy
+
+  - id: tls-005
+    question: "Which Talend job fills the calendar dimension DIM_CALENDRIER?"
+    mode: reason
+    expected_facts:
+      - "jGenerateCalendar"
+    expected_evidence_contains: ["jGenerateCalendar_0.2.item"]
+    difficulty: easy
+
+  - id: tls-006
+    question: "Which tables does the Talend job jDwhProduit read to build DIM_PRODUIT?"
+    mode: reason
+    expected_facts:
+      - "ODS_PRODUIT"
+      - "ODS_CATEGORIE"
+      - "ODS_SOUS_CATEGORIE"
+    expected_evidence_contains: ["jDwhProduit_0.1.item"]
+    difficulty: medium
+
+  - id: tls-007
+    question: "Where do the ODS Talend jobs write rows they reject?"
+    mode: reason
+    expected_facts:
+      - "ODS_REJET"
+    expected_evidence_contains: ["process/ODS/"]
+    difficulty: medium
+
+  - id: tls-008
+    question: "Which parameters does the Talend context ConnectionDWH define?"
+    mode: reason
+    expected_facts:
+      - "ServerName"
+      - "schema_dwh"
+      - any_of: ["database", "port"]
+    expected_evidence_contains: ["ConnectionDWH_0.1.item"]
+    difficulty: medium
+
+  - id: tls-009
+    question: "Which custom Java routine does the Talend project ALIMENTATION_DATA_WAREHOUSE define?"
+    mode: reason
+    expected_facts:
+      - "customCode"
+    expected_evidence_contains: ["customCode_0.1.item"]
+    difficulty: easy
+
+  - id: tls-010
+    question: "Which input files does the Talend job jOdsVente read, and how does it find them?"
+    mode: reason
+    expected_facts:
+      - any_of: ["ICOM_*_VENTE.csv", "VENTE"]
+      - any_of: ["tFileList", "mask", "masque_fichier"]
+    expected_evidence_contains: ["jOdsVente_0.1.item"]
+    difficulty: hard

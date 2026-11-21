@@ -52,7 +52,8 @@ pub fn is_live(o: &KirObject) -> bool {
     o.properties.get("origin").and_then(|v| v.as_str()) == Some(LIVE_ORIGIN)
 }
 
-/// Names → object ids, exact (lower-cased full name) and by last dotted segment.
+/// Names → object ids, exact (the full name, unquoted and lower-cased per segment as
+/// `data_lineage` compares names) and by last dotted segment.
 ///
 /// RFC 0211: objects read from a live catalog sit in a second layer, consulted only when no
 /// file-derived object has the name. A database and the scripts that built it name the same
@@ -77,7 +78,7 @@ impl NameIndex {
     }
 
     pub(crate) fn add(&mut self, name: &str, id: KirId) {
-        let n = name.to_lowercase();
+        let n = crate::data_lineage::name_key(name);
         let tail = n.rsplit('.').next().unwrap_or(&n).to_string();
         self.exact.entry(n).or_default().insert(id.0);
         self.tail.entry(tail).or_default().insert(id.0);
@@ -97,7 +98,7 @@ impl NameIndex {
     }
 
     fn own_candidates(&self, name: &str) -> Vec<KirId> {
-        let n = name.to_lowercase();
+        let n = crate::data_lineage::name_key(name);
         if let Some(ids) = self.exact.get(&n) {
             return ids.iter().map(|u| KirId(*u)).collect();
         }
@@ -120,7 +121,7 @@ impl NameIndex {
     }
 
     fn resolve_own(&self, name: &str) -> Result<(KirId, &'static str), bool> {
-        let n = name.to_lowercase();
+        let n = crate::data_lineage::name_key(name);
         let unique = |s: Option<&BTreeSet<Uuid>>| match s {
             Some(ids) if ids.len() == 1 => Ok(KirId(*ids.iter().next().unwrap())),
             Some(ids) if ids.len() > 1 => Err(true),
@@ -338,6 +339,23 @@ mod tests {
         let other = table("c_invoice", false);
         index.add_object(&other);
         assert_eq!(index.resolve("C_INVOICE"), Err(true));
+    }
+
+    #[test]
+    fn quoted_and_bare_names_resolve_to_the_same_object() {
+        // DDL keeps the quotes it was written with; an ETL job names the table bare (RFC 0264).
+        let quoted = table("\"DIM_CLIENT\"", false);
+        let qualified = table("\"dwh\".\"FAIT_VENTE\"", false);
+        let mut index = NameIndex::default();
+        index.add_object(&quoted);
+        index.add_object(&qualified);
+        assert_eq!(index.resolve("DIM_CLIENT").map(|r| r.0), Ok(quoted.id));
+        assert_eq!(index.resolve("\"dim_client\"").map(|r| r.0), Ok(quoted.id));
+        assert_eq!(index.resolve("dwh.fait_vente"), Ok((qualified.id, "exact")));
+        assert_eq!(
+            index.resolve("FAIT_VENTE"),
+            Ok((qualified.id, "unqualified"))
+        );
     }
 
     fn obj(g: &mut KirGraph, name: &str, kind: ObjectKind, props: &[(&str, &[&str])]) -> KirId {

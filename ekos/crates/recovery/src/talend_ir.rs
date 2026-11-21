@@ -218,6 +218,48 @@ fn schema_columns(c: &Component) -> Vec<String> {
 }
 
 /// A Java string parameter folded over the job's context, as `{text, complete, holes, context_used}`.
+/// The tables and files one job reads and writes, sorted and without repeats: what its data
+/// components name, the way the IR names them (in-memory hand-overs and generated rows left out).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct DataIo {
+    pub reads: Vec<String>,
+    pub writes: Vec<String>,
+    pub files_read: Vec<String>,
+    pub files_written: Vec<String>,
+}
+
+pub fn data_io(job: &Job) -> DataIo {
+    let mut sets: [std::collections::BTreeSet<String>; 4] = Default::default();
+    for c in job.components.iter().filter(|c| c.mapper.is_none()) {
+        let slot = match c.logical.as_str() {
+            "db_input" => 0,
+            "db_output" | "db_output_bulk" | "db_output_bulk_exec" | "db_bulk_exec" | "db_scd" => 1,
+            "tRowGenerator" | "tFixedFlowInput" | "tHashInput" | "tBufferInput" | "tHashOutput"
+            | "tBufferOutput" => continue,
+            _ if c.category == Category::Input => 2,
+            _ if c.category == Category::Output => 3,
+            _ => continue,
+        };
+        let name = if slot < 2 {
+            db_table(job, c, &mut BTreeMap::new())
+        } else {
+            param_text(c, "FILENAME")
+                .map(|e| folded(job, e).0)
+                .filter(|t| !t.is_empty())
+        };
+        if let Some(name) = name {
+            sets[slot].insert(name);
+        }
+    }
+    let [reads, writes, files_read, files_written] = sets.map(|s| s.into_iter().collect());
+    DataIo {
+        reads,
+        writes,
+        files_read,
+        files_written,
+    }
+}
+
 fn folded(job: &Job, expr: &str) -> (String, Value) {
     let f = job.fold(expr);
     let value = json!({

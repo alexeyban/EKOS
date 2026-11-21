@@ -49,9 +49,14 @@ its command line; `scripts/talend-census.py` counts what each contains; the comm
 |---|---|---|
 | A | `AymaneSab/Data-Integration-Project-with-Talend` @ `aed50909` | documents only: must yield 0 jobs |
 | B | `BelkacemYerfa/talend-project-big-data` @ `3d46b6f2` | a real Talend Open Studio 8.0.1 project: 14 jobs, 272 components of 24 types, 232 links |
-| C | to assemble | ELT components, joblets, `tDBRow`, `tJavaRow`, several context groups and engines |
+| C | `KompallyAkhil/Talend2` @ `8e8887c0` | joblets as Studio writes them (9; a data joblet used twice, once as a lookup; trigger joblets chained), component-framework (Snowflake) components, `tJavaRow`, `tJoin`, 3 projects, 30 jobs |
+| D | `singhSurajsehwag/Talend_SQL` @ `3f98d699` | a two-output joblet used through its second port; 3 projects, 26 jobs |
 
-Tests that need a fixture read its path from `EKOS_TALEND_FIXTURE_B` and skip, saying so, when it is unset.
+C and D were chosen from the seven public repositories holding joblet items (GitHub code search for
+`model:JobletProcess`, 2026-11-21) as the ones whose jobs use them; none has a licence file, so they are fetched
+like A and B. ELT components and several engines in one project are still not covered by a fixture.
+
+Tests that need a fixture read its path from `EKOS_TALEND_FIXTURE_B` (`_C`, `_D`) and skip, saying so, when it is unset.
 Everything else is tested on small synthetic items written for the test, each marked as such.
 
 ## Ledger kinds

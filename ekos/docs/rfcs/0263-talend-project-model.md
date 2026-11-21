@@ -86,7 +86,7 @@ parameter. An unknown type is kept with its parameters, never an error.
 
 ## Joblets (amendment, 2026-11-21)
 
-*(doc)* — no fixture holds a joblet yet (fixture C is still to assemble). The shape below is taken from Talend's own
+*(doc)* when written; checked against fixtures C and D below. The shape below is taken from Talend's own
 EMF model (`joblet.ecore`: `JobletProcess` extends `ProcessType`, `jobletNodes` are `NodeType`s) and from two
 independent open-source readers of Studio files. Every rule here is checked again against the first
 Studio-written joblet, and a difference is a bug in this section, not in the project.
@@ -119,6 +119,37 @@ Studio-written joblet, and a difference is a bug in this section, not in the pro
 
 The un-expanded job is what the ledger's `TalendComponent` objects describe (a use is one component); the
 expanded job is what the Transformation IR and column lineage are built from (RFC 0264).
+
+### Checked against Studio-written joblets (amendment, 2026-11-21)
+
+Fixtures C (`KompallyAkhil/Talend2`, 9 joblets, 4 uses) and D (`singhSurajsehwag/Talend_SQL`, 5 joblets, a
+two-port joblet used by its second port) are joblets as Studio 8 writes them. Three rules above were wrong or
+missing; the rest held:
+
+- **The envelope.** A joblet item is an `xmi:XMI` document holding `model:JobletProcess`, its icon
+  (`TalendProperties:ByteArray`) and sometimes a `Signature` — not `JobletProcess` as the root. Every one of the
+  23 joblet items in the candidates read had it; the reader takes the process out of the envelope.
+- **Links named after ports.** A caller's link out of a joblet use carries the port's name as its connector
+  (`connectorName="OUTPUT_2"`, `metaname="OUTPUT_2"`, `TRIGGER_OUTPUT_1`), so only its line style says what it
+  is: 8 is a lookup, 1/3/4/5/6 are `SUBJOB_OK`/`COMPONENT_OK`/`SUBJOB_ERROR`/`COMPONENT_ERROR`/`RUN_IF` (measured
+  over 4,000 links of fixture B and the candidates). Such a trigger keeps the port as `Trigger::port`.
+- **Triggers through trigger ports.** A link into a use never names the use's input port (Studio writes the
+  *source's* port as the connector); it must be the only one. A trigger into a use fires what the joblet's
+  `TRIGGER_INPUT` fires; a trigger out of a use is fired by what fires the `TRIGGER_OUTPUT` its connector names
+  (else the only one). Unmatched: `TALEND005`, dropped. Before this, a trigger between two trigger joblets was a
+  row link and `TALEND005`.
+
+`PROCESS_TYPE_VERSION` was absent from every use read: uses resolve to the latest version, as above.
+
+### Component-framework settings (amendment, 2026-11-21)
+
+Components of Talend's component framework (`tSnowflake*`, cloud storage, …) keep their settings as JSON in one
+`PROPERTIES` parameter (Daikon serialization: each setting `{…, "storedValue": …, …, "name": …}`). The reader lifts
+`table.tableName`, `connection.schemaName` and `outputAction` into `TABLE`, `SCHEMA_DB` and `DATA_ACTION` when the
+component has none, and keeps the JSON with the `storedValue` of every setting named like a secret (`pass`,
+`secret`, `token`, `apikey`, `privatekey`) set to null. Before the parse, `ekos build`'s redaction removes those
+values from the text (RFC 0043, `json-secret-property`): the regex rules could not tie a value to the name written
+after it, and one candidate project held a plain-text password there.
 
 ## Diagnostics
 

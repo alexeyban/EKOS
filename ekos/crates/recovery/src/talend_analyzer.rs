@@ -119,7 +119,8 @@ impl CompilerPass for TalendAnalyzerPass {
 
     fn version(&self) -> &str {
         // v2: joblets and column lineage (RFC 0264 Phase 2).
-        "v2"
+        // v3: lineage through `tBufferOutput` → `tRunJob` and through files between jobs.
+        "v3"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -418,6 +419,34 @@ fn emit_joblet(e: &mut Emit, project_id: KirId, joblet: &Job, stats: &mut Talend
     emit_flow(e, joblet, &scope);
 }
 
+/// The searchable sentence of a job: what its author wrote, then what it reads, writes and runs
+/// (the author's text can be wrong — fixture B's `jDwhProduit` says it loads `DIM_CLIENT`).
+fn job_description(job: &Job, io: &crate::talend_ir::DataIo, called: &[&str]) -> String {
+    let mut text = String::new();
+    if let Some(d) = job.description.as_deref().filter(|d| !d.trim().is_empty()) {
+        text.push_str(d.trim());
+        text.push_str(". ");
+    }
+    text.push_str(&format!(
+        "Talend job {} ({} {}).",
+        job.name, job.folder, job.version
+    ));
+    for (what, list) in [
+        ("Reads tables", &io.reads),
+        ("Writes tables", &io.writes),
+        ("Reads files", &io.files_read),
+        ("Writes files", &io.files_written),
+    ] {
+        if !list.is_empty() {
+            text.push_str(&format!(" {what} {}.", list.join(", ")));
+        }
+    }
+    if !called.is_empty() {
+        text.push_str(&format!(" Runs jobs {}.", called.join(", ")));
+    }
+    text
+}
+
 fn emit_job(e: &mut Emit, project_id: KirId, job: &Job, expanded: &Job, stats: &mut TalendStats) {
     let project = e.project;
     let calls = project.calls(job);
@@ -426,6 +455,8 @@ fn emit_job(e: &mut Emit, project_id: KirId, job: &Job, expanded: &Job, stats: &
         .filter(|c| c.resolved.is_none())
         .map(|c| c.child_name.as_str())
         .collect();
+    let io = crate::talend_ir::data_io(expanded);
+    let called: Vec<&str> = calls.iter().map(|c| c.child_name.as_str()).collect();
     let props = json!({
         "job": job.name,
         "version": job.version,
@@ -434,7 +465,12 @@ fn emit_job(e: &mut Emit, project_id: KirId, job: &Job, expanded: &Job, stats: &
         "folder": job.folder,
         "job_type": job.job_type,
         "purpose": job.purpose,
-        "description": job.description,
+        "author_description": job.description,
+        "description": job_description(job, &io, &called),
+        "reads": io.reads,
+        "writes": io.writes,
+        "files_read": io.files_read,
+        "files_written": io.files_written,
         "created": job.created,
         "modified": job.modified,
         "default_context": job.default_context,
@@ -971,6 +1007,19 @@ mod tests {
             .collect();
         assert_eq!(upstream, ["SALES.PRICE", "SALES.QTY"]);
         assert_eq!(report.properties["upstream_jobs"], json!(["jChild"]));
+        // The job says what it reads and writes, joblet components included.
+        let job = kir
+            .objects
+            .iter()
+            .find(|o| o.kind.to_string() == "TalendJob" && o.name == "jReport")
+            .unwrap();
+        assert_eq!(job.properties["reads"], json!(["FACT"]));
+        assert_eq!(job.properties["writes"], json!(["REPORT"]));
+        let text = job.properties["description"].as_str().unwrap();
+        assert!(
+            text.contains("Reads tables FACT. Writes tables REPORT."),
+            "{text}"
+        );
         let feeds = rels(&kir, "ColumnFeeds");
         assert_eq!(feeds.len(), 1);
         assert_eq!((feeds[0].from, feeds[0].to), (fact.id, report.id));

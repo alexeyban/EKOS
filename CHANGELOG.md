@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+**Security: secrets in Talend component JSON** (RFC 0043)
+- Talend's newer components (Snowflake, cloud storage, …) keep their settings as JSON inside one attribute.
+  A password written there in plain text was stored by `ekos build`; it is now removed (`json-secret-property`),
+  and an attribute holding JSON that does not parse is removed whole. Rebuild any workspace built from such a
+  project (`PIPELINE_LOGIC_VERSION` 9 does this on the next `ekos build`).
+
+**Talend: joblets as Studio writes them, lineage across buffers and files, zips, eval set** (RFC 0262–0264)
+- Joblets saved by Talend Studio (inside an `xmi:XMI` envelope) are read; links out of a joblet use, named after
+  its port, are lookups or triggers by their line style; triggers run through a joblet's trigger ports. Checked on
+  two real projects (fixtures C and D).
+- Column lineage crosses jobs through `tBufferOutput` → `tRunJob` and through files one job writes and another
+  reads (a `tFileList` mask matches the written path), column by position; `tJoin`, `tSchemaComplianceCheck` and
+  `tWarn` have column rules; Snowflake-style components name their table.
+- An items-export `.zip` is read in place (`<archive>!/<member>`), without unpacking.
+- `TalendJob` objects list the tables and files they read and write and the jobs they run.
+- `evals/talend/`: 20 questions on fixture B with the files an answer must cite.
+
+**Fixes**
+- `ekos check refs` matched quoted DDL names (`"DIM_CLIENT"`) against nothing; it now compares names as data
+  lineage does (Talend fixture B: 53 errors → 0). Its report is now identical from run to run.
+- The Java observer no longer reads the code Talend Studio generates under a project's `poms/` (fixture B's
+  pipeline: about 10 minutes → 2), and a Talend routine beside a Java class of the same name is not an identity
+  conflict (`ekos resolve` no longer needs `--force` there).
+
 **Talend column lineage and joblets** (RFC 0264 Phase 2)
 - Every column a Talend job writes (database and file outputs, `tBufferOutput`) gets a `TalendColumnLineage`
   object: the steps back to where the value came from (tMap expressions with their variables, lookups and

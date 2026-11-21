@@ -2212,6 +2212,11 @@ fn present_files(
                 return true;
             };
             let target = json["target"].as_str().unwrap_or_default();
+            // A member of an archive read in place (`exports/p.zip!/P/talend.project`) is present
+            // while the archive is.
+            let target = target
+                .split_once("!/")
+                .map_or(target, |(archive, _)| archive);
             target.is_empty()
                 || Path::new(target).is_absolute()
                 || bases.iter().any(|b| b.join(target).exists())
@@ -2424,6 +2429,24 @@ mod tests {
     /// legitimately gain a second artifact over time. The stale one (from before some redaction
     /// fix) never goes away and gets reprocessed — and re-warned-about, if it's now unparseable —
     /// forever.
+    #[test]
+    fn an_archive_member_is_present_while_its_archive_is() {
+        let dir = tempdir().unwrap();
+        let ws = tempdir().unwrap();
+        std::fs::write(ws.path().join("p.zip"), b"zip").unwrap();
+        let store = PackArtifactStore::open(dir.path()).unwrap();
+        let mut ids = Vec::new();
+        for target in ["p.zip!/P/talend.project", "gone.zip!/P/talend.project"] {
+            let a = ObservationArtifact::new("talend", target, serde_json::json!({"t": target}));
+            store
+                .write(&a.id, &serde_json::to_value(&a).unwrap())
+                .unwrap();
+            ids.push(a.id);
+        }
+        let kept = present_files(&store, ids.clone(), &[ws.path().to_path_buf()]);
+        assert_eq!(kept, [ids[0].clone()]);
+    }
+
     #[test]
     fn collect_artifact_ids_for_connector_dedupes_by_target() {
         let dir = tempdir().unwrap();

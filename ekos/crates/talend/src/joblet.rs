@@ -158,6 +158,14 @@ fn choose_port<'a>(ports: &[&'a str], link: &Link) -> Option<&'a str> {
     ports.iter().copied().find(|p| named(p))
 }
 
+/// Which trigger port a caller trigger goes through: the one its connector names, else the only one.
+fn choose_trigger_port<'a>(ports: &[&'a str], named: Option<&str>) -> Option<&'a str> {
+    if let Some(p) = named.and_then(|n| ports.iter().copied().find(|p| *p == n)) {
+        return Some(p);
+    }
+    (ports.len() == 1).then(|| ports[0])
+}
+
 /// A link out of a joblet's output port joined to a caller's: kind and target end from the
 /// caller (`downstream`), source end from inside (`upstream`).
 fn joined(upstream: &Link, downstream: &Link) -> Link {
@@ -190,6 +198,8 @@ struct Splice<'a> {
     joblet: &'a Job,
     inputs: Vec<&'a str>,
     outputs: Vec<&'a str>,
+    trigger_inputs: Vec<&'a str>,
+    trigger_outputs: Vec<&'a str>,
     ports: BTreeSet<&'a str>,
     inner: BTreeSet<&'a str>,
 }
@@ -209,6 +219,8 @@ impl<'a> Splice<'a> {
             joblet,
             inputs: names(&|c| c.logical == INPUT_PORT),
             outputs: names(&|c| c.logical == OUTPUT_PORT),
+            trigger_inputs: names(&|c| c.logical == "joblet_trigger_input"),
+            trigger_outputs: names(&|c| c.logical == "joblet_trigger_output"),
             ports: names(&is_port).into_iter().collect(),
             inner: names(&|_| true).into_iter().collect(),
         }
@@ -317,6 +329,63 @@ impl<'a> Splice<'a> {
         out
     }
 
+    /// Caller triggers into and out of the use, routed through its trigger ports: a trigger into
+    /// the use fires what the joblet's trigger input fires, a trigger out of it is fired by what
+    /// fires the trigger output its connector names. Studio does not name the input port of a
+    /// trigger into a joblet, so it must be the only one.
+    fn triggers(
+        &self,
+        callers: &[crate::model::Trigger],
+        job: &Job,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Vec<crate::model::Trigger> {
+        let mut out = Vec::new();
+        let body = &self.body.triggers;
+        for t in callers.iter().filter(|t| t.to == self.use_name) {
+            let Some(port) = choose_trigger_port(&self.trigger_inputs, t.port.as_deref()) else {
+                diagnostics.push(self.unrouted_trigger(job, t, "into"));
+                continue;
+            };
+            out.extend(
+                body.iter()
+                    .filter(|i| i.from == port && !self.is_port(&i.to))
+                    // `port` names the source's port: kept for when the source is a joblet use
+                    // inlined after this one.
+                    .map(|i| crate::model::Trigger {
+                        to: self.prefix(&i.to),
+                        ..t.clone()
+                    }),
+            );
+        }
+        for t in callers.iter().filter(|t| t.from == self.use_name) {
+            let Some(port) = choose_trigger_port(&self.trigger_outputs, t.port.as_deref()) else {
+                diagnostics.push(self.unrouted_trigger(job, t, "out of"));
+                continue;
+            };
+            out.extend(
+                body.iter()
+                    .filter(|i| i.to == port && !self.is_port(&i.from))
+                    .map(|i| crate::model::Trigger {
+                        from: self.prefix(&i.from),
+                        port: None,
+                        ..t.clone()
+                    }),
+            );
+        }
+        out
+    }
+
+    fn unrouted_trigger(&self, job: &Job, t: &crate::model::Trigger, side: &str) -> Diagnostic {
+        Diagnostic {
+            code: "TALEND005".into(),
+            path: job.path.clone(),
+            message: format!(
+                "{}: a {:?} trigger {side} joblet {} cannot be matched to one of its trigger ports; dropped",
+                self.use_name, t.kind, self.joblet.name
+            ),
+        }
+    }
+
     fn unrouted(&self, job: &Job, link: &Link, side: &str) -> Diagnostic {
         Diagnostic {
             code: "TALEND005".into(),
@@ -361,7 +430,11 @@ fn splice(
             None => diagnostics.push(sp.unrouted(out, l, "out of")),
         }
     }
+    let routed = sp.triggers(&out.triggers, out, diagnostics);
+    out.triggers
+        .retain(|t| t.from != use_name && t.to != use_name);
     out.triggers.extend(triggers);
+    out.triggers.extend(routed);
     out.links.retain(|l| l.from != use_name && l.to != use_name);
     out.links.extend(links);
     let at = out
@@ -537,6 +610,92 @@ mod tests {
         assert_eq!(origin.uses, ["jlClean_1"]);
         // The joblet's context variable is now the job's.
         assert!(e.job.context_var("suffix").is_some());
+    }
+
+    /// In the shapes Studio writes (fixture C, `KompallyAkhil/Talend2` and
+    /// `singhSurajsehwag/Talend_SQL`): joblets inside an `xmi:XMI` envelope; one trigger joblet
+    /// firing the next through a link named after the first's `TRIGGER_OUTPUT_1`; a lookup out of
+    /// a two-output joblet, named by its port and marked only by line style 8.
+    #[test]
+    fn studio_joblets_route_triggers_and_lookups_through_their_ports() {
+        let xmi = |body: &str| {
+            format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?><xmi:XMI xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:TalendMapper="http://www.talend.org/mapper" xmlns:model="http://www.talend.com/joblet.ecore"><model:JobletProcess defaultContext="Default" jobType="Standard"><context name="Default"/>{body}</model:JobletProcess><TalendProperties:ByteArray xmlns:TalendProperties="http://www.talend.org/properties"/></xmi:XMI>"#
+            )
+        };
+        let port = |kind: &str, name: &str| {
+            format!(
+                r#"<jobletNodes componentName="{kind}"><elementParameter field="TEXT" name="UNIQUE_NAME" value="{name}"/></jobletNodes>"#
+            )
+        };
+        let ok = |from: &str, to: &str| {
+            format!(
+                r#"<connection connectorName="COMPONENT_OK" label="OnComponentOk" lineStyle="3" metaname="{from}" source="{from}" target="{to}"/>"#
+            )
+        };
+        let start = xmi(&format!(
+            "{}{}{}",
+            node("tJava", "tJava_1", ""),
+            port("TRIGGER_OUTPUT", "TRIGGER_OUTPUT_1"),
+            ok("tJava_1", "TRIGGER_OUTPUT_1"),
+        ));
+        let end = xmi(&format!(
+            "{}{}{}",
+            port("TRIGGER_INPUT", "TRIGGER_INPUT_1"),
+            node("tJava", "tJava_1", ""),
+            ok("TRIGGER_INPUT_1", "tJava_1"),
+        ));
+        let split = xmi(&format!(
+            "{}{}{}{}{}{}",
+            node("tFileInputDelimited", "tFileInputDelimited_1", ""),
+            node("tMap", "tMap_1", ""),
+            port("OUTPUT", "OUTPUT_2"),
+            port("OUTPUT", "OUTPUT_3"),
+            link("row1", "tFileInputDelimited_1", "tMap_1"),
+            r#"<connection connectorName="FLOW" label="MM" lineStyle="0" metaname="MM" outputId="2" source="tMap_1" target="OUTPUT_3"/><connection connectorName="FLOW" label="out1" lineStyle="0" metaname="out1" outputId="1" source="tMap_1" target="OUTPUT_2"/>"#,
+        ));
+        let job = format!(
+            r#"<talendfile:ProcessType xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd" defaultContext="Default">{}{}{}{}{}{}</talendfile:ProcessType>"#,
+            node("StartTime", "StartTime_1", ""),
+            node("EndTime", "EndTime_1", ""),
+            node("Split", "Split_1", ""),
+            node("tMap", "tMap_9", ""),
+            r#"<connection connectorName="TRIGGER_OUTPUT_1" label="OnComponentOk (TRIGGER_OUTPUT_1)" lineStyle="3" metaname="StartTime_1" source="StartTime_1" target="EndTime_1"/>"#,
+            r#"<connection connectorName="OUTPUT_3" label="row6" lineStyle="8" metaname="OUTPUT_3" source="Split_1" target="tMap_9"/>"#,
+        );
+        let files = vec![
+            file("joblets/StartTime_0.1.item", &start),
+            file("joblets/EndTime_0.1.item", &end),
+            file("joblets/Split_0.1.item", &split),
+            file("process/j_0.1.item", &job),
+        ];
+        let p = read_project("", &files);
+        assert_eq!(p.joblets.len(), 3, "{:?}", p.diagnostics);
+        let e = p.expand(&p.jobs[0]);
+        assert!(e.diagnostics.is_empty(), "{:?}", e.diagnostics);
+        assert_eq!(e.inlined, 3);
+        let triggers: Vec<(&str, &str)> = e
+            .job
+            .triggers
+            .iter()
+            .map(|t| (t.from.as_str(), t.to.as_str()))
+            .collect();
+        assert_eq!(triggers, [("StartTime_1__tJava_1", "EndTime_1__tJava_1")]);
+        let lookup = e
+            .job
+            .links
+            .iter()
+            .find(|l| l.to == "tMap_9")
+            .expect("the lookup out of OUTPUT_3");
+        assert_eq!(
+            (lookup.from.as_str(), &lookup.kind, lookup.label.as_deref()),
+            (
+                "Split_1__tMap_1",
+                &crate::model::LinkKind::Lookup,
+                Some("row6")
+            )
+        );
+        assert_eq!(lookup.metaname.as_deref(), Some("MM"));
     }
 
     #[test]

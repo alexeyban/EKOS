@@ -105,10 +105,12 @@ output name, empty elsewhere.
 | tMap | the output entry's expression; each `input.column` it names resolves through the link with that label **into this tMap**; `Var.x` is replaced by the variable's own expression and references; conditions: the output's filter, and the key expressions and join mode of every lookup the expression reads from |
 | tAggregateRow / tAggregateSortedRow | an operation output → `function(input column)`; a group-by output → its input column; condition: `grouped by …` |
 | tJavaRow | `output_row.X = <expr>;` statements of `CODE`, references `input_row.Y` |
-| tFilterRow, tUniqRow, tSortRow, tReplicate, tUnite, tConvertType, tLogRow, tFlowMeter, tHashOutput, tBufferOutput, joblet ports | pass-through by column name from every row input; conditions: the filter, the unique keys |
+| tFilterRow, tUniqRow, tSortRow, tReplicate, tUnite, tConvertType, tLogRow, tFlowMeter, tHashOutput, tBufferOutput, tSchemaComplianceCheck, tWarn, joblet ports | pass-through by column name from every row input; conditions: the filter, the unique keys |
+| tJoin | a `LOOKUP_COLS` output column from the lookup's column, any other from the main row by name; condition `inner|left join <lookup> on <JOIN_KEY>` — on every column for an inner join, on lookup columns for a left join |
+| tRunJob (with an output row) | **origin** `Job`: the called job (`PROCESS`) and the column's position in the `tRunJob` schema, linked to that job's `tBufferOutput` across jobs |
 | tHashInput | pass-through from the `tHashOutput` its `LIST` names (every one in the job when `LINK_WITH` is off) |
 | database input | **origin** `Table`: when the folded query parses (`QueryReader`, sqlparser in `recovery`), the select item at the column's position — a plain column gives `table.column`, an expression gives its text and every column it names; else the component's table and the column's own name (`by_name: true`); the query's `WHERE` is a condition |
-| file input | **origin** `File`: the folded file name, the column |
+| file input | **origin** `File`: the folded file name (a `tFileList`'s directory and masks), the column and its position |
 | tRowGenerator, tFixedFlowInput | **origin** `Generated`, with the value expression when the component states one |
 | anything else | a **gap**: the component and its type; the walk stops there, nothing is invented |
 
@@ -138,6 +140,27 @@ hold — `FAIT_VENTE.NB_MT_VENTE` has formula `sum(ODS_VENTE.QTE_VENTE*ODS_VENTE
 reaches the sales CSV columns; `FAIT_VENTE.NB_QTE_VENTE` shows `count(…ID_DIM_PRODUIT)`. Gaps are counted and
 printed on the `Talend:` line. Joblets: synthetic tests in the shapes above, until fixture C. The 20-question
 eval set stays open.
+
+### Across jobs through buffers and files (amendment, 2026-11-21)
+
+A file or buffer target records the column's `position` in its schema: what another job reads back is bound by
+position, not by name (a delimited file has no names; `tRunJob` copies the buffer's row array). `link_jobs` adds
+two kinds of `ColumnFeeds` beside tables: a file output feeds a job whose file origin names the same path, or a
+`tFileList` mask matching it (`glob`), column by position (by name when a side has none); a job's `tBufferOutput`
+feeds every job whose `Job` origin names it, by position. No fixture holds either; synthetic tests only.
+
+### Jobs say what they read and write (amendment, 2026-11-21)
+
+`TalendJob` objects carry `reads`, `writes`, `files_read`, `files_written` (from the expanded job's data
+components, as the IR names them) and a `description` that is the author's text (kept as `author_description`)
+followed by "Reads tables …. Writes tables …. Runs jobs …." — the job is then found by the tables it touches.
+Fixture B's `jDwhProduit` says it loads `DIM_CLIENT`; its `writes` say `DIM_PRODUIT`.
+
+### Eval set (2026-11-21)
+
+`evals/talend/` (`--dataset talend-20`): 10 structure, 7 lineage and 3 adversarial questions on fixture B, each with
+the facts and the `.item` an answer must cite. Evidence only (no model): 17 of 17 answerable questions have their
+facts in the evidence a model would be shown (16 of 17 before the job `reads`/`writes` above).
 
 **Result (2026-11-21, devlog_344):** fixture B — 368 target columns, 368 lineages, 0 with a gap, 107
 `ColumnFeeds` between jobs; `FAIT_VENTE.NB_MT_VENTE = sum(ODS_VENTE.QTE_VENTE*ODS_VENTE.PRIX_VENTE)` (the SQL

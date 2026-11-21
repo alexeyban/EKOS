@@ -15,6 +15,8 @@
           "sqlPatterns": 68
         },
         "jobs": 14,
+        "joblets": 0,
+        "joblet_uses": 0,
         "components": 272,
         "component_types": {
           "tAggregateRow": 1,
@@ -65,6 +67,286 @@
         "tmap_inputs": 58,
         "tmap_outputs": 58,
         "tmap_expressions": 442
+      }
+    }
+  },
+  "C": {
+    "commit": "8e8887c0b503bc29f8d8aceffe2ad31a56599c7c",
+    "projects": {
+      "ACCOUNT4": {
+        "items": {
+          "code": 1,
+          "process": 7,
+          "sqlPatterns": 68
+        },
+        "jobs": 7,
+        "joblets": 0,
+        "joblet_uses": 0,
+        "components": 25,
+        "component_types": {
+          "tFileInputDelimited": 3,
+          "tFileInputJSON": 1,
+          "tFileOutputDelimited": 3,
+          "tJavaFlex": 2,
+          "tJavaRow": 1,
+          "tLogRow": 6,
+          "tLoop": 1,
+          "tMap": 2,
+          "tMysqlInput": 2,
+          "tS3Connection": 1,
+          "tS3Get": 1,
+          "tS3List": 1,
+          "tSnowflakeOutput": 1
+        },
+        "links": 19,
+        "row_links": {
+          "FLOW": 14,
+          "ITERATE": 2,
+          "LOOKUP": 1
+        },
+        "triggers": {
+          "COMPONENT_OK": 2
+        },
+        "data_actions": {},
+        "tmap_inputs": 3,
+        "tmap_outputs": 4,
+        "tmap_expressions": 15
+      },
+      "ACCOUNT5": {
+        "items": {
+          "code": 1,
+          "context": 1,
+          "joblets": 8,
+          "process": 8,
+          "sqlPatterns": 68
+        },
+        "jobs": 8,
+        "joblets": 8,
+        "joblet_uses": 4,
+        "components": 60,
+        "component_types": {
+          "EndTime_Joblet1": 1,
+          "StartTime_Joblet1": 1,
+          "cdcHashJoblet": 2,
+          "tChronometerStart": 1,
+          "tChronometerStop": 1,
+          "tContextLoad": 1,
+          "tFileInputDelimited": 17,
+          "tFileInputProperties": 1,
+          "tFileOutputDelimited": 4,
+          "tFilterRow": 3,
+          "tJava": 2,
+          "tJavaRow": 1,
+          "tLogRow": 14,
+          "tMap": 5,
+          "tSnowflakeInput": 1,
+          "tSnowflakeOutput": 5
+        },
+        "links": 50,
+        "row_links": {
+          "FILTER": 3,
+          "FLOW": 32,
+          "LOOKUP": 7,
+          "MAIN": 1
+        },
+        "triggers": {
+          "COMPONENT_OK": 4,
+          "SUBJOB_OK": 3
+        },
+        "data_actions": {},
+        "tmap_inputs": 12,
+        "tmap_outputs": 9,
+        "tmap_expressions": 66
+      },
+      "AKHIL": {
+        "items": {
+          "joblets": 1,
+          "metadata": 1,
+          "process": 15,
+          "sqlPatterns": 68
+        },
+        "jobs": 15,
+        "joblets": 1,
+        "joblet_uses": 0,
+        "components": 69,
+        "component_types": {
+          "tAggregateRow": 1,
+          "tExtractJSONFields": 1,
+          "tFileDelete": 1,
+          "tFileExist": 1,
+          "tFileInputDelimited": 5,
+          "tFileInputExcel": 1,
+          "tFileInputJSON": 3,
+          "tFileInputXML": 1,
+          "tFileOutputDelimited": 5,
+          "tFilterRow": 2,
+          "tFixedFlowInput": 2,
+          "tFlowToIterate": 1,
+          "tIterateToFlow": 2,
+          "tJava": 1,
+          "tJoin": 1,
+          "tLogRow": 16,
+          "tLoop": 2,
+          "tMap": 9,
+          "tMysqlInput": 2,
+          "tRESTClient": 1,
+          "tSchemaComplianceCheck": 1,
+          "tSleep": 3,
+          "tSnowflakeOutput": 4,
+          "tSortRow": 1,
+          "tUnite": 1,
+          "tWarn": 1
+        },
+        "links": 59,
+        "row_links": {
+          "FILTER": 2,
+          "FLOW": 42,
+          "ITERATE": 4,
+          "LOOKUP": 5,
+          "REJECT": 1,
+          "RESPONSE": 1
+        },
+        "triggers": {
+          "COMPONENT_ERROR": 1,
+          "COMPONENT_OK": 3
+        },
+        "data_actions": {},
+        "tmap_inputs": 13,
+        "tmap_outputs": 11,
+        "tmap_expressions": 61
+      }
+    }
+  },
+  "D": {
+    "commit": "3f98d69965a29a8c9a29704649643a737a98aa3d",
+    "projects": {
+      "DB_SQL": {
+        "items": {
+          "code": 10,
+          "metadata": 4,
+          "process": 5,
+          "sqlPatterns": 68
+        },
+        "jobs": 5,
+        "joblets": 0,
+        "joblet_uses": 0,
+        "components": 6,
+        "component_types": {
+          "tFileOutputJSON": 1,
+          "tFixedFlowInput": 1,
+          "tJava": 1,
+          "tLogRow": 1,
+          "tRowGenerator": 1,
+          "tWarn": 1
+        },
+        "links": 4,
+        "row_links": {
+          "FLOW": 2
+        },
+        "triggers": {
+          "SUBJOB_OK": 2
+        },
+        "data_actions": {},
+        "tmap_inputs": 0,
+        "tmap_outputs": 0,
+        "tmap_expressions": 0
+      },
+      "SSS1": {
+        "items": {
+          "metadata": 1,
+          "process": 3,
+          "sqlPatterns": 68
+        },
+        "jobs": 3,
+        "joblets": 0,
+        "joblet_uses": 0,
+        "components": 7,
+        "component_types": {
+          "tFileInputDelimited": 1,
+          "tFileOutputDelimited": 1,
+          "tLogRow": 3,
+          "tMatchGroup": 1,
+          "tRowGenerator": 1
+        },
+        "links": 4,
+        "row_links": {
+          "CONFIDENT_GROUPS": 1,
+          "FLOW": 2,
+          "UNIQUE_ROWS": 1
+        },
+        "triggers": {},
+        "data_actions": {},
+        "tmap_inputs": 0,
+        "tmap_outputs": 0,
+        "tmap_expressions": 0
+      },
+      "SSS_SOURCE": {
+        "items": {
+          "context": 1,
+          "joblets": 5,
+          "metadata": 3,
+          "process": 18,
+          "sqlPatterns": 68,
+          "tests": 1
+        },
+        "jobs": 18,
+        "joblets": 5,
+        "joblet_uses": 1,
+        "components": 63,
+        "component_types": {
+          "SAmple_file_tmap": 1,
+          "ZendeskInput": 1,
+          "tCombinedSQLAggregate": 1,
+          "tConvertType": 1,
+          "tDataStewardshipTaskOutput": 1,
+          "tDataprepRun": 3,
+          "tDenormalizeSortedRow": 1,
+          "tExtractJSONFields": 1,
+          "tFTPPut": 1,
+          "tFileArchive": 1,
+          "tFileInputDelimited": 3,
+          "tFileInputRaw": 1,
+          "tFileInputXML": 1,
+          "tFileOutputDelimited": 1,
+          "tFileOutputXML": 1,
+          "tFixedFlowInput": 1,
+          "tGroovy": 1,
+          "tGroovyFile": 1,
+          "tJavaFlex": 2,
+          "tJobLog": 1,
+          "tLogRow": 14,
+          "tMSSqlCDC": 1,
+          "tMSSqlInput": 8,
+          "tMSSqlOutput": 2,
+          "tMap": 3,
+          "tMsgBox": 1,
+          "tMysqlInput": 1,
+          "tMysqlSCD": 1,
+          "tNormalize": 1,
+          "tRESTClient": 2,
+          "tRunJob": 1,
+          "tSampleRow": 1,
+          "tSortRow": 1,
+          "tUniqRow": 1
+        },
+        "links": 37,
+        "row_links": {
+          "FAULT": 1,
+          "FLOW": 28,
+          "ITERATE": 1,
+          "REJECT": 1,
+          "RESPONSE": 2,
+          "UNIQUE": 1
+        },
+        "triggers": {
+          "SUBJOB_OK": 3
+        },
+        "data_actions": {
+          "INSERT": 2
+        },
+        "tmap_inputs": 2,
+        "tmap_outputs": 3,
+        "tmap_expressions": 15
       }
     }
   }

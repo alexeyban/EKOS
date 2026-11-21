@@ -11,7 +11,8 @@ rust-version.workspace = true
 [dependencies]
 roxmltree.workspace = true
 serde.workspace = true
+# Component-framework components keep their settings as JSON (`PROPERTIES`).
+serde_json.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 walkdir.workspace = true

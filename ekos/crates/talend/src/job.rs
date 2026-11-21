@@ -18,7 +18,16 @@ const LOOKUP_LINE_STYLE: &str = "8";
 /// it, and the caller overlays what the `.properties` file says.
 pub(crate) fn parse_job(path: &str, text: &str) -> Result<Job, String> {
     let doc = Document::parse(text).map_err(|e| e.to_string())?;
-    let root = doc.root_element();
+    let top = doc.root_element();
+    // Studio saves a joblet inside an `xmi:XMI` envelope, beside its icon (`ByteArray`) and a
+    // `Signature`; a job's `ProcessType` is the root itself.
+    let root = if top.tag_name().name() == "XMI" {
+        top.children()
+            .find(|c| matches!(c.tag_name().name(), "ProcessType" | "JobletProcess"))
+            .ok_or_else(|| "not a job item: an XMI envelope without a process".to_string())?
+    } else {
+        top
+    };
     if !matches!(root.tag_name().name(), "ProcessType" | "JobletProcess") {
         return Err(format!(
             "not a job item: root element is <{}>",
@@ -104,9 +113,10 @@ fn context_var(node: &Node) -> ContextVar {
 }
 
 fn component(doc: &Document, node: &Node) -> Component {
-    let params: BTreeMap<String, Param> = children(node, "elementParameter")
+    let mut params: BTreeMap<String, Param> = children(node, "elementParameter")
         .filter_map(|p| Some((attr_string(&p, "name")?, param(&p))))
         .collect();
+    framework_params(&mut params);
     let text = |name: &str| params.get(name).and_then(Param::text).map(str::to_string);
     let component_type = attr_string(node, "componentName").unwrap_or_default();
     let classified = classify(&component_type, text("TYPE").as_deref());
@@ -125,6 +135,84 @@ fn component(doc: &Document, node: &Node) -> Component {
         component_type,
         params,
         joblet: None,
+    }
+}
+
+/// Talend's component-framework components (Snowflake, cloud storage, …) keep their settings as
+/// JSON in one `PROPERTIES` parameter, each setting `{"storedValue": …, "name": …}`. The table,
+/// schema and write action are lifted into the parameters every other component uses (`TABLE`,
+/// `SCHEMA_DB`, `DATA_ACTION`), when the component does not have them already. The JSON is kept
+/// with every secret's value removed, as for any password parameter: the model never holds one.
+fn framework_params(params: &mut BTreeMap<String, Param>) {
+    let Some(Param::Value { value, field }) = params.get("PROPERTIES") else {
+        return;
+    };
+    let Ok(mut json) = serde_json::from_str::<serde_json::Value>(value) else {
+        return;
+    };
+    let field = field.clone();
+    let stored = |path: &[&str]| -> Option<String> {
+        let mut at = &json;
+        for key in path {
+            at = at.get(key)?;
+        }
+        let v = at.get("storedValue")?;
+        v.as_str()
+            .or_else(|| v.get("name").and_then(serde_json::Value::as_str))
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
+    let lifted = [
+        ("TABLE", stored(&["table", "tableName"])),
+        ("SCHEMA_DB", stored(&["connection", "schemaName"])),
+        ("DATA_ACTION", stored(&["outputAction"])),
+    ];
+    for (name, value) in lifted {
+        if let Some(value) = value {
+            params.entry(name.to_string()).or_insert(Param::Value {
+                field: "TEXT".into(),
+                value,
+            });
+        }
+    }
+    drop_secret_values(&mut json);
+    params.insert(
+        "PROPERTIES".into(),
+        Param::Value {
+            field,
+            value: json.to_string(),
+        },
+    );
+}
+
+/// Every `storedValue` of a setting whose name says it is a secret, set to null.
+fn drop_secret_values(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::Object(map) => {
+            let secret = map
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|n| {
+                    let n = n.to_ascii_lowercase();
+                    [
+                        "pass",
+                        "secret",
+                        "token",
+                        "apikey",
+                        "api_key",
+                        "privatekey",
+                        "private_key",
+                    ]
+                    .iter()
+                    .any(|k| n.contains(k))
+                });
+            if secret && map.contains_key("storedValue") {
+                map.insert("storedValue".into(), serde_json::Value::Null);
+            }
+            map.values_mut().for_each(drop_secret_values);
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(drop_secret_values),
+        _ => {}
     }
 }
 
@@ -235,7 +323,13 @@ fn connection(doc: &Document, node: &Node, job: &mut Job) {
     let from = attr_string(node, "source").unwrap_or_default();
     let to = attr_string(node, "target").unwrap_or_default();
     let at = line(doc, node);
-    if let Some(kind) = trigger_kind(connector) {
+    let style = node.attribute("lineStyle").unwrap_or_default();
+    // A link out of a joblet use is named after the joblet's port (`OUTPUT_1`,
+    // `TRIGGER_OUTPUT_1`); only its line style says what kind of link it is.
+    let port = is_port_connector(connector).then(|| connector.to_string());
+    if let Some(kind) =
+        trigger_kind(connector).or_else(|| port.as_ref().and_then(|_| trigger_style(style)))
+    {
         let condition = children(node, "elementParameter")
             .find(|p| p.attribute("name") == Some("CONDITION"))
             .and_then(|p| attr_string(&p, "value"));
@@ -245,11 +339,13 @@ fn connection(doc: &Document, node: &Node, job: &mut Job) {
             to,
             condition,
             line: at,
+            port,
         });
         return;
     }
     let kind = match connector {
-        "FLOW" if node.attribute("lineStyle") == Some(LOOKUP_LINE_STYLE) => LinkKind::Lookup,
+        "FLOW" if style == LOOKUP_LINE_STYLE => LinkKind::Lookup,
+        _ if port.is_some() && style == LOOKUP_LINE_STYLE => LinkKind::Lookup,
         "FLOW" | "MAIN" => LinkKind::Main,
         "FILTER" => LinkKind::Filter,
         "REJECT" => LinkKind::Reject,
@@ -266,6 +362,28 @@ fn connection(doc: &Document, node: &Node, job: &mut Job) {
         metaname: attr_string(node, "metaname"),
         line: at,
     });
+}
+
+/// A connector named after a joblet port (`OUTPUT_2`, `TRIGGER_OUTPUT_1`, `INPUT_1`).
+fn is_port_connector(connector: &str) -> bool {
+    let base = connector.trim_end_matches(|c: char| c.is_ascii_digit());
+    matches!(
+        base.strip_suffix('_').unwrap_or(base),
+        "INPUT" | "OUTPUT" | "TRIGGER_INPUT" | "TRIGGER_OUTPUT"
+    )
+}
+
+/// Studio's trigger line styles (`EConnectionType`), as fixture B and the joblet fixtures write
+/// them: `SUBJOB_OK` 1, `COMPONENT_OK` 3, `SUBJOB_ERROR` 4, `COMPONENT_ERROR` 5, `RUN_IF` 6.
+fn trigger_style(style: &str) -> Option<TriggerKind> {
+    Some(match style {
+        "1" => TriggerKind::SubjobOk,
+        "3" => TriggerKind::ComponentOk,
+        "4" => TriggerKind::SubjobError,
+        "5" => TriggerKind::ComponentError,
+        "6" => TriggerKind::RunIf,
+        _ => return None,
+    })
 }
 
 fn trigger_kind(connector: &str) -> Option<TriggerKind> {
@@ -406,6 +524,29 @@ mod tests {
         );
         let text = format!("{job:?}");
         assert!(!text.contains("enc:system"), "{text}");
+    }
+
+    /// Synthetic, in the shape fixture C's `tSnowflakeOutput` is written: settings as JSON in
+    /// `PROPERTIES`, the value of each setting before its name.
+    #[test]
+    fn component_framework_settings_are_lifted_and_their_secrets_dropped() {
+        // Filled in at run time so no credential-shaped literal sits in the source (S2068).
+        let secret = format!("pl{}n", "ai");
+        let props = format!(
+            r#"{{"table":{{"tableName":{{"storedValue":"\"Example3\"","name":"tableName"}}}},"connection":{{"schemaName":{{"storedValue":"\"PUBLIC\"","name":"schemaName"}},"userPassword":{{"password":{{"storedValue":"{secret}","name":"password"}}}}}},"outputAction":{{"storedValue":{{"@type":"OutputAction","name":"UPSERT"}},"name":"outputAction"}}}}"#
+        )
+        .replace('"', "&quot;");
+        let xml = format!(
+            r#"<talendfile:ProcessType xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd" defaultContext="Default"><node componentName="tSnowflakeOutput"><elementParameter field="TEXT" name="UNIQUE_NAME" value="tDBOutput_1"/><elementParameter field="TECHNICAL" name="PROPERTIES" value="{props}"/></node></talendfile:ProcessType>"#
+        );
+        let job = parse_job("process/j_0.1.item", &xml).unwrap();
+        let c = &job.components[0];
+        let text = |n: &str| c.params[n].text().unwrap().to_string();
+        assert_eq!(text("TABLE"), "\"Example3\"");
+        assert_eq!(text("SCHEMA_DB"), "\"PUBLIC\"");
+        assert_eq!(text("DATA_ACTION"), "UPSERT");
+        assert!(!format!("{job:?}").contains(&secret));
+        assert!(text("PROPERTIES").contains("\"tableName\""));
     }
 
     #[test]
