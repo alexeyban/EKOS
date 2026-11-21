@@ -1002,6 +1002,7 @@ dependencies = [
  "ekos-plugin-python",
  "ekos-plugin-rust",
  "ekos-plugin-sqlserver",
+ "ekos-plugin-talend",
  "ekos-plugin-treasury",
  "ekos-recovery",
  "ekos-runtime",
@@ -1011,6 +1012,7 @@ dependencies = [
  "ekos-simulation",
  "ekos-sql-dialect-sdk",
  "ekos-sqlgen",
+ "ekos-talend",
  "fs4 0.8.4",
  "hex",
  "rand 0.8.7",
@@ -1866,6 +1868,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ekos-plugin-talend"
+version = "1.6.1"
+dependencies = [
+ "async-trait",
+ "ekos-artifact",
+ "ekos-observation-sdk",
+ "ekos-talend",
+ "hex",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tracing",
+ "walkdir",
+ "zip",
+]
+
+[[package]]
 name = "ekos-plugin-treasury"
 version = "1.6.1"
 dependencies = [
@@ -1908,6 +1927,7 @@ dependencies = [
  "ekos-plugin-sql-dialect-trino",
  "ekos-semantic",
  "ekos-sql-dialect-sdk",
+ "ekos-talend",
  "glob",
  "hex",
  "oxc_allocator",
@@ -2037,6 +2057,15 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlparser",
+]
+
+[[package]]
+name = "ekos-talend"
+version = "1.6.1"
+dependencies = [
+ "roxmltree",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -19,6 +19,9 @@ ignore-patterns = [
     # tested against.
     "fixtures",
     "examples",
+    # Third-party projects fetched for tests (`.local/talend-fixtures/`, RFC 0262 — never ours to
+    # store, and they hold encrypted passwords) and local testbeds (RFC 0256).
+    ".local",
     # Found live 2026-08-23 (devlog_90 found the same gap in a downstream project first): `doc/`
     # is this repo's own self-dogfooded `docs generate --output doc` output. Left unexcluded, a
     # real `ekos build` would re-ingest EKOS's own generated documentation as if it were fresh

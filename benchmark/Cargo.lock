@@ -804,6 +804,7 @@ dependencies = [
  "ekos-plugin-sql-dialect-trino",
  "ekos-semantic",
  "ekos-sql-dialect-sdk",
+ "ekos-talend",
  "glob",
  "hex",
  "oxc_allocator",
@@ -882,6 +883,15 @@ name = "ekos-sql-dialect-sdk"
 version = "1.6.1"
 dependencies = [
  "sqlparser",
+]
+
+[[package]]
+name = "ekos-talend"
+version = "1.6.1"
+dependencies = [
+ "roxmltree",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

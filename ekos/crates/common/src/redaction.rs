@@ -54,7 +54,17 @@ const BUILTIN_SECRET_PATTERNS: &[SecretPattern] = &[
     // of it.
     SecretPattern {
         label: "talend-encrypted-value",
-        regex_src: r"enc:system\.encryption\.key\.v\d+:[A-Za-z0-9+/=_-]+",
+        // Also `enc:routine.…` (a routine's own key) and the Java-properties form Studio writes into
+        // generated context files, `enc\:routine.encryption.key.v1\:…`.
+        regex_src: r"enc\\?:[a-z]+\.encryption\.key\.v\d+\\?:[A-Za-z0-9+/=_-]+",
+        skip_dotted_identifier_refs: false,
+    },
+    // RFC 0262: the key itself, as Studio copies it into a project's generated code
+    // (`routines/system/keys.properties`: `routine.encryption.key.v1=<key>`). It decrypts every
+    // `enc:` value above.
+    SecretPattern {
+        label: "talend-encryption-key",
+        regex_src: r"(?m)\b[a-z]+\.encryption\.key\.v\d+\s*[=:]\s*(?P<value_bare>[^\s\[][^\s]*)",
         skip_dotted_identifier_refs: false,
     },
     // RFC 0262: a Talend password stated in plain text, as a component parameter
@@ -656,6 +666,22 @@ mod tests {
         // Not a password: other attributes that merely contain the letters.
         let plain = r#"<x passes="3" passive="true" bypassed="no"/>"#;
         assert_eq!(redact(plain, &cfg()), plain);
+    }
+
+    /// RFC 0262, found by the talend-20 eval: Studio's generated context files escape the colons
+    /// (`enc\:routine.…\:`), and `keys.properties` holds the key that decrypts them all.
+    #[test]
+    fn redacts_escaped_talend_values_and_the_encryption_key() {
+        let key_name = format!("routine.encryption.key.{}", "v1");
+        let text = format!(
+            "# generated\npassword=enc\\:{key_name}\\:wTAi5lCB2PXdgzSnidL1t5\nhost=localhost\n{key_name}=QUJDREVGR0hJSktMTU5PUA\\=\\=\n"
+        );
+        let out = redact(&text, &cfg());
+        assert!(!out.contains("wTAi5lCB2PX"), "{out}");
+        assert!(!out.contains("QUJDREVGR0hJSktM"), "{out}");
+        assert!(out.contains("[REDACTED:talend-encrypted-value]"), "{out}");
+        assert!(out.contains("[REDACTED:talend-encryption-key]"), "{out}");
+        assert!(out.contains("host=localhost"), "{out}");
     }
 
     /// RFC 0262: a secret in a component-framework component's JSON settings, as Studio writes

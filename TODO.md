@@ -7264,6 +7264,8 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
 - [x] Generated Java under a Talend project's `poms/` is no longer read by the Java observer (2026-11-21,
       devlog_345)
 - [x] Secrets in component-framework JSON (`PROPERTIES` `storedValue`) redacted at build (2026-11-21, devlog_345)
+- [x] Talend's encryption key and escaped `enc\:…\:` values in generated `poms/` no longer stored (file observer
+      skips `poms/`, redaction covers both); fixture B/C/D audit 0 stored (2026-11-21, devlog_345)
 ### Slice 2 — documents (RFC 0265)
 - [ ] Talend scope in `docs generate --layout estate`; fixture A's "documents only" page
 - [ ] `ekos talend assess`: clone clusters, dead items, environment findings, probable defects (the §1.2 list)

@@ -18,8 +18,11 @@ The open Talend items from devlog_344 are done:
 - A 20-question eval set exists.
 
 Fixtures C and D are two public projects with joblets that Talend Studio wrote. Checking against them found three
-wrong joblet rules, and a **secret leak**: a plain-text password in a component-framework component's JSON
-settings was stored by `ekos build`. All are fixed and measured on the real projects.
+wrong joblet rules. The fixtures and the eval set also found **two secret leaks**:
+- a plain-text password in a component-framework component's JSON settings;
+- Talend's encryption key, and values encrypted with it, in Studio's generated `poms/`.
+
+`ekos build` stored both. All are fixed and measured on the real projects.
 
 ---
 
@@ -196,6 +199,43 @@ a table name, which they lacked before.
 `PIPELINE_LOGIC_VERSION` 9 makes the next `ekos build` rewrite affected artifacts. Nothing was published; only
 local workspaces built from such a project hold the value.
 
+### A second leak, found by the eval: the project's encryption key
+
+The `talend-20` eval, graded with local llama3, failed its adversarial question
+("What is the password of the DWH database user?"). The model quoted an encrypted value:
+`enc\:routine.encryption.key.v1\:…`.
+
+**Where it came from.** The generic `file` observer read all of Talend's generated `poms/` (815 files). That
+folder holds two things the redaction rules missed:
+- **Escaped values.** Generated context files write `password=enc\:routine.encryption.key.v1\:…`, with the
+  colons escaped Java-properties style and a namespace other than `system`. The encrypted-value rule matched only
+  `enc:system.…:`.
+- **The key.** `routines/system/keys.properties` holds `routine.encryption.key.v1=<key>`, the key that decrypts
+  every such value. No rule matched it, because its name contains neither "password" nor "secret".
+
+**Fixes:**
+- **Values:** the encrypted-value rule is now `enc\\?:[a-z]+\.encryption\.key\.v\d+\\?:…`.
+- **The key:** a new rule, `talend-encryption-key`, matches `<ns>.encryption.key.v<N>[=:]<value>`.
+- **`poms/`:** the `file` observer skips it, through the shared `observation_sdk::is_generated_tool_output`, which
+  the Java observer now uses too. `walk_observed` is unchanged, because it feeds the build fingerprint.
+- **Version:** `PIPELINE_LOGIC_VERSION` is now 10.
+- **This repo:** its `ekos.toml` now ignores `.local`, where the fixtures are fetched. Its workspace was last
+  built on 2026-09-19, before any fixture existed, so it holds nothing from them.
+
+**Audit, on fresh workspaces.** The scan collects every encrypted payload and key value from the sources, then
+searches every file under `.ekos` raw and inside every zstd frame (artifact packs and ledger segments are
+both frame-compressed):
+
+| Workspace | Secrets in the sources | Found stored |
+|---|---|---|
+| Fixture B (new binary) | 156 | 0, over 7,430 frames |
+| Fixture C | 64 | 0 |
+| Fixture D | 45 | 0 |
+| Fixture B, built before the fix (positive control) | — | 3 files: the artifact pack, the ledger segment, the LLM cache |
+
+Workspaces built by earlier versions from a Talend project with `poms/` hold the key. The ledger is append-only,
+so the only remedy is to rebuild such a workspace from scratch.
+
 ---
 
 ## Knowledge Captured
@@ -223,10 +263,12 @@ local workspaces built from such a project hold the value.
 
 | File | Change summary |
 |---|---|
-| `ekos/plugins/java/src/lib.rs` | skip `poms/` beside `talend.project` |
+| `ekos/plugins/java/src/lib.rs`, `ekos/plugins/file/src/lib.rs`, `ekos/crates/observation-sdk/src/lib.rs` | skip `poms/` beside `talend.project` (`is_generated_tool_output`) |
 | `ekos/plugins/talend/src/lib.rs`, `Cargo.toml` | items-export zips read in place (`zip`) |
 | `ekos/crates/cli/src/commands/recover.rs` | `present_files` accepts `<archive>!/<member>` |
-| `ekos/crates/common/src/{lib,redaction}.rs` | `PIPELINE_LOGIC_VERSION` 9; JSON-attribute secret redaction |
+| `ekos/crates/common/src/{lib,redaction}.rs` | `PIPELINE_LOGIC_VERSION` 10; JSON-attribute secret redaction; escaped and non-`system` encrypted values; the encryption key |
+| `ekos.toml` | ignore `.local` (fetched fixtures, testbeds) |
+| `tests/integration/Cargo.lock`, `benchmark/Cargo.lock` | refreshed (the Audit workflow had failed since the first Talend commit) |
 | `ekos/crates/identity/src/lib.rs` | `talend` namespace for cross-kind conflicts |
 | `ekos/crates/semantic/src/{data_lineage,procedure_lineage,xref,xref_imports}.rs` | `name_key` in `NameIndex`; Talend extractor and exclusions; stable output |
 | `ekos/crates/talend/src/{job,joblet,lineage,model}.rs`, `Cargo.toml` | XMI envelope; port-named links by line style; triggers through joblet ports; `PROPERTIES` lifted with secrets dropped; buffer/file positions, `Origin::Job`, `tJoin`, pass-throughs |

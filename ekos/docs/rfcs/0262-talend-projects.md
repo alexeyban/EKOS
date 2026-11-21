@@ -97,3 +97,12 @@ no artifact written from fixture B contains any of its encrypted strings.
 
 Big Data jobs (`process_mr/`, `process_storm/`), routes, dynamic schemas and `tXMLMap` are recognised, counted and
 reported as out of scope for v1. Generated Java under `poms/` is never a source (it is a test oracle in Slice 3).
+
+## Amendment (2026-11-21): generated code holds the key
+
+Studio's generated `poms/` holds the project's encryption key (`code/routines/src/main/java/routines/system/
+keys.properties`, `routine.encryption.key.v1=…`) and context files with every encrypted password in the
+Java-properties form `enc\:routine.encryption.key.v1\:…`. D5's "skip `poms/`" therefore applies to every content
+observer, not only the Talend one (`observation_sdk::is_generated_tool_output`: the `file` and `java` observers),
+and redaction covers both forms wherever they appear (`talend-encrypted-value`, `talend-encryption-key`). Found by
+the `talend-20` eval's adversarial question, which a local model answered with the stored value (devlog_345).

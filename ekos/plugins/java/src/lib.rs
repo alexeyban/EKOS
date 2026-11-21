@@ -36,7 +36,7 @@ impl Observer for JavaObserver {
                 && let Some(name) = e.file_name().to_str()
             {
                 return !ctx.ignore_patterns.iter().any(|p| name == p.as_str())
-                    && !is_talend_generated(e.path(), name);
+                    && !ekos_observation_sdk::is_generated_tool_output(e.path());
             }
             true
         }) {
@@ -107,16 +107,6 @@ impl Observer for JavaObserver {
 
         Ok(pkg)
     }
-}
-
-/// Talend Studio writes the code it generates for every job under `<project>/poms/` (RFC 0262 D5).
-/// That Java is derived from the job items, which the Talend observer reads; reading it again as
-/// source would duplicate every job as Java types and slow the pipeline down.
-fn is_talend_generated(dir: &std::path::Path, name: &str) -> bool {
-    name == "poms"
-        && dir
-            .parent()
-            .is_some_and(|project| project.join("talend.project").is_file())
 }
 
 #[cfg(test)]

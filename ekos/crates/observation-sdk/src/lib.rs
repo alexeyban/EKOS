@@ -115,6 +115,18 @@ pub struct Fingerprint(pub String);
 /// once per directory pruned by an ignore pattern. Both are `FnMut` so the caller accumulates.
 /// This is the single source of "what would `ekos build` observe" — `source_fingerprint` and
 /// `ekos config preview-scan` (RFC 0130) both go through it so they cannot drift.
+/// A directory a tool generated from sources another observer reads: Talend Studio's `poms/`
+/// beside a `talend.project` (RFC 0262 D5) holds the Java, contexts and keys it builds from the job
+/// items — derived text, and `routines/system/keys.properties` holds the key that decrypts every
+/// password in the project. Content observers skip it. ([`walk_observed`] does not: it feeds the
+/// build fingerprint, which must stay byte-identical.)
+pub fn is_generated_tool_output(dir: &std::path::Path) -> bool {
+    dir.file_name().and_then(std::ffi::OsStr::to_str) == Some("poms")
+        && dir
+            .parent()
+            .is_some_and(|project| project.join("talend.project").is_file())
+}
+
 pub fn walk_observed(
     ctx: &ScanContext,
     mut on_file: impl FnMut(&str, &std::fs::Metadata),

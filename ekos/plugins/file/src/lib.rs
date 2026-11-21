@@ -46,7 +46,8 @@ impl Observer for FileObserver {
             if e.file_type().is_dir()
                 && let Some(name) = e.file_name().to_str()
             {
-                return !ctx.ignore_patterns.iter().any(|p| name == p.as_str());
+                return !ctx.ignore_patterns.iter().any(|p| name == p.as_str())
+                    && !ekos_observation_sdk::is_generated_tool_output(e.path());
             }
             true
         }) {
@@ -417,5 +418,30 @@ mod tests {
         assert_eq!(data["path"], "readme.md");
         assert_eq!(data["size_bytes"], payload.len());
         assert!(data["content_sha256"].as_str().unwrap().len() == 64);
+    }
+
+    /// RFC 0262 D5: Studio's generated `poms/` beside a `talend.project` (it holds the project's
+    /// encryption key) is not observed; a `poms` directory anywhere else is.
+    #[tokio::test]
+    async fn talend_generated_code_is_not_observed() {
+        let pkg = scan_temp(|dir| {
+            let p = dir.path().join("P");
+            std::fs::create_dir_all(p.join("poms/code/routines")).unwrap();
+            std::fs::create_dir_all(dir.path().join("other/poms")).unwrap();
+            std::fs::write(p.join("talend.project"), "<x/>").unwrap();
+            std::fs::write(p.join("poms/code/routines/keys.properties"), "k=v").unwrap();
+            std::fs::write(dir.path().join("other/poms/kept.txt"), "x").unwrap();
+        })
+        .await;
+        let targets: Vec<String> = pkg
+            .artifacts
+            .iter()
+            .map(|a| a.content.target.clone())
+            .collect();
+        assert!(
+            targets.iter().any(|t| t.ends_with("other/poms/kept.txt")),
+            "{targets:?}"
+        );
+        assert!(!targets.iter().any(|t| t.contains("P/poms")), "{targets:?}");
     }
 }

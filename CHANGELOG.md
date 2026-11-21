@@ -5,8 +5,12 @@
 **Security: secrets in Talend component JSON** (RFC 0043)
 - Talend's newer components (Snowflake, cloud storage, …) keep their settings as JSON inside one attribute.
   A password written there in plain text was stored by `ekos build`; it is now removed (`json-secret-property`),
-  and an attribute holding JSON that does not parse is removed whole. Rebuild any workspace built from such a
-  project (`PIPELINE_LOGIC_VERSION` 9 does this on the next `ekos build`).
+  and an attribute holding JSON that does not parse is removed whole.
+- Talend Studio's generated `poms/` folder holds the project's encryption key (`keys.properties`) and values
+  encrypted with it in an escaped form (`enc\:routine.…\:`); the generic file observer stored both. `poms/` is no
+  longer observed, and both forms are redacted wherever they appear.
+- `PIPELINE_LOGIC_VERSION` 10 rebuilds artifacts on the next `ekos build`, but the ledger is append-only: rebuild
+  from scratch any workspace that observed a Talend project before this version.
 
 **Talend: joblets as Studio writes them, lineage across buffers and files, zips, eval set** (RFC 0262–0264)
 - Joblets saved by Talend Studio (inside an `xmi:XMI` envelope) are read; links out of a joblet use, named after
