@@ -146,7 +146,8 @@ missing; the rest held:
 Components of Talend's component framework (`tSnowflake*`, cloud storage, …) keep their settings as JSON in one
 `PROPERTIES` parameter (Daikon serialization: each setting `{…, "storedValue": …, …, "name": …}`). The reader lifts
 `table.tableName`, `connection.schemaName` and `outputAction` into `TABLE`, `SCHEMA_DB` and `DATA_ACTION` when the
-component has none, and keeps the JSON with the `storedValue` of every setting named like a secret (`pass`,
+component has none, and `query` into `QUERY` when `manualQuery` is on (stored as `true` or as
+`{"@type": "boolean", "value": true}`; fixture E's 14 Snowflake inputs), and keeps the JSON with the `storedValue` of every setting named like a secret (`pass`,
 `secret`, `token`, `apikey`, `privatekey`) set to null. Before the parse, `ekos build`'s redaction removes those
 values from the text (RFC 0043, `json-secret-property`): the regex rules could not tie a value to the name written
 after it, and one candidate project held a plain-text password there.

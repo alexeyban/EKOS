@@ -127,7 +127,8 @@ impl CompilerPass for TalendAnalyzerPass {
         // v3: lineage through `tBufferOutput` → `tRunJob` and through files between jobs.
         // v4: ELT maps (RFC 0264 §ELT): IR, lineage, reads and writes.
         // v5: the migration assessment (RFC 0265): `TalendFinding`, `assessment` summaries.
-        "v5"
+        // v6: a component-framework input's manual query is its `QUERY` (Snowflake).
+        "v6"
     }
 
     fn cache_inputs(&self) -> Vec<String> {

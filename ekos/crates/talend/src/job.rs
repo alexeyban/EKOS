@@ -181,10 +181,21 @@ fn framework_params(params: &mut BTreeMap<String, Param>) {
             .filter(|s| !s.is_empty())
             .map(str::to_string)
     };
+    // A manual query (`manualQuery` on) is the input's SQL, as `QUERY` is for the others. The
+    // flag is stored as `true` or as `{"@type": "boolean", "value": true}`.
+    let manual = json
+        .get("manualQuery")
+        .and_then(|m| m.get("storedValue"))
+        .is_some_and(|v| {
+            v.as_bool()
+                .or_else(|| v.get("value").and_then(serde_json::Value::as_bool))
+                == Some(true)
+        });
     let lifted = [
         ("TABLE", stored(&["table", "tableName"])),
         ("SCHEMA_DB", stored(&["connection", "schemaName"])),
         ("DATA_ACTION", stored(&["outputAction"])),
+        ("QUERY", manual.then(|| stored(&["query"])).flatten()),
     ];
     for (name, value) in lifted {
         if let Some(value) = value {
@@ -643,6 +654,30 @@ mod tests {
         assert_eq!(text("DATA_ACTION"), "UPSERT");
         assert!(!format!("{job:?}").contains(&secret));
         assert!(text("PROPERTIES").contains("\"tableName\""));
+    }
+
+    #[test]
+    fn a_manual_query_is_lifted_only_when_manual_query_is_on() {
+        let read = |manual: &str| {
+            let props = format!(
+                r#"{{"manualQuery":{{"storedValue":{manual},"name":"manualQuery"}},"query":{{"storedValue":"\"select A from T\"","name":"query"}}}}"#
+            )
+            .replace('"', "&quot;");
+            let xml = format!(
+                r#"<talendfile:ProcessType xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd" defaultContext="Default"><node componentName="tSnowflakeInput"><elementParameter field="TEXT" name="UNIQUE_NAME" value="tDBInput_1"/><elementParameter field="TECHNICAL" name="PROPERTIES" value="{props}"/></node></talendfile:ProcessType>"#
+            );
+            parse_job("process/j_0.1.item", &xml).unwrap().components[0]
+                .params
+                .get("QUERY")
+                .and_then(Param::text)
+                .map(str::to_string)
+        };
+        assert_eq!(
+            read(r#"{"@type":"boolean","value":true}"#).as_deref(),
+            Some("\"select A from T\"")
+        );
+        assert_eq!(read("true").as_deref(), Some("\"select A from T\""));
+        assert_eq!(read(r#"{"@type":"boolean","value":false}"#), None);
     }
 
     #[test]
