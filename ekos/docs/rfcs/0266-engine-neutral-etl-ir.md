@@ -56,8 +56,9 @@ only: the corpora are third-party and never vendored. After the move, the same r
 manifest byte for byte.
 
 The check is `scripts/pentaho-golden.sh capture|check <corpus>…`, in the lakehouse repo, with the manifests
-under `tests/golden/`. CI runs the test package's check, the one corpus in the repo. The other two are run
-locally and the result is recorded in the devlog.
+under `tests/golden/`. The in-repo corpus (`bench-gold`) is checked by every `cargo test --workspace`. The lakehouse repository has no
+CI workflow, so that run is local and comes before each push. The other two corpora are run locally too, and the
+result is recorded in the devlog.
 
 ## Not in scope
 
