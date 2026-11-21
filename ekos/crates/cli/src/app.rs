@@ -255,6 +255,11 @@ enum Commands {
         #[command(subcommand)]
         subcommand: SqlCommands,
     },
+    /// Talend projects in the ledger (RFC 0262–0265)
+    Talend {
+        #[command(subcommand)]
+        subcommand: TalendCommands,
+    },
     /// Which source files changed since the ledger was committed, and which compiled objects
     /// cite them (RFC 0171)
     Freshness {
@@ -2211,6 +2216,23 @@ enum SqlCommands {
 }
 
 #[derive(Subcommand)]
+enum TalendCommands {
+    /// The migration assessment (RFC 0265): findings for a person to review (probable defects,
+    /// copies, environment ties, unused items), clone clusters, migration order and a target
+    /// sketch, from the compiled ledger. No model call
+    Assess {
+        /// One project (its name or label); all by default
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long)]
+        json: bool,
+        /// Write the report to this file instead of printing it
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
 enum CheckCommands {
     /// Where recovered logic assumes something the data contradicts (RFC 0254 §3.4): CASE
     /// branches that miss values, dead branches, constants outside the data's range, lookups on a
@@ -2824,6 +2846,9 @@ fn emits_machine_output(command: &Commands) -> bool {
         Commands::Sql {
             subcommand: SqlCommands::Check { json, .. } | SqlCommands::Generate { json, .. },
         } => *json,
+        Commands::Talend {
+            subcommand: TalendCommands::Assess { json, .. },
+        } => *json,
         Commands::Llm { subcommand } => match subcommand {
             LlmCommands::Routes { json }
             | LlmCommands::Usage { json, .. }
@@ -3112,6 +3137,9 @@ where
         Commands::Coverage { json, strict, all } => {
             crate::commands::coverage::run(&config, &cwd, json, strict, all)
         }
+        Commands::Talend {
+            subcommand: TalendCommands::Assess { project, json, out },
+        } => crate::commands::talend::assess(&config, &cwd, project.as_deref(), json, out.as_ref()),
         Commands::Check { subcommand } => match subcommand {
             CheckCommands::CodeVsData { json, expectations } => {
                 crate::commands::questions::check_code_vs_data(&config, &cwd, json, expectations)

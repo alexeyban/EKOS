@@ -7270,8 +7270,15 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
 - [x] Talend's encryption key and escaped `enc\:…\:` values in generated `poms/` no longer stored (file observer
       skips `poms/`, redaction covers both); fixture B/C/D audit 0 stored (2026-11-21, devlog_345)
 ### Slice 2 — documents (RFC 0265)
-- [ ] Talend scope in `docs generate --layout estate`; fixture A's "documents only" page
-- [ ] `ekos talend assess`: clone clusters, dead items, environment findings, probable defects (the §1.2 list)
+- [x] RFC 0265 (2026-11-21)
+- [x] Talend scope in `docs generate --layout estate` (`talend/`: projects, orchestration tree, a page per job with
+      maps, lineage and findings, contexts, the assessment; source text behind the licence rule); fixture A: no
+      Talend pages, "Talend jobs 0" (2026-11-21, devlog_347)
+- [x] `ekos talend assess`: clone clusters, dead items, environment findings, probable defects; fixture B lists
+      every §1.2 finding, 0 false findings on fixtures B–E after review (2026-11-21, devlog_347)
+- [ ] Assessment: repository schemas nothing uses (needs a `UsesSchema` relationship); `tLogCatcher` messages
+- [ ] Publish fixture B's Talend pages to a sandbox wiki (Confluence / Azure DevOps / GitHub) through the
+      lakehouse-docs publishers
 ### Slice 3 — translation (RFC 0266–0268, extension)
 - [ ] Engine-neutral IR extracted from the Kettle crates, Pentaho golden outputs byte-identical
 - [ ] Expressions, component semantics, idioms → dbt, differential run, console tab

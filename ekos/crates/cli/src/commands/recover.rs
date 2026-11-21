@@ -442,7 +442,8 @@ fn print_talend(s: &TalendStats) {
     println!(
         "  Talend: {} project(s), {} job(s), {} component(s), {} data component(s), {:.0}% mapped, \
          {} of {} quer(y/ies) folded, {} joblet(s) ({} use(s) inlined), {} column lineage(s) \
-         ({} with a gap, {} cross-job link(s)), {} diagnostic(s), 0 model calls",
+         ({} with a gap, {} cross-job link(s)), {} assessment finding(s), {} diagnostic(s), \
+         0 model calls",
         s.projects,
         s.jobs,
         s.components,
@@ -455,6 +456,7 @@ fn print_talend(s: &TalendStats) {
         s.lineages,
         s.lineage_gaps,
         s.column_feeds,
+        s.findings,
         s.diagnostics
     );
 }

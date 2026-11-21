@@ -51,6 +51,10 @@ pub struct Job {
     pub context_groups: Vec<ContextGroup>,
     /// Implicit context load (`IMPLICIT_TCONTEXTLOAD`): context values may be replaced at run time.
     pub implicit_context_load: bool,
+    /// The repository connection implicit context load reads its values through
+    /// (`PROPERTY_TYPE_IMPLICIT_CONTEXT:REPOSITORY_PROPERTY_TYPE`), when it names one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implicit_context_connection: Option<String>,
     pub components: Vec<Component>,
     pub links: Vec<Link>,
     pub triggers: Vec<Trigger>,

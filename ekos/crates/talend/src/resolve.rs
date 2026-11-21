@@ -76,7 +76,55 @@ pub fn context_assignments(code: &str) -> BTreeSet<String> {
     out
 }
 
+impl Component {
+    /// Every text the component holds: parameter values (table rows included, secrets never), and
+    /// its tMap's or ELT map's expressions and filters.
+    pub fn texts(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = Vec::new();
+        for p in self.params.values() {
+            match p {
+                Param::Value { value, .. } => out.push(value),
+                Param::Table { rows, .. } => {
+                    out.extend(rows.iter().flat_map(|r| r.values().map(String::as_str)));
+                }
+                Param::Secret { .. } => {}
+            }
+        }
+        if let Some(m) = &self.mapper {
+            let entries = m
+                .inputs
+                .iter()
+                .flat_map(|t| &t.entries)
+                .chain(m.outputs.iter().flat_map(|t| &t.entries))
+                .chain(&m.vars);
+            out.extend(entries.filter_map(|x| x.expression.as_deref()));
+            out.extend(m.inputs.iter().filter_map(|t| t.filter.as_deref()));
+            out.extend(m.outputs.iter().filter_map(|t| t.filter.as_deref()));
+        }
+        if let Some(m) = &self.elt {
+            out.extend(
+                m.inputs
+                    .iter()
+                    .flat_map(|i| i.join_keys.iter().map(|(_, _, e)| e.as_str())),
+            );
+            for o in &m.outputs {
+                out.extend(o.entries.iter().filter_map(|x| x.expression.as_deref()));
+                out.extend(o.filters.iter().map(String::as_str));
+                out.extend(o.clauses.iter().map(String::as_str));
+            }
+        }
+        out
+    }
+}
+
 impl Job {
+    /// Every text of every component ([`Component::texts`]) and every trigger condition.
+    pub fn texts(&self) -> Vec<&str> {
+        let mut out: Vec<&str> = self.components.iter().flat_map(Component::texts).collect();
+        out.extend(self.triggers.iter().filter_map(|t| t.condition.as_deref()));
+        out
+    }
+
     /// The default context group's variable.
     pub fn context_var(&self, name: &str) -> Option<&ContextVar> {
         let group = self

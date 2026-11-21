@@ -17,6 +17,7 @@
 //! - `TALEND005`: a link into or out of a joblet use whose port cannot be chosen (expansion);
 //! - `TALEND006`: joblet nesting deeper than [`joblet::MAX_DEPTH`], or a joblet that uses itself.
 
+pub mod assess;
 pub mod catalogue;
 pub mod java;
 mod job;

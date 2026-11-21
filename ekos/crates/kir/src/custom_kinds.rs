@@ -535,6 +535,11 @@ prefixes constantly",
         structurally_keyed: true,
         note: "(project, job, version, target component, column) — RFC 0264 Phase 2; one per target column, ColumnFeeds between jobs",
     },
+    CustomKind {
+        name: "TalendFinding",
+        structurally_keyed: true,
+        note: "(project, rule, subject) — RFC 0265; a migration-assessment finding, status hypothesis, About its job",
+    },
     // RFC 0200 — Pentaho → lakehouse dbt, written by the ekos-lakehouse extension.
     CustomKind {
         name: "PentahoPackage",

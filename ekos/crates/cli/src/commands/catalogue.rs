@@ -93,6 +93,7 @@ pub const CLASSES: &[(&str, Class, bool)] = &[
     ("coverage", Class::Read, false),
     ("freshness", Class::Read, false),
     ("check refs", Class::Read, false),
+    ("talend assess", Class::Read, false),
     ("sql check", Class::External, false),
     ("sql generate", Class::External, true),
     ("check explain", Class::External, true),

@@ -17,6 +17,7 @@ use ekos_kir::{
 };
 use ekos_semantic::merge_graphs;
 use ekos_semantic::transform_ir::lower_to_kir;
+use ekos_talend::assess::{Evidence, Finding, JobView, assess};
 use ekos_talend::java::context_refs;
 use ekos_talend::lineage::{ColumnLineage, job_lineage};
 use ekos_talend::{
@@ -42,6 +43,7 @@ pub const KINDS: &[&str] = &[
     "TalendRoutine",
     "TalendJoblet",
     "TalendColumnLineage",
+    "TalendFinding",
 ];
 
 /// What one run read, for `ekos recover`'s summary line.
@@ -63,6 +65,8 @@ pub struct TalendStats {
     pub lineage_gaps: usize,
     /// Lineage links between jobs through a table.
     pub column_feeds: usize,
+    /// RFC 0265 assessment findings.
+    pub findings: usize,
 }
 
 impl TalendStats {
@@ -84,6 +88,7 @@ impl TalendStats {
         self.queries_folded += other.queries_folded;
         self.diagnostics += other.diagnostics;
         self.joblets += other.joblets;
+        self.findings += other.findings;
         self.joblet_uses += other.joblet_uses;
         self.lineages += other.lineages;
         self.lineage_gaps += other.lineage_gaps;
@@ -121,7 +126,8 @@ impl CompilerPass for TalendAnalyzerPass {
         // v2: joblets and column lineage (RFC 0264 Phase 2).
         // v3: lineage through `tBufferOutput` → `tRunJob` and through files between jobs.
         // v4: ELT maps (RFC 0264 §ELT): IR, lineage, reads and writes.
-        "v4"
+        // v5: the migration assessment (RFC 0265): `TalendFinding`, `assessment` summaries.
+        "v5"
     }
 
     fn cache_inputs(&self) -> Vec<String> {
@@ -331,8 +337,153 @@ pub fn project_kir(project: &Project) -> (KirGraph, TalendStats, Vec<Diagnostic>
         lineages.push((job, expanded.job, found));
     }
     emit_lineages(&mut e, &lineages, &mut stats);
+    emit_assessment(&mut e, project_id, &lineages, &mut stats);
     stats.diagnostics += diagnostics.len();
     (e.kir, stats, diagnostics)
+}
+
+/// RFC 0265: the migration assessment, from the same expanded jobs and lineage. Findings become
+/// keyed `TalendFinding` objects (`About` their job); summaries land on `TalendJob` and
+/// `TalendProject` as `assessment`.
+fn emit_assessment(
+    e: &mut Emit,
+    project_id: KirId,
+    lineages: &[(&Job, Job, Vec<ColumnLineage>)],
+    stats: &mut TalendStats,
+) {
+    let io: Vec<(crate::talend_ir::DataIo, usize, usize)> = lineages
+        .iter()
+        .map(|(_, expanded, _)| {
+            let lowered = lower_job(expanded);
+            (
+                crate::talend_ir::data_io(expanded),
+                lowered.mapped_components,
+                lowered.data_components,
+            )
+        })
+        .collect();
+    let views: Vec<JobView> = lineages
+        .iter()
+        .zip(&io)
+        .map(|((job, expanded, lineage), (io, mapped, data))| JobView {
+            job,
+            expanded,
+            lineage,
+            mapped: *mapped,
+            data_components: *data,
+            reads: &io.reads,
+            writes: &io.writes,
+            files_read: &io.files_read,
+        })
+        .collect();
+    let mut a = assess(e.project, &views);
+    a.findings.extend(unused_items(e, project_id));
+    for f in &a.findings {
+        let at = f.evidence.first();
+        let path = at
+            .map_or("talend.project", |ev| ev.path.as_str())
+            .to_string();
+        let line = at.and_then(|ev| ev.line);
+        let evidence: Vec<Value> = f
+            .evidence
+            .iter()
+            .map(|ev| json!({ "path": workspace_path(&e.project.root, &ev.path), "line": ev.line }))
+            .collect();
+        let props = json!({
+            "rule": f.rule,
+            "class": f.class,
+            "subject": f.subject,
+            "job": f.job,
+            "message": f.message,
+            "evidence": evidence,
+            "status": "hypothesis",
+        });
+        let key = format!("{}:{}", f.rule, f.subject);
+        // Named `rule: subject`, never the subject alone: a finding named like its job or
+        // component made identity report the pair as one name in two kinds.
+        let name = format!("{}: {}", f.rule, f.subject);
+        let id = e.object("TalendFinding", &key, &name, props, (&path, line));
+        let about = f
+            .job
+            .as_ref()
+            .and_then(|name| e.project.jobs.iter().find(|j| j.latest && &j.name == name))
+            .map_or(project_id, |j| e.id("TalendJob", &job_key(j)));
+        e.relate("About", id, about, "", Value::Null);
+        stats.findings += 1;
+    }
+    for (key, ja) in &a.jobs {
+        let id = e.id("TalendJob", key);
+        if let Some(o) = e.kir.objects.iter_mut().find(|o| o.id == id) {
+            o.properties.insert("assessment".into(), json!(ja));
+        }
+    }
+    if let Some(o) = e.kir.objects.iter_mut().find(|o| o.id == project_id) {
+        o.properties.insert("assessment".into(), json!(a.project));
+    }
+}
+
+/// Contexts, connections and custom routines nothing uses (RFC 0265 `unused_item`), from the
+/// `Uses*` relationships the pass already emitted.
+fn unused_items(e: &Emit, project_id: KirId) -> Vec<Finding> {
+    let used: std::collections::HashSet<KirId> = e
+        .kir
+        .relationships
+        .iter()
+        .filter(|r| {
+            matches!(&r.kind, RelationshipKind::Custom(k)
+                if matches!(k.as_str(), "UsesContext" | "UsesConnection" | "UsesRoutine"))
+        })
+        .map(|r| r.to)
+        .collect();
+    let contains: Vec<(KirId, KirId)> = e
+        .kir
+        .relationships
+        .iter()
+        .filter(|r| r.kind == RelationshipKind::Contains)
+        .map(|r| (r.from, r.to))
+        .collect();
+    let mut out = Vec::new();
+    for o in &e.kir.objects {
+        let kind = match &o.kind {
+            ObjectKind::Custom(k) => k.as_str(),
+            _ => continue,
+        };
+        let what = match kind {
+            "TalendContext" => "context",
+            "TalendDbConnection" => "database connection",
+            "TalendRoutine" => "routine",
+            _ => continue,
+        };
+        let in_use = used.contains(&o.id)
+            || (kind == "TalendContext"
+                && contains
+                    .iter()
+                    .any(|(from, to)| *from == o.id && used.contains(to)));
+        if in_use || !contains.iter().any(|(f, t)| *f == project_id && *t == o.id) {
+            continue;
+        }
+        let path = o
+            .properties
+            .get("source_path")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let rel = path
+            .strip_prefix(&format!("{}/", e.project.root))
+            .unwrap_or(path)
+            .to_string();
+        out.push(Finding {
+            rule: "unused_item".into(),
+            class: "dead_item".into(),
+            subject: format!("{kind}:{}", o.name),
+            job: None,
+            message: format!("the {what} `{}` is not used by any job", o.name),
+            evidence: vec![Evidence {
+                path: rel,
+                line: None,
+            }],
+        });
+    }
+    out
 }
 
 fn emit_repository(e: &mut Emit, project_id: KirId) {
@@ -496,6 +647,24 @@ fn emit_job(e: &mut Emit, project_id: KirId, job: &Job, expanded: &Job, stats: &
         e.relate("Contains", job_id, cid, "", Value::Null);
     }
     emit_flow(e, job, &scope);
+    if let Some(conn) = &job.implicit_context_connection
+        && let Some(target) = project
+            .connections
+            .iter()
+            .find(|x| x.id.as_deref() == Some(conn.as_str()))
+    {
+        let to = e.id(
+            "TalendDbConnection",
+            &format!("{}@{}", target.name, target.version),
+        );
+        e.relate(
+            "UsesConnection",
+            job_id,
+            to,
+            "implicit_context",
+            json!({ "for": "implicit context load" }),
+        );
+    }
     for call in &calls {
         let Some(target) = &call.resolved else {
             continue;
@@ -629,36 +798,8 @@ fn emit_flow(e: &mut Emit, job: &Job, scope: &str) {
 
 /// Every text a job's behaviour depends on: parameter values and table cells, tMap expressions
 /// and filters, trigger conditions.
-fn job_texts(job: &Job) -> Vec<&str> {
-    let mut out: Vec<&str> = Vec::new();
-    for c in &job.components {
-        for p in c.params.values() {
-            match p {
-                Param::Value { value, .. } => out.push(value),
-                Param::Table { rows, .. } => {
-                    out.extend(rows.iter().flat_map(|r| r.values().map(String::as_str)))
-                }
-                Param::Secret { .. } => {}
-            }
-        }
-        if let Some(m) = &c.mapper {
-            let entries = m
-                .inputs
-                .iter()
-                .flat_map(|t| &t.entries)
-                .chain(m.outputs.iter().flat_map(|t| &t.entries))
-                .chain(&m.vars);
-            out.extend(entries.filter_map(|x| x.expression.as_deref()));
-            out.extend(m.inputs.iter().filter_map(|t| t.filter.as_deref()));
-            out.extend(m.outputs.iter().filter_map(|t| t.filter.as_deref()));
-        }
-    }
-    out.extend(job.triggers.iter().filter_map(|t| t.condition.as_deref()));
-    out
-}
-
 fn emit_uses(e: &mut Emit, job: &Job, job_id: KirId) {
-    let texts = job_texts(job);
+    let texts = job.texts();
     let runtime = RuntimeContext::of(job);
     let used: BTreeSet<String> = texts.iter().flat_map(|t| context_refs(t)).collect();
     let mut unresolved: Vec<String> = Vec::new();
@@ -710,11 +851,13 @@ fn context_variable_key(project: &Project, job: &Job, name: &str) -> Option<Stri
     ))
 }
 
-/// `routine.method(` at a word boundary.
+/// `routine.method(` at a word boundary, or written in full as `routines.routine.method(`.
 fn calls_routine(text: &str, routine: &str) -> bool {
     let needle = format!("{routine}.");
     text.match_indices(&needle).any(|(at, _)| {
-        let before_ok = text[..at]
+        let before = &text[..at];
+        let unqualified = before.strip_suffix("routines.").unwrap_or(before);
+        let before_ok = unqualified
             .chars()
             .next_back()
             .is_none_or(|c| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'));
@@ -971,6 +1114,17 @@ mod tests {
     }
 
     #[test]
+    fn a_routine_is_called_by_its_short_or_full_name() {
+        assert!(calls_routine("HashUtil.sha256(row1.email)", "HashUtil"));
+        assert!(calls_routine(
+            "routines.HashUtil.sha256(row1.email)",
+            "HashUtil"
+        ));
+        assert!(!calls_routine("other.HashUtil.sha256(x)", "HashUtil"));
+        assert!(!calls_routine("MyHashUtil.sha256(x)", "HashUtil"));
+    }
+
+    #[test]
     fn lineage_runs_through_a_joblet_and_across_jobs_to_the_first_source() {
         let project = read_project("", &demo_with_joblet());
         let (kir, stats, diagnostics) = project_kir(&project);
@@ -1051,6 +1205,23 @@ mod tests {
 
     fn by_id(kir: &KirGraph, id: KirId) -> &KirObject {
         kir.objects.iter().find(|o| o.id == id).unwrap()
+    }
+
+    #[test]
+    fn findings_never_share_a_name_with_another_object() {
+        // Identity reports one name in two kinds as a conflict (`resolve` stops).
+        let project = read_project("", &elt_project());
+        let (kir, stats, _) = project_kir(&project);
+        assert!(stats.findings > 0, "the lone ELT job is an uncalled job");
+        let finding = ObjectKind::Custom("TalendFinding".into());
+        for f in kir.objects.iter().filter(|o| o.kind == finding) {
+            let same = kir
+                .objects
+                .iter()
+                .filter(|o| o.kind != finding && o.name.eq_ignore_ascii_case(&f.name))
+                .count();
+            assert_eq!(same, 0, "{}", f.name);
+        }
     }
 
     #[test]

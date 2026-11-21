@@ -161,7 +161,7 @@ fn current_code(config: &EkosConfig, cwd: &Path, objects: &[KirObject]) -> Optio
 }
 
 /// The ids of the latest compiled model's objects.
-fn compiled_ids(model: &Path) -> Option<std::collections::HashSet<KirId>> {
+pub(crate) fn compiled_ids(model: &Path) -> Option<std::collections::HashSet<KirId>> {
     ekos_common::compress::resolve_auto(model)?;
     let m: ekos_semantic::CkModel = ekos_common::compress::read_json_auto(model).ok()?;
     Some(m.objects.into_iter().map(|o| o.id).collect())

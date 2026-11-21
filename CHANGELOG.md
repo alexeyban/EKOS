@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+**Talend: migration assessment and documentation** (RFC 0265)
+- `ekos talend assess [--project] [--json] [--out]`: findings for a person to review, from the compiled ledger
+  with no model call:
+  - probable defects: a measure named after a column it never reads; a leap-year test by 4 only;
+  - copies: a message naming a job that the job carrying it neither is nor calls; a link label named after
+    another job;
+  - environment ties: absolute paths, flagged when under a person's own folders;
+  - unused jobs, contexts, connections and routines.
+
+  The report also has clone clusters, migration waves over the table graph, a per-job summary (IR mapping,
+  expressions by kind, state, run-time dependence, idioms) and a target sketch, with no estimate in days.
+- Findings are `TalendFinding` objects (`status: hypothesis`), written at recover.
+- On fixture B the report lists every acceptance example of the plan, and the six ODS jobs form one clone
+  cluster. On fixture E it found a real copy (error messages naming another job's children). 0 false findings on
+  fixtures B–E after review.
+- `ekos docs generate --layout estate` writes `talend/` pages: projects, the orchestration tree, one page per job
+  (tables, context variables, maps column by column, column lineage, findings), contexts, and the assessment.
+  Expressions and descriptions follow the estate licence rule.
+- The ledger now records a job's implicit-context-load connection (`UsesConnection`) and routines called as
+  `routines.Name.m(…)` (`UsesRoutine`); both were missing.
+
 **Talend: ELT maps and several engines in one project** (RFC 0262–0264)
 - `tELTInput` → `tELTMap` → `tELTOutput` jobs (SQL the database runs) are read: the map's inputs with alias,
   table, join type and keys, its outputs with SQL expressions, WHERE filters and `GROUP BY` clauses. They are

@@ -17,6 +17,9 @@
 //! [`passport`]).
 
 mod passport;
+mod talend;
+
+pub use talend::assessment_markdown;
 
 pub use passport::{PassportInput, QuestionState, decision_words};
 
@@ -25,7 +28,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Bump when the output of [`build`] changes for the same input.
-pub const ESTATE_VERSION: u32 = 2;
+pub const ESTATE_VERSION: u32 = 3;
 
 /// Where a table stands in the RFC 0213 scope review.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1690,6 +1693,12 @@ fn home(m: &Model, counts: &[(&str, String)]) -> EstatePage {
     ] {
         b.push_str(&format!("- {}\n", link("index.md", path, title)));
     }
+    if talend::present(m.input.objects) {
+        b.push_str(&format!(
+            "- {}\n",
+            link("index.md", "talend/index.md", "Talend")
+        ));
+    }
     b.push_str("\n## Review\n\nThe source model's review (RFC 0213) as of this generation:\n\n");
     let rows: Vec<Vec<String>> = m
         .input
@@ -1767,6 +1776,7 @@ pub fn build(input: &EstateInput<'_>) -> Vec<EstatePage> {
     let routines = routine_pages(&m, &mut pages);
     let scripts = history_pages(&m, &mut pages);
     pages.push(findings_page(&m));
+    let talend_jobs = talend::pages(&m, &mut pages);
     let in_scope = m.tables.keys().filter(|t| m.in_scope(t)).count();
     let open: usize = m.conflicts.values().map(Vec::len).sum();
     let counts = [
@@ -1780,6 +1790,7 @@ pub fn build(input: &EstateInput<'_>) -> Vec<EstatePage> {
         ("glossary terms", terms.to_string()),
         ("migration scripts", scripts.to_string()),
         ("open conflicts", open.to_string()),
+        ("Talend jobs", talend_jobs.to_string()),
     ];
     // Home last: it reports what the other pages dropped.
     pages.push(home(&m, &counts));

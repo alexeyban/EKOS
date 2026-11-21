@@ -47,9 +47,23 @@ pub(crate) fn parse_job(path: &str, text: &str) -> Result<Job, String> {
     job.context_groups = children(&root, "context")
         .map(|c| context_group(&c))
         .collect();
-    job.implicit_context_load = children(&root, "parameters")
+    let job_params: Vec<Node> = children(&root, "parameters")
         .flat_map(|p| children(&p, "elementParameter").collect::<Vec<_>>())
-        .any(|p| p.attribute("name") == Some("IMPLICIT_TCONTEXTLOAD") && attr_bool(&p, "value"));
+        .collect();
+    let job_param = |name: &str| {
+        job_params
+            .iter()
+            .find(|p| p.attribute("name") == Some(name))
+            .and_then(|p| p.attribute("value"))
+    };
+    job.implicit_context_load = job_param("IMPLICIT_TCONTEXTLOAD") == Some("true");
+    // Implicit context load reads its values through a repository connection, named at job level.
+    job.implicit_context_connection = (job.implicit_context_load
+        && job_param("PROPERTY_TYPE_IMPLICIT_CONTEXT:PROPERTY_TYPE") == Some("REPOSITORY"))
+    .then(|| job_param("PROPERTY_TYPE_IMPLICIT_CONTEXT:REPOSITORY_PROPERTY_TYPE"))
+    .flatten()
+    .filter(|v| !v.is_empty())
+    .map(str::to_string);
     // A joblet may write its boundary ports as `jobletNodes` (RFC 0263 §Joblets).
     job.components = root
         .children()

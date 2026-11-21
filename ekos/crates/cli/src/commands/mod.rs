@@ -64,6 +64,7 @@ pub mod simulate;
 pub mod source;
 pub mod sql_check;
 pub mod store;
+pub mod talend;
 pub mod testimony;
 pub mod transformation;
 pub mod treasury;

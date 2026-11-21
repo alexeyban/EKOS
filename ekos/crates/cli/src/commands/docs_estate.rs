@@ -314,7 +314,8 @@ pub fn generate(config: &EkosConfig, cwd: &Path, output: &Path) -> Result<()> {
         anyhow::anyhow!("{e}\nRun the pipeline (`ekos build` … `ekos commit`) first.")
     })?;
     let review = super::review::review_state(config, cwd, &*ledger)?;
-    let objects = ledger.all_objects()?;
+    // RFC 0265: Talend objects the latest compile no longer holds stay out of the pages.
+    let objects = super::talend::current_only(config, cwd, ledger.all_objects()?);
     let relationships = ledger.all_relationships()?;
     let scope = scope_from(review.items(ekos_semantic::review::Subject::Scope));
     let subjects: Vec<SubjectLine> = review
