@@ -182,15 +182,16 @@ fn framework_params(params: &mut BTreeMap<String, Param>) {
             .map(str::to_string)
     };
     // A manual query (`manualQuery` on) is the input's SQL, as `QUERY` is for the others. The
-    // flag is stored as `true` or as `{"@type": "boolean", "value": true}`.
-    let manual = json
-        .get("manualQuery")
-        .and_then(|m| m.get("storedValue"))
-        .is_some_and(|v| {
+    // flag is stored as `true` or as `{"@type": "boolean", "value": true}`. A component with no
+    // such setting (a `tSnowflakeRow`) always runs its query.
+    let manual = match json.get("manualQuery") {
+        None => true,
+        Some(m) => m.get("storedValue").is_some_and(|v| {
             v.as_bool()
                 .or_else(|| v.get("value").and_then(serde_json::Value::as_bool))
                 == Some(true)
-        });
+        }),
+    };
     let lifted = [
         ("TABLE", stored(&["table", "tableName"])),
         ("SCHEMA_DB", stored(&["connection", "schemaName"])),
@@ -678,6 +679,20 @@ mod tests {
         );
         assert_eq!(read("true").as_deref(), Some("\"select A from T\""));
         assert_eq!(read(r#"{"@type":"boolean","value":false}"#), None);
+    }
+
+    #[test]
+    fn a_row_components_query_is_lifted_without_a_manual_query_setting() {
+        let props = r#"{"query":{"storedValue":"\"update T set A = 1\"","name":"query"}}"#
+            .replace('"', "&quot;");
+        let xml = format!(
+            r#"<talendfile:ProcessType xmlns:talendfile="platform:/resource/org.talend.model/model/TalendFile.xsd" defaultContext="Default"><node componentName="tSnowflakeRow"><elementParameter field="TEXT" name="UNIQUE_NAME" value="tDBRow_1"/><elementParameter field="TECHNICAL" name="PROPERTIES" value="{props}"/></node></talendfile:ProcessType>"#
+        );
+        let job = parse_job("process/j_0.1.item", &xml).unwrap();
+        assert_eq!(
+            job.components[0].params.get("QUERY").and_then(Param::text),
+            Some("\"update T set A = 1\"")
+        );
     }
 
     #[test]
