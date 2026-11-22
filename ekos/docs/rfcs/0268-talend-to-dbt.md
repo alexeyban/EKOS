@@ -230,6 +230,156 @@ They are read from where they live:
   - the MCP tool list and scope tests pass, and so does the console policy's equality test;
   - the lakehouse's report test covers the saved translation by project and component.
 
+## Phase 3 design: the sandbox host (2026-11-22)
+
+The differential run executes a project's built jobs, which are third-party code, so only in a sandbox. The host is a
+libvirt/KVM virtual machine (Windows 11, `win11`) on the operator's machine, driven only from outside, with no GUI
+automation:
+- **From the host, with `virsh`:**
+  - the VM's NIC is on an isolated libvirt network, `ekos-sandbox`, with no forwarding and no route out, so it
+    reaches only the host's bridge;
+  - a snapshot, `ekos-sandbox-clean`, is taken with the VM shut down. Every run starts from it and reverts to it
+    after, so whatever a job did is undone.
+- **Inside, over SSH:** a dedicated key, as the account the operator set up.
+  - The tools are unpacked under `C:\ekos-sandbox`, from zip files the host downloaded and checked: a Java 17
+    runtime (Talend 8.0.1's jobs are Java 8 bytecode) and PostgreSQL's Windows binaries. There are no installers
+    and no services.
+  - A Windows Firewall rule blocks outbound traffic as a second wall.
+  - Each run gets a throwaway PostgreSQL cluster on `127.0.0.1` (`initdb`, then `pg_ctl` while the run lasts),
+    loaded from the project's DDL scripts.
+- **Copied in for a run:** the job's jar, its libraries and routines, and the input files. A job runs as
+  `java -cp … <package>.<job> --context_param name=value…`, with the context pointed at the sandbox: host
+  `127.0.0.1`, the throwaway database, the input directory.
+- **Copied out:** the written tables, as CSV through `psql \copy`, and the job's log. Nothing else leaves the VM.
+
+**Set up (2026-11-22).** The host side has these parts:
+- **Network:** `ekos-sandbox` (192.168.150.0/24) has no forwarding, and the VM gets 192.168.150.10 by its MAC.
+- **Snapshot:** `ekos-sandbox-clean` was taken shut off.
+- **Tools:** Temurin JRE 17.0.21.1 (its Adoptium checksum verified) and PostgreSQL 16.16's EDB binaries. EDB
+  publishes no checksum, so the host recorded its own and the VM compared against it.
+
+Checked from inside:
+- the VM has no default gateway;
+- the internet, the host's ports (a published container port included) and the old NAT are unreachable;
+- loopback PostgreSQL works.
+
+What setting it up taught:
+- **EDB's Windows binaries need the Visual C++ runtime** (`0xC0000135` without it). Its three DLLs are copied from
+  the JRE's `bin` beside `postgres.exe`, an app-local deployment, instead of running an installer.
+- **Never pipe a server's output over SSH.** `pg_ctl start | Out-Null` hung the session: the server inherits the
+  pipe. The cluster script (`pg.ps1`) starts it with output redirected to files and waits with `pg_isready`.
+- **Windows put the new network in the Public profile, where its OpenSSH rule did not apply.** The NIC went back
+  to the NAT network for one minute, live, to widen the rule to every profile. Outbound traffic was already blocked
+  then.
+- **Windows ignores libvirt's ACPI shutdown** on this guest; `shutdown /s` over SSH works.
+
+### The runner (the Talend side of the differential run)
+
+`scripts/talend-sandbox/run.sh <project-dir> <out-dir>` in ekos-lakehouse. The sandbox is named by `EKOS_SANDBOX_SSH`,
+`EKOS_SANDBOX_DOMAIN` and `EKOS_SANDBOX_SNAPSHOT`. A run goes through these steps:
+1. **Revert** the VM to the clean snapshot, start it, and wait for SSH.
+2. **Send one archive.** It holds each job's built jar (`poms/jobs/**/target/*.jar`), the project's libraries
+   (`temp/lib`, routines, beans), the input files, the project's SQL scripts and the VM-side script.
+3. **Run in the VM** (`vm-run.ps1`):
+   - a throwaway cluster on `127.0.0.1:5432`, the port the jobs' own context names;
+   - the database the context names, then the project's create and insert scripts, in their order;
+   - the input files where the jobs look for them;
+   - each job in the orchestration jobs' order, `java -cp <job jar>;lib\* <class>`, with output to files,
+     exit code and time recorded. After each job, every table of the project's schemas is dumped as CSV.
+4. **Bring back** the dumps, the logs and a `manifest.json`. Revert the snapshot again.
+
+The project's own files say where a job looks. **Every value the runner sets that the project did not is recorded
+in the manifest as a sandbox setting**: the run day, the context rows changed, the paths a job hard-codes. Fixture B
+shows all three:
+- **Input directory:** `projectFolder` plus the run day's date, `TalendDate.getDate("YYYYMMDD")`.
+- **Context rows:** its context table names a database `Vente_DB` while the jobs' defaults say `vente_db`; the
+  runner keeps the defaults.
+- **Hard-coded path:** the calendar reads `C:/Users/pc/Downloads/joursFeries.xlsx`.
+
+A job that fails is reported with its log and exit code, and the next jobs still run. Its tables are **not verified
+by execution**, with the reason.
+
+### The comparison (the dbt side)
+
+`lakehouse talend verify <project> --run <dir> --trino-url <url>` (class `external`). It reads the runner's output
+directory and the project, and translates the project as `translate` does, with the same settings and an empty
+plan: a model reading a lakehouse table is not verified, by name. Then:
+1. **On a throwaway Trino, in its `memory` catalog**, under schemas prefixed with this verification's id, which
+   are dropped afterwards. Trino's in-memory tables are lost on restart, and nothing is written elsewhere.
+2. **Land each `talend_files` source** from the input files the run used, as the job's file component reads them:
+   - its separator, header rows, encoding and empty-row setting, with no quoting when its CSV option is off;
+   - its schema's types, an empty value being NULL for a non-text column;
+   - `$path` as the job saw it, the VM's path.
+
+   A listed input is named by its `tFileList` mask, so each mask lands the files it matches.
+3. **Execute every enabled model's first build in `ref()` order:** incremental models in full and, for a snapshot,
+   its first version. One Talend run on empty tables is the first build of each model, and that is what is
+   compared. A second run, whose incremental behaviour is not compared yet, is stated as such.
+4. **Compare each gold model that writes a table with the table the jobs left after the last job.** Both sides are
+   multisets of rows, over the columns both have, compared as normalised text: numbers canonical, timestamps without
+   trailing zero fractions, booleans `true`/`false`. These columns are left out, each named with why:
+   - columns set from the clock (`Now`/`Today` in the IR; a snapshot's `dbt_valid_*`);
+   - database-assigned keys (a snapshot's `surrogate`), and every column of another model with the same name, since
+     both hold values of that key.
+
+   Per model the result is `equal`, `differs` (counts each side, and up to five rows only on one side), or
+   `not verified` (why).
+5. **Comparer control:** the comparison is repeated on the first `equal` model with one of its dbt rows removed,
+   and it must report `differs`, or the result is not trusted.
+
+The report goes to `<state>/lakehouse/talend/<pkg>.verification.json`, and the summary to the console.
+
+### Result: the first differential run (2026-11-22, fixture B)
+
+**The Talend side.** Fixture B's ten jobs all ran to their end in the sandbox, in their orchestration order with the
+calendar before the DWH. Rows written:
+
+| Table | Rows |
+|---|---|
+| `DIM_CALENDRIER` | 2,192 |
+| `FAIT_VENTE` | 500 |
+| `DIM_CLIENT` | 17,415 |
+| `DIM_PRODUIT` | 3,788 |
+| `ODS_REJET` | 4 |
+
+The calendar's 2,192 rows are the count the translator computes from the context defaults.
+
+**The comparison** (`--locale fr_FR`, the sandbox JVM run as `fr_FR`):
+
+| Table | Rows | Result |
+|---|---|---|
+| `DIM_CALENDRIER` | 2,192 | equal on all 17 columns: week numbers, month and day names, holidays, last day of month, leap years |
+| `ODS_CATEGORIE` (a snapshot) | 3 | equal, `DT_INSERTION` left out as the run's time |
+| `ODS_TYPE_CLIENT` (a snapshot) | 3 | equal, `DT_INSERTION` left out as the run's time |
+
+- **Built:** all 18 enabled models built on Trino.
+- **Not verified:** the 12 other outputs. Their models are disabled, downstream of the two ODS jobs refused for
+  defects in them; each is reported with its reason.
+- **Control:** the comparer found its planted difference.
+
+**Amendments from the run:**
+- **Six different files had one source name.** A file input that reads a `tFileList`'s current file was named after
+  the path expression, the same text in every job. It is now named by that list's masks (`ICOM_*_TYPE_CLIENT.csv`),
+  so each file lands apart. This was a translation defect.
+- **A file's name was wrong on Windows.** `CURRENT_FILE` was `regexp_replace($path, '^.*/', '')`, but a job run on
+  Windows stores `C:\…\file.csv`. It now cuts at either separator, as Java's `File.getName()` does. This too was a
+  translation defect.
+- **The JVM's locale is a sandbox setting** (`jvm_locale`). The VM's own Java ran `en_US` and printed `January`,
+  where the translation, told `fr_FR`, printed `Janvier`. Both sides run one stated locale.
+- **The calendar was compiled but not packaged** by the project's build. The runner zips its `target/classes`;
+  nothing is compiled. Its Excel libraries, named by its pom and missing from `temp/lib`, come from the Talend
+  Studio 8.0.1 the project was built with (`EKOS_TALEND_STUDIO`). Both are recorded in the run's `origins.json`.
+- **What the landing had to learn, all from the files:**
+  - `CUSTOMER.csv` ends its lines with a bare CR, and Talend's reader takes CR, LF and CRLF;
+  - a delimited date column is read with its schema's pattern (`dd-MM-yyyy`);
+  - a workbook's dates are Excel day numbers.
+- **A `date` and a midnight `timestamp` normalise to one value.** PostgreSQL's column is a date, and the model's a
+  timestamp.
+- **The runner's own defects, found on its first run:**
+  - PowerShell's `Start-Process` joins arguments without quoting them, so SQL goes through files;
+  - a process object loses its exit code unless its handle is read first. A job that does not run
+in the sandbox stays **not verified by execution**, with the reason.
+
 ## Exit (phase 1)
 
 - **Golden gate:** the Pentaho golden manifests are byte-identical after the `etl-dbt` move.

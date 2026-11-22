@@ -7308,5 +7308,11 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
       console's Talend tab (projects, summary, data flow, models, patterns, components, original ↔ SQL, questions,
       proposal; scan and translate) (2026-11-22, devlog_353, lakehouse devlog_29)
 - [ ] RFC 0268 phase 2 later: a keyed replace whose join on the target sits inside a chain of joins (E, 9 jobs)
-- [ ] RFC 0268 phase 3: differential run (needs a sandbox host: the project's built jobs are third-party code, never
-      run on a developer machine); LLM fill-in for gaps (`--allow-metered`, RFC 0205 loop)
+- [x] RFC 0268 phase 3 differential run: sandbox (libvirt VM, isolated network, clean snapshot), runner
+      (`scripts/talend-sandbox/run.sh` in the lakehouse), `lakehouse talend verify` (throwaway Trino, memory
+      catalog); fixture B: 10/10 jobs ran, `DIM_CALENDRIER` (2,192 rows, 17 columns), `ODS_CATEGORIE`,
+      `ODS_TYPE_CLIENT` equal, 0 differ, control passed; two translation defects found and fixed (2026-11-22,
+      devlog_354, lakehouse devlog_30)
+- [ ] RFC 0268 phase 3 later: a second (incremental) run compared; fixtures C–E in the sandbox; the verification in the
+      console's Talend tab
+- [ ] RFC 0268 phase 3: LLM fill-in for gaps (`--allow-metered`, RFC 0205 loop)
