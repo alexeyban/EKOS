@@ -132,6 +132,52 @@ The command's catalogue class is `external`, as `lakehouse pentaho translate`'s 
      waits for a sandbox host. Until then the result says **not verified by execution**.
    - **LLM fill-in for gaps** (plan V.7), with `--allow-metered`, through RFC 0205's loop.
 
+## Phase 2 design: pattern idioms (2026-11-22)
+
+Measured first on the fixtures (lakehouse `talend-dbt` diagnostic over B and E). The disabled models of phase 1 come
+from five shapes. Each is recognised by structure, names its rule, and falls back to phase 1 when any condition
+fails. A fallback names the condition that failed. A recognised pattern is never `exact`.
+
+| Shape (where) | Recognised when | dbt result | Rule |
+|---|---|---|---|
+| **SCD2 by hand** (B: ODS and DIM jobs) | one job; a tMap looks up the target's own rows (a `Source` on the table); three sinks on that table: an `INSERT` of the rows the lookup did not match, an `UPDATE` keyed on the lookup key or on a key read from the lookup that sets a flag column to a literal, and an `INSERT` of matched rows that pass a comparison of main and lookup columns; both inserts write the same columns and set the flag to a different literal than the update | a **snapshot** (`strategy='check'`, `unique_key` = the lookup key, `check_cols` = the main-side columns of the comparison) over the first insert's projection with the lookup removed, plus a gold model over it that gives the table's own columns back (`flag` from `dbt_valid_to IS NULL`, the insert's clock column from `dbt_valid_from`, the update's clock column from `dbt_valid_to`) | `snapshot` |
+| **Delete then insert on a key** (E: 17 ELT jobs) | one job; a `DELETE` of `B.k` for the rows where `A LEFT JOIN B` matched, `B` a `Source` on the table; an `INSERT` over the same join that reads only `A` and writes `k` | an incremental model, `merge` on `k`, over the insert's projection with the join removed | `keyed-replace` |
+| **One rejects table, many writers** (B: `ODS_REJET`, 18 writers in 6 jobs) | ≥ 2 writers, all `INSERT_OR_UPDATE` (or all `INSERT`) with the same keys and columns; none reads the table; every writer's flow carries a reject branch | one `rej_` model: the writers' rows, `UNION ALL`, incremental `merge` on the shared keys (append for inserts) | `rejects` |
+| **Write-back flag** (B: `ODS_VENTE.BL_LIGNE_IN_DWH`) | an `UPDATE` of a table the same job reads as a source, every non-key column a literal | no model; a `write-back` question: the consumer's incremental predicate replaces the flag, unless something else reads it. The sink is not counted as a writer of the table. | `write-back` |
+| **Lookup on the target** (B: `jOdsVente`; E: nine upserts) | the only writer of a table reads it through a `Source` upstream; the rule is incremental; the source reads only columns the model writes | the source reads `{{ this }}` in an incremental run, and an empty relation of the model's typed columns on the first build (every key is new) | the sink's rule, noted `self-read` |
+
+Conditions and questions:
+- **Snapshot divergences are stated, not hidden.**
+  - An update keyed on the natural key changes every version under that key. In fixture B it also writes NULL into
+    the attribute columns, because field options are off. The snapshot keeps the history, and a `snapshot`
+    question names the overwritten columns.
+  - A key the update matches on that no insert writes (a `SERIAL`) becomes `dbt_scd_id`. The values change, so a
+    `surrogate-key` question is raised.
+- **Not recognised:** jOdsClient's third output *inserts* a row that is NULL except for the flag, instead of
+  updating. It stays phase 1, with a question that names the output.
+- **Keyed replace** holds when every key in the table is the insert's expression of its row (E: `md5` of the natural
+  key). That is a stated assumption, raised as a `keyed-replace` question.
+- **Rejects:** a merge refuses two rows with one key in a run. Talend's row-by-row upsert keeps the last one. The
+  model's notes say so.
+- **`--faithful <job>`** (repeatable, or `all`) turns recognition off for those jobs: phase 1, one model per output.
+
+Two lowering changes in `talend-rel` (RFC 0267) are needed by fixture B's calendar:
+- **A row count a `tJava` sets.** `tRowGenerator`'s `NB_ROWS` can name a context variable that a `tJava` assigns.
+  Phase 1 read its default (0) as an exact count, which is wrong. The count is now:
+  - `TalendDate.diffDate(context.E, context.S, "dd") + 1`, computed from the two defaults and `rewritten` with a
+    note;
+  - any other assignment is a gap naming the `tJava`.
+- **What follows the JVM's locale** stays a gap unless the operator states it with `--locale <tag>`, from a closed
+  list (`fr_FR`, `de_DE`, `en_GB`, `en_US`, …, `talend-rel`'s `Locale::KNOWN`). Two things depend on it:
+  - `getPartOfDate("WEEK_OF_YEAR")`. Under a Monday-first, four-day locale (every listed country but the United
+    States) Java's week is the ISO week, so the part lowers to the ISO week, `rewritten`. Under `en_US` it stays
+    a gap.
+  - `formatDate("MMMM")` and `formatDate("EEEE")`, the month's and the day's name: a `CASE` over the month or the
+    weekday, with CLDR's names (as Java 9 and later print them), `rewritten`.
+
+The calendar's holiday file is a `talend_files` source with its `file` question. The translation is pure and never
+reads the file, so it cannot write a seed.
+
 ## Exit (phase 1)
 
 - **Golden gate:** the Pentaho golden manifests are byte-identical after the `etl-dbt` move.
@@ -141,6 +187,79 @@ The command's catalogue class is `external`, as `lakehouse pentaho translate`'s 
   devlog.
 - **Fixture E:** its 42 statements are listed, and the 12 watermark sources each carry their question.
 - **Pure:** a test checks that `talend-dbt` reads no file.
+
+## Exit (phase 2 idioms)
+
+- **Fixture B:**
+  - its seven SCD2 shapes (five ODS jobs, two DIM jobs) are recognised as snapshots, or refused by name where the
+    job differs from an SCD2;
+  - `ODS_REJET` is one `rej_` model;
+  - the write-back update has no model;
+  - the calendar's count is computed, and with `--locale fr_FR` its model is enabled.
+- **Fixture E:** each delete-then-insert job whose delete and insert read one join is `keyed-replace`; the others
+  are refused by name.
+- **Each rule** has a synthetic test, and a refusal test for each condition that matters (the NULL-insert "close"
+  of jOdsClient).
+- **Gates:** no model is disabled by a gate, and `dbt parse` accepts B's project with its snapshots.
+- **`--faithful`** gives phase 1's output for the named jobs.
+
+## Result (phase 2 idioms, 2026-11-22, devlog_352; lakehouse devlog_28)
+
+The plan is synthetic, as in phase 1, and the fixtures run with `--locale fr_FR`. Models enabled out of written:
+
+| Fixture | Phase 1 | Phase 2 | Snapshots |
+|---|---|---|---|
+| B | 10 / 73 | 18 / 44 | 2 / 5 |
+| C | 42 / 61 | 42 / 61 | — |
+| D | 9 / 23 | 9 / 23 | — |
+| E | 17 / 184 | 25 / 164 | — |
+
+What the rules found:
+- **Fixture B:**
+  - **Snapshots:** five of the seven SCD2 shapes are snapshots: `ODS_TYPE_CLIENT`, `ODS_CATEGORIE`,
+    `ODS_PRODUIT`, `DIM_CLIENT` and `DIM_PRODUIT`.
+  - **Two refused, both by a difference in the job itself:**
+    - jOdsClient's third output *inserts* a row that is NULL except `BL_LIGNE_ACTIVE`, where an SCD2 updates;
+    - jOdsSousCategorie inserts a new version of every matched row, changed or not, while it closes only the
+      changed ones, so an unchanged key gains a second current row on each run.
+  - **Questions raised on the snapshots:**
+    - `snapshot`: the closing updates of the ODS jobs match on the business key and write NULL into the
+      attribute columns of every version;
+    - `surrogate-key`: the DIM jobs' `SERIAL` keys become `dbt_scd_id`.
+  - **Rejects:** `ODS_REJET` is one `rej_` model over 18 writers in 6 jobs.
+  - **Write-back:** `ODS_VENTE.BL_LIGNE_IN_DWH` has no model.
+  - **Calendar:** enabled. Its row count is computed, 2,192 days from the two context defaults.
+- **What stays disabled in B is downstream of the two refused jobs.** That covers the client and product
+  dimensions' inputs, `ODS_VENTE`, `FAIT_VENTE` and the rejects model, which reads `ODS_VENTE`. A reviewer's
+  answer to the two questions decides them. `--faithful` gives phase 1's shape for any job.
+- **Fixture E:** 10 jobs are keyed replaces. Three are enabled; the rest read Snowflake or Oracle tables outside
+  the lakehouse. Ten are refused by name: nine join the target in the middle of a chain of joins, and one (`DIM_SKU`) does not delete the rows its join matched.
+- **Checks:**
+  - no model on B–E is disabled by a gate, the new scope gate included;
+  - `dbt parse` (dbt 1.11, by hand) accepts B's project: 16 models, 2 snapshots, 2 tests, nothing left to stub;
+  - the Pentaho golden manifests are identical on the three corpora.
+
+**Amendments from the run.** Five were defects that the gates could not see; the last four are additions:
+- **The file a row came from was dropped by the first tMap.** A later tMap read `$path` from an input that did not
+  have it. Each tMap output now carries `$path` when its main input does.
+- **A new gate, scope:** every column a projection, filter, lookup or join reads is a column of its own input. The
+  anti-invention gate checks names against the whole job, which is how the `$path` defect passed it.
+- **`schema.table.column` references** were left as they were by the PostgreSQL → Trino rewrite (`etl-dbt`), while
+  the table became an aliased `ref()`. Trino would refuse them, and only `EXPLAIN` would have said so. They are now
+  `table.column`.
+- **A component on an existing connection keeps `""` in its own `SCHEMA_DB` and `DBNAME`.** The lowering took the
+  empty value instead of the connection's. Fixture B's calendar wrote a table with no schema, which the fact job's
+  read did not match.
+- **A date context's default is a timestamp.** It was a text literal, which date arithmetic refuses in Trino.
+- **Lowered: `getLastDayOfMonth`, `getFirstDayOfMonth` and `compareDate`.** `compareDate` prints both dates with a
+  numeric pattern and compares them as text, as Talend does.
+- **`--locale` replaces the ISO-weeks flag of the design.** It settles both the week rule and the month and day
+  names.
+- **A self-read is a lookup on the target only.** A job whose main flow reads its own table re-reads every row it
+  wrote; it stays a `self-read` question. A self-read source is inlined into every model that reads it: as
+  `{{ this }}` in the model that writes the table, as its `ref()` in the others.
+- **The translation runs on a 64 MiB stack in the command.** Fixture B's long concatenations nest deeply in the SQL
+  parser, and an async worker's 2 MiB is not enough.
 
 ## Result (phase 1, 2026-11-22, devlog_351; lakehouse `95f458b`, devlog_27)
 

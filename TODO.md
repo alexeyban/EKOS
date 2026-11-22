@@ -7292,13 +7292,20 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
       (tMap's library not in the fixture: stays `rewritten`); fixtures B 98%, C 89%, D 69%, E 100% (2026-11-22,
       devlog_350, lakehouse dcfdcff)
 - [ ] RFC 0267 later: `tNormalize` (an unnest node), `tMysqlSCD` (a wider `Scd`, with RFC 0268's snapshots),
-      `formatDateInUTC`, `getLastDayOfMonth`, `replaceAll`, an array's `.length`; inlining a general routine body
+      `formatDateInUTC`, `replaceAll`, an array's `.length`; inlining a general routine body
+      (`getLastDayOfMonth`, `getFirstDayOfMonth`, `compareDate` done with RFC 0268 phase 2)
 - [x] RFC 0268 phase 1: `etl-dbt` (moved from `pentaho-dbt`, golden identical), `talend-dbt` (silver chains, gold by
       data-action rule, refs across jobs, files as sources, statements and watermarks reported, gates: Trino parse,
       anti-invention, no Java, ref cycles, readers of disabled models), `lakehouse talend scan` / `translate`; no
       model on B–E disabled by a gate, `dbt parse` accepts B and E (2026-11-22, devlog_351, lakehouse 95f458b)
-- [ ] RFC 0268 phase 2: two writers of one table → one merge; lookup current + deactivate + insert-version → dbt
-      snapshot; rejects → `rej_` model; date spine + holiday seed; `--faithful`; the console's Talend tab;
-      `ekos_talend_explain` (MCP, read-only, scoped)
+- [x] RFC 0268 phase 2 idioms: SCD2 by hand → dbt snapshot (refused by name where the job differs), delete-then-insert
+      → keyed merge, one `rej_` model per rejects table, write-back flag → no model, lookup on the target →
+      `{{ this }}`, `--faithful`, `--locale` (weeks, month/day names), a `tJava`-set row count, scope gate; B 10 → 18
+      enabled, E 17 → 25; five lowering defects found (`$path`, `schema.table.col`, empty connection fields, date
+      context text, self-read) (2026-11-22, devlog_352, lakehouse devlog_28)
+- [ ] RFC 0268 phase 2 console and MCP: the console's Talend tab (projects, a job's graph, fidelity per component,
+      original next to SQL, questions, `translate`); `ekos_talend_explain` (MCP, read-only, scoped, over the ledger's
+      Talend objects)
+- [ ] RFC 0268 phase 2 later: a keyed replace whose join on the target sits inside a chain of joins (E, 9 jobs)
 - [ ] RFC 0268 phase 3: differential run (needs a sandbox host: the project's built jobs are third-party code, never
       run on a developer machine); LLM fill-in for gaps (`--allow-metered`, RFC 0205 loop)
