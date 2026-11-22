@@ -32,6 +32,7 @@ SCOPED_TOOLS = frozenset(
         "ekos_testimony",
         "ekos_probe",
         "ekos_transformation_graph",
+        "ekos_talend_explain",
     }
 )
 

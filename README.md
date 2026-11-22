@@ -127,7 +127,7 @@ through tMap, aggregates, joins, ELT maps (SQL run in the database) and jobs —
 the first source; items-export
 `.zip` files read in place; passwords redacted, including in component JSON settings; `ekos talend assess` — a
 migration assessment of probable defects, copies, environment ties, unused items, clone clusters and migration
-order — and `talend/` pages in the estate documentation — RFC 0262–0265), Python/PySpark source (real AST parsing, DataFrame chains recovered into the
+order —, `talend/` pages in the estate documentation, and `ekos talend explain` / the read-only MCP tool `ekos_talend_explain` for one job or component as recovered — RFC 0262–0265, 0268), Python/PySpark source (real AST parsing, DataFrame chains recovered into the
 Transformation IR — RFC 0038/0040), Rust source (real AST parsing, real function-call graph —
 RFC 0041), Elixir and JavaScript/TypeScript source (real AST + `Calls` recovery — RFC 0081/0082),
 Perl source (`.pl`/`.pm`/`.t`/`.psgi`, plus `.cgi` with a real `perl` shebang — packages, subs,

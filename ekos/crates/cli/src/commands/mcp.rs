@@ -149,6 +149,9 @@ pub const SCOPED_TOOLS: &[&str] = &[
     // RFC 0257: nodes, edges, evidence and annotations through the scoped store; the definition's
     // text is read only for an owning View/Procedure that store returned.
     "ekos_transformation_graph",
+    // RFC 0268: Talend objects and their links through the scoped store; the compiled model is
+    // read only for ids, to leave out what the latest compile no longer holds.
+    "ekos_talend_explain",
 ];
 
 /// Tools a restricted reader does not get, each with the reason.
@@ -1207,6 +1210,7 @@ fn tool_definitions(config: &EkosConfig, ext: &Extensions) -> Vec<Value> {
     }
     tools.push(testimony_tool_definition());
     tools.push(transformation_graph_tool_definition());
+    tools.push(talend_explain_tool_definition());
     if config.probe.mcp {
         tools.push(probe_tool_definition());
     }
@@ -1286,6 +1290,23 @@ fn transformation_graph_tool_definition() -> Value {
                 "expand": { "type": "string", "description": "`all`, or statement numbers like `1,3`" }
             },
             "required": ["id"]
+        }
+    })
+}
+
+/// RFC 0268 — read-only: a Talend job or component as recovered.
+fn talend_explain_tool_definition() -> Value {
+    json!({
+        "name": "ekos_talend_explain",
+        "description": "One Talend job (its latest version), or one of its components, as recovered from the project's files: what it reads and writes, its components (with one `component`: its whole configuration — parameters, schemas, tMap), the row and trigger links between them, the context variables it uses with their default values and whether a run can replace them (implicit context load, tContextLoad), its column lineage and its assessment findings. Secret values are never stored. Read-only; for its translation to dbt see the lakehouse extension.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "job": { "type": "string", "description": "The job's name, e.g. jOdsClient" },
+                "project": { "type": "string", "description": "The Talend project, when two hold a job of that name" },
+                "component": { "type": "string", "description": "A component's unique name, e.g. tMap_2" }
+            },
+            "required": ["job"]
         }
     })
 }
@@ -2279,6 +2300,8 @@ fn call_tool(
         "ekos_transformation_graph" => {
             super::transformation::chain_json(config, workspace, ledger, args)
         }
+        // RFC 0268: reads through `ledger`, the call's scoped store.
+        "ekos_talend_explain" => super::talend::explain_json(config, workspace, ledger, args),
         "ekos_clickhouse_query" => tool_clickhouse_query(config, workspace, args),
         other => ext
             .call_mcp_tool(other, args, ledger)
@@ -3888,7 +3911,9 @@ mod tests {
                 // RFC 0253 — read-only.
                 "ekos_testimony",
                 // RFC 0257 — read-only.
-                "ekos_transformation_graph"
+                "ekos_transformation_graph",
+                // RFC 0268 — read-only.
+                "ekos_talend_explain"
             ]
         );
         for tool in tools {

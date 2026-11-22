@@ -178,6 +178,58 @@ Two lowering changes in `talend-rel` (RFC 0267) are needed by fixture B's calend
 The calendar's holiday file is a `talend_files` source with its `file` question. The translation is pure and never
 reads the file, so it cannot write a seed.
 
+## Phase 2 design: the console tab and `ekos_talend_explain` (2026-11-22)
+
+The two halves of a Talend job's story live in different places:
+- **What the job is** lives in the EKOS ledger, written by the analyzer (RFC 0262–0265): its components with their
+  configuration, links, context, lineage and findings.
+- **What it became** lives in the lakehouse translation: models, rules, fidelity, SQL and patterns.
+
+They are read from where they live:
+- **`ekos_talend_explain`** (EKOS MCP, read-only, in `SCOPED_TOOLS` and the console's `mcp_policy`). It takes a
+  `job` (its latest version), and optionally a `project` and one `component`. It returns:
+  - what the job reads and writes;
+  - its components, found through the job's `Contains` edges (with one component, its whole configuration, also
+    as text);
+  - its row and trigger links;
+  - the context variables it uses, each with its default and whether a run can replace it. A secret's value is
+    never stored, and the answer says so.
+  - its column lineage and its findings.
+
+  It reads only through the call's store, which a read scope filters. Objects the latest compile no longer holds
+  are left out (`talend::current_only`). `ekos talend explain --job J | --component J:C [--talend-project P]
+  [--json]` gives the same answer, with catalogue class `read`.
+- **`lakehouse talend report`** (class `read`): `translate` saves its report, each model's SQL and the proposal in
+  `<state>/lakehouse/talend/<pkg>.json`, so the console shows a translation before anyone merges it. The report
+  adds a data-flow graph: one node per component, one edge from each input.
+  - `--talend-project` selects one project.
+  - `--component JOB:COMPONENT` selects one component, with its models' SQL.
+
+  The project option is not `--project`, which is EKOS's global home-project argument.
+- **The Talend tab** (RFC 0198/0207 page seam). Parameters: a project from the projects panel, a component from
+  the components panel. Panels:
+  - projects;
+  - the translation's summary;
+  - the data flow;
+  - models, by rule and fidelity, with why disabled;
+  - patterns recognised and refused;
+  - components;
+  - the component's original configuration (`talend explain`) and its translation (notes, models' SQL);
+  - questions;
+  - the proposal.
+
+  Actions: scan, and translate.
+
+**Result.**
+- **`ekos_talend_explain` on fixture B through `ekos mcp serve`** (no model configured, a scratch workspace):
+  - `jOdsTypeClient` gives 24 components, 21 links and 9 context variables, each replaceable at run time, since
+    implicit context load is on;
+  - one component (`tDBOutput_1`) gives its 43 parameters and its schemas, also as text.
+- **Tests:**
+  - a ledger test covers components, links, context (a secret without its value), lineage and refusals;
+  - the MCP tool list and scope tests pass, and so does the console policy's equality test;
+  - the lakehouse's report test covers the saved translation by project and component.
+
 ## Exit (phase 1)
 
 - **Golden gate:** the Pentaho golden manifests are byte-identical after the `etl-dbt` move.

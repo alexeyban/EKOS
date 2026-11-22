@@ -7303,9 +7303,10 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
       `{{ this }}`, `--faithful`, `--locale` (weeks, month/day names), a `tJava`-set row count, scope gate; B 10 → 18
       enabled, E 17 → 25; five lowering defects found (`$path`, `schema.table.col`, empty connection fields, date
       context text, self-read) (2026-11-22, devlog_352, lakehouse devlog_28)
-- [ ] RFC 0268 phase 2 console and MCP: the console's Talend tab (projects, a job's graph, fidelity per component,
-      original next to SQL, questions, `translate`); `ekos_talend_explain` (MCP, read-only, scoped, over the ledger's
-      Talend objects)
+- [x] RFC 0268 phase 2 console and MCP: `ekos_talend_explain` (MCP, read-only, scoped) and `ekos talend explain`;
+      `lakehouse talend report` (the saved translation, by project and component, with a data-flow graph); the
+      console's Talend tab (projects, summary, data flow, models, patterns, components, original ↔ SQL, questions,
+      proposal; scan and translate) (2026-11-22, devlog_353, lakehouse devlog_29)
 - [ ] RFC 0268 phase 2 later: a keyed replace whose join on the target sits inside a chain of joins (E, 9 jobs)
 - [ ] RFC 0268 phase 3: differential run (needs a sandbox host: the project's built jobs are third-party code, never
       run on a developer machine); LLM fill-in for gaps (`--allow-metered`, RFC 0205 loop)

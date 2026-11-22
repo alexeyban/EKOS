@@ -2230,6 +2230,22 @@ enum TalendCommands {
         #[arg(long)]
         out: Option<std::path::PathBuf>,
     },
+    /// One job, or one of its components, as recovered (RFC 0268): components, links, the
+    /// context it uses (and whether a run replaces it), column lineage, findings. The same answer
+    /// as the MCP tool `ekos_talend_explain`. No model call
+    Explain {
+        /// The job's name; or give `--component JOB:COMPONENT`
+        #[arg(long)]
+        job: Option<String>,
+        /// One component, as `JOB:COMPONENT` (its whole configuration)
+        #[arg(long)]
+        component: Option<String>,
+        /// The Talend project, when two hold a job of that name
+        #[arg(long = "talend-project")]
+        talend_project: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2847,7 +2863,7 @@ fn emits_machine_output(command: &Commands) -> bool {
             subcommand: SqlCommands::Check { json, .. } | SqlCommands::Generate { json, .. },
         } => *json,
         Commands::Talend {
-            subcommand: TalendCommands::Assess { json, .. },
+            subcommand: TalendCommands::Assess { json, .. } | TalendCommands::Explain { json, .. },
         } => *json,
         Commands::Llm { subcommand } => match subcommand {
             LlmCommands::Routes { json }
@@ -3140,6 +3156,22 @@ where
         Commands::Talend {
             subcommand: TalendCommands::Assess { project, json, out },
         } => crate::commands::talend::assess(&config, &cwd, project.as_deref(), json, out.as_ref()),
+        Commands::Talend {
+            subcommand:
+                TalendCommands::Explain {
+                    job,
+                    component,
+                    talend_project,
+                    json,
+                },
+        } => crate::commands::talend::explain(
+            &config,
+            &cwd,
+            job.as_deref(),
+            component.as_deref(),
+            talend_project.as_deref(),
+            json,
+        ),
         Commands::Check { subcommand } => match subcommand {
             CheckCommands::CodeVsData { json, expectations } => {
                 crate::commands::questions::check_code_vs_data(&config, &cwd, json, expectations)
