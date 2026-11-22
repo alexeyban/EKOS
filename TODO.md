@@ -7293,4 +7293,12 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
       devlog_350, lakehouse dcfdcff)
 - [ ] RFC 0267 later: `tNormalize` (an unnest node), `tMysqlSCD` (a wider `Scd`, with RFC 0268's snapshots),
       `formatDateInUTC`, `getLastDayOfMonth`, `replaceAll`, an array's `.length`; inlining a general routine body
-- [ ] Expressions, component semantics, idioms → dbt, differential run, console tab
+- [x] RFC 0268 phase 1: `etl-dbt` (moved from `pentaho-dbt`, golden identical), `talend-dbt` (silver chains, gold by
+      data-action rule, refs across jobs, files as sources, statements and watermarks reported, gates: Trino parse,
+      anti-invention, no Java, ref cycles, readers of disabled models), `lakehouse talend scan` / `translate`; no
+      model on B–E disabled by a gate, `dbt parse` accepts B and E (2026-11-22, devlog_351, lakehouse 95f458b)
+- [ ] RFC 0268 phase 2: two writers of one table → one merge; lookup current + deactivate + insert-version → dbt
+      snapshot; rejects → `rej_` model; date spine + holiday seed; `--faithful`; the console's Talend tab;
+      `ekos_talend_explain` (MCP, read-only, scoped)
+- [ ] RFC 0268 phase 3: differential run (needs a sandbox host: the project's built jobs are third-party code, never
+      run on a developer machine); LLM fill-in for gaps (`--allow-metered`, RFC 0205 loop)
