@@ -7313,6 +7313,9 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
       catalog); fixture B: 10/10 jobs ran, `DIM_CALENDRIER` (2,192 rows, 17 columns), `ODS_CATEGORIE`,
       `ODS_TYPE_CLIENT` equal, 0 differ, control passed; two translation defects found and fixed (2026-11-22,
       devlog_354, lakehouse devlog_30)
-- [ ] RFC 0268 phase 3 later: a second (incremental) run compared; fixtures C–E in the sandbox; the verification in the
-      console's Talend tab
-- [ ] RFC 0268 phase 3: LLM fill-in for gaps (`--allow-metered`, RFC 0205 loop)
+- [x] RFC 0268 phase 3 remaining: a second (incremental) run compared (fixture B: the original ODS jobs cannot load a
+      change, their closing UPDATE violates their own NOT NULL columns; the snapshot does), the verification in the
+      console's Talend tab, E's chained keyed replace (19, E 27/146 enabled), LLM fill-in for gaps through the
+      router (Ollama without a flag; glm-4.7-flash 2/5 on C, qwen2.5-coder:3b 0/7), C–E stated as not verified by
+      execution (no built jobs) (2026-11-22, devlog_355, lakehouse devlog_31)
+- [ ] RFC 0268 later: C–E built by Talend Studio for the sandbox; `FACT_MOV_COST` (a delete of a computed key)

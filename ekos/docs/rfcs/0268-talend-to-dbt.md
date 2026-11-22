@@ -329,6 +329,28 @@ plan: a model reading a lakehouse table is not verified, by name. Then:
 
 The report goes to `<state>/lakehouse/talend/<pkg>.verification.json`, and the summary to the console.
 
+### A second run: the incremental behaviour
+
+A model's first build is compared above; a Talend job's state-keeping (merges, appends, closing versions) shows only
+on a later run. The plan can name a second run:
+- **`runs[1].edits`:** changes to the run-1 input files, made on the host: `replace` a text, `append` a line. The
+  fixture's files are never committed changed.
+- **The runner:** after run 1, it replaces the input files with run 2's and runs the jobs again, on the tables run 1
+  left. Dumps are kept per run (`r1_…`, `r2_…`).
+- **`verify`:** it re-lands the run-2 files and builds each model as dbt's second run would:
+  - a table is rebuilt;
+  - an append inserts its incremental rows;
+  - a merge (and an update, a keyed replace, a `rej_` model) replaces the rows whose key its incremental rows hold;
+  - a model's `{{ this }}` is its run-1 table;
+  - a snapshot (`check`) closes the current version of each key whose compared columns changed and inserts the new
+    versions and new keys.
+
+  It then compares with the tables after run 2. Trino's `memory` catalog has no `MERGE`, so each step builds a new
+  table, `<alias>__r2`.
+
+A difference on run 2 that the translation already reports (the snapshot keeps history Talend overwrites) is
+expected. The report names it, and the comparison does not hide it.
+
 ### Result: the first differential run (2026-11-22, fixture B)
 
 **The Talend side.** Fixture B's ten jobs all ran to their end in the sandbox, in their orchestration order with the
@@ -379,6 +401,43 @@ The calendar's 2,192 rows are the count the translator computes from the context
   - PowerShell's `Start-Process` joins arguments without quoting them, so SQL goes through files;
   - a process object loses its exit code unless its handle is read first. A job that does not run
 in the sandbox stays **not verified by execution**, with the reason.
+
+### Result: the second run, the remaining items (2026-11-22)
+
+**The second run** (fixture B; run-2 edits change one category and one client type and add one of each):
+- **`DIM_CALENDRIER`:** equal again, 2,192 rows.
+- **`ODS_CATEGORIE` and `ODS_TYPE_CLIENT` differ, and the jobs are at fault.** Each job's closing `UPDATE` writes
+  NULL into columns its own DDL declares `NOT NULL`. PostgreSQL refuses it, the batch rolls back with the new
+  version's insert, and the job still exits 0 with the error in its log. The original jobs therefore cannot load
+  any change to a category or a client type.
+- **The snapshot behaves as the job evidently meant:** it closes the old version and adds the new version and the
+  new key.
+- **The verification reports each difference with the job's error lines** (`job_errors`, from the run's manifest).
+  This confirms what phase 2's `snapshot` question only suspected.
+
+**The remaining items:**
+- **Console:** `lakehouse talend report` attaches the latest verification, and the Talend tab shows it under
+  "Verified by execution".
+- **Fixture E's chained keyed replace:**
+  - **The rule:** the left join on the target may sit anywhere in a chain. The insert's path from it is rebuilt on
+    the staged side when no node on it reads a target column (a projection that only passes one on is dropped).
+  - **The delete:** it may have no filter, since an unmatched row's key is NULL and deletes nothing.
+  - **Result:** E has 19 keyed replaces (10 before), 27 / 146 models enabled (25 / 164 before), no gate disables.
+    `FACT_MOV_COST` stays refused: it deletes a key it computes.
+- **Fixtures C, D and E in the sandbox: not verified by execution.** None ships a built job (no jars, compiled
+  classes or generated Java), and building them needs Talend Studio. E's jobs also read Snowflake and Oracle, which
+  an offline sandbox cannot reach.
+- **LLM fill-in, RFC 0205 for Talend:**
+  - **Moved code:** `DraftRequest`, the answer parser and the checks moved from `pentaho-dbt` to `etl-dbt`
+    (re-exported; golden identical).
+  - **`talend-rel`:** it offers a gap whose one input is fully known (a code component's code, or a tMap output's
+    expressions), and applies a checked draft as `llm-drafted`.
+  - **`lakehouse talend translate`:** it drafts by the configured `translate` route (Ollama needs no flag;
+    anything else `--allow-metered`), keeps the drafts in `<pkg>.drafts.json`, and `verify` uses them.
+  - **Measured locally, never metered:**
+    - `qwen2.5-coder:3b`: 0 of 7 gaps passed the checks; it wrote Java names into SQL.
+    - `glm-4.7-flash`: 2 of fixture C's 5 passed. It refused, correctly, a `tJavaFlex` that counts across rows.
+  - **Nothing unchecked was accepted.**
 
 ## Exit (phase 1)
 
