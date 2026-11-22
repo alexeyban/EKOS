@@ -7286,7 +7286,11 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
 - [x] RFC 0267 phase 1: Talend expressions (Java over `etl-expr`'s parser, Talend's rules, routine and `java.lang`
       catalogue) and the component lowering to `etl-rel` (lakehouse `talend-rel`); fixtures B 93%, C 87%, D 62%, E 73%
       of data components (2026-11-21, devlog_349, lakehouse 28dee30)
-- [ ] RFC 0267 phase 2: ELT maps through sqlparser, `tDBRow` / `tSnowflakeRow` statements, tJavaRow
-      `output_row.x = …`, custom routines (a pure single-expression static method inlined), `Numeric.sequence` with the
-      flow's order; check tMap `UNIQUE_MATCH` (last match) against fixture B's generated Java
+- [x] RFC 0267 phase 2: ELT maps through sqlparser, `tDBRow` / `tSnowflakeRow` as `Op::Statement`, tJavaRow
+      `output_row.x = …` and `context.v = input_row.c` (watermarks: 12 queries in E now `rewritten`), digest custom
+      routines, `Numeric.sequence` as a window, `tSampleRow`; `UNIQUE_MATCH` evidence from fixture B's generated code
+      (tMap's library not in the fixture: stays `rewritten`); fixtures B 98%, C 89%, D 69%, E 100% (2026-11-22,
+      devlog_350, lakehouse dcfdcff)
+- [ ] RFC 0267 later: `tNormalize` (an unnest node), `tMysqlSCD` (a wider `Scd`, with RFC 0268's snapshots),
+      `formatDateInUTC`, `getLastDayOfMonth`, `replaceAll`, an array's `.length`; inlining a general routine body
 - [ ] Expressions, component semantics, idioms → dbt, differential run, console tab

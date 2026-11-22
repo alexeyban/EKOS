@@ -279,3 +279,41 @@ its lookups stay `rewritten`. A gated test reads the file and fails if either ch
 - The 12 watermark queries in E are `rewritten` and name their `tJavaRow`.
 - Coverage on B–E is reported in the devlog, against phase 1's.
 
+
+## Result (phase 2, 2026-11-22, devlog_350; lakehouse `dcfdcff`, EKOS `859708c4`)
+
+| Fixture | Phase 1 | Phase 2 | Expressions lowered / gaps |
+|---|---|---|---|
+| B | 116 / 125 (93%) | 123 / 125 (98%) | 482 / 4 |
+| C | 79 / 91 (87%) | 87 / 98 (89%) | 167 / 4 |
+| D | 26 / 42 (62%) | 29 / 42 (69%) | 40 / 2 |
+| E | 199 / 274 (73%) | 288 / 288 (100%) | 1353 / 0 |
+
+The exit holds:
+- **Fixture E:** all 21 ELT maps lower, all 42 `tSnowflakeRow`s are `Op::Statement`s, and all 12 watermark
+  queries are `rewritten` and name their `tJavaRow`.
+- **Every fixture:** every expression lowered on B–E prints SQL that parses (a fixture test).
+
+**Amendments from the run:**
+- **Membership.** A component on a row link is part of the flow even when its category is not a data category
+  (`tJavaFlex`, `tFlowToIterate`, `tRESTClient`, …). It is lowered or counted as a gap. A component that only
+  sends rows (a `tJavaFlex` under a `tLoop`, a `tIterateToFlow`) is no longer skipped as disconnected. That is why
+  the denominators of C and E grew.
+- **`Numeric.sequence` after a `tSortRow`** stays `rewritten`: rows that tie on the sort keys can be numbered
+  either way. In a `tRowGenerator`, the rows are numbered before the columns are computed. That is `exact`,
+  because the rows are alike until numbered. Talend takes the next number at every call, so the rule counts
+  calls, not places.
+- **Digest routines** also read the hex case. Fixture E's `generateMD5` writes `%02X`, which is `upper(md5(x))`.
+- **SQL names** are matched without regard to case when only one column matches (Snowflake folds unquoted names).
+- **ELT joins.** A key against a literal filters the joined input before the join, and a key against an expression
+  of the other inputs is computed on the left first. Fixture E has 16 and 5 of them, all in left joins.
+
+**Expression gaps left, all named:**
+- **By design:** `getPartOfDate("WEEK_OF_YEAR")` (it depends on the locale), `TalendString.getAsciiRandomString`
+  (it is random), and `formatDate` with a computed pattern.
+- **Not lowered yet:** `TalendDate.formatDateInUTC`, `TalendDate.getLastDayOfMonth`, `String.replaceAll`, and an
+  array's `.length`.
+
+**Components left as gaps:** the ones under *Not in phase 2*, and `tJava`, `tContextLoad`,
+`tFlowToIterate` / `tIterateToFlow`, `tExtractJSONFields`, `tRESTClient`, `tDataprepRun`,
+`tDataStewardshipTaskOutput` and `tMSSqlCDC`.
