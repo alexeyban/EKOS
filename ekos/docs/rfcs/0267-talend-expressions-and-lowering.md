@@ -147,3 +147,135 @@ computes as `QTE_VENTE * PRIX_VENTE`.
 - custom routines (`HashUtils.generateMD5`, `HashUtil.*`);
 - `tNormalize`, `tSampleRow`, `tMysqlSCD`.
 
+## Phase 2 design (2026-11-22)
+
+Surveyed on fixtures B–E before any code. Counts only, because E names a real account.
+
+### SQL expressions (`sql`)
+
+ELT maps and statements hold SQL, not Java. `sql` parses one expression with sqlparser in the
+component's engine dialect (Snowflake, PostgreSQL, Oracle, SQL Server and MySQL; generic otherwise)
+and lowers it to `etl-expr`, by a whitelist like the Java one:
+- columns `<alias>.<column>`, resolved by the same column lookup as Java;
+- literals, arithmetic, `||`, comparisons, `AND` / `OR` / `NOT`, `IS [NOT] NULL`, `IN (…)`,
+  `BETWEEN`, `LIKE`, `CASE`, `CAST` / `::`;
+- functions:
+  - `COALESCE` / `IFNULL` / `NVL`, `NULLIF`;
+  - `IFF` and `DECODE` (as `CASE`);
+  - `TRIM` / `LTRIM` / `RTRIM`, `UPPER`, `LOWER`, `LENGTH` / `LEN`, `SUBSTR` / `SUBSTRING`,
+    `REPLACE`, `CONCAT`;
+  - `ABS`, `ROUND`, `FLOOR`, `CEIL`;
+  - `CURRENT_TIMESTAMP` / `CURRENT_DATE` / `SYSDATE` (the run's start, `rewritten`);
+  - `TO_DATE` / `TO_TIMESTAMP` with a format of numeric fields only (`YYYY`, `MM`, `DD`, `HH24`,
+    `MI`, `SS`), `MD5`.
+- the aggregates `SUM`, `COUNT`, `MIN`, `MAX` and `AVG`, only where a `GROUP BY` allows them.
+
+Two Snowflake functions have no equal on another engine:
+- **`HASH(…)`** is Snowflake's own 64-bit hash. It is lowered to the MD5 of the same values joined
+  as text, `rewritten`, with a note: the keys are new values, the same rows get the same key, and a
+  differential run (RFC 0268) must not compare them with the old table's keys.
+- **`TO_VARIANT(x)`** is lowered to a cast to text, `rewritten`.
+
+Anything else is a gap with its text.
+
+### ELT maps
+
+A `tELTMap` takes its inputs from `tELTInput`s, bound by link label as phase 1 does. It then
+lowers like a tMap:
+- the first input (`NO_JOIN`) and each later one renamed `<alias>__<column>`;
+- a `Join` per later input, in input order: `INNER_JOIN`, `LEFT_OUTER_JOIN`, `RIGHT_OUTER_JOIN`,
+  `FULL_OUTER_JOIN` or `CROSS_JOIN`. The join entries (`<alias>.<column> <op> <expression>`)
+  become its condition.
+- per output:
+  - a `Filter` (its `WHERE` filters, joined by `AND`);
+  - a `GROUP BY` clause, which becomes a `Project` of the key and argument expressions, then an
+    `Aggregate`. Each output column must then be an aggregate, or equal to a key.
+  - an `ORDER BY` clause, which becomes a `Sort`. Any other clause is a gap.
+  - a `Project` of the output's expressions.
+
+A `tELTOutput` reads the map's output through its link's `metaname`.
+
+### Statements
+
+A `tDBRow` or `tXRow` (category `elt`, logical `db_row`) runs one SQL statement from a trigger.
+`ekos-talend` lifts a component-framework Row's query into `QUERY`, since a Row has no `manualQuery`
+setting (EKOS change). The statement parses in the engine's dialect and becomes a new shared node:
+`Op::Statement { verb, target, reads, set, predicate, sql }`.
+- **`UPDATE`:** its `SET` and `WHERE` expressions are lowered through `sql`.
+- **`DELETE`:** its `WHERE` is lowered through `sql`.
+- **`INSERT … SELECT`, `MERGE` and `TRUNCATE`:** only the verb and the tables are kept.
+
+The node is `rewritten`, with a note that the statement runs on a trigger, not on rows.
+
+A statement that does not fold (a run-time value in its text), that is several statements, or that
+is not one of those verbs is a gap.
+
+Kettle never produces this node, so `pentaho-dbt`'s output does not change.
+
+### `tJavaRow` and run-time context
+
+A `tJavaRow`'s code is parsed by `etl-expr`'s statement parser. Four forms are allowed:
+- `output_row.<c> = <expr>;`, which becomes a `Project`. A column the code does not assign is
+  null, as in Talend.
+- `context.<v> = input_row.<c>;`, which sets a context variable from data. It is recorded as a
+  `RuntimeContext { var, component, column, from }`.
+- `System.out.println(…)`, which is dropped with a note;
+- `if (…) { System.out.println(…); }`, also dropped with a note.
+
+Anything else is a gap.
+
+A context variable that a `tJavaRow` sets is **known only at run time**. Every query or expression
+that reads it is `rewritten` (never `exact`), with a note naming the component and column that set
+it.
+
+This is the watermark pattern RFC 0268 turns into an incremental model. Fixture E has 14 such
+`tJavaRow`s, and 12 database inputs filter on what they set.
+
+### Row order
+
+- **`Numeric.sequence("s", start, step)`** in a tMap becomes a `Window` (`Sequence`) column on the
+  combined row, read by the expression.
+  - **Order:** when the main input comes straight from a `tSortRow`, the window uses its keys and
+    is `exact`. Otherwise the order is arrival, so it is `rewritten`, with the note that the order
+    must be stated.
+  - **Sharing:** Talend shares one sequence by name across components. Two uses of one name in a
+    job are a gap.
+- **`tSampleRow`** keeps line numbers: a `Window` number, then a `Filter` on the listed numbers and
+  ranges, `rewritten` because of arrival order.
+
+### Custom routines
+
+`lower_job` now also takes the project's routines.
+- **Digest routines:** a custom routine method is lowered when its body is a digest of its one
+  `String` parameter in lower-case hex: `MessageDigest.getInstance("MD5" | "SHA-1" | "SHA-256")`,
+  `digest(<p>.getBytes(…))`, then hex by `Integer.toHexString` or `String.format("%02x")`. It
+  becomes `Md5Hex`, `Sha1Hex` or `Sha256Hex`, `rewritten`.
+- **Notes:**
+  - a body without a null check stops the job on null (`NOTE_NPE`);
+  - `getBytes()` without a charset uses the platform's, while the translation hashes UTF-8.
+- **Anything else** stays a gap naming the routine. All three custom routines in the fixtures are
+  digests (fixtures C and E).
+
+### `UNIQUE_MATCH`
+
+Fixture B's generated Java passes `MATCHING_MODE.UNIQUE_MATCH` to `AdvancedMemoryLookup`. That
+class is in a Talend library jar the fixture does not contain. The only lookup source in the
+fixture is `routines/system/DocumentLookupCache.java`, which is tXMLMap's: there, `UNIQUE_MATCH` and
+`FIRST_MATCH` both `HashMap.put`, so the last row put wins. That is evidence, not proof, for tMap:
+its lookups stay `rewritten`. A gated test reads the file and fails if either changes.
+
+### Not in phase 2
+
+- **`tNormalize`:** splitting a column into rows needs an unnest node the shared IR lacks.
+- **`tMysqlSCD`:** its type 1, 2 and 3 fields need a wider `Scd`. RFC 0268 decides its shape,
+  next to dbt snapshots.
+- **Inlining a general routine body:** no fixture has one that is not a digest.
+- **`tJavaFlex`:** its loop state (counters, running sums) is not a row expression.
+
+### Exit (phase 2)
+
+- On fixture E, every `tELTMap` and every `tSnowflakeRow` lowers without a gap.
+- Every expression gap that remains is one this section names as not lowered.
+- The 12 watermark queries in E are `rewritten` and name their `tJavaRow`.
+- Coverage on B–E is reported in the devlog, against phase 1's.
+
