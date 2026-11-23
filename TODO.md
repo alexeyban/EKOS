@@ -7318,4 +7318,6 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
       console's Talend tab, E's chained keyed replace (19, E 27/146 enabled), LLM fill-in for gaps through the
       router (Ollama without a flag; glm-4.7-flash 2/5 on C, qwen2.5-coder:3b 0/7), C–E stated as not verified by
       execution (no built jobs) (2026-11-22, devlog_355, lakehouse devlog_31)
-- [ ] RFC 0268 later: C–E built by Talend Studio for the sandbox; `FACT_MOV_COST` (a delete of a computed key)
+- [ ] RFC 0268 later: `FACT_MOV_COST` (a delete of a computed key). C–E stay not verified by execution (decided
+      2026-11-23: no built jobs, no headless build in Talend Open Studio, E is all Snowflake, C/D's runnable jobs
+      write files, which have no model)

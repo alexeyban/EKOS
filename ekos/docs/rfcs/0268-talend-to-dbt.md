@@ -424,9 +424,16 @@ in the sandbox stays **not verified by execution**, with the reason.
   - **The delete:** it may have no filter, since an unmatched row's key is NULL and deletes nothing.
   - **Result:** E has 19 keyed replaces (10 before), 27 / 146 models enabled (25 / 164 before), no gate disables.
     `FACT_MOV_COST` stays refused: it deletes a key it computes.
-- **Fixtures C, D and E in the sandbox: not verified by execution.** None ships a built job (no jars, compiled
-  classes or generated Java), and building them needs Talend Studio. E's jobs also read Snowflake and Oracle, which
-  an offline sandbox cannot reach.
+- **Fixtures C, D and E in the sandbox: not verified by execution (decided 2026-11-23).** The reasons:
+  - **No built jobs:** none of the three ships one (no jars, compiled classes or generated Java).
+  - **No headless build:** Talend Open Studio 8.0.1 has none. Its command-line builder
+    (`org.talend.commandline`) ships only with the commercial Studio, and the Studio window is not automated.
+  - **E needs Snowflake:** every data job of E reads or writes Snowflake (ELT pushed down into it, or its outputs),
+    and some read Oracle. An offline sandbox can run none of them, built or not.
+  - **C and D write files:** about 20 of their jobs touch no external system, but they write files. A file output
+    has no dbt model (rule `file`), so the comparison has no counterpart to compare with.
+
+  Comparing a job's output file with the SQL of its chain would be new work, and is not planned.
 - **LLM fill-in, RFC 0205 for Talend:**
   - **Moved code:** `DraftRequest`, the answer parser and the checks moved from `pentaho-dbt` to `etl-dbt`
     (re-exported; golden identical).
