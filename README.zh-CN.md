@@ -28,7 +28,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme-flow.svg" alt="来源（代码、数据库、文档、二进制文件）被编译成有证据支撑的知识，AI 智能体通过 MCP 查询这些知识" width="900">
+  <img src="docs/assets/readme-demo.gif" alt="EKOS 列出 LedgerSMB 的来源之间三处不一致，并显示每个说法所在的文件和行号" width="900"><br>
+  <sub>真实输出。EKOS 编译了开源 ERP LedgerSMB，发现其来源之间有三处不一致。每个说法都附带文件和行号。</sub>
 </p>
 
 > 本文是 [README.md](README.md) 的中文翻译。文档、参考手册和演示视频目前只有英文。
@@ -90,6 +91,10 @@ claude mcp add ekos -- ekos mcp serve --workspace /path/to/your/repo
 | 上周以来发生了什么变化？ | 知识本身的差异，而不是文本文件的差异 |
 
 ## 工作原理
+
+<p align="center">
+  <img src="docs/assets/readme-flow.svg" alt="来源（代码、数据库、文档、二进制文件）被编译成有证据支撑的知识，AI 智能体通过 MCP 查询这些知识" width="900">
+</p>
 
 1. **观察。** 连接器按原样读取每个来源：文件、Git 历史、数据库目录、文档。读入过程中不做任何摘要或改写。
 2. **编译。** 确定性的编译步骤解析这些来源，把在两处出现的同一事物对应起来，并建立一个由对象、关系和事件组成的模型。每一项都保留自己的证据。

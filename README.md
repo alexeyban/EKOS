@@ -27,7 +27,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme-flow.svg" alt="Sources (code, databases, docs, binaries) are compiled into evidence-backed knowledge, which an AI agent queries over MCP" width="900">
+  <img src="docs/assets/readme-demo.gif" alt="EKOS listing three places where the sources of LedgerSMB disagree, then showing each claim with its file and line" width="900"><br>
+  <sub>Real output. EKOS compiled LedgerSMB, an open-source ERP, and found three places where its sources disagree. Each claim comes with its file and line.</sub>
 </p>
 
 An AI agent that works on a real system spends most of its tokens rediscovering it: it greps the
@@ -100,6 +101,10 @@ claude mcp add ekos -- ekos mcp serve --workspace /path/to/your/repo
 | What changed since last week? | A diff of the knowledge itself, not of text files |
 
 ## How it works
+
+<p align="center">
+  <img src="docs/assets/readme-flow.svg" alt="Sources (code, databases, docs, binaries) are compiled into evidence-backed knowledge, which an AI agent queries over MCP" width="900">
+</p>
 
 1. **Observe.** Connectors read each source as it is: files, Git history, database catalogs,
    documents. Nothing is summarised or rewritten on the way in.
