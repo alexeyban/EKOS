@@ -28,8 +28,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme-demo.gif" alt="EKOS が LedgerSMB のソース間の食い違いを三件一覧し、各主張のファイルと行番号を表示する様子" width="900"><br>
-  <sub>実際の出力です。EKOS がオープンソース ERP の LedgerSMB をコンパイルし、ソース間の食い違いを三件見つけました。各主張にファイルと行番号が付きます。</sub>
+  <img src="docs/assets/readme-overview.gif" alt="アニメーション図：EKOS がコード、ドキュメント、データベースを知識台帳に読み込み、人の承認のあと、PostgreSQL の ERP を bronze、silver、gold を経て Superset へ運ぶパイプラインを生成する" width="900"><br>
+  <sub>EKOS が未知の ERP のコード、ドキュメント、データベースを読み、人が範囲と意味を承認し、EKOS Lakehouse がパイプラインを生成します：PostgreSQL から Iceberg、dbt、DuckDB マート、Superset へ。</sub>
 </p>
 
 > この文書は [README.md](README.md) の日本語訳です。ドキュメント、リファレンス、デモ動画は現在英語のみです。

@@ -27,8 +27,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme-demo.gif" alt="EKOS listing three places where the sources of LedgerSMB disagree, then showing each claim with its file and line" width="900"><br>
-  <sub>Real output. EKOS compiled LedgerSMB, an open-source ERP, and found three places where its sources disagree. Each claim comes with its file and line.</sub>
+  <img src="docs/assets/readme-overview.gif" alt="Animated diagram: EKOS reads code, docs and the database into a knowledge ledger; after human sign-off it generates the pipelines that move an ERP in PostgreSQL through bronze, silver and gold into Superset" width="900"><br>
+  <sub>EKOS reads the code, docs and database of an unknown ERP, people sign off the scope and meaning, and EKOS Lakehouse generates the pipelines: PostgreSQL to Iceberg, dbt, DuckDB marts and Superset.</sub>
 </p>
 
 An AI agent that works on a real system spends most of its tokens rediscovering it: it greps the

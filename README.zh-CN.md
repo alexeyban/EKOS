@@ -28,8 +28,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/readme-demo.gif" alt="EKOS 列出 LedgerSMB 的来源之间三处不一致，并显示每个说法所在的文件和行号" width="900"><br>
-  <sub>真实输出。EKOS 编译了开源 ERP LedgerSMB，发现其来源之间有三处不一致。每个说法都附带文件和行号。</sub>
+  <img src="docs/assets/readme-overview.gif" alt="动画示意图：EKOS 把代码、文档和数据库读入知识账本；经人工签核后，生成把 PostgreSQL 中的 ERP 经 bronze、silver、gold 送入 Superset 的管道" width="900"><br>
+  <sub>EKOS 读取一个陌生 ERP 的代码、文档和数据库，由人签核范围和含义，然后 EKOS Lakehouse 生成管道：从 PostgreSQL 到 Iceberg、dbt、DuckDB 数据集市和 Superset。</sub>
 </p>
 
 > 本文是 [README.md](README.md) 的中文翻译。文档、参考手册和演示视频目前只有英文。
