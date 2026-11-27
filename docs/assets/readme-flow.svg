@@ -1,0 +1,66 @@
+<svg role="img" aria-label="flow-overview" width="1137pt" height="129pt"
+ viewBox="0.00 0.00 1136.80 128.80" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(32.4 96.4)">
+<title>G</title>
+<polygon fill="#0a1424" stroke="transparent" points="-32.4,32.4 -32.4,-96.4 1104.4,-96.4 1104.4,32.4 -32.4,32.4"/>
+<g id="node1" class="node">
+<title>src</title>
+<path fill="#0f1d33" stroke="#2f4568" stroke-width="1.3" d="M253,-57C253,-57 12,-57 12,-57 6,-57 0,-51 0,-45 0,-45 0,-19 0,-19 0,-13 6,-7 12,-7 12,-7 253,-7 253,-7 259,-7 265,-13 265,-19 265,-19 265,-45 265,-45 265,-51 259,-57 253,-57"/>
+<text text-anchor="middle" x="132.5" y="-35.6" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#eef3f8">Sources</text>
+<text text-anchor="middle" x="132.5" y="-21.6" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#eef3f8">code · databases · docs · binaries</text>
+</g>
+<g id="node2" class="node">
+<title>comp</title>
+<path fill="#1c3a12" stroke="#86cc42" stroke-width="1.3" d="M416,-57C416,-57 320,-57 320,-57 314,-57 308,-51 308,-45 308,-45 308,-19 308,-19 308,-13 314,-7 320,-7 320,-7 416,-7 416,-7 422,-7 428,-13 428,-19 428,-19 428,-45 428,-45 428,-51 422,-57 416,-57"/>
+<text text-anchor="middle" x="368" y="-35.6" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#eef3f8">Knowledge</text>
+<text text-anchor="middle" x="368" y="-21.6" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#eef3f8">Compilation</text>
+</g>
+<g id="edge1" class="edge">
+<title>src&#45;&gt;comp</title>
+<path fill="none" stroke="#86cc42" stroke-width="1.5" d="M265.26,-32C277.13,-32 288.79,-32 299.74,-32"/>
+<polygon fill="#86cc42" stroke="#86cc42" stroke-width="1.5" points="299.96,-34.8 307.96,-32 299.96,-29.2 299.96,-34.8"/>
+</g>
+<g id="node3" class="node">
+<title>know</title>
+<path fill="#0f1d33" stroke="#2f4568" stroke-width="1.3" d="M622,-64C622,-64 483,-64 483,-64 477,-64 471,-58 471,-52 471,-52 471,-12 471,-12 471,-6 477,0 483,0 483,0 622,0 622,0 628,0 634,-6 634,-12 634,-12 634,-52 634,-52 634,-58 628,-64 622,-64"/>
+<text text-anchor="middle" x="552.5" y="-42.6" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#eef3f8">Structured</text>
+<text text-anchor="middle" x="552.5" y="-28.6" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#eef3f8">Knowledge</text>
+<text text-anchor="middle" x="552.5" y="-14.6" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#eef3f8">(evidence&#45;backed)</text>
+</g>
+<g id="edge2" class="edge">
+<title>comp&#45;&gt;know</title>
+<path fill="none" stroke="#86cc42" stroke-width="1.5" d="M428,-32C439.08,-32 450.9,-32 462.66,-32"/>
+<polygon fill="#86cc42" stroke="#86cc42" stroke-width="1.5" points="462.78,-34.8 470.78,-32 462.78,-29.2 462.78,-34.8"/>
+</g>
+<g id="node4" class="node">
+<title>mcp</title>
+<path fill="#0f1d33" stroke="#2f4568" stroke-width="1.3" d="M733,-50C733,-50 689,-50 689,-50 683,-50 677,-44 677,-38 677,-38 677,-26 677,-26 677,-20 683,-14 689,-14 689,-14 733,-14 733,-14 739,-14 745,-20 745,-26 745,-26 745,-38 745,-38 745,-44 739,-50 733,-50"/>
+<text text-anchor="middle" x="711" y="-28.6" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#eef3f8">MCP</text>
+</g>
+<g id="edge3" class="edge">
+<title>know&#45;&gt;mcp</title>
+<path fill="none" stroke="#86cc42" stroke-width="1.5" d="M634.04,-32C645.98,-32 657.85,-32 668.53,-32"/>
+<polygon fill="#86cc42" stroke="#86cc42" stroke-width="1.5" points="668.82,-34.8 676.82,-32 668.82,-29.2 668.82,-34.8"/>
+</g>
+<g id="node5" class="node">
+<title>agent</title>
+<path fill="#0f1d33" stroke="#2f4568" stroke-width="1.3" d="M873,-50C873,-50 800,-50 800,-50 794,-50 788,-44 788,-38 788,-38 788,-26 788,-26 788,-20 794,-14 800,-14 800,-14 873,-14 873,-14 879,-14 885,-20 885,-26 885,-26 885,-38 885,-38 885,-44 879,-50 873,-50"/>
+<text text-anchor="middle" x="836.5" y="-28.6" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#eef3f8">AI Agent</text>
+</g>
+<g id="edge4" class="edge">
+<title>mcp&#45;&gt;agent</title>
+<path fill="none" stroke="#86cc42" stroke-width="1.5" d="M745.1,-32C755.78,-32 767.93,-32 779.78,-32"/>
+<polygon fill="#86cc42" stroke="#86cc42" stroke-width="1.5" points="779.92,-34.8 787.92,-32 779.92,-29.2 779.92,-34.8"/>
+</g>
+<g id="node6" class="node">
+<title>ans</title>
+<path fill="#1c3a12" stroke="#86cc42" stroke-width="1.3" d="M1060,-50C1060,-50 940,-50 940,-50 934,-50 928,-44 928,-38 928,-38 928,-26 928,-26 928,-20 934,-14 940,-14 940,-14 1060,-14 1060,-14 1066,-14 1072,-20 1072,-26 1072,-26 1072,-38 1072,-38 1072,-44 1066,-50 1060,-50"/>
+<text text-anchor="middle" x="1000" y="-28.6" font-family="Helvetica,sans-Serif" font-size="13.00" fill="#eef3f8">Answer / Action</text>
+</g>
+<g id="edge5" class="edge">
+<title>agent&#45;&gt;ans</title>
+<path fill="none" stroke="#86cc42" stroke-width="1.5" d="M885.08,-32C895.97,-32 907.83,-32 919.65,-32"/>
+<polygon fill="#86cc42" stroke="#86cc42" stroke-width="1.5" points="919.81,-34.8 927.81,-32 919.81,-29.2 919.81,-34.8"/>
+</g>
+</g>
+</svg>

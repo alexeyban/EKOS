@@ -19,7 +19,7 @@ knowledge. As that ecosystem develops, the EKOS token takes on new functions ins
 designed to align contributors, users, and developers around a shared piece of infrastructure,
 not to be a standalone speculative asset.
 
-See `README.md` for what is implemented today and `TODO.md` for the phase-by-phase engineering
+See `docs/REFERENCE.md` for what is implemented today and `TODO.md` for the phase-by-phase engineering
 roadmap. This document describes the product and ecosystem trajectory those phases are building
 toward, and where the token fits at each stage.
 

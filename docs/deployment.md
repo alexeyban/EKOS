@@ -110,7 +110,7 @@ only: it opens a page on the console's own machine, which a team's owner reaches
 People who want the `ekos` command on their own machine (for a project of their own, or for
 `ekos mcp serve` beside an editor) do not need the image: `scripts/package-release.sh` builds an
 offline install package for Linux x86_64 with the installer and an `INSTALL.md`; see the
-README's [Installation](../README.md#offline-from-an-install-package) section.
+reference's [Installation](REFERENCE.md#offline-from-an-install-package) section.
 
 `EKOS_CONSOLE_PRODUCTION=true` makes the console refuse to start without OIDC, an owner and a
 session secret, turns the two development tokens off, and gives nobody access except through a

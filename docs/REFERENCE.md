@@ -1,0 +1,2982 @@
+# EKOS reference
+
+The full, feature-by-feature reference: every command group, connector, MCP tool and storage
+option, with the RFC that designed it. For what EKOS is and a five-minute start, read the
+[README](../README.md). The same material, organised as guides, is at
+[ekos.dev/docs](https://ekos.dev/docs/).
+
+## About
+
+EKOS is a **compiler for enterprise knowledge**, not a database or document store. It observes an
+enterprise's existing systems — source code, Git history, SQL schemas, GitHub issues/PRs,
+Confluence, local PDF/DOCX documents — without interpreting them, compiles
+those observations through deterministic passes into a Canonical Knowledge Model, and stores the
+result in an append-only ledger where every conclusion carries the evidence it was derived from. AI
+agents (Claude Code among them) read that ledger through a read-only Model Context Protocol server
+(`ekos mcp serve`, RFC 0013) — they never touch raw enterprise systems directly.
+
+The project follows an RFC-first workflow (`docs/rfcs/`): every capability is designed in writing
+before it's implemented, and the `devlogs/devlog_*.md` files are the running record of
+what shipped, why, and what was learned building it. It is written in Rust (2024 edition) as a
+Cargo workspace, and is licensed under the [MIT License](../LICENSE).
+
+## The Problem
+
+Modern enterprises contain enormous amounts of valuable knowledge distributed across disconnected systems: source code, databases, data warehouses, documentation, wikis, Git repositories, infrastructure-as-code, APIs, runtime logs, and monitoring systems. Every system contains only a partial description of reality. Documentation becomes outdated. Employees leave. Business logic remains hidden inside production code. AI assistants receive fragmented, inconsistent, and often contradictory information.
+
+**Enterprises continuously lose knowledge.**
+
+## The Insight
+
+The enterprise already contains its own documentation — embedded inside source code, SQL, infrastructure definitions, APIs, logs, deployment history, schemas, and runtime behaviour. The problem is not missing information. The problem is the absence of a **compiler** capable of transforming enterprise reality into enterprise knowledge.
+
+EKOS is that compiler.
+
+## Architecture
+
+```
+          Enterprise Systems
+ Git   SQL   APIs   Confluence   Logs   Cloud   Monitoring
+                        |
+                 Observation Layer        ← collects facts, no interpretation
+                        |
+               Knowledge Compiler         ← multi-pass: normalize → analyze → recover → verify
+                        |
+          ┌─────────────┴─────────────┐
+   Knowledge Recovery          Identity Resolution
+          └─────────────┬─────────────┘
+                        |
+          Canonical Knowledge Model (CKM)  ← language/storage/AI-provider independent
+                        |
+           Semantic Knowledge Ledger        ← append-only, every fact traceable to evidence
+                        |
+          ┌─────────────┴─────────────┐
+    Knowledge Runtime          Knowledge Services
+          └─────────────┬─────────────┘
+                        |
+            AI Agents & Enterprise Applications
+```
+
+### Semantic Primitives
+
+The ledger stores four immutable primitives:
+
+| Primitive | Description |
+|-----------|-------------|
+| **Object** | Identity of a concept: Customer, Product, Dataset, Service, Business Rule |
+| **Relationship** | Semantic connection between objects (first-class, not just a foreign key) |
+| **Event** | Immutable change — the only mechanism that mutates enterprise state |
+| **Evidence** | Origin of knowledge: SQL query, source code, Git commit, log line, API spec |
+
+Every semantic conclusion is supported by evidence. Every change is auditable.
+
+### Key Invariants
+
+- The **Observation Layer** collects facts only — it never interprets business meaning.
+- The **ledger is append-only** — knowledge is never modified in place.
+- The **Runtime is read-only** — it reconstructs and interprets state, never modifies it. This is enforced by the type system: the store API is split into a read-only `KnowledgeReader` and a `KnowledgeStore` that adds the writes, and the Runtime, EKL and graph export only ever hold a `KnowledgeReader`.
+- **Human decisions stay human.** Confirming business definitions, settling conflicts, promoting session notes, approving migrations and confirming treasury payment authorizations are CLI / web console actions only; a test parses the MCP server and fails if any of them becomes reachable from it, even through a renamed import.
+- **AI systems** consume reconstructed knowledge through the Runtime; they never touch raw enterprise systems directly. The one explicit, scoped, audited exception is the gated `ekos_clickhouse_query` MCP tool (RFC 0056, off by default) — see below.
+- Every compiler pass is **deterministic** and **side-effect-free**. Evidence ids are derived from the evidence's content, so re-running a pass over unchanged sources writes no new ledger versions.
+- Every artifact is **content-addressable** (id + checksum + metadata + dependencies + version).
+- **Secrets and PII are never observed or stored** (RFC 0043) — a built-in baseline redacts known
+  secret shapes (AWS/GitHub/Slack/Google/Stripe tokens, private keys, JWTs, generic
+  key/password assignments) from all observed content, and excludes files like `.env`/`*.pem`/
+  `id_rsa` entirely. The same rule covers every later re-read of a workspace file for a model or
+  the ledger (symbol source, crate doc comments, view definitions: one shared `read_redacted`)
+  and the `git blame` commit subjects recorded as rationale. `ekos.toml`'s `[security]` section
+  can only extend this baseline, never disable it.
+
+## Implementation
+
+**Language:** Rust (2024 edition), Cargo workspace.
+
+**Crates (`ekos/crates/`):** `compiler-core`, `compiler-sdk`, `observation-sdk`, `artifact`, `kir`,
+`scheduler`, `sql-dialect-sdk`, `ledger`, `runtime`, `identity`, `recovery`, `ekl`, `semantic`,
+`marketing`, `docs-gen`, `dbt-gen`, `common`, `cli`, `demo-server`, `segment-backend` / `cluster` /
+`distributed` (RFC 0111/0113's partitioned + horizontally-distributed storage — see below),
+`simulation` (RFC 0047-0055's opt-in World Engine — see below), `clickhouse-query` (RFC 0056's
+opt-in live NL-to-SQL query engine — see below), `evals` (RFC 0138's answer-grading harness — see
+below), `session` (RFC 0151 agent session memory), `plpgsql` (RFC 0163's PL/pgSQL parser and
+procedural IR), `plsql` (RFC 0210's Oracle script scanner and PL/SQL front end), `ora-live` (RFC 0211's
+read-only Oracle catalog reader), and EKOS Migrate's `migrate`, `migrate-dq`, `migrate-logic`, `migrate-validate`, `migrate-approval`,
+`migrate-report`, `migrate-target-clickhouse` and `pg-live` (RFC 0154–0162 — see below). The same workspace also builds `ekos` with a generic extension seam (RFC 0149) that out-of-tree
+builds plug extra connectors and MCP tools into.
+
+**Connectors (`ekos/plugins/`):** File, Git, GitHub issues/PRs (live-verified against a real
+repo, 1,600 real issues/PRs — RFC 0062), Confluence, local documents
+(PDF/DOCX/text/Markdown/HTML/email, XLSX/CSV sheets, PPTX slides and notes, PNG/JPEG/TIFF/WebP
+images through local Tesseract OCR — text, tables, image OCR; RFC 0253), Pentaho Kettle (`.ktr`/`.kjb` —
+RFC 0027), Talend projects (a directory holding `talend.project` — jobs, components, links, contexts,
+connections and schemas as `Talend*` objects, `tRunJob` calls, SQL folded from Java strings, each job's data
+components in the Transformation IR, joblets inlined (as Studio saves them), column lineage per target column back
+through tMap, aggregates, joins, ELT maps (SQL run in the database) and jobs — tables, files and `tBufferOutput` — to
+the first source; items-export
+`.zip` files read in place; passwords redacted, including in component JSON settings; `ekos talend assess` — a
+migration assessment of probable defects, copies, environment ties, unused items, clone clusters and migration
+order —, `talend/` pages in the estate documentation, and `ekos talend explain` / the read-only MCP tool `ekos_talend_explain` for one job or component as recovered — RFC 0262–0265, 0268), Python/PySpark source (real AST parsing, DataFrame chains recovered into the
+Transformation IR — RFC 0038/0040), Rust source (real AST parsing, real function-call graph —
+RFC 0041), Elixir and JavaScript/TypeScript source (real AST + `Calls` recovery — RFC 0081/0082),
+Perl source (`.pl`/`.pm`/`.t`/`.psgi`, plus `.cgi` with a real `perl` shebang — packages, subs,
+`use`/`require` dependencies, `use parent`/`use base`/`@ISA` inheritance, POD descriptions and
+source spans; RFC 0147), Java source (`.java` — types, methods and constructors with spans,
+signatures and Javadoc, imports and inheritance resolved inside the tree, SQL built in method
+bodies folded and linked to the tables it reads and writes, `IDEMPIERE-NNNN` ticket anchors; for the
+iDempiere/ADempiere family, the generated model classes become `ModelTable`s with every column's
+business name, list values, mandatory flag, default and code-declared foreign key — RFC 0209),
+**compiled .NET and JVM binaries with no source available**
+(`.dll`/`.exe`/`.class`/`.jar`/`.war`/`.ear` — types, methods, signatures, fields, the real call
+graph, branch structure, string/numeric constants and external I/O boundaries, read in-process
+from CLI metadata and bytecode with no .NET SDK or JRE required; for .NET, per-method statement
+recovery — `if`/loop/`switch`/`try` with the IL offset of every line, labelled with the fidelity actually
+reached — plus a per-method migration spec, a Python-rewrite parity check and sandboxed characterization tests that
+run the original and check the rewrite against what it did, RFC 0150; RFC 0148 — shipped
+as a separately licensed extension build, not part of this open-source repository, RFC 0149), ClickHouse (real HTTP client, schema metadata plus an opt-in live query engine — RFC
+0056), a live Oracle catalog connector (read-only sessions, catalog reconciled against the
+database's own object counts, behind the `oracle` build feature — RFC 0211), plus scaffolded
+proof-of-concept clients for Salesforce, SAP,
+Microsoft Fabric, and Snowflake (real API shapes, mock-tested — none yet exercised against a live
+account). SQL in the PostgreSQL, SQL Server (T-SQL), MySQL, Snowflake, Databricks and ClickHouse dialects is
+parsed from files (RFC 0031); live Oracle, PostgreSQL, ClickHouse, SQL Server and Informix catalogs are read through `[[databases]]` (RFC 0211, RFC 0235, RFC 0252 §3.5); a Jira connector remains planned.
+
+## Installation
+
+### Installers: Windows .msi, macOS .pkg, Linux .deb and .rpm (from v1.5.5)
+
+Each release carries a native installer per system, built from the full package (the `ekos`
+command, the web console and the Python that runs it). The installer puts the program in place and
+on your `PATH`; **EKOS Setup** then opens the setup wizard in your browser for the EKOS home, the
+console, a first project and your agents — the same wizard as below.
+
+| Your machine | Asset | What it does |
+|---|---|---|
+| Windows 10/11, 64-bit | `ekos-<version>-x86_64-pc-windows-msvc.msi` | Per user, no administrator: `%LOCALAPPDATA%\Programs\EKOS`, `bin\` on your user Path, Start menu **EKOS Setup** and **EKOS Console**, an Apps & features entry. The last page's "Open EKOS Setup now" starts the wizard. A newer .msi upgrades an older one in place. |
+| macOS, Apple silicon | `ekos-<version>-aarch64-apple-darwin.pkg` | `/usr/local/ekos`, `ekos` in `/usr/local/bin`, **EKOS Setup** and **EKOS Console** in Applications (needs an administrator's password). EKOS Setup opens when the installer finishes, as you, never as root. |
+| Linux x86_64 / ARM 64-bit, Debian or Ubuntu | `ekos-<version>-<arch>-unknown-linux-gnu.deb` | `sudo apt install ./ekos-….deb`: `/opt/ekos`, `/usr/bin/ekos`, menu entries **EKOS Setup** and **EKOS Console**. Then run `ekos setup` as yourself. |
+| Linux x86_64 / ARM 64-bit, RHEL 9, Rocky, Alma, Fedora | `ekos-<version>-<arch>-unknown-linux-gnu.rpm` | `sudo dnf install ./ekos-….rpm`: the same as the .deb. |
+
+**EKOS.DEV, the desktop app (from v1.6.0).** Every installer also adds **EKOS.DEV**: the console
+in its own window, started and signed in for you, with a tray menu of your projects and a
+notification when a run ends (RFC 0261; local mode). Run **EKOS Setup** once first. On Linux it needs
+WebKitGTK 4.1 and an AppIndicator library, which the `.deb` and `.rpm` recommend.
+EKOS Setup itself opens in the app's window (in the browser where the app cannot run), and with the
+app nothing opens a browser or a terminal window: there is no separate "EKOS Console" shortcut.
+The console itself (in the app and in a browser) has a sidebar of grouped pages and a command
+palette, **Ctrl/⌘ K**, to go to a page, switch project, find an object or open a command's form.
+
+The Linux packages need glibc 2.34 or newer (Ubuntu 22.04, Debian 12, RHEL 9); on older systems
+use the command-only `musl` archive below. Nothing is started as root, and no service is installed:
+the console is started by `ekos setup` (or at login, if you ask it to) as the person who runs it.
+
+**Unsigned, so the first open needs one extra click.** Windows SmartScreen: **More info → Run
+anyway**. macOS Gatekeeper refuses a downloaded unsigned .pkg ("cannot be opened because Apple
+cannot check it"): right-click the .pkg → **Open** → **Open**, or System Settings → Privacy &
+Security → **Open Anyway**. The checksums in `SHA256SUMS` and the signed build provenance below
+cover the installers too.
+
+**Plain ASCII output on Windows.** On Windows `ekos` writes its rules, dashes and arrows as ASCII
+(`-`, `--`, `->`), so `ekos doctor > log.txt` reads the same in any shell: PowerShell would decode
+the UTF-8 symbols with its own code page and turn `─` into `â”€`. Other text, such as paths and
+names, and JSON output are not changed. `EKOS_ASCII=0` keeps the symbols; `EKOS_ASCII=1` asks for
+ASCII on other systems.
+
+**Removing.** First `ekos uninstall` if you want to undo what setup did for you (the login entry,
+agent entries; `--purge --yes` also deletes your projects) — it leaves the program to the OS
+uninstaller and says how to run it. Then: Windows — Settings → Apps → Installed apps → EKOS →
+Uninstall; macOS — `sudo /usr/local/ekos/uninstall.sh`; Linux — `sudo apt remove ekos` or
+`sudo dnf remove ekos`. The OS uninstaller never touches your EKOS home (`~/.ekos`).
+
+If you set EKOS up from an archive before, run **EKOS Setup** once after installing: it removes the
+earlier copy from the home and its `PATH` lines, so the installed program is the one that runs.
+Your projects stay.
+
+### With the web console: the full package and the setup wizard (Linux, Windows 11, macOS — RFC 0185)
+
+The full package holds the `ekos` command, the web console and the Python that runs it; nothing
+else is needed. Installing it opens a setup page in your browser:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh | sh        # Linux, macOS
+```
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/alexeyban/EKOS/main/install.ps1 | iex"   # Windows
+```
+
+Or download `ekos-<version>-<target>-full` from the releases page, unpack it and start
+`setup.sh` (Linux), `setup.command` (macOS: right-click → Open the first time) or `setup.cmd`
+(Windows: **More info → Run anyway** the first time; the program is not code-signed).
+
+The wizard asks where EKOS goes, whether the console is for you alone (local mode: this machine
+only, signed in with a one-time code) or for a team (OIDC), which port, a first project and its
+source directories, which agents to register it with (Claude Code, Claude Desktop, VS Code —
+their config files are backed up and other entries kept), and whether to start the console at
+login. It shows the exact list of steps before doing anything. Afterwards:
+
+```bash
+ekos console open | status | stop | start | restart | logs
+ekos console stop            # refuses while runs are in progress and names them;
+                              # --wait waits for them, --force ends them (RFC 0261)
+ekos setup                  # change any of it later
+ekos uninstall              # the program, login entry, PATH line, agent entries; keeps projects
+ekos uninstall --ui         # the same on a page in the browser: what goes, your projects, confirm
+```
+
+The console has the same: **Settings → Uninstall EKOS** (local mode, an install made by setup)
+opens that page, which keeps working while it removes the console itself (RFC 0188). A project's
+top bar has **Init & compile**: init (in-place workspaces), build, recover, resolve (conflicts
+reported, not stopping), compile, commit and coverage as one run (RFC 0189).
+
+`ekos setup --answers answers.toml` applies the same answers without a browser (servers,
+scripts); `--dry-run` lists the steps. The release workflow builds the full package for Linux
+x86_64 and aarch64, macOS on Apple silicon and Windows (Intel Macs: the command only); `scripts/package-full.sh` assembles one, and
+`scripts/package-release.sh --full` builds an offline set for Linux x86_64. Releases from v1.1.0 on carry the full packages.
+
+### Prebuilt binary, command only
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh | sh
+```
+
+Installs a single `ekos` binary into the EKOS home, `~/.ekos/bin` (RFC 0179), and creates
+`~/.ekos/data`, where projects keep their config and compiled data. `EKOS_HOME` moves the home;
+`EKOS_INSTALL_DIR` puts the binary somewhere else. An earlier install in `~/.local/bin` is
+upgraded where it is. No Rust toolchain, no compiler, nothing else to install. The script resolves the latest release, verifies
+the download against the release's `SHA256SUMS` **before** unpacking it, and never uses `sudo`.
+
+Piping a script into a shell is a real supply-chain decision, so the script is short enough to
+read first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh -o install.sh
+less install.sh && sh install.sh
+```
+
+The script also takes `EKOS_VERSION` to pin a release (`EKOS_VERSION=v1.1.0 sh install.sh`) and
+`EKOS_INSTALL_DIR` to change where it lands. To run EKOS as a shared service with the web
+console, use the [container image](#container-image-rfc-0179) instead.
+
+### Prebuilt binary, downloaded by hand
+
+If you would rather not pipe a script into a shell, every release is a plain archive on the
+[releases page](https://github.com/alexeyban/EKOS/releases). Pick the one for your machine:
+
+| Your machine | Asset |
+|---|---|
+| Linux, Intel/AMD 64-bit | `ekos-<version>-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux, Intel/AMD, old or unusual distro | `ekos-<version>-x86_64-unknown-linux-musl.tar.gz` |
+| Linux, ARM 64-bit (Raspberry Pi 4+, Graviton, Ampere) | `ekos-<version>-aarch64-unknown-linux-gnu.tar.gz` |
+| macOS, Apple Silicon (M1 and later) | `ekos-<version>-aarch64-apple-darwin.tar.gz` |
+| macOS, Intel | `ekos-<version>-x86_64-apple-darwin.tar.gz` |
+| Windows, 64-bit | `ekos-<version>-x86_64-pc-windows-msvc.zip` |
+
+`uname -sm` tells you which you are on if you are not sure: `Linux x86_64`, `Darwin arm64`, and
+so on.
+
+**glibc or musl?** Take the `gnu` build first — it is the faster of the two. If it refuses to
+start with something like `version 'GLIBC_2.x' not found`, your distribution is older than the
+one the release was built on: take the `musl` build instead, which is fully static and depends on
+nothing. (`install.sh` does this fallback automatically.)
+
+#### Linux and macOS
+
+```bash
+VERSION=v1.1.0
+TARGET=x86_64-unknown-linux-gnu          # from the table above
+ASSET="ekos-${VERSION#v}-$TARGET.tar.gz"
+BASE="https://github.com/alexeyban/EKOS/releases/download/$VERSION"
+
+curl -fsSLO "$BASE/$ASSET"
+curl -fsSLO "$BASE/SHA256SUMS"
+
+# Verify before unpacking. Feeding one line to -c keeps it quiet about the five assets
+# you did not download, and works with both GNU sha256sum and macOS's shasum.
+grep "$ASSET" SHA256SUMS | sha256sum -c -        # macOS: shasum -a 256 -c -
+
+tar xzf "$ASSET"
+mkdir -p ~/.local/bin                    # install(1) will not create it for you
+install -m 755 "ekos-${VERSION#v}-$TARGET/ekos" ~/.local/bin/ekos
+```
+
+That prints `<asset>: OK` and exits 0. Anything else — `FAILED`, or nothing matched — means do
+not unpack it; open an issue instead.
+
+Worth being precise about what this proves: `SHA256SUMS` tells you the archive arrived intact
+and matches what the release publishes; it does not, on its own, prove who built it. From the
+first release cut after 2026-11-07, every archive and `SHA256SUMS` also carries signed SLSA build
+provenance (Sigstore, keyless), which does:
+
+```bash
+gh attestation verify "$ASSET" --repo alexeyban/EKOS      # needs the GitHub CLI
+```
+
+Earlier releases (v1.3.0 and before) are checksummed only.
+
+`~/.local/bin` needs to be on your `PATH`; add `export PATH="$HOME/.local/bin:$PATH"` to your
+shell profile if `ekos --version` comes back "command not found". Any directory on `PATH` works —
+`/usr/local/bin` needs `sudo`, which is the only reason it is not the default here.
+
+**macOS, one extra step.** These binaries are not code-signed or notarised. A file downloaded
+with a *browser* is quarantined by Gatekeeper and refuses to run ("cannot be opened because the
+developer cannot be verified"). Clear the flag on the extracted binary:
+
+```bash
+xattr -d com.apple.quarantine ~/.local/bin/ekos
+```
+
+Downloading with `curl` — as above, and as `install.sh` does — does not set that flag, so this
+step only applies if you clicked the link in a browser.
+
+#### Windows
+
+```powershell
+$Version = "v1.6.1"
+$Asset   = "ekos-$($Version -replace '^v','')-x86_64-pc-windows-msvc.zip"
+$Base    = "https://github.com/alexeyban/EKOS/releases/download/$Version"
+
+Invoke-WebRequest "$Base/$Asset" -OutFile $Asset
+Invoke-WebRequest "$Base/SHA256SUMS" -OutFile SHA256SUMS
+
+# Verify before unpacking.
+$actual = (Get-FileHash $Asset -Algorithm SHA256).Hash.ToLower()
+$line   = Select-String -Path SHA256SUMS -SimpleMatch $Asset
+if (-not $line) { throw "$Asset is not listed in SHA256SUMS - do not use this file" }
+$expected = $line.Line.Split()[0]
+if ($actual -ne $expected) { throw "checksum mismatch - do not use this file" }
+
+Expand-Archive $Asset -DestinationPath .
+```
+
+`ekos.exe` is inside the extracted folder. Move it somewhere on your `PATH`, or add that folder
+to `PATH`. SmartScreen may warn the first time you run it, for the same reason as macOS: the
+binary is unsigned. Since v1.5.0 `ekos.exe` is linked with the static C runtime, so it needs no
+Visual C++ Redistributable (no "VCRUNTIME140.dll was not found"); the `-full.zip` package also
+carries the console's own Python and its runtime DLLs.
+
+(The Linux/macOS block above was run verbatim against the real v1.0.3 release. This PowerShell
+block was not run as written. Since v1.5.0 the Release workflow unpacks the Windows `-full.zip` on
+a Windows Server runner, runs `ekos setup` with answers, checks that the console answers, and runs
+`ekos uninstall`, so the package is exercised on every release. Please open an issue if this block
+misbehaves.)
+
+### Offline, from an install package
+
+For a machine without internet access, or a build of a commit that is not released yet, build a
+package on a Linux x86_64 machine with a checkout:
+
+```bash
+scripts/package-release.sh          # → dist/ekos-<version>-release.tar.gz
+```
+
+It builds `ekos` from the committed tree (uncommitted changes are left out) for glibc on the
+host and fully static for musl in the pinned Rust image (needs Docker; `--no-musl` skips it),
+packs both the way a release does with one `SHA256SUMS`, `install.sh` and an `INSTALL.md`, and
+checks that the package installs. `<version>` is the tag on a tagged commit, otherwise
+`<crate version>-dev.<commit>`. Copy that one file to the target machine, then:
+
+```bash
+tar xzf ekos-<version>-release.tar.gz && cd ekos-<version>-release
+EKOS_VERSION=v<version> EKOS_BASE_URL="file://$PWD" sh install.sh
+```
+
+The installer verifies the archive and installs into `~/.ekos/bin` exactly as it does from a
+release. `INSTALL.md` in the package covers installing by hand, the first run, agents, upgrading
+and removing.
+
+### First run
+
+However you installed it:
+
+```bash
+ekos --version
+cd /path/to/your/repo
+ekos init --detect     # writes an ekos.toml that matches what's actually in this repository
+ekos doctor
+ekos build && ekos recover && ekos resolve && ekos compile && ekos commit
+ekos coverage          # confirms every input kind actually produced objects
+ekos ask "what does this system do?"
+```
+
+`ekos init --detect` is worth using rather than plain `ekos init`: it detects the SQL dialect your
+schema is written in, excludes third-party and generated directories that would otherwise be
+compiled as if they were your own code, and prints an inventory of what it found. See
+[RFC 0152](../ekos/docs/rfcs/0152-first-run-self-verification.md).
+
+### Projects kept outside the sources (RFC 0178)
+
+By default `ekos.toml` and the `.ekos/` state directory sit in the repository. A project in the
+EKOS home keeps both elsewhere, so the sources are only read and one machine can hold many
+projects, each with its own ledger:
+
+```bash
+ekos project add shop --source /path/to/your/repo --detect
+ekos --project shop build && ekos --project shop recover && ekos --project shop resolve \
+  && ekos --project shop compile && ekos --project shop commit
+ekos --project shop ask "what does this system do?"
+ekos project list
+ekos mcp serve --project shop
+```
+
+```
+~/.ekos/                          $EKOS_HOME, or --home
+  data/<tenant>/<project>/
+      ekos.toml                   [workspace] root = "/path/to/your/repo"
+      state/                      what .ekos/ is for an in-place workspace
+```
+
+- `--project` works from any directory; `EKOS_PROJECT` and `EKOS_TENANT` do the same.
+- The tenant is `default` unless `--tenant` names one. Two tenants may each have a project
+  called `shop`; they share nothing.
+- Nothing is written into the sources. Generated docs and dbt models default to the project's
+  `out/` directory.
+- `ekos project remove shop` moves the project's data to `~/.ekos/trash/`; `--purge --yes`
+  deletes it.
+- `ekos init` and `--config` are refused together with `--project`.
+
+**Several repositories and folders in one project.** Name each input and they compile into one
+ledger, so knowledge links across them and every object says where it is from:
+
+```bash
+ekos project add shop \
+  --source api=/repos/payments-api --source web=/repos/storefront --source handbook=/srv/handbook
+ekos --project shop source list
+ekos --project shop build --source handbook      # re-observe one source only
+ekos --project shop ekl "FIND Object WHERE source = 'handbook'"
+```
+
+- A file of the same name in two sources is two objects. Each object carries `source` (and
+  `sources` when it was found in more than one).
+- `ekos source add <name> --path <dir>` and `ekos source remove <name>` edit the project's
+  `ekos.toml` and keep its comments. Removing a source does not remove compiled objects.
+- A project already compiled without source names cannot gain them; create a new project.
+- Sources are local directories and git repositories. Confluence and GitHub are still configured
+  once per project.
+
+Users, groups and roles are in the web console
+([below](#tenants-users-and-roles-rfc-0180)). See
+[RFC 0178](../ekos/docs/rfcs/0178-ekos-home-projects-sources.md).
+
+### Is the ledger still current? (RFC 0171)
+
+The ledger describes the source as it was at the last `ekos commit`. `ekos build` records every
+observed file's size and modification time, and a successful commit marks that list as "what the
+ledger reflects". From then on EKOS compares it with the files on disk. It reads metadata only,
+never file contents, and a file that was only touched also counts as changed. With `[freshness]
+content-hash = true` (off by default) `ekos build` also records a content hash per file, and a file
+whose time moved but whose bytes did not is no longer reported; files excluded as secrets are never
+hashed.
+
+```bash
+ekos status            # … Source : fresh — ledger reflects the source as of 2026-10-09 12:35 UTC (git c4f01c7)
+ekos freshness         # what changed since, and which compiled objects cite those files
+```
+
+```
+Changed (1):
+  schema.sql
+    may be stale: File schema.sql, Table customers, Table orders
+Removed (1):
+  app.py
+    may be stale: File app.py, PythonSymbol total
+```
+
+`ekos compile` and `ekos commit` warn `FRESH001` when the source moved after `ekos build`.
+`ekos doctor` includes a "Source freshness" line. Over MCP, `ekos_status` carries a `freshness`
+block, and when the source has changed every read tool's answer gets one extra note saying the
+ledger may be behind, so an agent knows not to trust facts about those files. `[freshness] enabled
+= false` turns all of this off; `ttl-seconds` (default 30) sets how long the MCP server reuses one
+check.
+
+### Upgrading and removing
+
+With an installer (above), install the newer .msi, .pkg, .deb or .rpm over the old one, and
+remove EKOS with the system's own uninstaller. Otherwise:
+re-running the install command (or installing a newer package) replaces the binary in place with the latest release; there is no
+package database and nothing else to update. To remove it, delete the binary
+(`rm ~/.ekos/bin/ekos`, or `~/.local/bin/ekos` for an install made before RFC 0179). EKOS keeps
+files in two places only: the `.ekos/` directory inside each workspace you compiled in place,
+and the EKOS home (`~/.ekos`) for projects. Delete either separately.
+
+### Container image (RFC 0179)
+
+**Deploying for a team?** [docs/deployment.md](deployment.md) is the step-by-step guide:
+sign-in, tenants, roles, agents, model credentials, backups and upgrades.
+
+One image holds the `ekos` binary, the console API and the built console UI, and serves both on
+port 8000. All state is in one volume, the EKOS home. Sources are mounted read-only.
+
+```bash
+cp deploy/.env.example deploy/.env       # set EKOS_SOURCES and the two tokens
+docker compose -f deploy/docker-compose.yml up -d --build
+open http://127.0.0.1:8000
+```
+
+- `EKOS_SOURCES` is the host directory holding your repositories and document folders. It
+  appears in the container as `/sources`.
+- In the console, **Add a workspace → New project from a source directory** with a path such as
+  `/sources/payments-api`. The project's config and compiled data go to the volume
+  (`/var/lib/ekos/data/default/<project>/`); nothing is written into the source directory.
+  Then run the pipeline from the project's Run tab.
+- A project may only read directories under `/sources`, both when it is created and when its
+  config is edited.
+- The CLI is in the container too: `docker compose -f deploy/docker-compose.yml exec ekos ekos project list`.
+  A project created that way appears in the console after a restart.
+- The container runs as a non-root user and listens on loopback over plain HTTP. For access from
+  other machines put a reverse proxy with TLS in front.
+- **In a cloud** (RFC 0232): `deploy/terraform` deploys the same image to Azure, Google Cloud or
+  AWS as a VM, a serverless container (Container Apps, Cloud Run, ECS Fargate) or on Kubernetes
+  (AKS, GKE, EKS, with the `deploy/helm/ekos` chart), with secrets in the cloud's secret store, one
+  workload identity, a git sync for the sources and nightly backups to object storage; a new
+  deployment over an existing bucket restores the newest backup on its first start, GKE and EKS get
+  an HTTPS ingress for a `domain`, and `exposure = "private"` keeps the console off the internet. See
+  [docs/deployment.md](deployment.md#10-in-a-cloud-azure-google-cloud-aws-rfc-0232).
+- A model server on the host (Ollama) is reachable from a project's `ekos.toml` as
+  `http://host.docker.internal:11434`.
+
+Tagged releases publish the image as `ghcr.io/alexeyban/ekos:<version>`; until the next tag,
+build it from a checkout as above. See [RFC 0179](../ekos/docs/rfcs/0179-installer-and-image.md).
+
+### Tenants, users and roles (RFC 0180)
+
+The console decides who may see and do what. The CLI is not affected: someone with a shell on
+the machine already has the files.
+
+- **Tenants.** Each tenant has its own projects and its own members. A project or tenant you
+  have no role in answers 404, the same as one that does not exist.
+- **Roles**, granted per tenant or per project in the console's **Admin** page:
+
+  | Role | May |
+  |---|---|
+  | `viewer` | read everything in a project, including runs and logs |
+  | `reviewer` | also decide business semantics and conflicts |
+  | `operator` | also run commands, manage schedules, edit the project config |
+  | `admin` | everything in the tenant: projects, members, groups, API tokens, audit log |
+
+  A platform owner (named in `EKOS_CONSOLE_OWNERS`) can do everything, creates tenants, and sets
+  which host directories each tenant's projects may read.
+- **Sign-in** is OIDC. A role can be granted to an e-mail address before that person first signs
+  in. A group can hold a role for its members, and can name a value of the provider's group
+  claim so membership follows the provider.
+- **API tokens** for agents and scripts (`Authorization: Bearer ekos_…`), created in the Admin
+  page and shown once. A token can be `viewer` or `operator`. It can never review or administer:
+  those need a signed-in person.
+- **Audit log** per tenant: every request that changes something, and every refusal, with who
+  and when.
+
+```bash
+# deploy/.env
+EKOS_CONSOLE_OIDC_ISSUER=https://id.example.com/realms/main
+EKOS_CONSOLE_OIDC_CLIENT_ID=ekos
+EKOS_CONSOLE_OIDC_CLIENT_SECRET=...
+EKOS_CONSOLE_OWNERS=you@example.com
+EKOS_CONSOLE_SESSION_SECRET=...
+EKOS_CONSOLE_PRODUCTION=true
+```
+
+With `EKOS_CONSOLE_PRODUCTION=true` the console refuses to start without OIDC, an owner and a
+session secret, static tokens stop working, and access comes only from granted roles. Without it
+the earlier behaviour remains for the `default` tenant: the two static tokens work (the write
+token acts as a platform owner), and under OIDC every signed-in user can read `default`.
+
+See [RFC 0180](../ekos/docs/rfcs/0180-tenants-users-groups-roles.md).
+
+### MCP for agents, through the console (RFC 0182)
+
+An agent connects to a project through the console, with an API token:
+
+```json
+{"url": "https://ekos.example.com/mcp/default/shop",
+ "headers": {"Authorization": "Bearer ekos_…"}}
+```
+
+`/mcp/<tenant>/<project>` speaks MCP Streamable HTTP, the same as `ekos mcp serve --http`. The
+console sits in front of the project's own server and:
+
+- lists only the tools the token's role allows. The two review tools need a signed-in reviewer,
+  so no token ever sees them; `ekos_session_note` needs `operator`;
+- attaches the token's read scope (RFC 0181) to every call. A scope the client sends itself is
+  dropped;
+- answers `404` for a project the token has no role in, the same as one that does not exist;
+- records every call in the tenant's audit log: who, which tool, allowed or denied. Arguments
+  are not recorded.
+
+Projects' servers now start on first use. One unused for 15 minutes is stopped
+(`EKOS_CONSOLE_MCP_IDLE_SECONDS`), and at most 8 run at once (`EKOS_CONSOLE_MCP_MAX_SERVERS`);
+the first call after a stop waits for the server to start. Not built: OAuth for MCP clients and
+rate limits. See [RFC 0182](../ekos/docs/rfcs/0182-mcp-gateway.md).
+
+### Backup, restore and model credentials (RFC 0183)
+
+```bash
+ekos home backup                       # every project, and the console's database
+ekos --tenant acme home backup         # one tenant's projects
+ekos home restore ekos-backup-20261013T101500Z.tar.zst
+```
+
+- A backup is one zstd-compressed tar under `<home>/backups/`. It holds each project's config
+  and compiled data, not the sources (they are not in the home).
+- A project is copied under its ledger's write lock: a pipeline stage that is writing makes the
+  backup stop with that project's name, and no file is left. Readers are not affected.
+- Restore replaces nothing that exists, and changes nothing if anything would be replaced. With
+  `--force` each existing project is first moved to the home's trash. An archive with a path
+  that would leave the home, or with a link in it, is refused.
+
+In the console, a platform owner names for each tenant the environment variables holding its
+model keys and switches metered calls on. A tenant's pipeline and MCP server then receive those
+variables and no other tenant's, and none of the console's own settings. With the switch off
+they receive none; a local model server still works. See
+[RFC 0183](../ekos/docs/rfcs/0183-operations.md).
+
+### Console settings, local mode and the keychain (RFC 0184)
+
+A platform owner changes the console's own settings on its **Settings** page: sign-in, owners,
+MCP limits, ports. They are kept in `<EKOS_HOME>/control/console.toml`. An environment variable
+wins over the file and shows on the page as read-only, so a container configured by
+`deploy/.env` behaves as before. Changes apply at the next start (**Restart now** when a launcher
+or a restart policy starts the console again).
+
+Secrets typed on that page, and model keys for projects, go to the operating system's keychain
+(Windows Credential Manager, macOS Keychain, Secret Service on Linux), never to a file or a
+response. A key stored under a variable name (`ANTHROPIC_API_KEY`) reaches the commands of a
+tenant granted that name while its metered calls are on, as an environment variable would. A
+container has no keychain (`EKOS_CONSOLE_KEYCHAIN=off` in the image); keep secrets in its
+environment.
+
+**Local mode** (`mode = "local"`) is for one person on their own machine: no identity provider,
+loopback only (a request from elsewhere, or naming another host, is refused), and the person who
+can write the home's control directory signs in with a one-time code. That person is a platform
+owner. The installer of RFC 0185 sets it up; see
+[RFC 0184](../ekos/docs/rfcs/0184-console-settings-local-mode-keychain.md).
+
+### Every command and every setting from the console (RFC 0186)
+
+A project's **Commands** tab lists every `ekos` command, read from the binary itself
+(`ekos commands --json`), with a form built from its arguments and the exact command line shown
+before it runs. Who may run what follows each command's class: reading needs a viewer, changing
+the project an operator, a review decision a signed-in reviewer (recorded under their name, never
+a token), and destructive commands or ones that reach a live system outside EKOS an admin who
+types the command to confirm. Servers, the installer and the console's own commands are not run
+from the web. The run's output lands in the run log like the pipeline's.
+
+The project's config page has a **Settings** form for every section of `ekos.toml`, built from
+the schema of the running binary (`ekos config schema --json`): types, defaults and the
+documentation of each setting. Changes are applied to the file's text with its comments kept,
+then validated and saved as before.
+
+### Chat with a project (RFC 0187)
+
+A project's **Chat** tab answers questions with a model that uses the project's EKOS tools: each
+tool call is shown with its arguments and result, and the answer says which objects it rests
+on. The model is set once by an owner (Settings → Chat, or in `ekos setup`): a local Ollama model,
+any OpenAI-compatible server, or Anthropic. Its key is named by a variable whose value comes from
+the environment or the OS keychain. A hosted model is paid per call, so it answers only in a
+tenant whose metered calls an owner has turned on; a model on this machine always may.
+
+The model is offered only tools that read, called with the person's own rights and read scope,
+and every call is in the audit log. It never sees a review tool: review decisions stay with
+people. Conversations are private to the person who started them.
+
+### Access inside a project (RFC 0181)
+
+A project is one ledger over several sources, so limits inside a project are applied when the
+ledger is read. A viewer can be limited to part of one project, or have part of it hidden:
+
+- **only** a source, or a path pattern in a source (`src/**`), or one object;
+- **all except** a source, a path pattern (`secrets/**`), or an object.
+
+In the Admin page, grant `viewer` on one workspace and choose "only…" or "all except…".
+
+What a limited person gets:
+
+- The graph, search, object pages, neighbourhoods and impact, filtered. A hidden object is not
+  found, the same as one that does not exist. A relationship shows only when both its ends do.
+  Counts cover only what is visible.
+- Nothing else in that project: the dashboard, run history and logs, the configuration,
+  semantics and conflicts answer 403. Those show more than the ledger (file names in a log, a
+  freshness report), and nothing there could apply the limit.
+- Anything the compiler could not attribute to a source is hidden from them: commit authors,
+  crates, rollups, business-semantics items, conflicts.
+
+Operators, admins and platform owners cannot be limited: running the pipeline shows every
+source. A rule hides objects; it does not rewrite the text of a visible document that mentions
+a hidden one.
+
+The same filter is available from the command line, for `ekos mcp serve`, `ekos ekl` and
+`ekos query`:
+
+```bash
+cat > scope.json <<'JSON'
+{"default": "allow", "rules": [{"effect": "deny", "source": "payments-api", "path": "secrets/**"}]}
+JSON
+ekos --project shop --read-scope scope.json mcp serve
+ekos --project shop --read-scope scope.json ekl "FIND Object WHERE kind = 'Table'"
+```
+
+Under a restricting scope the MCP server offers the tools that read only through the ledger
+(`ekos_search`, `ekos_query`, `ekos_retrieve`, `ekos_ekl`, `ekos_neighborhood`, `ekos_state`,
+`ekos_dependents`, `ekos_impact`, `ekos_diff`, `ekos_graph_export`) and refuses the rest. Any
+other command refuses `--read-scope`. A local `ekos` run without a scope is unrestricted: that
+user already has the files. See [RFC 0181](../ekos/docs/rfcs/0181-read-scope.md).
+
+### From source
+
+**The Cargo workspace root is `ekos/`, not the repo root** — there is no top-level `Cargo.toml`,
+so `cargo` commands must be run from inside `ekos/` (or with `--manifest-path ekos/Cargo.toml`).
+The toolchain is pinned by `rust-toolchain.toml`; rustup installs the right version automatically.
+
+Prerequisites on both platforms:
+- **Rust**, stable channel, via [rustup](https://rustup.rs) — 2024 edition needs rustc 1.85+;
+  installing the latest stable is fine.
+- **A C/C++ toolchain** — `rusqlite`'s bundled SQLite and the `zstd` crate both compile native C
+  source at build time, so a working `cc` is required even though the project itself is pure Rust.
+- **Git**, to clone the repo.
+
+#### macOS
+
+```bash
+# 1. C toolchain (skip if already installed)
+xcode-select --install
+
+# 2. Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+
+# 3. Clone and build (note: cd into ekos/, the actual workspace root)
+git clone https://github.com/alexeyban/EKOS.git
+cd EKOS/ekos
+cargo build --release --workspace
+
+# 4. Binary is at target/release/ekos — run it directly, or install onto PATH:
+cargo install --path crates/cli
+```
+
+(Homebrew's `rustup-init` — `brew install rustup-init && rustup-init` — works the same way if you
+prefer Homebrew-managed installs.)
+
+#### Windows 11
+
+Two supported paths — WSL2 is the path of least friction for a Unix-first Rust CLI project, since
+it gives you a real Linux toolchain; native Windows works too and is fully supported by Rust.
+
+**Option A — WSL2 (recommended):**
+
+```powershell
+wsl --install                       # if WSL2 isn't already set up; reboot if prompted
+```
+
+Then open the Ubuntu shell it installs and follow the **macOS/Linux steps above** (`xcode-select`
+isn't applicable — `sudo apt install build-essential` gives you the C toolchain instead — then the
+same `rustup.rs` install and `cargo build` commands).
+
+**Option B — Native Windows:**
+
+```powershell
+# 1. C++ build tools (provides the MSVC linker rustc's default toolchain needs)
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+
+# 2. Rust (accept the default x86_64-pc-windows-msvc toolchain when prompted)
+winget install Rustlang.Rustup
+
+# 3. Git, if not already installed
+winget install Git.Git
+
+# 4. Clone and build (open a new terminal first, so the updated PATH takes effect)
+git clone https://github.com/alexeyban/EKOS.git
+cd EKOS\ekos
+cargo build --release --workspace
+
+# 5. Binary is at target\release\ekos.exe — run it directly, or install onto PATH:
+cargo install --path crates\cli
+```
+
+#### Verify the install
+
+```bash
+ekos --help                # or: cargo run -p ekos -- --help, from ekos/
+ekos init                  # creates .ekos/ in the current directory
+cargo test --workspace     # optional: run the test suite (1,500+ tests)
+```
+
+See [`CLAUDE.md`](../CLAUDE.md) for the full command reference and the mandatory development
+workflow if you're planning to contribute.
+
+### Legacy transformation recovery (RFC 0027/0028/0029)
+
+A Pentaho step, a SQL `SELECT`, a `VIEW`, and a stored procedure are all the same underlying
+concept — a transformation of data from sources to a sink through filter/join/aggregate/calculate
+operations. `ekos recover` compiles all of them into one shared **Transformation IR**
+(`Source`/`Filter`/`Join`/`Aggregate`/`Calculate`/`Sink`/`Unmapped`), so legacy ETL logic recovered
+from a Pentaho `.ktr`/`.kjb` job can be diffed against a newly drafted SQL pipeline — no manual XML
+reading required. `Unmapped` is deliberate, not a gap swept under the rug: anything that can't be
+parsed is still recorded as evidenced fact ("something is here, not yet understood"), never
+silently dropped.
+
+### Oracle scripts, PL/SQL and schema history (RFC 0210)
+
+An `oracle` SQL dialect reads Oracle schemas and SQL*Plus scripts: `SET`/`PROMPT`/`@file` lines and
+whole PL/SQL units are set aside, Oracle-only clauses (`ENABLE NOVALIDATE`, `ADD (…)` column lists,
+`MODIFY c DEFAULT x`, `VARCHAR2(10 BYTE)`, `FORCE` views, `(+)`, `MINUS`, physical attributes, …)
+are rewritten — always keeping the file's line numbers. `ekos init --detect` adds one dialect rule
+per engine-named directory, so a project shipping each migration for Oracle and for PostgreSQL reads
+each copy with its own grammar, and the two copies are no longer reported as conflicting:
+definitions are compared only within one dialect.
+
+PL/SQL functions, procedures, triggers and packages are read into the same procedural IR as
+PL/pgSQL and written as the same `Procedure` / `ProcedureStatement` objects, with a computed
+fidelity label; an Oracle trigger's inline body is a `Procedure`, classified like any trigger
+function. Migration scripts named `<yyyyMMddHHmm>_<description>.sql` become `SchemaChangeSet`s
+(time, release, engine, tickets) holding one `SchemaChange` per operation — `add_column`,
+`modify_column`, `add_constraint`, … — linked to their table at `ekos commit`.
+
+On iDempiere `release-13`: Oracle migration statements rejected 5,317 → 9 (of 62,251); `db/oracle`
+60 of 61 routines recovered completely (991 of 992 statements — the gap is a `GOTO`); 2,154 change
+sets with 26,060 changes, none unrecognized; no model calls.
+
+```bash
+ekos recover   # … PL/SQL routines: …   Schema history: 2154 migration script(s), 26060 change(s) …
+ekos ekl "FIND Object WHERE kind = 'SchemaChange' AND table = 'C_Invoice'"
+```
+
+### Live Oracle catalog and code ↔ database conflicts (RFC 0211)
+
+A project can name an Oracle database next to its sources. `ekos build` reads its catalog through a
+read-only session — `SET TRANSACTION READ ONLY`, a write probe that must be refused, settings pinned,
+a call timeout — and checks that every kind it read matches the database's own object count, so a
+user who cannot see some objects is an error, not a smaller answer. The password is never in the
+file, only the name of the variable holding it:
+
+```toml
+[[databases]]
+name = "erp-db"
+kind = "oracle"
+connect = "localhost:51521/XEPDB1"
+user = "ekos_ro"
+password-env = "EKOS_ORACLE_PASSWORD"
+owners = ["ADEMPIERE"]
+```
+
+`ekos recover` turns the catalog into ordinary `Table`, `View` and `Procedure` objects marked
+`origin: live` (routines go through the same PL/SQL reader as files); they never merge with tables
+from scripts. `ekos commit` then compares the code's claims with the database and records each
+disagreement as a conflict that cites both sides: a model table or column the database lacks, a
+table no model describes, a mandatory model column that is nullable, a routine file whose text
+differs from the installed one. When the source tree accounts for a difference — a migration newer
+than the database, a translation table — the conflict carries that explanation.
+
+`profile = "p0" | "p1" | "p2"` decides how much `ekos build` measures: optimizer statistics only
+(the default), exact row counts, or one aggregate scan per table for exact null counts, number and
+date bounds and text lengths. No tier stores a text value — a seeded marker row checks it — and
+number and date bounds are withheld for columns named like personal data. A mandatory model column
+that is nullable in the database then carries the count of rows that break the rule and the query
+that re-counts them. The catalog also records the archive-log and supplemental-logging state.
+
+On iDempiere (source `release-13`, the release 12 seed on Oracle XE): schema changes linked to their
+table 11,748 → 28,916 of 31,620; 444 conflicts, 239 explained, every pending-migration explanation
+confirmed against the database's own record of applied scripts. Among the rest: tables of modules
+removed from the code but not the seed, a model column no script ever created, and an installed
+procedure that builds `NVARCHAR2` columns where its file says `VARCHAR2`. At `profile = "p2"`
+(903 tables in 6 s), of 116 mandatory-but-nullable columns 11 hold nulls and 105 none, each count
+re-checked against the database. No model calls.
+
+```bash
+cargo build --release -p ekos --features oracle      # needs Oracle Instant Client at run time
+ekos commit    # … Code ↔ database: 754 table(s) and 22 routine(s) compared … 239 of 444 explained …
+ekos conflicts list --type model_column_missing
+```
+
+The testbed is `docker-compose.oracle.yml` + `deploy/fixtures/idempiere-oracle.sh`.
+
+
+`ekos database add|list|test|remove` (RFC 0223) manage `[[databases]]` without editing `ekos.toml`; `ekos database
+test <name>` connects read-only, checks a write is refused, and puts the census (tables, views, routines, triggers) next
+to what was compiled. In the web console, a project's **Sources** tab does the same: add directories and databases (the
+password goes to the server's keychain, never to `ekos.toml`), test, and analyse with Init & compile. On iDempiere,
+from an empty project in a browser: census and compiled counts equal for every kind.
+
+PostgreSQL and ClickHouse databases are declared the same way (RFC 0235): `kind = "postgres"` with
+`connect = "host[:port]/database"` and `owners` the schemas, or `kind = "clickhouse"` with
+`connect = "http[s]://host[:port]"` and `owners` the ClickHouse databases. PostgreSQL is read through
+`pg-live`'s read-only session (`default_transaction_read_only`, timeouts) and reconciled against the
+server's own counts; every ClickHouse catalog query carries `readonly=1`. Both probe a write that
+must be refused and compile to the same `origin: live` objects as Oracle — tables with keys and
+foreign keys, views, PL/pgSQL routines and triggers through the readers files use — and a dropped
+object leaves the model. `profile = "p0" | "p1" | "p2"` works for every kind (RFC 0252): P0 reads the
+optimizer's statistics, P1 counts rows, P2 scans each table once for exact null counts, number and date
+bounds and text lengths — never a text value. ClickHouse scans only engines that store their own rows.
+The application dictionary stays Oracle-only.
+
+```bash
+ekos database add shop --kind postgres --connect db.local:5432/shop --user shop_ro --password-env SHOP_PW --owner public
+ekos database add wh --kind clickhouse --connect https://ch.local:8443 --user ro --password-env WH_PW --owner analytics
+ekos database add erp --kind sqlserver --connect mssql.local:1433/erp --user ekos_ro --password-env ERP_PW --owner dbo
+ekos database add stores --kind informix --connect ifx.local:9088/stores@ol_ifx --user ekos_ro --password-env STORES_PW --owner informix
+```
+
+SQL Server (RFC 0252 §3.5): `kind = "sqlserver"`, `connect = "host[:port]/database"` (port 1433 by
+default; append `?trust-server-certificate=true` only for a self-signed certificate — the connection
+is encrypted either way), `owners` the schemas. The catalog comes from the `sys.*` views — tables,
+columns, keys and unique indexes, checks, foreign keys, `MS_Description` comments, and view, routine
+and trigger text from `sys.sql_modules` — reconciled against `sys.objects`. SQL Server has no
+read-only session setting, so the session asks for read-only routing (`ApplicationIntent=ReadOnly`),
+runs every statement in a transaction that is always rolled back, with lock and command timeouts, and
+the write check reports the login's rights (`HAS_PERMS_BY_NAME`) rather than attempting a write. P0 is
+`sys.partitions`' approximate row counts (column statistics are histograms of values and are never
+read); P1/P2 as for the other kinds. T-SQL routines compile at *signature* fidelity — arguments,
+return type, description, and the tables they read and write from a real parse — with no
+per-statement objects yet. `ekos sql check --database <name>` probes it read-only too. The testbed is
+`docker-compose.sqlserver.yml` (`EKOS_SQLSERVER_LIVE=1` for the live suite).
+
+Informix (RFC 0252 §3.5): `kind = "informix"`, read over ODBC — build `ekos` with `--features informix`
+(it links unixODBC) and install an Informix ODBC driver (see the deployment guide). `connect` is
+`host[:port]/database@server` for the IBM Informix Client SDK (SQLI, port 9088 by default; `server` is
+the `INFORMIXSERVER` name) or `drda://host[:port]/database` for the IBM Data Server Driver (DRDA, port
+9089); `?driver=<name or library path>` and `?db-locale=<locale>` are optional. `owners` are table
+owners (`systables.owner`). The catalog comes from `systables`, `syscolumns` (types decoded from
+`coltype`/`collength`), `sysdefaults`, `sysconstraints`/`sysindexes`/`sysreferences`/`syschecks`,
+`sysviews`, `sysprocedures`/`sysprocbody` and `systriggers`/`systrigbody`, reconciled against its own
+counts. Every statement runs in a transaction that starts `SET TRANSACTION READ ONLY` and is always
+rolled back, under `COMMITTED READ LAST COMMITTED`; the write check reports the user's grants
+(`systabauth`, `syscolauth`, roles, `sysusers`). P0 is `systables.nrows` (the optimizer's `colmin`/
+`colmax` and distributions are values and are never read). SPL routines compile as `Procedure`
+objects **without IR** — there is no Informix SPL reader yet — with arguments, return types, the
+`DOCUMENT` text and the tables their SQL statements read and write; the recover summary counts them.
+Informix has no MD5, so its columns get no overlap signature (`ekos relationships`). The testbed is
+`docker-compose.informix.yml` + `deploy/fixtures/informix/load.sh` (`EKOS_INFORMIX_LIVE=1` for the live
+suite).
+### Write behaviour: how each table is updated and deleted (RFC 0212)
+
+Before copying a table incrementally you need to know whether every change moves its timestamp
+column and whether rows ever disappear. `ekos commit` writes one `WriteBehaviour` per table with
+both, each class citing where it came from:
+
+- **update:** `po_only`, `raw_sql_sets_updated`, `raw_sql_skips_updated` (a raw `UPDATE` that leaves
+  `Updated` alone — a watermark misses it), `no_updated_column`;
+- **delete** (a set): `deleted_by_app` (a raw `DELETE` or a `PO` delete in code), `deleted_by_users`,
+  `deleted_by_cascade`, `purged` (age-based or whole-table deletes), `soft_delete_only`,
+  `never_deleted_in_code`;
+- **change log:** whether the application records deletes of the table.
+
+Users' deletes and change logging live in the application's dictionary, not its code; for
+iDempiere-family schemas `[[databases]] dictionary = "idempiere"` reads those two flags of
+`AD_Table` (opt-in). On iDempiere: 144 of 903 tables have a raw `UPDATE` that skips `Updated`, and
+754 are deletable by users — something no source file says. No model calls.
+
+```bash
+ekos commit   # … Write behaviour: 903 table(s); update: po_only 737, raw_sql_skips_updated 144, …
+ekos ekl "FIND Object WHERE kind = 'WriteBehaviour' AND update_class = 'raw_sql_skips_updated'"
+```
+
+### Tickets: commits, migrations and code joined by ticket key (RFC 0219)
+
+Legacy estates cite their issue tracker in file names, comments and commit messages. With
+`[tickets] keys = ["IDEMPIERE"]` (`ekos init --detect` proposes keys found in file names), every
+ticket a commit names becomes a `Ticket` — its commits, dates, authors, a title taken from the first
+commit's subject, and the files it touched — linked at `ekos commit` to the migration change sets
+and code that cite it. A schema question then reaches when, why and who: on iDempiere,
+`C_Country.ISOCountryCodeAlpha3` → change set `202412261358_IDEMPIERE-6349` → one commit,
+2024-12-27, "Add M49 country codes to the C_Country table". Ticket ids are matched by exact key
+only. `[observe] git-max-commits` raises the default of 500 commits read from history (the
+iDempiere history has 16,260; read in full: 4,597 tickets).
+
+```bash
+ekos commit   # … Ticket links: 4597 ticket(s) from commits; linked to 272 JavaMethod, 154 JavaType, 3074 SchemaChangeSet …
+ekos ekl "FIND Object WHERE kind = 'Ticket' AND name = 'IDEMPIERE-6349'"
+```
+
+### Run logs: every pipeline step as JSON lines (RFC 0220)
+
+`build`, `recover`, `resolve`, `compile` and `commit` each write a JSON-lines run log next to their
+usual output: one line per step with its counts (each connector scanned, each Oracle dictionary
+query with rows and milliseconds, the reconciliation, a pass summary, analyzer stats, merges, facts
+written), the warnings any part logged (redacted; the first 200, the rest counted), and two closing
+lines — the model calls the command made, then its outcome. The file is `EKOS_RUN_LOG` when set,
+otherwise `.ekos/runs/<timestamp>-<command>.jsonl`; the console sets it per run and shows the lines as
+a steps table on the run page. On iDempiere every command logged zero model calls.
+
+RFC 0218 widened it: every command whose catalogue class is write, review, admin or external writes
+one too (`docs generate`, `signoff approve`, `lakehouse marts build`, …), named after the command's
+path (`<timestamp>-lakehouse-marts-build.jsonl`); extensions add their own stage lines. `docs generate
+--layout estate` also records its latest run in `.ekos/docs/estate.json`, which step 2 of the
+workflow bar reads. The run logs feed the generated **demo book** (ekos-lakehouse `tools/demo-book`):
+a script walks the console through the seven steps and renders, per step, the screen, the run log
+behind it and the numbers, keeping the narration a person wrote — the iDempiere book is in
+[ekos-lakehouse-oracle/book](https://github.com/alexeyban/ekos-lakehouse-oracle/tree/main/book).
+
+```
+{"stage":"oracle.catalog","msg":"read DBA_TAB_COLUMNS","ms":687,"owner":"ADEMPIERE","query":"columns","rows":30457,"cmd":"build","t_ms":4889}
+{"stage":"oracle.catalog","msg":"reconciled against DBA_OBJECTS","kinds":13,"mismatches":0,"objects":10613,"owner":"ADEMPIERE","cmd":"build","t_ms":8985}
+{"stage":"llm","msg":"calls","count":0,"cache_hits":0,"embeddings":0,"cmd":"build","t_ms":19987}
+{"stage":"run","msg":"finished","ok":true,"ms":19987,"warnings":0,"cmd":"build","t_ms":19987}
+```
+
+### Documentation repositories and wiki snapshots (RFC 0221)
+
+A documentation site kept as Markdown (Docusaurus, MkDocs, a `docs/` folder) is a source like code: add it to a
+project's `[[sources]]`. Front matter becomes the document's properties (`title`, `description`, and for a wiki
+snapshot `source_url`, `source_revision`, `licence`) instead of the text of a section, and each section records the
+tickets it names, so `ekos commit` links a ticket to the docs pages that describe it as well as to the commits,
+migrations and code. On iDempiere (code + docs repository): 1,743 docs sections linked to tickets, e.g.
+`C_Country.ISOCountryCodeAlpha3` → change set `202412261358_IDEMPIERE-6349` → `IDEMPIERE-6349` → the page "New
+Fields in Country".
+
+`scripts/wiki-snapshot.py` turns MediaWiki pages into such a directory — from a `Special:Export` file saved in a
+browser, or from the API (one request a second; it stops at a 403 or a bot challenge rather than working around
+it). Each page keeps its URL, revision id and licence. Snapshots are for analysis; check the licence before
+republishing anything derived from them.
+
+```bash
+scripts/wiki-snapshot.py --xml export.xml --out ~/wiki-snapshot --licence "CC BY-SA 4.0"
+ekos source add wiki --path ~/wiki-snapshot
+```
+
+### What the data says about the code (RFC 0252)
+
+After `ekos commit`, `ekos profile run` measures every `[[databases]]` entry with `profile = "p1"` or
+`"p2"` — counts only; the only values it ever handles are the literals code already names:
+
+```bash
+ekos profile run                       # code-value usage, first/last seen, implied nulls, keys, history
+ekos profile show account              # what was measured for one table
+ekos relationships discover --cross-database   # references the data shows, verified by inclusion
+ekos review relationships "invoice.parts_id → partstax.parts_id" --confirm --as ana
+```
+
+- Each `EnumMeaning` gains `data_usage` (rows, share, first/last month, `dead` after 24 months without
+  a row, `never_seen`) and `implies` (`status = 7 ⇒ cancelled_at IS NOT NULL`); a column holding values
+  no code names gets a `data_only_values` gap (counts, never the values); each table a `GrainCandidate`
+  (declared key or a levelwise key search); `WriteBehaviour` gains `data_history` (open validity
+  periods, set soft-delete flags). Re-profiling never stales a review.
+- `relationships discover` signs every comparable column with a salted MinHash **computed inside the
+  database**, proposes references to unique columns, adds every code join, and checks each with an
+  exact inclusion query: `FkCandidate`s with `seed: code | data | both` and a verdict, reviewed under
+  the optional subject `relationships`. Across databases, overlapping keys become `value_overlap` on a
+  `SameAs` candidate — never a merge.
+- MCP: `ekos_profile`, `ekos_relationships` (read-only). Works for Oracle, PostgreSQL, ClickHouse,
+  SQL Server and Informix (no signatures on Informix: no MD5 there).
+
+### Open questions, the inbox and testimony (RFC 0253 / 0254)
+
+What nobody can explain becomes a question for the person likely to know; what people answer is
+recorded as testimony — evidence with who, where and when, never a decision:
+
+```bash
+ekos questions list                     # derived at every commit; status computed on read
+ekos questions show e595d49f --reveal   # the unexplained values, live, for you only (never stored)
+ekos questions export --format md --out questionnaire.md
+ekos check code-vs-data                 # CASE without ELSE that misses values, dead branches, …
+ekos inbox add spec.pdf --as ivana      # files and links people send → the source `inbox`
+ekos testimony add --as ivana --text "Q is owner capital" \
+    --about "account.category = 'Q'" --meaning "owner capital" --answers e595d49f
+ekos probe --spec '{"database":"erp","table":"orders","template":"null_by","column":"cancelled_at","by":"status"}'
+```
+
+- Questions: `[[questions.owners]]` (`pattern`, `people`), `[questions] reviewers`,
+  `per-person-per-day`, `min-cell`; `reassign` / `decline` ("not me") / `mute`.
+- Inbox: originals stay outside the ledger (`<state>/inbox/`), pending until `ekos inbox accept`
+  when sent with `--pending` or under `[inbox] require-accept`; links are fetched once, never from a
+  private or loopback address unless in `[inbox] allow-hosts`; every text is scrubbed of secrets,
+  e-mail addresses and card numbers before it is compiled.
+- Testimony: a stated meaning is a meaning source `testimony`; one that disagrees with code is a
+  `testimony_mismatch` conflict. `testimony add`/`withdraw`, `inbox accept`/`purge` are human-only.
+- Probes (`[probe] mcp = true` to offer `ekos_probe` to agents): closed aggregate templates, personal
+  columns counted only, small cells hidden, budgeted, audited without results. The
+  `.claude/agents/source-explorer.md` agent works hypothesis → probe → proposals for a person.
+- MCP: `ekos_questions`, `ekos_testimony`, `ekos_probe` (opt-in) — all read-only.
+
+### Review and sign-off (RFC 0213)
+
+Before a lakehouse is built from a source estate, a person agrees to its source model. `ekos review list` shows six
+subjects — the tables in scope (classed by name: `T_*` transient, `I_*` import, `*_Trl` translation, `*Log*` log,
+`AD_*` config; `[review.scope]` adds rules), PII candidates, code ↔ database conflicts, identity matches, each table's
+write behaviour, and the glossary — with what is decided and what still blocks. Decide items with `ekos review scope`,
+`ekos review pii` and `ekos review write-behaviour` (conflicts, identity and glossary keep their own commands), then
+sign a subject off on the digest you were shown:
+
+```bash
+ekos review show pii --undecided
+ekos review pii C_BPARTNER.EMAIL --confirm --mask hash
+ekos signoff show pii                      # prints the digest
+ekos signoff approve pii --digest <digest>
+```
+
+A sign-off is valid only while the facts it covered are unchanged; after a compile that changes one, `signoff show`
+says **stale** and names the items added, removed or changed; `ekos review show <subject> --changed` lists just those
+items, so a re-review starts from the delta. Row and null counts are shown but not signed, so a fresh
+profile alone does not invalidate anything. Decisions and sign-offs are human-only: no MCP tool can make them.
+
+`ekos workflow status [--json]` is the step bar of the seven-step operator workflow (analyse, documentation, review
+and sign-off, requirements, extraction, bronze/silver, marts): step 1 from source freshness, step 3 from the six
+subjects' sign-offs, the others from an extension such as ekos-lakehouse. Steps 4–7 show `blocked` until every subject
+is validly signed, and an extension's step commands call the same gate before writing anything. Agents read the same
+state, without being able to change it, through the `ekos_signoff_status` MCP tool. The subject summary is cached
+beside the ledger under a key that every write moves (iDempiere: 24.5 s to compute, 1.8 s cached).
+
+In the web console, every project page shows the step bar, and the **Review** tab has one tab per subject: a filterable
+table of items (signed facts and shown-only measurements apart), decisions for selected items (scope, PII with a mask,
+write behaviour, identity matches — `ekos review identity` on the CLI), and a sign-off box that shows the digest and
+what changed since a stale sign-off and signs only after the subject's name is typed. Conflicts and the glossary are
+decided on their own tabs. Deciding and signing need the reviewer role; no API token holds it.
+
+### Source-estate documentation (RFC 0214)
+
+`ekos docs generate --layout estate --output docs/estate` writes a database estate's documentation from the ledger:
+functional areas with ER diagrams, one page per in-scope table (columns with business names, the database's foreign
+keys next to the application model's references, check constraints, who reads and writes it, write behaviour, schema
+history, open conflicts), a glossary of business terms, where each document type's `DocAction` methods start,
+routines with their nested statements, schema history by release, and findings. The pages use the lakehouse-docs page
+format, so `publish_github_wiki.py`, `publish_confluence.py` and `publish_azure_devops_wiki.py` publish them; manual
+"notes" sections survive regeneration. Tables follow the review's scope (RFC 0213). Two gates are built in: a column
+profile contributes counts only, never a value, and text is used only from sources with a known licence (detected from
+a source's `LICENSE` file, or set in `[docs-estate] licences`; a database has none until you set one). On iDempiere:
+1,060 pages in 26 s — published with a walkthrough of the first three workflow steps at
+[alexeyban/ekos-lakehouse-oracle](https://github.com/alexeyban/ekos-lakehouse-oracle).
+
+Each table page is also the table's **source passport** (RFC 0254 §3.6, estate page format v2): what an analyst
+needs before building on it, each fact with its status (hypothesis, confirmed, …) and the evidence it rests on.
+Sections appear only when there is something to say:
+
+1. **What a row is** — the grain (`ekos profile run`'s `GrainCandidate`: declared key or a measured unique key) and
+   the row count.
+2. **Keys and references** — the declared foreign keys, then references inferred from code and data (`ekos
+   relationships discover`) with seed, verdict, how many values the target holds and the `relationships` review
+   decision.
+3. **Codes** — per coded column, every value code names with its meaning, where the meaning is stated, share of rows,
+   first and last seen, dead or never seen, and one counted row for values no code names. Never a data value.
+4. **How it changes** — write behaviour with its review status and the measured validity periods and soft-delete
+   flags.
+5. **What the code assumes** — `code_vs_data` findings (`ekos check code-vs-data`) and how they were decided; a
+   finding's measured minimum and maximum are never shown.
+6. **What people said** — testimony cited as "According to *author* (*channel*, *date*)" (withdrawn testimony left
+   out), and notes from people (RFC 0247).
+7. **Open questions** — the table's questions with their computed status and who they are with now.
+
+### Oracle as a lakehouse source (RFC 0216)
+
+[EKOS Lakehouse](https://github.com/alexeyban/ekos-lakehouse) reads Oracle as well as PostgreSQL. In
+`[extensions.lakehouse]`, `source-engine = "oracle"` and `source-database = "<a [[databases]] entry>"` reuse the
+connection steps 1–3 already use; `lakehouse plan` maps every column with an Oracle → Iceberg type map (a `DATE`
+lands as `timestamp(6)` because it carries a time, an unconstrained `NUMBER` at the scale its data uses), and
+`lakehouse reconcile` checks bronze against Oracle directly at V1–V3. For that, `migrate-validate` renders the
+canonical form in Oracle SQL (`Dialect::Oracle`; the database must be AL32UTF8) and hashes a wide row over column
+digests, since an Oracle string stops at 4000 bytes. On the iDempiere testbed: 901 of 903 tables planned, 12 business
+and dictionary tables loaded and reconciled green with the planted control firing.
+
+With `application-watermark = "UPDATED"` (RFC 0225) the lakehouse reads EKOS's write-behaviour facts (RFC 0212): a
+table whose code always sets `Updated` loads incrementally on it, and gets a delete plan from how it is deleted —
+checked every run, or audited weekly where the code never hard-deletes. `lakehouse deletes` finds hard deletes by a
+bucketed key diff (only buckets whose key counts or hashes differ are read key by key) and applies nothing when more
+than 5 % of a table's keys vanish at once, until a person accepts it. On iDempiere 739 of 901 tables load
+incrementally.
+
+Step 5 is a reviewed decision (RFC 0226). The plan applies step 3's decisions from every review subject with a valid
+sign-off — tables out of scope are not planned, confirmed PII columns are masked in silver, write-behaviour overrides
+change the mode and delete plan — and is saved as a proposal. On the console's **Extraction** page (or
+`lakehouse extraction show|change|approve`) an operator reads each table's evidence, changes its mode, delete
+cadence or purge policy with a reason, and approves the plan; the approval is a ledger fact with the plan's digest.
+With `require-plan-approval = true`, `generate` builds only the approved plan and names the tables that moved since.
+On iDempiere: 849 tables planned, 53 out of scope, one column masked.
+
+Silver reads what the source and EKOS know about each column (RFC 0227): `Y`/`N` flags become booleans when a check
+constraint or the application model says so, declared value lists are tested strictly, and the application's own
+lists and logical foreign keys are tested as warnings, since the database does not enforce them. Retained purges are
+flagged, and history closes rows deleted at the source. `lakehouse run` starts the Dagster job (the console's
+**Run the pipeline**). On the iDempiere testbed a closed 165-table subset ran in Dagster: all bronze tables reconciled, 165 silver models built, 3,664 of 3,667 tests passing and 3 warnings on real data outside the application's lists. The full 849-table run was dropped.
+
+The whole workflow, step by step with its commands, settings and results, is in
+[docs/operator-workflow.md](operator-workflow.md).
+
+Step 4 turns a request into an approved mart requirement (RFC 0215). On the console's **Requirements** page (or
+`lakehouse requirements draft|edit|show|approve`) an operator describes a mart in plain words. The model routed to
+the `requirements` task (local Ollama unless a metered route is allowed) drafts its header from a catalogue excerpt
+of the plan, and EKOS resolves every term against the deployed plan. Names match regardless of case, and a term may
+choose a join path with `… via table.column`. Joins are searched at most four keys deep, and one table is never
+joined along two paths. Whatever does not resolve is a question for the operator, answered by changing the term,
+never by the model. An approval commits `marts/<mart>.md` and is a ledger fact; with `require-plan-approval`,
+`gold draft` builds only approved requirements. On iDempiere the plan's example request was drafted by `llama3`,
+answered by nine edits (three `via` choices among 3, 36 and 19 key paths) and approved, and the gold mart was proposed
+with nothing invented.
+
+Step 7 builds the marts (RFC 0228). On the console's **Marts** page (or `lakehouse marts
+show|propose|merge|build|reconcile`) each approved requirement is proposed as a dbt model on a branch, merged (the
+approval, recorded in the ledger), built through Dagster on its own, and reconciled. Reconciliation shows each
+measure's total in the mart next to the same aggregate over silver. The page shows the SQL beside the requirement,
+which terms were compiled exactly and which a model drafted, the tests, and the lineage. On iDempiere four marts went
+from approved to reconciled, every total equal.
+
+### External benchmarks: BIRD (RFC 0240 / 0241)
+
+`ekos eval bench` runs external Text-to-SQL benchmarks against EKOS projects built from the
+benchmark's own databases: `prepare` downloads and verifies the data, builds one project per
+database and scans every ledger for leaked questions, gold SQL and evidence; `run` answers one
+experiment cell over a split; `compare` gives the paired difference with a bootstrap interval;
+`export` writes BIRD's prediction format. On BIRD Mini-Dev 1024's full hold-out split (302
+questions, Claude Haiku 5.5), the EKOS cell (pack + column profiles + value lookup + result checks)
+scored 63.9% execution accuracy against 53.3% for the same model with raw DDL: +10.6 points, 95%
+CI +4.3 to +16.9, for $0.30 a run. See `evals/README.md`.
+
+RFC 0242 added cells that *check* each answer:
+
+- `strategy = "loop"` sends gold-free findings back;
+- `strategy = "agent"` lets the model call schema, value and read-only SQL tools, and `verify`
+  shows it its own result once.
+
+`ekos eval bench checks <report>` replays the checks over an old report for free. The agent cell
+K2 scored **76.2%** on the same hold-out split. That is +4.6 over the same pack without the agent
+(71.5%; CI 0.0 to +9.3, so not shown at 5%; +7.1 with p = 0.007 on the tune split), and **+22.9
+points over raw DDL** with the same model, for $0.78 a run.
+
+### Checking and writing SQL for a database (RFC 0242 / 0243)
+
+`ekos sql check q.sql` lints a query against the ledger's tables, columns, keys and foreign keys,
+and against the dialect's rules:
+
+| Check | Example |
+|---|---|
+| Unknown names | with the nearest real ones |
+| Row-limit form | `LIMIT` on Oracle |
+| `ILIKE` | where the engine has none |
+| Identifier quoting | wrong quote character for the dialect |
+| Integer division | truncates a ratio |
+| `=` on a list column | needs `LIKE` |
+| NULLs first under `ORDER BY … LIMIT` | — |
+| Date literals | in another format |
+| A join that multiplies rows (L002) | also through a function: `DATE_TRUNC('month', a.m) = DATE_TRUNC('month', b.m)` |
+| A constant under a column's name (L013) | `'Unknown' AS customer`: a made-up value where the data is expected |
+| Text where a date is needed (L014) | `DATE_TRUNC('year', '2026-01-01')` — write `DATE '…'` or `CURRENT_DATE` |
+
+Every SQL dialect plugin (sqlite, postgres, mysql, mssql, snowflake, databricks, clickhouse,
+trino, oracle) states these rules and its own notes for writing SQL.
+
+With `--database <name>` (a `[[databases]]` entry) or `--sqlite <file>`, it also runs read-only
+probes on the database: the result, value spellings (`'Germany'` vs `'Berlin, Germany'`), rows
+repeated by joins, ties at the top. Each live probe is protected:
+
+- **PostgreSQL:** a read-only session, and a role that cannot write (`--allow-writable-role`
+  overrides).
+- **ClickHouse:** `readonly=1`.
+- **Oracle:** a read-only transaction.
+- **All of them:** a guard refuses anything but one SELECT before it is sent.
+
+`ekos sql generate "<question>" --database <name>` runs RFC 0242's agent over the same schema and
+probes, through the `nl-sql` model route; `--allow-metered` is needed unless it is Ollama. The
+`text-to-sql` skill (`.claude/skills/`) gives Claude Code the same procedure over MCP.
+
+### iDempiere eval (RFC 0222)
+
+`evals/idempiere/` holds 25 checked questions about iDempiere (code, schema, history, docs, write behaviour, and six
+with no grounded answer), graded with `ekos eval run --datasets-dir evals/idempiere --dataset idempiere-25`. Add
+`--evidence-only` to grade retrieval without calling a model. First results (code + docs, with and without the
+Oracle database, answers by Claude Haiku 5.5): 14 and 15 of 25 passed, no hallucination, about 2 US cents a run;
+the nine misses are retrieval, mostly documentation prose outranking the code that implements an answer.
+
+### PL/pgSQL stored procedures (RFC 0163)
+
+A stored procedure is also *imperative* — ordered statements, branches, loops, exception handlers —
+which a dataflow IR cannot hold without losing the order. For every `.sql` file resolved to the
+`postgres` dialect (or that names `plpgsql`), `ekos recover` parses each routine with a
+deterministic, in-process PL/pgSQL parser (no database, no LLM) and writes:
+
+- one `Procedure` object per routine — signature, language, and a **fidelity label computed from
+  the parse**: `statements` (every statement recovered), `partial` (with the exact counts and the
+  lines of what was missed), or `signature` (a `LANGUAGE sql`/`c` routine whose body is not parsed);
+- one `ProcedureStatement` per statement at every depth, whose evidence is its own source text and
+  line, linked by `Contains` edges that record which branch each child sits in (`then:0`, `else`,
+  `handler:1`, …).
+
+```bash
+ekos recover   # … PL/pgSQL routines: 556 (254 plpgsql: 251 complete, 3 partial), 1556 statements
+ekos commit    # … Procedure links: 1852 new (409 reads, 308 writes, 989 depends-on, 146 calls …)
+ekos ekl "FIND Object WHERE kind = 'Procedure' AND name = 'payment_post'"
+```
+
+On LedgerSMB every routine its `LOADORDER` installs recovers completely (212/212); the three
+`partial` routines above are in a module LedgerSMB itself does not load, and are invalid PL/pgSQL.
+
+Each statement's embedded SQL (and each condition, assignment and loop bound) is parsed as real
+PostgreSQL, so every `ProcedureStatement` and `Procedure` records the tables it **reads**, the tables
+it **writes** and the functions it **calls** — `LANGUAGE sql` routines included. `ekos commit` then
+links them across the whole workspace: `ReadsFrom`/`WritesTo` per statement, `DependsOn` from the
+routine to each table (with `access: read | write | read_write`), and `Calls` between routines — so
+"what breaks if I change `acc_trans`" now names the 50 LedgerSMB routines that touch it. A name links
+only when it names exactly one object; an overloaded or redefined routine or view, a temp table or
+a system catalog links nothing rather than something guessed.
+
+### Triggers (RFC 0163)
+
+Every `CREATE [CONSTRAINT] TRIGGER` becomes a `Trigger` object — timing, events (with `UPDATE OF`
+columns), level, `WHEN` condition and function — linked to the table it fires on (`DependsOn`, so
+impact analysis on a table finds its triggers) and to its function. Each is **classified from what
+its function actually does**, read from the recovered IR, never from names: `Validation` (raises or
+drops the row), `DerivedColumn` (sets `NEW` columns), `Audit` (only inserts elsewhere), `Cascade`
+(updates/deletes elsewhere), `Mixed` (several of those, dynamic SQL, or calls whose effects are not
+inlined — a human decides) or `Unknown` (the function body is not recovered). Every class carries its
+reasons. A function redefined across migrations is classified per definition and only gets a class
+when they all agree; `RETURN NEW` placeholders are set aside, and the reasons say so. Triggers are
+never auto-translated.
+
+```bash
+ekos recover   # … Triggers: 42 (42 parsed, 0 read from tokens) — classified at compile
+```
+
+### Views (RFC 0169)
+
+Every `CREATE [OR REPLACE] [MATERIALIZED] VIEW` in an observed `.sql` file is a `View` object — its
+declared columns, whether it is materialized, its exact source text and line, and what its query
+reads and calls, from a real parse. Each definition is parsed on its own, so a view using syntax the
+parser lacks is still recorded (`footprint: unparsed`, with the reason) and never takes its file down.
+Views are linked like routines: a view `DependsOn` the tables and views its query reads, routines and
+transformations that read a view link to it, and impact analysis on a table now reaches the views
+built on it.
+
+Routines and views are documented like code: `docs generate --layout curated` writes a page for
+each (the author's `COMMENT ON FUNCTION|VIEW` text as its description, its lines, what it reads,
+writes and calls, and who uses it), lists views among the Data Stores with the routines that use
+them, and lists routines in API.md under their file. `[llm-description]` describes them from their
+real source like any other symbol, and a backticked routine or view name in a doc links to it.
+
+```bash
+ekos recover   # … Views: 17 (17 parsed, 0 unparsed — still recorded)
+ekos ekl "FIND Object WHERE kind = 'View'"
+```
+
+### Business semantics → LinkML (RFC 0170, experimental, opt-in)
+
+Business meaning that nobody wrote down survives as traces: `WHERE NOT p.obsolete`,
+`entity_class = 2`, the lookup row `(2, 'Customer')`, `COMMENT ON COLUMN account.category IS
+'A=asset,L=liability,…'`, the commit that last changed the line. Recovery records every
+column-vs-literal predicate in views, routines and `CHECK` constraints — normalized, so
+`status IN (1,3)` and `status = 1 OR 3 = status` are one predicate — plus `CHECK` constraints,
+`NOT NULL`/key columns and lookup-table seed rows — plus PL/pgSQL `IF NEW.col …` conditions
+(resolved to the trigger's table), Pentaho `FilterRows` conditions, standalone analyst `SELECT`s,
+and dbt `schema.yml` (descriptions, `not_null`/`unique`/`accepted_values`/`relationships` tests)
+and model SQL (Jinja rendered: `ref`/`source`/`var`; model columns traced back to their source
+columns) — plus SQL in Perl strings, application constants (Perl `use constant EC_CUSTOMER => 2`,
+Python `Enum` classes; matched to columns by label agreement or name) and marked glossaries (local
+docs, Confluence; unmatched terms become gaps). Filters through CTEs and derived tables are
+restated on the base table. `[semantics] ontology = "<file>"` adds exact/close
+mapping suggestions from your own vocabulary, exported as annotations only. With `[semantics] enabled = true`, `ekos commit`
+synthesizes **hypotheses** from them, deterministically and without an LLM:
+
+| Kind | What |
+|---|---|
+| `BusinessConcept` | A filter that defines a view, or recurs in ≥ `min-sites` routines/views (`PartsNotObsolete`, `EntityCreditAccountCustomer`) |
+| `EnumMeaning` | A coded value and its meaning, from a column comment legend, a lookup seed row via its foreign key, or a `CASE` label |
+| `ConstraintCandidate` | A `CHECK` constraint, typed `range`/`enum`/`pattern`/`not_null`/`other` |
+| `SemanticGap` | A coded value used in logic that no source explains; a concept nobody documented |
+| (opt-in) AI summary | `[semantics] llm-definitions = true`: ≤2 sentences per undocumented concept, every sentence citing the concept's evidence (or the known code meanings) — uncited or hedging sentences are dropped; a reading aid, never the definition |
+| `RationaleLink` | `git blame -w` on the evidence lines → the commit that last changed them |
+
+Every item starts as `status: hypothesis` with its evidence (`path:line`). Only a human promotes
+one — `ekos semantics confirm|reject|edit` is CLI-only and no MCP tool can reach it. A review holds
+while what the item asserts and its evidence are unchanged (line moves don't count); otherwise the
+item becomes `needs_review`, and a confirmed item whose traces disappear is flagged, not dropped.
+Same-column threshold disagreements (`> 90` here, `> 60` there) become `ConceptConflict`s.
+The web console's **Semantics** tab is the review UI: a queue with evidence and bulk
+confirm/reject, and a LinkML viewer and YAML editor (with a side-by-side diff against the current
+export) whose edits round-trip through `ekos import linkml` (see *Web console* below).
+
+Agents read them over MCP — `ekos_semantics_lookup` (what a term, table, column or code means)
+and `ekos_semantics_gaps` (what is not known), listed when `[semantics]` is on. Every result
+states its status in words ("CONFIRMED by a human reviewer…", "HYPOTHESIS — … say so if you use
+it"); rejected definitions are left out; an empty lookup says `no_semantics_found` so an agent
+does not improvise. No MCP tool can confirm anything. The export is a **draft LinkML schema** — EKOS feeds LinkML, LinkML
+generates everything else (JSON Schema, Pydantic, RDF/OWL/SHACL):
+
+```bash
+ekos semantics list [--kind concept|enum|constraint|gap|rationale]
+ekos semantics show PartsNotObsolete        # definition, evidence lines, links, commits
+ekos semantics gaps                         # open questions, conflicts, and the needs_review queue
+ekos semantics confirm TransactionsNotApproved --note "drafts"     # human-only (--as, default $USER)
+ekos semantics edit PartsWithInventoryAccnoId --name "Inventory part" --description "…"
+ekos semantics reject UserPreferenceWithoutUserId --note "anti-join plumbing"
+ekos export linkml --out model.yaml          # confirmed only; --status hypothesis|all for the draft
+ekos import linkml model.yaml --dry-run      # an expert's YAML edits → the review decisions they mean
+ekos import linkml model.yaml --as ann       # …recorded, all or nothing (renames, descriptions,
+                                             # code labels, ekos_status: confirmed|rejected)
+ekos semantics confirm PartsAssembly PartsNotObsolete --as ann   # many at once, all or nothing
+ekos semantics gold-template --out gold.yaml   # blank, structure-only: for an expert, before any output
+ekos semantics eval --gold gold.yaml        # concept recall, label accuracy, gap recall, evidence validity
+```
+
+A runnable end-to-end example — clone LedgerSMB, compile, review, export, then lint, generate
+and validate with LinkML's own tools — is [`demo/ledgersmb-linkml/`](../deploy/demo/ledgersmb-linkml/README.md).
+
+On LedgerSMB (SQL + Perl + UI + git, no LLM): 649 predicate sites (458 resolved to a
+table column), 47 concepts, 222 coded values (179 with a meaning), 0 identity conflicts in
+`resolve`; an unchanged re-commit writes nothing. The LinkML file passes `linkml-lint` with 0 errors and
+`gen-json-schema`/`gen-pydantic` run cleanly. Against a *starter* gold set (not expert-written —
+see `ekos/docs/rfcs/0170-ledgersmb-starter-gold.yaml`): concept recall 0.68, enum label accuracy
+0.95, evidence validity 1.0. Meaning defined only by comparisons between columns or against the
+current date (overdue, unpaid) leaves no literal trace and is not recovered: no trace, no recovery.
+
+### Apache Ossie interchange (RFC 0245)
+
+[Apache Ossie](https://ossie.apache.org) (incubating; formerly Open Semantic Interchange) is the
+vendor-neutral YAML/JSON format for semantic models that Snowflake, dbt, ThoughtSpot, Dremio,
+Power BI and others read and write. EKOS works with it in both directions.
+
+**Export.** `ekos export ossie` writes the compiled schema as one model (spec `0.2.0.dev0`):
+
+- every table and view becomes a dataset, with typed fields;
+- the stated primary and unique keys, including composite ones;
+- foreign keys become relationships;
+- RFC 0170 business meanings go into `ai_context`, filtered by `--status` (default `confirmed`).
+  An unreviewed meaning is marked "unreviewed" in words.
+
+EKOS never invents a metric. A dataset's metrics come only from Ossie files a team keeps in the
+sources, and only when their fields are the table's own columns. Every element carries an `EKOS`
+extension with its ledger id, status and evidence. The tests validate every export against the
+official JSON Schema, and an opt-in test also runs Ossie's own `validate.py`.
+
+**Ingest.** `ekos recover` reads Ossie models it finds in the project's sources. It reads
+`*.ossie.yaml|yml|json` and any YAML/JSON file that looks like an Ossie model, in either
+`0.2.0.dev0` or `0.1.1`.
+
+- Each file becomes `OssieModel`, `OssieDataset` and `OssieMetric` objects, redacted first like
+  every raw input.
+- `ekos commit` links each dataset to the one table its `source` names.
+- Where the file and the schema disagree, the disagreement becomes a conflict: a field naming a
+  column the table lacks, or a declared type from another family than the column's.
+- Synonyms are searchable.
+- EKOS's own exports are never read back as sources.
+
+**Review round trip.** `ekos import ossie <file>` turns a reviewer's edits to an exported file
+into human-only review decisions, like `ekos import linkml`:
+
+- a concept's `name`, `description` or `status`;
+- a code meaning's `label` or `status`.
+
+Entries are matched by `ekos_id`, and either every decision is recorded or none is. Edits to the
+observed schema are reported and not imported.
+
+```bash
+ekos export ossie --status all --out shop.ossie.yaml    # or --json; --database / --source narrow it
+ekos import ossie shop.ossie.yaml --dry-run             # the decisions a reviewer's edits stand for
+ekos import ossie shop.ossie.yaml --as ann              # …recorded, all or nothing
+ekos export dbt-semantic --out models/semantic          # RFC 0246: MetricFlow YAML + key tests
+```
+
+Agents can read the model with the read-only MCP tool `ekos_ossie_export`, and the console's
+Semantics tab has an *Apache Ossie* view (browse, download, validate and apply an edited file).
+
+**What EKOS does with an imported model (RFC 0246).** One resolver
+(`ekos_ossie::knowledge`) rewrites the model over the compiled tables: metrics in terms of table
+columns, joins as column pairs, keys, synonyms and time axes. Anything it cannot resolve is listed
+with the reason. The model never overrides the schema.
+
+- **Text-to-SQL** (`ekos sql generate|check`, MCP `ekos_sql_check`):
+  - the schema the agent sees gains synonyms, stated unique keys, declared joins (marked "declared
+    in the semantic model") and time axes;
+  - a `metric` tool and a "Defined metrics" prompt instruction let the agent use the team's
+    definition of "total sales" instead of guessing a column;
+  - lint **L002** stops warning on joins over stated keys;
+  - new lint **L012** warns when a query names a defined metric but computes something else.
+- **dbt semantic layer** (`ekos export dbt-semantic --out <dir>`):
+  - `semantic_models.yml` holds MetricFlow semantic models (entities from keys and joins,
+    categorical and time dimensions) and `simple` / `ratio` metrics;
+  - `models.yml` holds `unique` / `not_null` key tests;
+  - `skipped.md` lists what MetricFlow cannot express, with the reason: window functions, nested
+    aggregates, or a measure whose model has no time dimension.
+- **Business meanings:** a field description with a code legend (`Y = preferred, N = not
+  preferred`) gives code meanings with source `ossie`, and a metric's description documents the
+  concept of the same name. All of these stay hypotheses for review.
+- **Questions** (`ekos ask`, `ekos_query`, `ekos_retrieve`): a business word in a question ("POS
+  data", "total quantity") resolves to its table, and `ekos_retrieve` says why (`via: synonym "POS
+  data" (ossie:…)`).
+- **EKOS Migrate:**
+  - a one-column key the model states is checked at `migrate assess` as a uniqueness claim (source
+    `ossie`);
+  - `migrate validate` runs tier **V2m**, which computes each defined single-table metric on
+    PostgreSQL and ClickHouse and compares the two values. A one-cent change on one row is caught,
+    and the planted control must fire. A metric the engines cannot both run is `not_run`, never a
+    pass.
+
+**Validation.** `scripts/ossie-validate.sh` checks EKOS against Ossie's own validator
+(`validation/validate.py`: JSON Schema, names, references, arity, and a sqlglot parse of every
+expression). It runs on `tests/fixtures/ossie-tpcds`: five TPC-DS tables, plus Ossie's official
+TPC-DS model of them.
+
+0. **Self-check.** The official examples pass, and a planted broken model is rejected, so the
+   validator is proven to be checking.
+1. **Export.** The compiled schema is exported and validated.
+2. **Import, export again.** The official model is imported by ingest and the schema exported
+   again. All 5 datasets link, and there are 0 conflicts. The re-export carries the model's
+   metric and synonyms and validates.
+3. **Review round trip.** A review is made in the file, `ekos import ossie` applies it, and the
+   confirmed model validates. Re-importing the same file plans nothing.
+4. **Planted disagreements.** Exactly the two planted ones are reported.
+
+The run leaves every export, validator log and a `summary.md`. CI runs it in
+`.github/workflows/ossie.yml` against the pinned Ossie commit, which is required, and against
+Ossie's `main`, which is informational and weekly. `cargo test -p ekos --test ossie_e2e` runs the
+same flow offline against the vendored schema.
+
+```bash
+scripts/ossie-validate.sh --out ossie-report     # clones apache/ossie at the pinned commit; needs uv
+OSSIE_REF=main scripts/ossie-validate.sh         # against Ossie's latest spec
+```
+
+### dbt metadata extraction (RFC 0117)
+
+dbt can point at any warehouse, so `ekos recover` extracts real `Table` objects from a dbt
+project's own checked-in metadata rather than a live database connection — never `manifest.json`/
+`catalog.json` either, since both are `dbt/target/` build artifacts, gitignored in every real
+project inspected while designing this. One `Table` per `models/**/*.sql` file (a model exists the
+moment its `.sql` file does, regardless of whether any YAML documents it) and one per declared
+`sources[].tables[]` entry (no `.sql` file backs a source — it's a pre-existing table dbt only
+references). `ref()`/`source()` macro calls in each model's raw SQL become real `DependsOn`
+relationships, resolved against the models/sources found in that same dbt project; an unresolvable
+reference (e.g. into an installed, gitignored `dbt_packages/`) is honestly skipped, never
+fabricated. Declared `schema.yml` columns are merged in as-is — explicitly partial, since dbt
+projects typically only document tested/described columns, not every column a model produces.
+
+The same real-world entity observed under different names across systems (Informix `cust_mstr`,
+Postgres `customers`, Databricks `gold.dim_customer`) can be linked too: `ekos identity scan`
+scores candidate cross-system matches (column overlap, naming-pattern similarity, type
+compatibility) and writes them as `unconfirmed` relationships — never a silent auto-merge — for
+review via the `ekos_identity_review` MCP tool (optional `reviewer` and `note`, recorded on the
+decision's evidence). Treasury payment authorizations (`ekos treasury scan`, RFC 0032) are
+different: a person confirms or rejects each with `ekos treasury confirm|reject <id>` (`reject`
+needs `--note`); no MCP tool can.
+
+Same-source duplicates (`ekos resolve`/`ekos
+compile`, e.g. two `Table` objects both literally named `customers`) auto-merge only when the
+match is an exact normalized name; anything fuzzy goes through that same `unconfirmed`/review
+flow instead of an irreversible merge (RFC 0063) — no confidence threshold on the underlying
+scoring formula reliably separates real correct fuzzy merges from real incorrect ones, so an
+irreversible auto-merge isn't a safe default for that case.
+
+A same-name group spread over separate namespaces is not a conflict: a Perl package
+`LedgerSMB::GL` beside a table `gl`, or a JS and a Perl `initialize`. `resolve` accepts a group
+spanning the database (`Table`/`View`/`Procedure`/`Trigger`) and the code of Perl, JS, Python,
+Rust or Elixir when each namespace's share is unremarkable on its own; a `Table` beside a
+same-named `View` still conflicts (RFC 0147 amendment b — LedgerSMB 16 → 0 conflicts).
+
+**When sources disagree, both claims are kept (RFC 0172).** A table created in two files with
+different columns, a column type an exact-name merge would have dropped, two labels for one code
+from different sources — each becomes a `ConflictingEvidence` item instead of the last one silently
+winning: every claim with its file and line, what EKOS kept, and a `Disputes` link to the object.
+Values are normalized first (`INT`/`INTEGER`/`SERIAL` are one type), a fact only one side states is
+unknown rather than a disagreement, and prose is never compared.
+
+```bash
+ekos conflicts list
+#   [open] account.category = 'A'.label  — 2 source(s) disagree: "asset"  vs  "L"
+#   [open] user_preference.columns  — 2 source(s) disagree: ["dateformat","id",…]  vs  ["id","name","user_id","value"]
+ekos conflicts show "account.category = 'A'.label"   # each claim's path:line and source
+ekos conflicts resolve user_preference.columns --both-valid --note "1.9 replaces the table"  # human-only
+ekos conflicts resolve "account.category = 'A'.label" --pick 1 --as ann
+```
+
+A decision holds while the claims are unchanged; when one changes, the conflict reopens with the old
+decision kept. Agents read conflicts over MCP (`ekos_conflicts`, and `open_conflicts` on
+`ekos_state`) and are told to present an open one as a disagreement, never one side as fact; no MCP
+tool can resolve one. Answers say so too (RFC 0173): an `ekos_query` / `ekos_retrieve` claim about an
+attribute with an open conflict carries `disputed: true` and the conflict ids, since its value is
+only the side EKOS kept, and `ekos ask` tells the model the same in the evidence it reads. A label
+conflict is also linked to the table its column belongs to, so a question about the table surfaces
+it. The web console's **Conflicts** tab lists every conflict with each claim's file and line, lets a
+write-role user pick the right claim or mark both valid, and the graph rings objects with an open
+conflict (RFC 0174). On LedgerSMB: 3 conflicts — `user_preference` (re-created by a 1.9 migration)
+and 2 order-class labels where an API query names the counterparty (`customer`) rather than the
+order type. The detector first surfaced a CASE that swaps `'A'`↔`'L'` misread as a label; the
+extractor no longer reads a rewrite as a meaning. `[conflicts]
+enabled = false` restores the old behaviour.
+
+**Broken references across systems (RFC 0233).** Every name a routine, a view, a Kettle step, SQL
+built in a Java method or a dbt `source()` points at is resolved against every compiled relation —
+DDL, live catalog, application model — by the same rule lineage links by. A name that resolves to
+nothing is an `UnresolvedReference`, one that resolves to several an `AmbiguousReference`: with the
+file and line it came from, the closest names, the evidence, a confidence, and a fingerprint that
+survives recompiles and edits above it. Relations a routine creates at run time (`CREATE TEMP TABLE`,
+`EXECUTE 'CREATE VIEW …'`), table functions and system catalogs are not findings; a name in a schema
+EKOS compiled nothing from is a coverage gap (info), not an error.
+
+```bash
+ekos check refs                                  # metrics + findings, most severe first
+ekos check refs --scope cross-system --fail-on error --format sarif > xref.sarif   # CI / code scanning
+ekos check refs --format json > baseline.json    # later: --baseline baseline.json shows only new ones
+ekos check refs --baseline 2026-10-01T00:00:00Z  # or new since a ledger time
+```
+
+`ekos commit` writes the same report to `<state>/integrity/current.json` (never to the ledger).
+`[xref]` sets `min-confidence` and per-kind severities; `<state>/xref-ignore.toml` suppresses by
+`fingerprint`, `target` or `source` glob, and every rule must carry a `reason`. On LedgerSMB (1,366
+references) it reports 2 errors, both real: `budget__reject` deletes from `budget_to_project` and
+`budget_to_department`, which no file creates. A name the repository's migration scripts alter but no
+compiled DDL defines is a coverage gap, and one they drop is an error naming the script — on
+iDempiere's code without its database (11,966 references, 97.7 % of the Java → schema ones resolved)
+that leaves 0 errors and 609 info findings; connect the live catalog to decide the rest.
+
+The same check covers calls and imports inside one language: a SQL routine calling a function no
+file defines and no engine provides (`coalesce`, `nvl` and `dbms_*` are built in), a Perl `use` or
+Elixir `alias` of a package under the workspace's own namespace that no file declares, a relative JS
+import with no file behind it, a Python import under an in-tree package. An import into a directory
+`[observe] ignore-patterns` excludes is a coverage gap naming the file. It also reports module
+dependency cycles, tables nothing uses, and SQL routine reachability. A routine no view, trigger,
+Java SQL text or `[xref] entry-points` glob reaches is `UnreachableSymbol`, unless code that may
+call it by name exists, in which case it is `DynamicReferenceUnknown`. The dynamic share is always
+printed beside the coverage, and languages without a call graph are reported as unsupported, with
+the reason. On LedgerSMB that adds two more real bugs: a call to `lsmb__next_businss_day` (a typo)
+and to `lsmb__daycount_act_365` (only `…_365fixed` exists).
+
+```bash
+ekos check refs --reachability                 # also list unreachable / dynamic routines
+ekos check refs --from-index --format json     # the last commit's report, no recompute
+ekos check explain --limit 5                   # a model suggests targets; kept only if cited
+```
+
+Agents get `ekos_xref_check` over MCP: the findings, and `name` to check one table or routine name
+before writing SQL against it. The web console has an **Integrity** tab and dashboard tiles. The
+estate docs' Findings page has a *Reference integrity* section, which ekos-lakehouse's documentation
+inherits. `check explain` keeps a model's suggestion only when it names an object it was shown and
+cites it. Suggestions are printed, never stored, and a model that is not a local Ollama one needs
+`--allow-metered`.
+
+### Real schema and class structure from source (RFC 0091/0092)
+
+**File-based SQL schema needs a dialect.** `.sql` files parse under the `generic` (ANSI) dialect
+unless `ekos.toml` routes them somewhere real:
+
+```toml
+[recover.sql]
+default-dialect = "generic"
+
+[[recover.sql.dialect-rules]]           # first path-glob match wins
+path-glob = "priv/repo/**"
+dialect = "postgres"
+[[recover.sql.dialect-rules]]
+path-glob = "priv/ingest_repo/**"
+dialect = "clickhouse"
+```
+
+This matters for any real schema **dump** — `pg_dump` output, a ClickHouse `structure.sql`, or
+hand-written DDL past plain ANSI. The `postgres` / `clickhouse` dialects carry the preprocessing
+(RFC 0057/0058/0059) that makes real dumps parse; `generic` does not.
+
+A statement the dialect cannot parse costs that statement, not the file (RFC 0176). The rest of
+the file is still recovered, and `ekos recover` says what was skipped:
+
+- `SQL005` — `<file>: 2 of 61 statements were not parsed and skipped`, with the line, the first
+  words and the parser's error for each. A skipped `CREATE TABLE` is called out as a lost table.
+- `SQL001` — when a file states a `CREATE TABLE` and no table was recovered, the message names the
+  dialect it was parsed under and the first error, and points at `[[recover.sql.dialect-rules]]`.
+  A file with no `CREATE TABLE` keeps the plain `no tables found`.
+
+If `ekos ekl "FIND Object WHERE kind = 'Table' COUNT"` returns 0 for a repo that clearly has a
+schema, read those two warnings first. Foreign keys declared after the tables, as `pg_dump` writes
+them (`ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY`), become `ForeignKey` edges too.
+
+**Hand-written schemas need more than the right dialect (RFC 0146).** Everything above was tuned
+against `pg_dump`, which emits a narrow, mechanical subset of PostgreSQL. A human-maintained schema
+does not: measured on LedgerSMB, a correctly-configured `dialect = "postgres"` still recovered
+**0 of 158 tables**, because the file's first `COMMENT ON TABLE … IS $$…$$` failed the whole-file
+parse and took every table with it. The `postgres` dialect now preprocesses `COMMENT ON`,
+`INHERITS`, `SECURITY DEFINER`, `RETURNS SETOF`, `:=` named arguments, `DO` blocks, `CREATE RULE`,
+psql meta-commands and `COPY … FROM stdin` payloads out of the way; the same file yields 158 tables
+and 214 foreign keys.
+
+`COMMENT ON TABLE` / `COMMENT ON COLUMN` text is no longer discarded either — it becomes an
+evidence-backed `description` on the `Table` object (and on the matching column), with the source
+line recorded. **Author-written text outranks the LLM's:** `description` is the schema's own words,
+the model's version is kept alongside as `llm_description`, and `sql_comment` marks the provenance.
+
+`[llm] max-tokens` caps compiler-pass LLM calls — distinct from `[ai] max-tokens`, which governs the
+read-side `ekos ask` runtime. Leave it unset and each file's budget is computed from its own schema
+size; a new `SQL004` diagnostic reports when enrichment named fewer tables than the file declares,
+and says so explicitly when the response hit its ceiling.
+
+Beyond raw SQL DDL, `ekos recover`'s Python analyzer recognizes a real SQLAlchemy declarative
+model (`__tablename__` present on a class) and compiles it into the same `Table` object shape as a
+`CREATE TABLE` statement — real column names, best-effort data-type hints, and `ForeignKey` edges
+resolved against other models in the same file — so a project whose entire schema is ORM-declared
+(the majority shape for a modern Python backend) still gets a real `## Data Architecture` and
+entity-relationship diagram instead of an empty section. The same analyzer also compiles real
+class inheritance (`class Document(Base):`) into `RelationshipKind::Extends` edges between the
+real `PythonSymbol` objects involved — visible on each class's own generated page and in its
+Mermaid diagram — resolved only when the base class is defined in the same file, never fabricated
+against an imported base EKOS can't see the definition of.
+
+### Document semantic memory (RFC 0025/0026)
+
+Beyond structural parsing, an opt-in pass reads local documents through an LLM to extract real
+entities (`Concept` objects) and the relationships between them — so the same concept mentioned
+across different documents becomes one findable, linkable thing instead of isolated text hits.
+Enable it in `ekos.toml`:
+
+```toml
+[llm]
+provider = "ollama"   # or omit for Anthropic via ANTHROPIC_API_KEY; any LlmProvider works
+
+[document-semantics]
+enabled = true
+```
+
+Then `ekos recover` runs `DocumentSemanticsAnalyzerPass` alongside the structural document pass,
+and the extracted `Concept` objects are queryable through the same MCP tools as everything else
+— `ekos_search`, `ekos_neighborhood`, `ekos_dependents`, `ekos ask`. No new tool, no new query
+surface — this is exactly the point: AI tools get real memory through the Runtime they already
+talk to. `ekos ask` honors `[llm] provider = "ollama"` the same way `ekos recover` does — both
+commands select the LLM provider through one shared function, so a workspace configured for local
+Ollama works identically for recovery and for querying.
+
+**Images, spreadsheets and slides (RFC 0253).** The local-documents connector also reads:
+
+| Format | What becomes a section |
+|---|---|
+| PNG, JPEG, TIFF, WebP | one per block of text Tesseract recognises, with its `ocr_confidence` (0–100); the document carries the mean |
+| XLSX, CSV | each sheet (a CSV file is one), header plus up to `[inbox] sheet-rows` rows (default 200) as a pipe table, split into sections that each repeat the header |
+| PPTX | each slide: its title (the section heading), its text and its speaker notes; pictures go through OCR like a PDF's |
+
+Recognition is local only — an image is never sent to a model. E-mail addresses and payment card
+numbers (Luhn-checked) in recognised text, cells and slides are replaced with `[REDACTED:email]` /
+`[REDACTED:payment-card]` before anything is held, on top of the RFC 0043 secret patterns. Without
+`tesseract` on `PATH`, standalone images are skipped with a warning; the build never fails over it.
+
+```toml
+[ocr]
+languages = "eng+rus+srp"   # packs that are not installed are dropped with a warning
+images = false              # default; true: also OCR standalone image files in the observed tree
+                            # (images inside documents and everything in the inbox are read either way)
+
+[inbox]
+sheet-rows = 200
+```
+
+**Markdown is split by heading (RFC 0144).** Each heading becomes its own searchable `Section` named by
+its heading path (`docs/rfcs/0013-mcp-server.md § RFC 0013 — MCP Server › Motivation`) with a real
+line range, `doc_type` (`rfc`/`devlog`/`readme`/`claude_md`/`doc`) and, for RFCs, `rfc_number`/`rfc_status`.
+`compile` also links docs deterministically: an `RFC NNNN` mention becomes a `References` edge to that RFC,
+and a backticked identifier that names exactly one code symbol becomes an edge to it. `ekos ask "what does
+RFC 0013 …"` resolves the RFC by number. These edges show up in neighbourhoods but never count as
+dependents in `ekos_dependents`/`ekos_impact`.
+
+**Using a hosted OpenAI-compatible model (RFC 0145).** Any Chat Completions host works — OpenCode Zen,
+OpenRouter, DeepSeek, Groq, vLLM:
+
+```toml
+[llm]
+provider = "openai"
+base-url = "https://opencode.ai/zen/v1"
+model = "deepseek-v4-flash"
+api-key-env = "OPENCODE_API_KEY"
+
+[ai]
+max-tokens = 8192            # reasoning models spend hidden tokens; 1024/2048 truncate or empty answers
+```
+
+**A model per task (RFC 0197).** `provider = "zen"` reaches every OpenCode Zen model on its own wire
+format (Claude and Qwen Flash on Messages, GPT/Grok on Responses, the rest on Chat Completions), and
+`[llm.tasks.<task>]` routes one kind of call to its own model — tasks: `ask`, `doc-semantics`,
+`description`, `semantics`, `sql-naming`, `session-capture`, `architecture`, `reconstruct`,
+`nl-sql`, `docs-prose`, `marketing`, `translate` (Pentaho code steps, RFC 0200), `requirements` (a plain-language mart
+request drafted as mart metadata, RFC 0215). Measured on this repository (RFC 0197's tables):
+
+```toml
+[llm]
+provider = "zen"
+model = "claude-haiku-5-5"   # ask: 98/101 for $0.10 a full eval run
+api-key-env = "OPENCODE_API_KEY"
+budget-usd = 1.00            # refuse a call whose worst case could cross this, per command
+
+[llm.tasks.doc-semantics]
+model = "gpt-6-luna"         # 40/40 sections parsed; deepseek-v4.1-flash parsed 4/33 at the old cap
+max-tokens = 4096
+fallback = ["claude-haiku-5-5"]
+```
+
+Every call that reaches a host is priced and logged (metadata only) to `.ekos/llm-usage.jsonl`:
+`ekos llm usage` totals it, `ekos llm routes` shows each task's model and price, `ekos llm probe`
+sends a few-token request per model to show which ones a key can reach (access is per account on
+Zen). Models whose provider may keep requests are refused unless `[llm] allow-data-collection = true`;
+Zen's free models are not reachable outside OpenCode.
+
+For local Ollama, `[llm] context-window = 8192` (the default; also `OLLAMA_NUM_CTX`) is sent as `num_ctx` —
+without it Ollama silently truncated long prompts — and EKOS warns when a prompt fills the window.
+`ekos doctor` shows the effective window or custom endpoint. Hosted models bill per token; a full
+101-scenario `ekos eval run` on DeepSeek V4 Flash costs about $0.08. `ekos eval run --evidence-only`
+calls no model: it reports Recall@10 and whether each scenario's expected facts reach the evidence. DeepSeek V4 Flash is a reasoning model whose
+hidden reasoning counts against `max-tokens` — use `[ai] max-tokens = 8192` or some answers come back empty.
+
+### Documentation generation (RFC 0035/0037/0042/0090/0094/0095)
+
+`ekos docs generate` renders the compiled ledger straight into Markdown/HTML documentation —
+zero LLM calls, every claim traceable to real compiled evidence. Three layouts:
+
+```bash
+ekos docs generate                              # --layout objects (default): one page per
+                                                  # significant object, plus an index and ER diagram
+ekos docs generate --layout curated --output doc # README.md/Architecture.md/API.md/
+                                                  # SequenceDiagrams.md — the shape a developer
+                                                  # actually expects, plus one detail page per
+                                                  # crate/technology/pipeline/program-entity object
+ekos docs generate --layout solution-architect --output doc-sa
+                                                  # DependencyRiskReport.md/OnboardingGuide.md/
+                                                  # FindingsMemo.md — a team-handoff bundle: real
+                                                  # declared dependency versions and concentration
+                                                  # risk, a first-day repository-layout guide, and
+                                                  # an actionable findings list (unresolved
+                                                  # dependencies, undeclared crate versions, missing
+                                                  # doc-comment coverage). `--prose` layers an
+                                                  # LLM-written executive summary on the findings
+                                                  # list, never replacing the deterministic list
+                                                  # underneath it.
+```
+
+`--layout curated`'s `Architecture.md` includes a real crate/workspace dependency graph (parsed
+`Cargo.toml`, not guessed, annotated with a C4 mapping — crate → Container, external dependency →
+External System, RFC 0065), external technology dependencies, an `## Open Questions` section
+listing real knowledge gaps a deterministic pass couldn't resolve (e.g. an unresolvable workspace
+dependency) rather than dropping them silently, CI/CD pipelines (parsed `.github/workflows/*.yml`),
+and an entity-relationship diagram; `API.md` lists real functions/
+structs/enums/traits (from `RustSymbol`/`PythonSymbol` objects, RFC 0038/0040/0041) grouped by
+file, each linked to its own detail page; `SequenceDiagrams.md` covers both Transformation-IR
+data-flow sequences and real function-call sequences (RFC 0041's `Calls` graph). Per-entity pages
+nest under `entities/<kind>/<2-char shard>/` so a large codebase's page count never blows past
+GitHub's per-directory file-listing cap — running `ekos docs generate --layout curated --output
+doc` against this repo's own source is a ready example to try. Each entity page's Definition
+section now shows the real human-written documentation from source when the analyzer found any
+(`///` doc comments, Python docstrings, `@moduledoc`/`@doc`, JSDoc — RFC 0087), honestly stating
+"Not documented in source" rather than fabricating one when it didn't. `--prose` (opt-in) layers an LLM-written overview onto each
+object page, reusing `ekos ask`'s exact grounding+citation pipeline, with a token-cost estimate
+shown before any call.
+
+`Architecture.md`'s Executive Summary now surfaces two more real, deterministic signals instead of
+placeholder text: **Major risks** lists real "Observed Concentration Risk" objects — any object
+with 3 or more real compiled `DependsOn` dependents, a structural single-point-of-failure
+candidate, never an LLM-guessed severity score (RFC 0094) — and **Architecture confidence** shows
+the same real completeness/evidence-coverage score `ekos architecture investigate` computes (RFC
+0065 Phase 3), now also run from the plain `docs generate` path instead of only the investigation
+loop (RFC 0095). Both say so honestly when there's no real signal to compute from yet, rather than
+showing a misleading 100%.
+
+### Architecture reasoning + investigation loop (RFC 0065/0066/0067, opt-in)
+
+Beyond deterministic extraction, `ekos architecture investigate` runs the RFC 0066 MVP agentic
+loop: broad collection, deterministic crate-topology extraction, one batched LLM call classifying
+each crate's architectural role (`ArchitectureReasoningPass`, RFC 0065 Phase 2), a deterministic
+evaluator scoring completeness and evidence coverage (no LLM — RFC 0065 Phase 3), and — for any
+crate the evaluator flags unclassified — a targeted second pass that reads that crate's own leading
+doc comment for more context before trying again. Stops early once the quality threshold is met, or
+after `--max-iterations`, always ending with a curated-docs `docs generate` run:
+
+```bash
+ekos architecture investigate                                 # RFC 0066 MVP defaults: 3 iterations,
+                                                                # 0.90 quality threshold, --output doc
+ekos architecture investigate --max-iterations 5 --quality-threshold 0.95 --output doc
+```
+
+Reuses the `[llm]` provider already configured in `ekos.toml` (local Ollama or a cloud provider) —
+no separate `--llm` flag. See RFC 0067 for what's deliberately out of scope for this MVP
+(persistent checkpointing/resume, concurrency-safety infrastructure, CI/CD exit codes, multi-format
+output).
+
+Because the LLM-classified crate role is a real judgment call, not a deterministic fact, two
+follow-on commands treat it accordingly rather than silently trusting or silently re-deriving it:
+
+```bash
+ekos architecture diff --since <timestamp>   # real id-set comparison of technologies, crate role
+                                              # classifications, risks, and open questions between
+                                              # two points in time — not a fuzzy match (RFC 0108)
+ekos architecture review                     # list/confirm/reject pending role classifications;
+                                              # a confirmed-or-rejected review status survives the
+                                              # next `ekos commit` even though the underlying claim
+                                              # is content-signature-versioned and gets re-derived
+                                              # on every run (RFC 0109)
+```
+
+`ekos_architecture_diff` and `ekos_architecture_review` expose both over MCP too — see the AI agent
+access section below.
+
+### LLM-backed compile-time descriptions (RFC 0088, opt-in)
+
+Unlike `--prose` above (render-time, re-spent on every `docs generate` call), `[llm-description]`
+in `ekos.toml` runs at `commit` time and persists real, evidence-grounded `ai_overview`/`ai_usage`
+properties straight into the ledger — queryable through `ekos ekl`/`ekos ask`/MCP the same as any
+other compiled knowledge, not just rendered once. Covers every `Module`/`Rollup`/`Crate`, and every
+`Symbol` with a compiled `source_span` (Rust and Elixir today), regardless of whether RFC 0087
+already found a real doc comment — a doc comment is real input to the prompt, not a skip condition.
+When one exists, a new `ai_comment_check` property (`consistent`/`stale`/`incomplete`) flags a real
+discrepancy between what the comment claims and what the code actually does, rendered as a visible
+callout right on the entity page's Definition section — never silently trusted, never overwritten.
+A single project-level call also fills `Architecture.md`'s `Purpose`/`Architecture style` fields
+when real signal (a README, compiled subsystems, compiled technologies) exists to ground them.
+
+```toml
+[llm-description]
+enabled = true
+scope = "modules"   # "modules" (default, cheapest) | "symbols" | "all"
+```
+
+```bash
+ekos commit          # shows a real call-count estimate, asks to confirm before any spend
+ekos commit --yes    # skip the confirmation prompt
+```
+
+Opt-in and cost-gated like `[architecture-reasoning]` — a real, potentially large spend (~900 real
+LLM calls at the default `scope = "modules"` against a real mid-size codebase, ~5x that at
+`scope = "all"`), never defaulting to the more expensive tier just because it was turned on.
+
+### Compiled-knowledge query engine (RFC 0118 — SEARCH → QUERY → REASON)
+
+Traditional RAG searches documents; EKOS queries **compiled knowledge**. The retrieval stack is
+three operations, built as RFCs 0119–0126 (`devlog_143`–`devlog_149`):
+
+- **SEARCH** — one `KnowledgeStore::retrieve` seam behind every consumer, fusing a BM25 arm, an
+  exact-name arm, and (opt-in) a vector arm with Reciprocal Rank Fusion (Cormack RRF, `k=60`). BM25
+  indexes object names and content with English stemming, so a singular mention ("the customer
+  table") resolves the same object a plural exact mention ("the Customers table") already did.
+  `ekos query find "<text>" --mode lexical|vector|hybrid`; `--explain` prints the compiled plan
+  and per-arm timings (populated on partitioned and distributed stores too, not just a single
+  `FactLedger`). The same fused path runs on the single `FactLedger`, the partitioned
+  store, and the distributed gateway.
+- **QUERY** — direct, zero-LLM answers over the compiled graph: `fact(entity, attr)` for one
+  attribute of one object, named ops (`dependents`, `callers`, `path`, …) for the graph. Exposed
+  as MCP `ekos_query` (a typed list of source-cited claims) and `ekos_retrieve` ("show your
+  work": the plan + evidence set + how the question was understood).
+- **REASON** — `ekos ask "<question>"` now *compiles* the question: a rules planner routes it to
+  fact lookups and graph traversals, executes them into a typed `EvidenceSet` where every item
+  carries its provenance, and the model's job shrinks to "explain this evidence, cite each item."
+  `--explain` prints the plan and evidence; `--classic` selects the pre-0123 retrieve-and-dump
+  path. A citation not backed by a source id in the evidence set is a reported finding, not a
+  formatting detail. Claims cite **a place in a file, not just a file** (RFC 0140): every
+  Rust/Python/Elixir symbol with a `source_span` carries real evidence naming its path, its line,
+  and the source text itself, rendered as `path:start-end` — so asking what a function does shows
+  the model the function body, not only its name. Each Rust/Python/Elixir function or method also
+  carries a real `signature` (RFC 0141) — the discriminating term for "what builds an
+  `Arc<dyn LlmProvider>`" often lives in a return type, not the function's own name — and a Rust
+  `Calls` edge carries `call_count`, `call_site_line`, and `caller_is_test`, so impact analysis can
+  weigh 40 production call sites differently from 40 mostly-test ones instead of returning an
+  undifferentiated list. For the top few entities in each answer's evidence set, `ekos ask` also
+  reads the entity's real, on-demand source text straight from the artifact store — never the live
+  filesystem, so it never bypasses redaction (RFC 0140 §3) — giving the model the actual code
+  behind a claim, not just a name and a short excerpt. When the artifact store holds no file text
+  for the entity, the source recorded with the symbol at recover time (up to 40 lines) is shown
+  instead (RFC 0177). An opt-in `[retrieval] rerank = "llm"`
+  (off by default) asks the model to reorder the top candidate evidence items by real relevance
+  before it answers (RFC 0140 §4) — never on the deterministic retrieval-ranking path RFC 0126's
+  CI gate checks, only inside the REASON answer pipeline itself.
+
+EKL gains `FIND Object SEMANTIC 'text' [LIMIT k]` — the retriever as a candidate-set strategy.
+Retrieval quality is CI-gated: `ekos_runtime::retrieval_eval` holds a checked-in graded query set
+and a reference estate, and a workspace test fails the build if Recall@10 / MRR / nDCG@10 or
+intent-classification accuracy drops more than 2% below the recorded baseline;
+`cargo bench --bench retrieval_eval` prints the current scoreboard (RFC 0126).
+
+What search reads and how it ranks (RFC 0177):
+
+- An object is indexed by its name, kind, excerpt, and for a symbol its doc comment, signature and
+  fields. An index built by an older version is rebuilt on the next command that writes to the
+  ledger; `ekos ledger repair` does it at once.
+- A hit that holds every word of the query ranks first. Hits that hold some of the words follow,
+  ordered by BM25 rank fused with how many words each holds.
+- A file is found by its name without directory or extension (`0043-secrets-and-pii-redaction`).
+- The excerpt shown with a hit is the passage that matched the query.
+- A question that asserts something the evidence does not support is answered
+  `Premise not supported.`, followed by what the evidence does show. A question whose answer is
+  not in the evidence is answered `Insufficient evidence.`, with what the evidence does show.
+
+### The vector arm — semantic search (RFC 0125, opt-in)
+
+A question phrased with none of the target object's words ("the thing that sends welcome emails" →
+a function called `dispatch_signup_notification`) has no lexical hook. `[embeddings]` in
+`ekos.toml` adds a vector retrieval arm: `ekos commit` embeds every compiled object (its name,
+kind, and `ai_overview` prose if present) into a derived `<ledger-dir>/vectors/` index, and
+retrieval fuses cosine-nearest hits with the BM25 + exact-name arms (Reciprocal Rank Fusion, the
+same fuser as RFC 0120).
+
+```toml
+[embeddings]
+enabled = true
+provider = "ollama"          # "ollama" | "openai" | "mock"; falls back to [llm] provider
+model = "nomic-embed-text"   # optional override
+api-key-env = "OPENAI_API_KEY"
+cache = true                 # content-addressed .ekos/embed-cache/, on by default
+```
+
+```bash
+ekos query find "sends welcome emails" --mode vector   # semantic only
+ekos query find "welcome email" --mode hybrid          # semantic + BM25, fused
+```
+
+Opt-in and off by default — with no `[embeddings]` table nothing is embedded and retrieval is the
+pure BM25 + exact-name path. Embeddings are cheap and disk-cached, so unlike `[llm-description]`
+there is no spend prompt. Single-node only this phase (a no-op on a SQLite or partitioned
+workspace); a vector/hybrid search with no index built yet degrades to lexical with a visible
+note. The MCP `ekos_search` tool takes the same `mode` and reports `arms_run`. Per-arm wall-clock
+timings (`arm_timings`, RFC 0126) ride along on the `ekos_search` / `ekos_retrieve` results, into
+`.ekos/query-log.jsonl`, and in `ekos query find --explain`.
+
+### Eval harness (RFC 0138, on-demand)
+
+`ekos eval run` grades whole `ekos ask` answers against a checked-in, 101-scenario suite spanning
+seven categories — Architecture, Code, Dependencies, Lineage, History, Security, Adversarial
+(`evals/datasets/*.yaml`) — not just retrieval ranking (that's RFC 0126's separate, narrower,
+CI-gated `ekos_runtime::retrieval_eval`). Every score is deterministic keyword/id matching — no
+LLM judge: did the answer state the expected facts, cite real (non-hallucinated) evidence, cover
+what was asked, surface the right objects in the top-10, route to the right REASON planner query
+type, and — for the Adversarial category — actually say **"Insufficient evidence"** for a question
+with no grounded answer instead of inventing one. That last category is the harness's strictest:
+every scenario in it expects a refusal, and an answer that invents a plausible-sounding detail
+(a database name, a version number, a person) counts as a hallucination regardless of how
+confidently it reads.
+
+Recall@10 is graded against the exact keyword-only query `reason::plan()` actually searches with
+(RFC 0139), not the raw natural-language question a `reason`/`ask` scenario asks — the two can rank
+differently, so grading the wrong one could pass or fail a scenario for a reason unrelated to what
+the model was shown. Lexical search itself also treats a bareword `and`/`or` as connector noise,
+not a literal word a document must contain — the same two words this codebase already treats as
+English stopwords everywhere else — so an "A or B" style query can match on either real term
+without silently requiring the word "or" itself to appear.
+
+```bash
+cd ekos
+cargo run -p ekos -- eval run --dataset ekos-full   # every category, "evals/" at the repo root
+cargo run -p ekos -- eval run --dataset architecture --agent ollama
+cargo run -p ekos -- eval run --dataset hallucination   # Category G only
+cargo run -p ekos -- eval history                       # every past run, as a trend table
+```
+
+```
+EKOS EVALUATION
+─────────────────────────────
+
+Dataset: architecture
+Agent: ollama (llama3:latest)
+Runtime: local
+
+Scenarios:                    3
+Passed:                       0
+Failed:                       3
+
+Answer correctness:       11.1%
+Evidence groundedness:   100.0%
+Completeness:             11.1%
+Recall@10:                  n/a
+Hallucination rate:        0.0%
+
+Avg tokens:               1,221
+P95 latency:              49.4s
+
+Cache hits:                 0/3
+Tokens saved:               n/a
+Peak RSS:               69.7 MB
+CPU time:                 14.7s
+
+Status: FAIL
+```
+
+That example is a real run against this repo's own live self-analysis ledger with the local
+`llama3:latest` model — not a simulated one. It is also the *floor*: a workstation-sized local model.
+
+**Full-suite results — `ekos-full`, 101 scenarios, graded deterministically.** The answering model
+went from a local llama3 8B on Ollama to **DeepSeek V4 Flash through [OpenCode Zen](https://opencode.ai/zen)**
+(an OpenAI-compatible cloud endpoint), and the knowledge EKOS hands it was improved in two further steps. The same
+checked-in suite, one change at a time:
+
+| Step | Passed | What changed |
+|---|---|---|
+| Baseline, local `llama3:latest` (8B) — report `20260914T154459Z` | 42/101 | — |
+| + evidence text kept, citation parsing, refusal wording (devlog_183) | 53/101 | Grader and evidence-rendering bugs, not the model |
+| **+ DeepSeek V4 Flash** (model swap only) | **70/101** | A larger model, and the local one had been reading a **truncated prompt** — EKOS never sent `num_ctx`, so Ollama dropped the *start* of long prompts, where the instructions live (RFC 0145) |
+| + document structure (RFC 0144) | **79/101** | Markdown cut by heading instead of blind 2,500-char chunks, fully indexed; docs link to code and to each other; output limit raised to 8,192 |
+| + query-planner fixes (devlog_186) | **87/101** | A dependency phrase in a descriptive clause no longer triggers a graph walk; `crate::path` names resolve as one entity; generic words stop matching unrelated objects |
+
+Seventeen points came from the model and seventeen from engineering; 53 → 87 is **+34**. Per category, before → after:
+
+| Category | Before | After |
+|---|---|---|
+| Architecture | 9/20 | 18/20 |
+| Code | 8/15 | 13/15 |
+| Dependencies | 10/12 | 10/12 |
+| Lineage | 5/12 | 10/12 |
+| History | 3/12 | 11/12 |
+| Security | 7/12 | 10/12 |
+| Adversarial | 11/18 | 15/18 |
+| **Total** | **53/101** | **87/101** |
+
+| Metric | llama3 8B (53/101) | DeepSeek V4 Flash (87/101) |
+|---|---|---|
+| Answer correctness | 50.1% | **85.7%** |
+| Evidence groundedness | 65.9% | **95.6%** |
+| Hallucinated answers on adversarial questions | 7 | **3** |
+| Recall@10 | 64.7% | 55.9% — *fell* |
+| Latency | up to 79 s p95, killed three times for lack of memory on a 15 GB workstation | median 5 s per fresh call |
+| Cost of a full 101-question run | free (local) | about **$0.05–0.08** |
+
+Recall@10 fell because documents are now many heading-sections that outrank the crate or file a
+retrieval-only scenario expects; answers improved anyway, and section-vs-document ranking is a tracked
+follow-up. These numbers were re-verified against the per-category reports saved in
+`evals/reports/zen-*/` (`zen-base` 70, `zen-final-8k` 79, `zen-planner2` 87). The full account, including the model-swap
+run's 2,048-token output limit that cut off 17 answers (DeepSeek V4 Flash reasons, and its hidden reasoning
+counts against the limit — so the model's own contribution is, if anything, understated), is in
+[EKOS from 53 to 87](https://alexeyban.github.io/EKOS/presentations/deepseek-53-to-87.html) and
+devlog_183 / 185 / 186.
+
+**What still fails — 14 of 101, named rather than averaged away:**
+
+| Cause | Scenarios |
+|---|---|
+| The model correctly rejects a false premise but not in refusal wording the grader accepts | adv-004, adv-011, adv-015 |
+| The answer never reaches the top of the retrieved evidence | code-002, lin-008, dep-004 |
+| The fact isn't recorded yet (a workspace-inherited Rust edition, struct fields as claims, no caller reached the evidence) | code-004, lin-007, dep-005 |
+| Retrieval-only scenarios graded on recall@10 (see above) | arch-009, hist-007 |
+| Right in substance, wrong keyword | arch-020, sec-002, sec-010 |
+
+**Reproduce it, with your own model:**
+
+```bash
+export OPENCODE_API_KEY=...        # or any OpenAI-compatible endpoint: set base-url/model in the config
+cargo run -p ekos -- --config ../ekos.zen.toml eval run --dataset ekos-full --save-answers
+cargo run -p ekos -- eval history  # trend table across every saved run
+```
+
+```toml
+# ekos.zen.toml — hosted, or a self-hosted OpenAI-compatible server (vLLM, llama.cpp) inside the network
+[llm]
+provider    = "openai"
+base-url    = "https://opencode.ai/zen/v1"
+model       = "deepseek-v4-flash"
+api-key-env = "OPENCODE_API_KEY"
+
+[ai]
+max-tokens  = 8192   # a reasoning model: hidden reasoning counts against this
+
+# local Ollama: set the window explicitly — a silent default truncation cost 17 points
+# [llm]
+# provider = "ollama"
+# context-window = 32768
+```
+
+**Closed environments.** Compiling needs no GPU, no network and no model; answer quality tracks the model you
+can serve. A workstation-sized local model lands near the llama3 column; reaching the DeepSeek column without a
+cloud API means self-hosting a much larger open-weights model on dedicated GPU servers, with a context window of
+at least 32k tokens and enough throughput to answer in seconds. Prompts contain real source excerpts — EKOS
+redacts secrets and PII before anything reaches the ledger, but a hosted model still sees your code (Zen's paid
+models are zero-retention; its free models may use prompts for training).
+
+A local model is real and free to run, but it is not the reference: `ekos eval run` refuses outright rather than
+silently grading against the stub `MockLlmProvider` when the configured provider's API key isn't set (there is no
+`--agent mock` option). Grading is unchanged across every step above — keyword and id matching at temperature 0,
+unchanged prompts replayed from the LLM cache — so a score that moved is attributable to a real change.
+
+*Earlier history.* With llama3 held fixed the suite went 39 → 43 (RFC 0140/0141), then 42 → 53 against the
+`20260914T154459Z` baseline (devlog_183), mostly because the harness found something unflattering: an adversarial-question fabrication count that got *worse* (3 → 6) once
+third-party noise was gone and real objects made a wrong answer read more convincingly; a bit-identical re-run
+after RFC 0139/0140/0141 that confirmed `temperature: 0` makes an unchanged prompt reproducible; and
+recall@10 grading that had silently graded the wrong query (RFC 0139, devlog_182). Details: devlog_182, devlog_183.
+
+Those numbers moved mostly because the harness found something unflattering: **94% of what this
+repo was compiling wasn't its own code.** A Python virtualenv and two `.scannerwork/` directories
+had never been excluded from the observation walk — `.gitignore` does not filter it. Excluding
+them took the corpus from ~13,700 files to 834 and the model from 53,830 objects to 12,283, while
+`recover` produced *identical* symbol counts (2,623 Rust symbols, 1,734 `Calls` edges) — all
+signal kept, all noise gone. See [devlog_174](../devlogs/devlog_174.md) and the
+[eval comparison report](https://alexeyban.github.io/EKOS/presentations/eval-comparison-report.html). Beyond the five headline scores, every run also captures real resource usage: **tokens
+saved** is genuine cache-hit attribution (`CachedLlmProvider` tracks hits/misses; a scenario whose
+answer came from the disk cache instead of a fresh network call is diffed and counted, not
+estimated), and **CPU time / peak RSS** are best-effort, Linux-only, read straight from
+`/proc/self/{stat,status}` — honestly `n/a` off-Linux or when unavailable, never fabricated.
+
+Every run saves a timestamped JSON report to `evals/reports/` and exits non-zero when the
+aggregate gate (`ekos_evals::report::GateThresholds`) misses — deliberately **not wired into CI**
+(real LLM calls against a real workspace, not free/fast/deterministic enough for every PR yet).
+`ekos eval history` reads every saved report back and renders one line per run, newest last — the
+"run history" a saved-JSON-per-run design gives for free. See `evals/README.md` for the scenario
+schema and category breakdown, and `ekos/docs/rfcs/0138-eval-harness.md` for the full design.
+
+### Hierarchical rollups (RFC 0044)
+
+Every other context-saving mechanism in EKOS (capped search results, hop-bounded graph walks) is
+*retrieval*-limiting — fewer raw facts, never a synthesized higher-level one. `ekos commit` now
+also synthesizes deterministic, zero-LLM `Rollup` objects: one per directory subtree (crate-level
+by default) or, in a multi-project `[observe] paths` estate, one per project — each carrying real
+member counts, a kind breakdown, and boundary-relationship counts (what crosses in/out of the
+subsystem), linked to every member via the same `Contains` relationship everything else already
+uses. This is exactly what closes the "huge project/many projects" context-window gap: an agent
+asking about a whole subsystem gets one condensed, evidence-linked object instead of personally
+synthesizing meaning from dozens of raw facts. Surfaced automatically in `Architecture.md`'s new
+`## Subsystems` section (see above) — running the same `docs generate` command against this
+repo's own source produces one rollup per crate/plugin (46 at last count).
+
+### Hosted demo server (RFC 0045, experimental)
+
+`ekos/crates/demo-server` is a small, read-only web server over a **fixed two-repo catalog** —
+built to answer a strategic question, not a roadmap phase: pick EKOS's single most painful task
+(making sense of a codebase without hitting an LLM's context-window ceiling) and put it in front of
+peers in a 5–10 minute demo, without anyone installing the CLI. Two binaries:
+
+```bash
+cargo run -p ekos-demo-server --bin prerender -- <curated-markdown-dir> <output-html-dir>  # bake step
+cargo run -p ekos-demo-server --bin demo-server -- catalog.toml                            # serve
+```
+
+`prerender` pre-renders `ekos docs generate --layout curated`'s Markdown output to static HTML once,
+offline (curated HTML isn't a general `docs-gen` feature yet — see the RFC). `demo-server` serves
+that pre-rendered output plus a `POST /ask` endpoint that reuses `AiRuntime::ask` unmodified,
+refusing to start rather than degrading silently if `ANTHROPIC_API_KEY` isn't set. Not general
+self-serve ingestion — a fixed, pre-baked catalog only. **Not yet demo-ready**: implemented and
+verified against a placeholder key (routing, boot check, rate limiting, static serving all confirmed
+correct), but live-question answer quality is unverified pending a real API key and a rehearsed run
+— see `devlog_45.md` and `TODO.md`.
+
+### AI agent access (MCP)
+
+`ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol
+server over stdio (RFC 0013), a raw TCP socket (`--tcp`, RFC 0115), or Streamable HTTP
+(`--http`, RFC 0143) — tools: `ekos_search` (`limit` param — RFC 0124; `mode`
+`lexical`/`vector`/`hybrid` for semantic matching, plus `arms_run` in the response — RFC 0125),
+`ekos_query` /
+`ekos_retrieve` (compiled fact + graph answers and the inspectable query plan / evidence set, no
+LLM — RFC 0124), `ekos_ekl` (EKL filters on built-in columns and on any property, `WHERE status = 'confirmed'` or a nested `a.b`; a field no candidate has is an `unknown field` error, not an empty result — RFC 0175; it supports point-in-time `AS OF <timestamp>` queries,
+`COUNT`/`GROUP BY` aggregation — RFC 0096, and `SEMANTIC 'text'` retrieval candidate sets — RFC
+0124), `ekos_neighborhood` (`depth` 0-3, stops at `max_objects` — default 500, at most
+5,000 — and says so with `truncated: true`),
+`ekos_state`, `ekos_dependents` (single-hop impact analysis; each entry shows the other end's
+`status`), `ekos_impact` (directed, kind-filtered, multi-hop impact tracing — RFC 0018; like the
+neighbourhood, it never steps onto an unconfirmed hypothesis or proposal), `ekos_graph_export` (the whole compiled
+graph as nodes + edges in one call — filtered, optionally collapsed to super-nodes, truncation
+reported; RFC 0127), `ekos_diff` (raw ledger-entry changes since
+T), `ekos_audit` (the write history of one object/relationship with the pipeline run, stage, and
+source artifact behind each version — RFC 0135; the source artifact is the object/relationship's
+own recovered `KnowledgeArtifact` id(s) where `compile` tracked one, falling back to the run's CKM
+content hash for compiler-synthesized objects like rollups and risks), `ekos_status` (with a
+`freshness` block: does the ledger still match the source? RFC 0171), `ekos_conflicts` (where
+sources disagree about one fact, every claim with its file and line — read-only, RFC 0172; an
+`ekos_query`/`ekos_retrieve` claim about such an attribute is marked `disputed: true`, RFC 0173),
+`ekos_sql_check` (check a drafted query against the compiled schema and the SQL dialect's rules;
+with only `dialect`, it returns that engine's rules for writing SQL — RFC 0242/0243, static, it
+never opens a database), `ekos_transformation_explain`/`ekos_transformation_diff` (Transformation IR
+explanation and migration diffing — RFC 0028), `ekos_architecture_evaluate`/
+`ekos_architecture_drift`/`ekos_architecture_diff` (real completeness/evidence-coverage scoring,
+documentation drift, and a real architecture-level diff between two points in time — technologies,
+crate role classifications, risks, open questions — distinct from `ekos_diff`'s raw entry report;
+RFC 0065/0068 §55/RFC 0107-0108), `ekos_semantics_lookup`/`ekos_semantics_gaps` (RFC 0170 —
+the recovered business meaning of a table, column or code value with its review status and
+evidence, and the open semantic gaps; read-only — confirming or rejecting stays a human-only CLI /
+web console action), and `ekos_identity_review`/`ekos_architecture_review` (confirm or
+reject a `SameAs` identity candidate, or an LLM-classified crate role claim — RFC 0029/RFC 0109,
+the two write-capable tools; each decision is an event citing evidence that names the optional
+`reviewer` and `note`; every other tool reads only the local ledger, except the gated
+`ekos_clickhouse_query`, which records each live query, and the opt-in
+`ekos_session_note`, RFC 0151 — it writes a redacted note to a local inbox file, never to the ledger). Long-lived server
+sessions reuse one cached, read-only ledger handle across calls without ever blocking a concurrent
+`ekos build`/`commit` in another process (RFC 0097). Every read tool (and `ekos ekl` run from the
+CLI) appends one line to `.ekos/query-log.jsonl` — a real usage log the previous designs had no
+equivalent of, groundwork for a future materialized-views pass (RFC 0114); a static heuristic
+classifies each call cheap/expensive from its own arguments and opportunistically caches an
+expensive one's result for an identical repeat while the workspace hasn't changed underneath it. A
+gated `ekos_clickhouse_query` tool (RFC 0056) is also available, off by default — see the
+ClickHouse connector section below. Connect Claude Code with:
+
+```bash
+claude mcp add ekos -- ekos --config /path/to/ekos.toml mcp serve --workspace /path/to/workspace
+```
+
+The server also honors `EKOS_WORKSPACE` and `EKOS_CONFIG` environment variables, so a
+registration can be path-free: `claude mcp add ekos --env EKOS_WORKSPACE=/path/to/workspace -- ekos mcp serve`.
+
+#### TCP transport — one server, multiple clients (RFC 0115)
+
+Stdio mode spawns a fresh `ekos mcp serve` process (and a fresh cached ledger handle) per client,
+which is fine for one tool but wasteful the moment a second one wants to talk to the same
+workspace — a second Claude Code session, PyCharm's AI chat, or any other MCP-speaking tool.
+`--tcp <addr>` starts a second, additive transport on the same command: a plain NDJSON-over-TCP
+socket that any number of clients can connect to concurrently, each getting its own
+`std::thread::spawn`'d connection and its own independent cached ledger handle (not shared across
+connections — RFC 0115's Concurrency model section explains why). Stdio stays the default and is
+completely unaffected when `--tcp` is omitted; passing it just adds the second transport alongside.
+
+**Local — multiple tools on the same machine.** Bind loopback and point every local tool at it:
+
+```bash
+ekos mcp serve --workspace /path/to/workspace --tcp 127.0.0.1:7331
+```
+
+Any MCP client on that machine that supports connecting to a raw TCP socket (rather than spawning
+its own subprocess) points at `127.0.0.1:7331` instead of a spawn command. Verify the server is
+actually answering before wiring up a client:
+
+```bash
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}\n' \
+  | nc 127.0.0.1 7331
+```
+
+A one-line JSON-RPC response (`"serverInfo":{"name":"ekos", ...}`) confirms the server is up and
+speaking the protocol correctly.
+
+**Optional bearer-token auth (RFC 0128).** `--token-file <path>` (or, if that flag is absent,
+the `EKOS_MCP_TOKEN` env var; `--tcp-token-file` is a back-compat alias) requires every TCP
+connection's **first** message to be an `initialize` request carrying a matching
+`params._meta.token` — anything else gets a single `-32001 unauthorized` and the socket closes
+before any tool is reachable. The comparison is constant-time. Token-less `--tcp` is unchanged
+(RFC 0115 back-compat); stdio is never gated. This is a plaintext-socket bearer token — defence
+against a second local process connecting casually, **not** against a network attacker who can
+read the wire; use the SSH tunnel below for that.
+
+```bash
+ekos mcp serve --workspace /path/to/workspace --tcp 127.0.0.1:7331 \
+  --token-file /run/secrets/ekos-mcp-token
+```
+
+**Remote — a client on a different machine.** There is **no TLS** on this transport, and auth is
+only the optional plaintext bearer token above (RFC 0115/0128's explicit v1 scope) — binding an
+externally-reachable address exposes the same read surface stdio gives a spawning parent process,
+plus the two write-capable tools, to anyone who can reach it. Two safe ways to do this:
+
+- **Trusted private network only**, if the workspace machine and every client already sit on one
+  (e.g. a home LAN, a VPN, a locked-down VPC): bind the interface facing that network instead of
+  loopback, e.g. `ekos mcp serve --workspace /path/to/workspace --tcp 0.0.0.0:7331`, and firewall
+  the port to that network explicitly — never expose it to the open internet.
+- **SSH tunnel (recommended for anything crossing an untrusted network)**, keeping the server itself
+  bound to loopback on its own machine:
+  ```bash
+  # on the workspace machine
+  ekos mcp serve --workspace /path/to/workspace --tcp 127.0.0.1:7331
+
+  # on the client machine
+  ssh -N -L 7331:127.0.0.1:7331 user@workspace-host
+  ```
+  The client then connects to its own `127.0.0.1:7331`, tunneled over SSH's encrypted, authenticated
+  channel — the EKOS server itself never has to bind or trust anything beyond loopback.
+
+Both `EKOS_WORKSPACE`/`EKOS_CONFIG` env vars and `--config` still apply the same way they do for
+stdio mode; `--tcp` only changes how clients connect, not which workspace is served.
+
+**Limits, on every transport.** A message line is capped at 4 MB, and `--tcp` serves at most 64
+connections at once; the first line is read under that cap before any token is checked. A request
+that panics is answered with `-32603` and the server keeps serving, where before a panic killed a
+stdio server and permanently wedged `--http`'s single worker. `--http` queues at most 64 waiting
+requests and answers `503` with `Retry-After` past that. Traversal bounds (`depth`, `max_hops`,
+`max_objects`) are refused with the limit named when out of range, never silently clamped. An
+argument name a tool does not declare (e.g. `max_depth` for `ekos_impact`, whose parameter is
+`max_hops`) is refused with the accepted names listed, instead of being ignored. Token-less
+`--tcp` or `--http` on a non-loopback address logs a warning.
+
+#### HTTP transport — for clients that only take a URL (RFC 0143)
+
+Many MCP clients (VS Code / GitHub Copilot agent mode, Visual Studio 2022, ChatGPT Developer
+Mode, `mcp-remote`) only offer *stdio* (spawn a command) or *Streamable HTTP* (a URL) — they
+cannot speak the raw TCP socket above. `--http <addr>` serves MCP's HTTP transport at one
+endpoint, `POST /mcp`:
+
+```bash
+ekos mcp serve --workspace /path/to/workspace --http 127.0.0.1:7331
+```
+
+`--http` and `--tcp` are mutually exclusive (each *replaces* stdio). The `POST` response is
+`application/json`, or a single-shot `text/event-stream` when the client's `Accept` header asks
+for it (ChatGPT's connector requires the latter); either way the response bytes are the same
+JSON-RPC. There is **no server push** — `GET /mcp` returns `405`, no sessions. Auth is the same
+token (`--token-file` / `EKOS_MCP_TOKEN`), presented over HTTP as an `Authorization: Bearer
+<token>` header checked on every request. The `Origin` header, when present, must be loopback or
+an explicit `--http-allow-origin <origin>` (DNS-rebinding defence); a request with no `Origin`
+(the normal case for editors) is allowed. All HTTP requests are serialized through one worker
+thread — a slow `tools/call` blocks the next request, matching the stdio loop.
+
+VS Code (`.vscode/mcp.json`) or Visual Studio (`.mcp.json`):
+
+```json
+{
+  "servers": {
+    "ekos": { "type": "http", "url": "http://127.0.0.1:7331/mcp" }
+  }
+}
+```
+
+Verify it is answering:
+
+```bash
+curl -s http://127.0.0.1:7331/mcp -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
+```
+
+For a remote client, tunnel it the same way as the TCP transport (`ssh -N -L 7331:127.0.0.1:7331 …`);
+there is no TLS on `--http` — terminate it at a reverse proxy if a deployment needs it.
+
+**ChatGPT** (Developer Mode connector, Plus/Pro) is cloud-hosted and cannot reach `127.0.0.1`, so
+it needs a public HTTPS URL — put a tunnel in front (`cloudflared tunnel --url
+http://127.0.0.1:7331`, then use `https://<name>.trycloudflare.com/mcp`). The tunnel URL is
+world-reachable and exposes the two write tools too, so protect it (Cloudflare Access / Tailscale,
+or a short supervised session). ChatGPT's *Deep Research* connector won't work — it requires
+tools named exactly `search`/`fetch`; only Developer Mode (full MCP) does.
+
+### Marketing agent (RFC 0030)
+
+`ekos marketing publish [devlog]` turns a `devlog_N.md` into a human-approved X (Twitter) release
+announcement: it classifies the devlog's importance (skipping docs/tests/refactor-only entries),
+drafts a tweet through the same `LlmProvider` used elsewhere, validates it (length, EKOS mention,
+GitHub link, hashtag count), asks for Y/N/E approval, and publishes via a real OAuth 1.0a-signed
+`POST /2/tweets` — with `marketing/posted/tweets.json` preventing the same devlog from ever being
+posted twice.
+
+```bash
+ekos marketing publish            # latest devlog_*.md, interactive approval
+ekos marketing publish 28         # a specific devlog number
+ekos marketing publish --dry-run  # preview only — never posts, never records
+```
+
+Configure via `[marketing]`/`[marketing.twitter]` in `ekos.toml` (see `marketing/README.md`);
+publishing requires `TWITTER_API_KEY`/`TWITTER_API_SECRET`/`TWITTER_ACCESS_TOKEN`/
+`TWITTER_ACCESS_SECRET` in the environment and stays off until `[marketing.twitter] enabled =
+true` is set explicitly.
+
+### World Engine simulation (RFC 0047-0055, experimental)
+
+Auxiliary, opt-in tooling built on top of the same ledger, kept deliberately separate from the
+compiler pipeline above: multi-agent scenarios with beliefs, goals, deterministic round-based
+decision-making, seed-reproducible priority/resource conflict resolution, a `VirtualForum`
+(channels, replies, likes, follows, shares), a durable, replayable event log, and `world.sources`
+document ingestion (real files, via the actual `localdocs` connector) — layered additively over the
+existing graph (see `ekos/docs/rfcs/0047`-`0055` and `devlog_47.md`-`devlog_55.md`). Define a
+scenario and its agents in YAML (source-document-style `agent.yaml`/`scenario.yaml` shapes), run
+it, and read it back afterward:
+
+```bash
+ekos simulate scenario.yaml             # runs scenario.yaml's own simulation.rounds
+ekos simulate scenario.yaml --rounds 5  # override the round count
+ekos simulate scenario.yaml --seed 42   # override the round's priority/resource-conflict seed
+ekos replay scenario.yaml               # read back every recorded round, read-only
+ekos replay scenario.yaml --round 2     # narrow to one round
+```
+
+### EKOS Migrate (PostgreSQL → ClickHouse, opt-in)
+
+Evidence-backed migration of a PostgreSQL database to an analytical target — a migration *proof*
+system rather than a SQL converter. Every scope decision, finding, mapping, validation result and
+human approval is a ledger fact with provenance, and the report cites those facts or does not ship
+(`ekos/docs/rfcs/0154`-`0167`).
+
+**Shipped:** a real table was migrated PostgreSQL → ClickHouse and validated at V1/V2/V3, with a
+planted one-row change caught by V3. The source side of logic migration is recovered: PL/pgSQL
+routines statement by statement, views, and triggers classified by what they do, all linked to the
+tables they touch (RFC 0163, 0169). **Not yet:** translating that logic to the target (RFC 0164:
+lowering, constrained reconstruction, V5 differential execution), V0/V4 validation, `signoff`, a
+second target, CDC and cutover.
+
+```bash
+ekos migrate init --name ledgersmb \
+  --source postgres://pg/ledgersmb \
+  --target clickhouse://ch/ledgersmb \
+  --source-secret-env PG_PASSWORD      # the variable's NAME; the value is never stored
+ekos migrate discover                   # live catalog → one unit per table + live-vs-repo drift
+ekos migrate profile --tier p1          # p0 catalog only | p1 bounded sample | p2 exact, budgeted
+ekos migrate assess                     # DQ + target-compatibility rules, affected rows measured
+ekos migrate map --emit out.sql         # type map with lossiness, CH design, DDL with its reasoning
+ekos migrate review --unit public.orders --env staging   # raise an approval request
+ekos migrate approve <REQUEST> --as alice --show-evidence # human-only; no MCP equivalent exists
+ekos migrate load --unit public.orders --dry-run         # gate + print every statement
+ekos migrate load --unit public.orders                   # create, then copy chunk by chunk
+ekos migrate validate --unit public.orders --tier v3     # V1 counts, V2 aggregates, V3 row hashes
+ekos migrate report --out report.md     # compiled from ledger facts, every claim cited
+ekos migrate status                     # units by state, and what is blocking
+ekos migrate lower --database lsmb --sql   # views → ClickHouse, trigger proposals, routine eligibility
+ekos migrate check-candidate --source open_items --candidate view.sql   # does it state anything new?
+ekos migrate v5 --source-sandbox postgres://sbpg/scratch --target-sandbox clickhouse://sbch/scratch
+                                        # run each lowered view against its source, on sandboxes
+ekos migrate reconstruct --source close_period   # one routine → a model → kept only if it invents nothing
+```
+
+What each stage guarantees:
+
+- **Credentials never reach the ledger.** A DSN names an alias, `[migrate.connections.<alias>]`
+  resolves it to host/port/user, and `secret-env` names the password variable. A connection string
+  carrying a password is refused rather than parsed and stripped — it has already leaked into shell
+  history. Row values never reach the ledger either: profiles hold statistics, and a column
+  classified as PII gets no bounds and no top-k at any tier.
+- **Logic is lowered by rule, or not at all (RFC 0164, Phase 1).** `ekos migrate lower` reads the
+  recovered views, triggers and routines from the ledger and their definitions from the source
+  files. It opens no connection, calls no model and writes nothing.
+  - A view becomes a ClickHouse `CREATE VIEW`, rewritten where the same text would return
+    something else: `sumOrNull` for `sum`, `join_use_nulls` for outer joins, explicit `NULLS FIRST`,
+    `Nullable(T)` casts, `char_length`, quoted names. Each rewrite is listed under the view.
+  - Anything without a rule blocks the view by name (`LOGIC.CH.DIVISION_TYPES`,
+    `LOGIC.CH.FUNCTION: string_agg() has no lowering rule`). A materialized view always blocks: a
+    ClickHouse materialized view is an insert trigger, not a stored result.
+  - The emitted statement must parse under the ClickHouse grammar and read back identically, and
+    must state nothing its source does not.
+  - A trigger gets a proposed replacement per class and the behaviour change it implies; `Mixed`
+    and `Unknown` triggers are left to a person. No trigger is translated.
+  - A routine is eligible for reconstruction only when every statement was recovered and none is
+    built at run time.
+
+  `ekos migrate check-candidate` applies the second check to a statement you supply: it is rejected
+  if it names a table, column, literal, function or comparison the source does not.
+  `--record` on `lower` saves each lowering and trigger proposal as a `MigrationProposal` with
+  `status: proposed`.
+- **A lowered view is run against its source (V5).** `ekos migrate v5` builds a small fixture from
+  the view's own comparisons — the literal and its neighbours for every `column <op> literal`,
+  `NULL` in every column, compared columns crossed — loads it into a PostgreSQL sandbox and a
+  ClickHouse sandbox, and compares what the source view and the lowered view return.
+  - The verdict always carries branch coverage: how many of the view's comparisons the fixture took
+    both ways. `V5 passed` alone is never printed.
+  - A view that cannot be run (`char(n)` column, a `LIMIT`, a column the recovered tables lack)
+    is `not run`, with the reason. Not run is not a pass.
+  - Both connections must be marked `sandbox = true` under `[migrate.connections.<alias>]`, and a
+    migration source is refused even with the mark. PostgreSQL work happens in one transaction in
+    its own schema and is rolled back; ClickHouse work in its own database, which is dropped.
+  - Rows are compared as multisets. Row order is not checked.
+- **A model's rewrite of a routine is kept only if it invents nothing.**
+  `ekos migrate reconstruct` sends one PL/pgSQL routine to the configured model.
+  - A routine with unrecovered statements or dynamic SQL is never sent.
+  - A model that is not local needs `--allow-metered` on that run; there is no config switch.
+  - The answer is rejected if it names a table, column, literal, function or comparison the
+    routine does not. A survivor is a proposal, unexecuted: the check finds what was added, not
+    what was left out, and V5 for routines is not built.
+- **Sessions are read-only against the source** (`default_transaction_read_only`, statement/lock
+  timeouts, low `work_mem`, a replica-lag guard that refuses a run above the configured threshold).
+- **Assessment measures, it does not guess.** Each finding carries the SQL that measured it.
+  Undeclared foreign keys are inferred from real joins in the compiled code *and* in
+  `pg_stat_statements`, then checked by inclusion before anything is claimed.
+- **Documentation is checked against the data** (`DQ.CONSIST.DOC`, RFC 0172 Phase 3). Where a
+  column's repository or live comment — or a sentence in a Markdown or Confluence page that names
+  exactly one `` `table.column` `` in code formatting — makes a checkable claim — "never null", "unique", "one of
+  open, closed or void", an `A=asset,L=liability` legend, "between 0 and 100", "positive" — assess
+  counts the rows that contradict it (counts only, no values). A contradicted claim becomes a
+  `doc_vs_data` conflict carrying both sides: the comment with its `path:line`, and the measured
+  count with its query. `ekos conflicts list --type doc_vs_data`; a re-assessment drops the ones the
+  data no longer contradicts.
+- **Every executed statement is parsed and classified** (never string-matched). An unparseable,
+  unknown or credential-carrying statement is refused. Outside the sandbox, a statement runs only if
+  an approval matches its artifact id, content hash and environment — there is no override.
+- **Approval risk is computed** from statement class × environment × lossiness × blast radius (how
+  many compiled objects depend on the table) × affected rows. An approval is pinned to an evidence
+  snapshot, so it dies if the evidence changes after it was given. Self-approval is refused, and R4
+  needs two distinct approvers plus a typed confirmation. Thresholds live in `migrate.policy.toml`,
+  and its hash is recorded on every approval.
+- **Validation compares engines through one canonical serialization** (RFC 0155), cross-checked by
+  PostgreSQL, ClickHouse and Rust. A tier passes only with zero blocking divergences *and* every
+  planted control fired, so a check that never ran cannot report green.
+- **The report is compiled, not generated.** Every factual sentence carries fact ids that are
+  resolved and structurally checked. Prose containing a number is refused. The same snapshot
+  recompiles byte-identically.
+
+Needs `[migrate] enabled = true` in `ekos.toml`. A PostgreSQL and a ClickHouse sandbox are in
+`docker-compose.migrate.yml`; the live suites run with `EKOS_MIGRATE_LIVE=1`.
+
+A scenario's `world: { sources: [reports/report_01.md] }` ingests real documents (PDF/DOCX/text/
+Markdown/HTML/email) into its starting world; an agent's `knowledge:`/`relationships:` can
+reference an ingested document by that same path string.
+
+By default `simulate` writes to a dedicated `.ekos/simulations/<scenario-id>/ledger.db`, **never**
+the real workspace ledger — simulated agents and events are fictional and regenerated on every run,
+and because the ledger has no delete/tombstone mechanism (RFC 0043), they should never permanently
+commingle with real, evidence-backed compiled knowledge. `--ledger <path>` opts back into a
+different target explicitly, including the real workspace ledger, if a caller wants that.
+
+This is a distinct capability from the "compiler for enterprise knowledge" positioning above, not
+a replacement for it — kept intentionally separate rather than blended into one pitch. Whether it
+grows into its own product surface remains a further, explicitly **not-yet-committed** idea, not a
+decided roadmap direction — revisited RFC by RFC rather than assumed to keep expanding.
+
+### ClickHouse connector (RFC 0056)
+
+Two independent pieces. **Compiled metadata** — `ekos build`/`ekos recover` observe a configured
+ClickHouse database's `system.tables`/`system.columns` (via ClickHouse's stock HTTP interface, no
+native driver) and compile every table into a real `KirObject(ObjectKind::Table)`, searchable
+through `ekos_search`/`ekos ekl` and cross-system identity-resolvable against same-named tables
+elsewhere in the estate, the same way file-based SQL recovery already is:
+
+```bash
+export EKOS_CLICKHOUSE_URL=http://localhost:8123
+export EKOS_CLICKHOUSE_DATABASE=analytics
+export EKOS_CLICKHOUSE_USER=default        # optional
+export EKOS_CLICKHOUSE_PASSWORD=            # optional
+ekos build && ekos recover
+```
+
+File-based ClickHouse DDL (`.sql` files routed to the `"clickhouse"` dialect via RFC 0031's
+`[[recover.sql.dialect-rules]]`) goes through the same `sqlparser::dialect::ClickHouseDialect` this
+connector uses for its live SELECT-only gate. `sqlparser` never supported several real ClickHouse
+`CREATE TABLE` clauses at all — `CODEC(...)` (RFC 0057), and `INDEX ... TYPE ... GRANULARITY`,
+`PARTITION BY`, `SAMPLE BY`, `SETTINGS`, and whole `CREATE DICTIONARY` statements (RFC 0058) — found
+and closed while using EKOS to document a real open-source repo's ClickHouse schema
+(Plausible Analytics). `ClickHouseDialectParser::preprocess` strips each, well-formed occurrences
+only, before the SQL reaches `sqlparser`; live-verified against that real repo's full,
+unmodified `structure.sql`, which now compiles into real `Table` KIR objects with zero parse
+warnings.
+
+**Live NL-to-SQL query** — the one path in EKOS that intentionally crosses the Key Invariant above:
+an LLM builds a ClickHouse `SELECT` from the compiled schema and the question, the generated SQL is
+parsed and hard-rejected unless it's exactly one `SELECT` (no writes, no multi-statement batches),
+then it's run live, redacted, and returned — every call is recorded as an Evidence/Event pair in the
+ledger for audit (the same query with the same answer is one event whose history lists each run),
+though the row data itself is never ledgered:
+
+```bash
+ekos clickhouse ask "how many orders were placed last week?"
+```
+
+This CLI command is always available. The matching `ekos_clickhouse_query` MCP tool is **off by
+default** — `ekos mcp serve` only lists it once a workspace explicitly opts in:
+
+```toml
+[clickhouse]
+enable-mcp-query = true
+```
+
+Deck, verified live against a real ClickHouse container: [ClickHouse: Compiled Metadata + Live
+NL-to-SQL](https://alexeyban.github.io/EKOS/presentations/clickhouse-connector.html).
+
+A second deck covers the same connector's file-based DDL path, run cold against a real
+open-source repo (Plausible Analytics) EKOS had never seen: [EKOS Cold Against Plausible's
+ClickHouse Layer](https://alexeyban.github.io/EKOS/presentations/analytics-clickhouse-cold-run.html)
+— git/CI/dependency knowledge compiled cleanly, and real gaps surfaced in `sqlparser`'s
+`ClickHouseDialect` (`CODEC`, `INDEX`, `PARTITION BY`, `SAMPLE BY`, `SETTINGS`, `CREATE
+DICTIONARY`), all since closed (RFC 0057, RFC 0058) — that same repo's full `structure.sql` now
+compiles cleanly into real `Table` objects.
+
+A third deck, [ClickHouse Extraction, After the
+Fix](https://alexeyban.github.io/EKOS/presentations/analytics-clickhouse-after.html), re-analyzes
+the same repo after both RFCs: 15/15 real tables now recover with zero parse warnings, but
+re-analyzing surfaced a second, unrelated finding in a different pipeline stage — identity
+resolution (`crates/identity`) over-merging 6 of those 15 real `imported_*` tables into one
+identity at confidence 0.93, because they share both a name prefix and a common 8-column "spine."
+Reported the same way the parser gap was, not silently fixed.
+
+The same case study also produced real generated documentation and two live demos, all against
+[github.com/plausible/analytics](https://github.com/plausible/analytics), a real unmodified
+open-source repo:
+
+- [ClickHouse Component — Generated Documentation](https://alexeyban.github.io/EKOS/generated/analytics-clickhouse-component.html)
+  — full schema, write/read paths, and data-migration framework for the event store, researched
+  using EKOS's compiled ledger plus direct source verification.
+- [Top Referrers Dashboard](https://alexeyban.github.io/EKOS/generated/analytics-referrers-dashboard.html)
+  — a real analytics dashboard reproduced from a screenshot; every number is a live query, built by
+  a local Ollama model against EKOS's compiled schema and run against a real ClickHouse server.
+- [Why That Day Spiked](https://alexeyban.github.io/EKOS/generated/analytics-why-high-day.html) —
+  an open-ended "why" question answered by chaining real `ekos_clickhouse_query` MCP calls over
+  stdio JSON-RPC (including a real failure and retry), plus a technical breakdown of how Claude,
+  MCP, and EKOS's pipeline fit together.
+
+A fourth deck, [Proving the Core Loop, Cold, on a Real
+Repo](https://alexeyban.github.io/EKOS/presentations/analytics-full-loop.html), goes past the
+ClickHouse slice: a genuinely cold `init → build → recover → resolve → compile → commit` run over
+the *whole* 2,045-file repo, timed stage by stage (~107s end to end), plus a real `ekos ask` + MCP
+question set graded against ground truth read from the repo itself. It found three new gaps in one
+sitting — a previously-unknown Postgres `sqlparser` failure (`INCREMENT`), identity resolution
+over-merging real people and unrelated documents (not just ClickHouse tables — a real contributor's
+own commit becomes unfindable under their own name), and a retrieval-brittleness bug in `ekos ask`
+itself (full-sentence questions return no context even when the object is trivially findable by
+keyword) — all reported the same honest way, not silently patched or hidden, and all fixed the same
+day (RFC 0059, RFC 0060, RFC 0061 — see `devlog_61.md`), each with a live re-verification against
+the same real repo, not just a passing unit test.
+
+### Compact storage (RFC 0015)
+
+Workspaces created before RFC 0015 can be shrunk in place (both commands verify before
+touching anything and leave backups):
+
+```bash
+ekos ledger status --storage   # per-component size report (or the shorter `ekos status --storage`)
+ekos ledger migrate            # ledger v1 → v2: dictionary-zstd payloads (~2.5x smaller)
+ekos ledger audit <id>         # write history of one object/relationship — which run, stage and
+                               # source artifact produced each version (RFC 0135; --json).
+                               # source artifact is the recovered KnowledgeArtifact id(s) for a
+                               # tracked object, or the run's CKM hash for synthesized ones
+ekos artifact repack           # loose JSON files → packed segments (~7x smaller on disk)
+```
+
+`ekos status [--storage]` (RFC 0116) is a top-level alias for `ekos ledger status` — same output,
+shorter to type; both forms stay supported. `--json` (RFC 0127) emits one machine-readable object
+instead of the text report — entry/object/relationship/evidence counts, the backend tag, a
+per-component storage breakdown, and an mtime-proxy `last_write`; the text output is unchanged.
+`ekos doctor --json` (RFC 0129) does the same for the environment checklist
+(`{ok, checks:[{name, status, detail}]}`), and `ekos ledger timeline [--bucket day|week|month]`
+(RFC 0129) emits cumulative object/relationship counts bucketed by mint time — the growth series
+behind the web-console dashboard. All the `--json` / export commands send their logs to stderr so
+stdout is a clean document.
+
+`ekos config validate [--json] [--file <path>]` (RFC 0130) parses `ekos.toml` and reports syntax
+errors plus `[observe]` mistakes — most usefully, an `ignore-patterns` entry like `*.lock` or
+`src/fixtures` that *looks* like a glob or path but is matched as a bare **directory name**, so it
+matches nothing. `ekos config preview-scan [--json]` counts what `ekos build` would observe under
+the current `paths` / `ignore-patterns` (files, by extension, and how many directories each
+ignore pattern actually pruned) without reading or compiling anything.
+
+**`ignore-patterns` is the only filter — `.gitignore` excludes nothing from the observation walk.**
+A git-ignored virtualenv, build cache, or scanner working directory is still fully observed unless
+you name it here. Measured on this repo (devlog_174): a `.venv/` and two `.scannerwork/` directories
+made **94%** of the observed corpus third-party code — over half the compiled knowledge model
+described numpy and pytest internals, and every query ranked the project's own code against 27k
+foreign objects. Run `preview-scan` before the first `build` on a new workspace, and prefer specific
+directory names over generic ones like `build`/`dist`, which match a bare path component and can
+prune real source.
+
+### Bulk graph export (RFC 0127)
+
+`ekos graph export` writes the whole compiled graph — every object and relationship — as one JSON
+(or NDJSON) document. It's the first non-per-object, non-`LIMIT`-capped read path in EKOS:
+
+```bash
+ekos graph export                                  # the whole graph, JSON on stdout
+ekos graph export --kind Table --kind File         # filter to object kinds
+ekos graph export --exclude-rel-kind CoupledWith --min-degree 1
+ekos graph export --level aggregate --group-by kind   # one super-node per kind
+ekos graph export --format ndjson --output graph.ndjson
+```
+
+Node ids are real object ids (feed them straight to `ekos_state` / `ekos_neighborhood`), degree is
+computed over the post-filter edge set, and when the graph exceeds `--max-nodes`/`--max-edges` the
+export keeps the most-connected core and says so in a `truncated` block rather than silently
+returning a prefix. Output is deterministic modulo its `generated_at` timestamp. The
+`ekos_graph_export` MCP tool exposes the same function to agents.
+
+### Web console (RFC 0127/0128/0129/0130/0131/0132/0133/0134/0136/0138/0170)
+
+`web/` is a browser surface over one or more compiled workspaces — a FastAPI app (`web/api/`) plus
+a Vite + React app (`web/ui/`).
+
+- **Phase 1** (RFC 0129): a persisted workspace registry, a supervisor that spawns and restarts
+  one `ekos mcp serve --tcp` per workspace on its own, and a statistics dashboard
+  (entry/object/relationship/evidence counts, storage breakdown, objects by kind, a growth
+  timeline, query-log stats, `doctor`).
+- **Phase 2** (RFC 0130): an `ekos.toml` editor with `validate` + `preview-scan` and the
+  append-only warning when you narrow `[observe]`.
+- **Phase 3** (RFC 0131): run EKOS pipeline commands from the browser and watch them stream. A
+  hardcoded command allowlist (`build`/`recover`/`resolve`/`compile`/`commit`, `pipeline`,
+  `doctor`, `status`, `ekl`, `ledger repair`, `docs generate`, …), a per-workspace job queue
+  (SIGTERM→SIGKILL cancel, chained `pipeline` with per-stage status), and an SSE log tail. This is
+  the first browser mutation, so it brings the **read/write role split**: auth is **OIDC**
+  (Authorization Code + PKCE, a claim → the write role) or, when `OIDC_ISSUER` is unset, **two
+  static tokens** — `CONSOLE_TOKEN` (read) and `CONSOLE_WRITE_TOKEN` (read + write).
+- **Phase 4** (RFC 0132): scheduled runs. A `Schedule` (workspace + command + cron or interval
+  trigger + a required `notify_url`) fires the same job runner; APScheduler is rebuilt from the
+  SQLite table on start. A non-`succeeded` run POSTs `{schedule_id, run_id, status, …}` to the
+  `notify_url`; the UI shows each schedule's last-run status.
+- **Phase 5** (RFC 0133): the graph view (`react-force-graph-2d`, lazy-loaded). An overview as one
+  super-node per object kind → click to expand a kind into its 500 most-connected real objects,
+  kind / relationship-kind filter toggles (`CoupledWith` / `FeedsInto` off by default), a search
+  that flies the camera to a node, and an object panel showing `ekos_state` — properties,
+  relationships, and one evidence row per claim (path · analyzer · confidence · fragment).
+- **Phase 6** (RFC 0134, RFC 0136): a **timelapse slider** under the graph — drag it back and the
+  diagram redraws as the knowledge existed at that instant; a clicked node's panel then shows the
+  evidence it had *then*. Backed by `ekos graph export --as-of <rfc3339> --first-seen` (and the
+  same `as_of` / `include_first_seen` on `ekos_graph_export`); the browser fetches the latest graph
+  once with per-element first-seen stamps and filters it client-side against a **frozen layout**,
+  so scrubbing never refetches and nodes never move. Ticks + the activity histogram come from
+  `ekos ledger timeline`. The slider is only as deep as the ledger's retained history — rich on a
+  workspace committed incrementally, near-flat on a freshly-rebuilt one. **Graph v2** (RFC 0136)
+  adds: **neighbourhood isolation** (an object's real BFS sub-graph, real edges included, at a
+  depth of 1-3 — `ekos_neighborhood`, unmodified); **impact mode** (`ekos_impact`'s hop-distance
+  trace rendered as node coloring source-outward plus highlighted edges between two impacted
+  nodes already on screen — the differentiating screen RFC 0127 called out as "the visual form of
+  the claim that currently has none"); a **server-side ForceAtlas2 layout** (`networkx` +
+  `fa2_modified`) for graphs past ~2,000 nodes, where the browser's own force simulation stops
+  keeping up; and one-click **PNG/glTF export** of the current view, entirely client-side (whatever
+  zoom, filters, and isolate/impact state are on screen, not a server-rendered reproduction).
+- **Eval history** (RFC 0138): every saved `ekos eval run` report, browsable under a workspace's
+  **Evals** tab — a history table (dataset, agent, PASS/FAIL, answer-correctness/hallucination-rate)
+  and a detail view (all eleven metrics — the five headline scores plus tokens/latency/cache/RSS/
+  CPU — and the full per-scenario pass/fail/hallucinated breakdown). Triggering a new run reuses
+  the existing command runner (`eval-run` in the allowlist) rather than a bespoke UI — it shows up
+  on the **Run** tab like any other command, with `dataset`/`agent`/`category`/`limit` params, and
+  its progress streams through the same job log every other command already uses.
+- **Semantics** (RFC 0170): human review of business-semantics hypotheses and the LinkML schema
+  they export. *Review* — a queue (needs-review first, then hypotheses by confidence) filterable by
+  kind/status/text; each item opens with its definition, evidence lines (`path:line` + fragment),
+  links and rationale commits, and **Confirm / Reject (note required) / Edit** (name and
+  description, or a code's label); tick several (or "select all shown") to confirm or reject
+  them in one all-or-nothing decision. *Gaps & conflicts* — the open questions, conflicting
+  definitions and the `needs_review` queue. *LinkML schema* — a **viewer** (concepts, enums and
+  tables as a tree; attributes, constraints, permissible values with status chips; "review" on
+  any recovered element) and a **YAML editor**: *Validate* is a dry-run `ekos import linkml`
+  showing the decisions the edits stand for, *Apply* records them all-or-nothing; *Diff vs
+  current export* shows the edits side by side (changed blocks with context); plus download and
+  load-from-file. *Apache Ossie* (RFC 0245) — the `ekos export ossie` model as a dataset browser
+  (fields, types, meanings, metrics, relationships), downloads as `.ossie.yaml` / `.json`, and an
+  import box: *Validate* is a dry-run `ekos import ossie`, *Apply* records the decisions.
+  Decisions need the write role and run the human-only CLI (never MCP),
+  attributed to the OIDC user — or, in token mode, to a typed name recorded as `token:<name>`.
+
+```bash
+cd ekos && cargo build --release -p ekos && cd ..
+EKOS_BIN=$PWD/ekos/target/release/ekos \
+EKOS_CONSOLE_CONSOLE_TOKEN=dev-read EKOS_CONSOLE_CONSOLE_WRITE_TOKEN=dev-write \
+EKOS_CONSOLE_SESSION_SECRET=$(openssl rand -hex 16) \
+uv --directory web/api run uvicorn --factory app.main:create_app --port 8000 &
+cd web/ui && npm install && npm run dev        # http://localhost:5173 — sign in with a token
+```
+
+`web/docker-compose.yml` runs the same thing (`api` on :8000, `ui` on :5173), published on
+`127.0.0.1` only. Settings live in `web/api/.env`. With no `EKOS_CONSOLE_SESSION_SECRET` set, the
+API generates a random secret per process (sessions do not survive a restart) rather than signing
+cookies with a string anyone can read in this repository. It also logs a warning while the read
+token is still the default `dev-console-token`. A hardening pass
+(Phase 7 — performance, theming, packaging) is still to come, authored just-in-time.
+
+### Fact-segment engine (RFC 0016) — the default for new workspaces
+
+A **brand-new** workspace (`ekos init`, nothing written yet) now runs on the fact-segment engine
+(EAV facts, immutable segments, tantivy search, mmap'd reads) by default, as of 2026-08-21 — every
+version is signature-verified, and it's real, not aspirational: the RFC's storage gate was amended
+with measurements in hand (≤2× of the v2 ledger at equal-or-better read latency — it passes at
+1.66× with 19× faster search), and the default switch itself waited on a real month-long soak
+period on a live, actively-used multi-project estate before flipping (RFC 0016's own dated
+section has the evidence). Any **pre-existing** SQLite-backed workspace is completely unaffected —
+it keeps serving from SQLite forever unless explicitly migrated. `ekos ledger migrate --v3`
+migrates an existing SQLite workspace onto the fact engine — the SQLite source is left untouched,
+and deleting `.ekos/ledger/facts/` rolls back.
+
+Since that default switch, the fact engine has picked up three further hardening passes, all
+opt-in-free and automatic on any fact-engine workspace:
+
+- **Concurrency safety** (RFC 0104) — writes take a real cross-process file lock (`fs4`) instead of
+  assuming a single writer, and multi-step writes run inside a transaction that rolls back cleanly
+  on failure rather than leaving a half-written segment.
+- **Self-healing search + `ledger repair`** (RFC 0103/0105) — a stale or corrupted tantivy schema
+  is detected and rebuilt automatically on open; `ekos ledger repair` additionally re-verifies every
+  sealed segment's signature and reports (or fixes) any that fail.
+- **Version-chain checkpoints** (RFC 0106) — periodic checkpoints into `checkpoints.jsonl` bound how
+  far back a version-chain read has to walk, keeping `object_at`/point-in-time reads fast as ledger
+  history grows.
+
+### Partitioned storage (RFC 0111 Phase A) — opt-in
+
+A **brand-new** workspace can opt into a partitioned store by setting `[storage.partition]` in
+`ekos.toml`:
+
+```toml
+[storage.partition]
+dimension = "entity-kind"   # partition by ObjectKind (Table, File, …); relationships by kind
+time-bucket = "monthly"     # "daily" | "weekly" | "monthly"
+```
+
+Data then splits across many independent fact-segment ledgers keyed by kind + time bucket, with a
+persisted catalog and a run-file index so a reopened store resolves any object/relationship with no
+partition scan; aged partitions tier to cold (handle evicted, promoted back on read). It is a
+drop-in for the single-ledger backend — every command (`ekos status`/`ekos ledger status` report
+it as `(partitioned, RFC 0111)` with real counts), the MCP server, and `docs generate` work
+unchanged. Retrieval fuses each partition's ranked hits **plus a cross-partition exact-name arm**
+(RFC 0120), so an exact-name query still promotes the named object even when a strong lexical hit
+lives in another partition. Existing SQLite or fact-engine workspaces are **never** switched
+implicitly, same rule as the fact-engine default.
+
+**Multi-machine distribution (Phase B, RFC 0113)** is feature-complete at v1 (2026-08-30) and
+validated end-to-end: two autonomous fault-injection soak runs — the second against a real S3
+endpoint (MinIO) and a 95-partition workspace — found and fixed 8 defects, each with a regression
+test (`devlog_144`). What it provides:
+
+- a `SegmentBackend` seam — `LocalFsBackend` (default) or `ObjectStoreBackend` (S3 / Azure /
+  in-memory, behind a feature flag);
+- a **coordinator** (`ekos coordinator serve`) that hands out fencing-tokened write leases and
+  tracks per-partition commit watermarks over newline-delimited JSON-RPC;
+- a **compile worker** (`ekos compile-worker run`) that runs the real
+  `build → recover → resolve → compile → commit` pipeline under a coordinator lease, then
+  registers the partitions it wrote and commits the new generation;
+- **self-describing object-storage partitions** — `[storage.partition] segment-backend-url =
+  "s3://…"` routes each partition's segments (sealed **and** active), `manifest.json`, `dict.bin`,
+  `HEAD`, and search index to S3 / Azure / any S3-compatible store (MinIO included; provider
+  credentials come from the standard `AWS_*` / `AZURE_*` env vars). A query worker can then serve
+  the partition from its URL alone — including committed-but-unsealed rows, which under
+  fine-grained partitioning is most of the data;
+- **query workers** (`ekos query-worker serve`) that pull a partition into a local cache and serve
+  reads for it, and a **`DistributedLedger` gateway** that implements the same `KnowledgeStore`
+  trait every command already uses — fanning reads across the workers, merging, and **failing over
+  to another worker** when one is unreachable — so pointing a workspace at a cluster is just
+  `[storage.distributed]` in `ekos.toml`:
+
+  ```toml
+  [storage.distributed]
+  coordinator   = "coordinator.internal:7333"
+  query-workers = ["qw1.internal:7334", "qw2.internal:7334"]
+  ```
+
+- **distributed search** — the gateway fans each shard's BM25 top-*k* to a worker and merge-sorts
+  the results (shard-local term statistics, the standard query-then-fetch approximation);
+- **a pooled, concurrent, pruned, fault-tolerant gateway** — `DistributedLedger` reuses one
+  connection per coordinator/worker instead of reconnecting per call, fans a multi-partition read
+  out concurrently, prunes id-scoped reads (`get_object` and friends) to the few partitions the
+  coordinator's index says actually hold that id, and rotates to the next worker on a connection
+  failure;
+- **adaptive leases** — `ekos compile-worker` derives its heartbeat from the lease's real TTL, so
+  `ekos coordinator serve --ttl-seconds 5` (fast failover) is safe; `ekos compile-worker run
+  --force` is the Service-A equivalent of `ekos resolve --force`; `ekos compile-worker run
+  --retry-lease-seconds <N>` keeps retrying (every 3s) if the shard's lease is already held by
+  another worker instead of failing immediately — 0 (default) preserves the original fail-fast
+  behavior, and only an "already leased" conflict is ever retried, never a genuinely failed run.
+
+That completes Phase B at its v1 scope. Known follow-on: interrupt-of-in-flight-work on lease
+loss (a fenced worker currently runs its pipeline to the end, then its commit is rejected) — needs
+a cancellation signal threaded through the whole pipeline, materially bigger than the acquire-retry
+loop above. None of this affects Local mode, which stays the default.
+
+## Development Process
+
+All significant architectural decisions begin as RFCs in `docs/rfcs/`. No feature is implemented until its RFC is accepted. See `CLAUDE.md` for the full mandatory development workflow.
+
+## Presentations
+
+Live decks at [alexeyban.github.io/EKOS](https://alexeyban.github.io/EKOS/presentations.html) — every claim in them is reproduced live against real repos, not staged:
+
+- [BIRD Mini-Dev on EKOS](https://alexeyban.github.io/EKOS/presentations/bird-mini-dev-benchmark.html) — the BIRD Text-to-SQL benchmark (Mini-Dev 1024, 11 databases) with Claude Haiku 5.5: 53.3% on raw DDL against 63.9–66.9% on EKOS's compiled pack. Every hold-out question with its generated SQL and verdict, the schema text the model saw, tokens and cost, memory and duration, code and configuration (RFC 0240/0241).
+- [Full-Stack Test Run](https://alexeyban.github.io/EKOS/presentations/full-stack-test-run.html) — an autonomous 22-act pass over the distributed storage stack (RFC 0111/0113), the compiled-knowledge query engine (RFC 0118/0119–0126), and the MCP protocol (RFC 0013/0115): coordinator fencing, gateway failover, RRF fusion, REASON citation checks, the vector arm on a real embedding model, and the write-vs-read-only-gateway safety assertion. Three partitioned-store bugs it surfaced, fixed and re-verified in the same run.
+- [Claude Code + EKOS](https://alexeyban.github.io/EKOS/presentations/claude-code-with-ekos.html) — how Claude Code searches and analyzes a codebase through EKOS's MCP server instead of raw grep/Read, with a measured with-vs-without comparison and real token/usage numbers.
+- [The AI-Native Enterprise Knowledge Compiler](https://alexeyban.github.io/EKOS/presentations/ai-native-knowledge-compiler-pitch.html) — the startup pitch, audited live by Claude Code using EKOS's own MCP server.
+- [ClickHouse: Compiled Metadata + Live NL-to-SQL](https://alexeyban.github.io/EKOS/presentations/clickhouse-connector.html) — the one explicit, audited exception to "AI never touches raw enterprise systems directly," verified live against a real ClickHouse container, honest failures included.
+- [GitHub, Live, End to End](https://alexeyban.github.io/EKOS/presentations/github-live-cross-system.html) — the GitHub connector's first live run, 1,600 real issues/PRs from a real repo: two known gaps fixed before the run, a third (96% of items collapsing into one identity) found only at real scale and fixed the same session, and the residual limitation reported honestly, not hidden.
+- [EKOS from 53 to 87](https://alexeyban.github.io/EKOS/presentations/deepseek-53-to-87.html) — the same 101-question eval, graded deterministically, moving from a local llama3 8B to DeepSeek V4 Flash (OpenCode Zen) and then to better document structure and query planning: 53 → 70 → 79 → 87, what each step bought, the 14 that still fail and why.
+- [Eval Comparison: Fixing a Self-Contaminated Ledger](https://alexeyban.github.io/EKOS/presentations/eval-comparison-report.html) — how the eval harness found that 94% of what EKOS was compiling was not its own code, and three bugs that made fixes silently do nothing.
+- [TSD System Documentation](https://alexeyban.github.io/EKOS/presentations/tsd-documentation.html) and [How TSD Works](https://alexeyban.github.io/EKOS/presentations/tsd-how-it-works.html) — a Windows CE barcode terminal and its desktop server documented from compiled .NET binaries alone (RFC 0148), every claim traced to a metadata token.
+- [Distributed Storage Under Fire](https://alexeyban.github.io/EKOS/presentations/distributed-storage-under-fire.html) — two end-to-end runs of the RFC 0111/0113 distributed engine and the eight defects they found.
+- [EKOS Web Console](https://alexeyban.github.io/EKOS/presentations/web-console.html) — the web console, RFC 0128–0133.
+
+See [alexeyban.github.io/EKOS/presentations.html](https://alexeyban.github.io/EKOS/presentations.html) for the full list.
+
+## Community
+
+Questions and ideas: [GitHub Discussions](https://github.com/alexeyban/EKOS/discussions). Release
+announcements post to X: [@ekosproject](https://x.com/ekosproject) (via `ekos marketing publish`,
+RFC 0030). The project site is [ekos.dev](https://ekos.dev).
+
+## Versioning Roadmap
+
+| Version | Milestone |
+|---------|-----------|
+| v0.1 | Compiler Infrastructure |
+| v0.2 | Observation Layer |
+| v0.3 | Knowledge Recovery |
+| v0.4 | Identity Resolution |
+| v0.5 | Knowledge Ledger |
+| v0.6 | Runtime |
+| v0.7 | AI Layer |
+| v1.0 | Enterprise Knowledge Compiler |
+
+The latest release is on the [releases page](https://github.com/alexeyban/EKOS/releases/latest);
+1.0.0 (2026-09-23) is the `v1.0` row above. [CHANGELOG.md](../CHANGELOG.md) lists what each release
+added. The phase-by-phase record is [TODO.md](../TODO.md) and
+the devlogs, not this table.
+
+## Team
+
+### Alexey Banaev — Co-Founder & Lead Developer
+
+<img src="assets/team-alexey-banaev.jpg" alt="Portrait of Alexey Banaev" width="140" align="left" hspace="16" vspace="4">
+
+Alexey is a Data Engineer and Solution Architect with extensive experience designing data
+platforms, analytics solutions, and distributed systems. He co-founded EKOS to address a fundamental
+challenge in modern data environments: making complex, fragmented data ecosystems understandable,
+traceable, and usable.
+
+As EKOS's co-founder and main developer, Alexey leads the product architecture and engineering,
+combining data engineering, software development, and AI-driven approaches to build a practical
+solution for modern data teams.
+
+<br clear="left">
+
+### Omid Ahmadi — CEO & Co-Founder
+
+**M.Sc. in Software Engineering | M.Sc. in Fluid Engineering**
+
+<img src="assets/team-omid-ahmadi-2026.jpg" alt="Portrait of Omid Ahmadi" width="140" align="left" hspace="16" vspace="4">
+
+CEO and co-founder of EKOS, leading strategic growth, partnerships, and business development.
+
+**Technical expertise:**
+- AI infrastructure, autonomous agents, x402 agentic payments
+- AI-driven development of refinery fluid systems and equipment
+
+<br clear="left">
+
+## License
+
+MIT — see [LICENSE](../LICENSE).

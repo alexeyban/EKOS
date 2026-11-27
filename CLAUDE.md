@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 EKOS has an implemented Rust (2024 edition) Cargo workspace — this is not a design-phase repo.
 Read `devlogs/devlog_*.md` (numbered chronologically — the highest-numbered file is the latest,
-`devlog_355.md` as of this writing) before starting non-trivial work: they are the project's
+`devlog_356.md` as of this writing) before starting non-trivial work: they are the project's
 long-term memory and record what shipped, why, and what was learned. `TODO.md` tracks the
 phase-by-phase roadmap; RFCs are split across two locations for historical reasons, not a
 meaningful distinction — `docs/rfcs/` (repo root) has `0001`–`0024`,
@@ -468,7 +468,10 @@ Increment from the highest existing `devlogs/devlog_N.md`: `devlog_43.md` → `d
 ### After writing the devlog
 
 1. Also update `TODO.md` to tick off completed items for the day's work
-2. Update `README.md` if any user-facing behaviour changed
+2. Update `docs/REFERENCE.md` if any user-facing behaviour changed: it is the feature-by-feature
+   reference (the README before 2026-11-27). **`README.md` stays short** — what EKOS is, the quick
+   start, measured results; change it only when the pitch, the install steps or a headline number
+   changes, never to add a feature section
 3. **Update `docs/generated/ekos-self-documentation.html`** — the human-readable, comprehensive
    capabilities reference published at
    [alexeyban.github.io/EKOS/generated/ekos-self-documentation.html](https://alexeyban.github.io/EKOS/generated/ekos-self-documentation.html).
