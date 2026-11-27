@@ -471,7 +471,8 @@ Increment from the highest existing `devlogs/devlog_N.md`: `devlog_43.md` → `d
 2. Update `docs/REFERENCE.md` if any user-facing behaviour changed: it is the feature-by-feature
    reference (the README before 2026-11-27). **`README.md` stays short** — what EKOS is, the quick
    start, measured results; change it only when the pitch, the install steps or a headline number
-   changes, never to add a feature section
+   changes, never to add a feature section. `README.zh-CN.md` and `README.ja.md` are its translations:
+   change all three together (the ekos.dev homepage has the same in `tools/build_i18n.py` of the site repo)
 3. **Update `docs/generated/ekos-self-documentation.html`** — the human-readable, comprehensive
    capabilities reference published at
    [alexeyban.github.io/EKOS/generated/ekos-self-documentation.html](https://alexeyban.github.io/EKOS/generated/ekos-self-documentation.html).
