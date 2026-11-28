@@ -15,6 +15,7 @@
   <a href="https://github.com/alexeyban/EKOS/actions/workflows/ci.yml"><img src="https://github.com/alexeyban/EKOS/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://sonarcloud.io/summary/new_code?id=alexeyban_EKOS"><img src="https://sonarcloud.io/api/project_badges/measure?project=alexeyban_EKOS&metric=alert_status" alt="Quality gate"></a>
   <a href="https://github.com/alexeyban/EKOS/stargazers"><img src="https://img.shields.io/github/stars/alexeyban/EKOS?style=flat" alt="GitHub stars"></a>
+  <a href="https://pypi.org/project/ekos/"><img src="https://img.shields.io/pypi/v/ekos?color=86cc42" alt="PyPI"></a>
 </p>
 
 <p align="center">
@@ -46,6 +47,11 @@ documents and the links between them, and serves that graph to the agent over
   database catalogs, ETL jobs (dbt, Pentaho, Talend), documents and Git history.
 - **Local and read-only.** A single Rust binary. Your sources stay on your machine, the agent gets
   read-only access, and secrets are redacted before anything is stored.
+
+<p align="center">
+  <a href="https://ekos.dev/semantic-layer/"><img src="docs/assets/readme-graph.png" alt="EKOS web console: the graph of an accounting system with one table selected and the SQL statements it was read from listed beside it" width="900"></a><br>
+  <sub>LedgerSMB compiled from its repository: 12,058 objects. The selected table shows the statements it was read from, with file and line.<br>More screenshots, a worked text-to-SQL example and the benchmark detail: <a href="https://ekos.dev/semantic-layer/">ekos.dev/semantic-layer</a></sub>
+</p>
 
 ## Quick start
 
@@ -111,6 +117,21 @@ print(kb.impact(hit.id, hops=3))             # what a change to it would reach
 | Write SQL for "revenue per customer last quarter" | A SQL agent that knows the schema, joins and code values, and checks its query before answering |
 | Do the docs still match the code and the data? | A list of conflicts, with each side's claim and where it was stated |
 | What changed since last week? | A diff of the knowledge itself, not of text files |
+
+## What the model holds
+
+Before an agent writes a query or changes a table it has to know six things. A schema dump answers one of them.
+
+| Question | In EKOS | Read from |
+|---|---|---|
+| What does it mean? | Concepts and code meanings, each a hypothesis until a person confirms it | Comments, constraints, seed rows, filters in views, procedures and ETL steps, glossaries |
+| Where is it? | Tables and columns | DDL, migration scripts, live catalogs, ORM models |
+| What is connected? | Relationships | Declared foreign keys; keys found in the data stay candidates until accepted |
+| How is it calculated? | Metrics and transformations | Views, stored procedures, dbt, Pentaho, Talend, imported Apache Ossie models |
+| Where does it come from? | Evidence and lineage | The file and line, statement or commit behind every object |
+| Can I rely on it? | Review status, conflicts, sign-off | People's decisions; an answer built on a disputed fact is marked `disputed` |
+
+The model exports to [Apache Ossie](https://ossie.apache.org/) and LinkML and reads Ossie models others wrote. The full tour, with screenshots: [ekos.dev/semantic-layer](https://ekos.dev/semantic-layer/).
 
 ## How it works
 

@@ -15,6 +15,7 @@
   <a href="https://github.com/alexeyban/EKOS/actions/workflows/ci.yml"><img src="https://github.com/alexeyban/EKOS/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://sonarcloud.io/summary/new_code?id=alexeyban_EKOS"><img src="https://sonarcloud.io/api/project_badges/measure?project=alexeyban_EKOS&metric=alert_status" alt="品質ゲート"></a>
   <a href="https://github.com/alexeyban/EKOS/stargazers"><img src="https://img.shields.io/github/stars/alexeyban/EKOS?style=flat" alt="GitHub stars"></a>
+  <a href="https://pypi.org/project/ekos/"><img src="https://img.shields.io/pypi/v/ekos?color=86cc42" alt="PyPI"></a>
 </p>
 
 <p align="center">
@@ -40,6 +41,11 @@
 - **すべての事実に出典。** 回答は、元になったファイルと行番号、SQL 文、コミットを示します。二つのソースが食い違う場合、EKOS はどちらかを選ばず、その食い違いを報告します。
 - **コードだけではありません。** アプリケーションコード、SQL スキーマとストアドプロシージャ、稼働中のデータベースカタログ、ETL ジョブ（dbt、Pentaho、Talend）、ドキュメント、Git 履歴を一つのグラフで扱います。
 - **ローカルで、読み取り専用。** Rust 製の単一バイナリです。ソースは手元のマシンから出ず、エージェントには読み取り専用のアクセスだけが与えられ、シークレットは保存前にマスクされます。
+
+<p align="center">
+  <a href="https://ekos.dev/semantic-layer/"><img src="docs/assets/readme-graph.png" alt="EKOS Web コンソール：会計システムのグラフで 1 つのテーブルを選択し、その読み取り元の SQL 文を横に表示" width="900"></a><br>
+  <sub>リポジトリからコンパイルした LedgerSMB：12,058 オブジェクト。選択したテーブルには、読み取り元の文がファイルと行番号付きで表示されます。<br>その他のスクリーンショット、text-to-SQL の実例、ベンチマークの詳細：<a href="https://ekos.dev/semantic-layer/">ekos.dev/semantic-layer</a>（英語）</sub>
+</p>
 
 ## クイックスタート
 
@@ -101,6 +107,21 @@ print(kb.impact(hit.id, hops=3))             # 変更の影響が及ぶ範囲
 | 「前四半期の顧客別売上」の SQL を書いて | スキーマ、結合、コード値を把握し、回答前に自分のクエリをチェックする SQL エージェント |
 | ドキュメントはまだコードやデータと一致している？ | 食い違いの一覧。それぞれの主張と、その記述場所付き |
 | 先週から何が変わった？ | テキストファイルの差分ではなく、知識そのものの差分 |
+
+## モデルが持つもの
+
+エージェントがクエリを書いたりテーブルを変更したりする前に、知っておくべきことが六つあります。スキーマのダンプが答えるのは、そのうちの一つだけです。
+
+| 問い | EKOS では | 読み取り元 |
+|---|---|---|
+| どういう意味か | 概念とコード値の意味。人が確認するまでは仮説です | コメント、制約、初期データ、ビューやプロシージャ、ETL ステップのフィルター、用語集 |
+| どこにあるか | テーブルとカラム | DDL、マイグレーションスクリプト、稼働中のカタログ、ORM モデル |
+| 何とつながっているか | リレーションシップ | 宣言された外部キー。データから見つけたキーは、承認されるまで候補のままです |
+| どう計算されるか | メトリクスと変換 | ビュー、ストアドプロシージャ、dbt、Pentaho、Talend、取り込んだ Apache Ossie モデル |
+| どこから来たか | 根拠とリネージ | 各オブジェクトの元になったファイルと行番号、文、コミット |
+| 信頼できるか | レビュー状態、食い違い、承認 | 人の判断。争いのある事実に基づく回答には `disputed` が付きます |
+
+モデルは [Apache Ossie](https://ossie.apache.org/) と LinkML にエクスポートでき、他の人が書いた Ossie モデルも読み込めます。スクリーンショット付きの紹介：[ekos.dev/semantic-layer](https://ekos.dev/semantic-layer/)（英語）。
 
 ## 仕組み
 

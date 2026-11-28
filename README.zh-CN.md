@@ -15,6 +15,7 @@
   <a href="https://github.com/alexeyban/EKOS/actions/workflows/ci.yml"><img src="https://github.com/alexeyban/EKOS/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://sonarcloud.io/summary/new_code?id=alexeyban_EKOS"><img src="https://sonarcloud.io/api/project_badges/measure?project=alexeyban_EKOS&metric=alert_status" alt="质量门禁"></a>
   <a href="https://github.com/alexeyban/EKOS/stargazers"><img src="https://img.shields.io/github/stars/alexeyban/EKOS?style=flat" alt="GitHub stars"></a>
+  <a href="https://pypi.org/project/ekos/"><img src="https://img.shields.io/pypi/v/ekos?color=86cc42" alt="PyPI"></a>
 </p>
 
 <p align="center">
@@ -40,6 +41,11 @@
 - **每条事实都标明出处。** 答案会指向它所依据的文件和行号、SQL 语句或提交记录。当两个来源说法不一致时，EKOS 会报告这个冲突，而不是替你选边。
 - **不只是代码。** 同一张图涵盖应用代码、SQL 表结构和存储过程、在线数据库目录、ETL 作业（dbt、Pentaho、Talend）、文档和 Git 历史。
 - **本地运行，只读访问。** 只有一个 Rust 二进制文件。你的源码留在你的机器上，智能体只有只读权限，密钥在存储之前就会被脱敏。
+
+<p align="center">
+  <a href="https://ekos.dev/semantic-layer/"><img src="docs/assets/readme-graph.png" alt="EKOS Web 控制台：一个会计系统的图谱，选中了一张表，旁边列出读取它的 SQL 语句" width="900"></a><br>
+  <sub>由代码仓库编译出的 LedgerSMB：12,058 个对象。选中的表列出了读取它的语句，以及文件和行号。<br>更多截图、一个完整的 text-to-SQL 示例和基准测试细节：<a href="https://ekos.dev/semantic-layer/">ekos.dev/semantic-layer</a>（英文）</sub>
+</p>
 
 ## 快速开始
 
@@ -101,6 +107,21 @@ print(kb.impact(hit.id, hops=3))             # 修改它会影响到什么
 | 为“上个季度每个客户的收入”写一条 SQL | 一个了解表结构、关联关系和代码值的 SQL 智能体，在回答之前先检查自己的查询 |
 | 文档和代码、数据还一致吗？ | 一份冲突清单，列出每一方的说法及其出处 |
 | 上周以来发生了什么变化？ | 知识本身的差异，而不是文本文件的差异 |
+
+## 模型里有什么
+
+智能体在写查询或修改表之前，需要知道六件事。表结构导出只回答了其中一件。
+
+| 问题 | 在 EKOS 中 | 读取自 |
+|---|---|---|
+| 它是什么意思？ | 概念和代码值含义；在有人确认之前都只是假设 | 注释、约束、初始数据、视图、存储过程和 ETL 步骤中的过滤条件、术语表 |
+| 它在哪里？ | 表和列 | DDL、迁移脚本、在线数据库目录、ORM 模型 |
+| 它和什么相连？ | 关系 | 声明的外键；从数据中发现的键在被接受之前只是候选 |
+| 它是怎么算出来的？ | 指标和转换 | 视图、存储过程、dbt、Pentaho、Talend、导入的 Apache Ossie 模型 |
+| 它从哪里来？ | 证据和血缘 | 每个对象背后的文件和行号、语句或提交 |
+| 它可靠吗？ | 评审状态、冲突、签字确认 | 人的决定；基于有争议事实的答案会标记为 `disputed` |
+
+模型可以导出为 [Apache Ossie](https://ossie.apache.org/) 和 LinkML，也能读取别人编写的 Ossie 模型。带截图的完整介绍：[ekos.dev/semantic-layer](https://ekos.dev/semantic-layer/)（英文）。
 
 ## 工作原理
 
