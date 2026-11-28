@@ -9,6 +9,7 @@ pub mod graph_export;
 pub mod reason;
 pub mod retrieval;
 pub mod retrieval_eval;
+pub mod store;
 
 use chrono::{DateTime, Utc};
 use ekos_kir::{

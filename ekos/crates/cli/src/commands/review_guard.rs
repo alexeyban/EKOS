@@ -444,7 +444,7 @@ fn mcp_cannot_reach_a_human_only_entry_point() {
     assert!(
         resolved
             .iter()
-            .any(|(_, r)| contains_run(r, &["conflicts", "open_for"])),
+            .any(|(_, r)| contains_run(r, &["conflicts", "agent_list"])),
         "mcp.rs was not read"
     );
     let found = violations(src);
@@ -452,6 +452,56 @@ fn mcp_cannot_reach_a_human_only_entry_point() {
         found.is_empty(),
         "human-only paths reachable from mcp.rs: {found:#?}"
     );
+}
+
+/// RFC 0269: the read tools moved out of `mcp.rs` into `ekos-read`, and the Python package's
+/// engine calls them too. Both are as programmable as an agent, so both are held to the same
+/// rule as `mcp.rs`: no path to a human-only entry point. `ekos-read` depends on `ekos-semantic`,
+/// where several of those entry points live, so this is not vacuous.
+#[test]
+fn the_shared_read_tools_and_the_python_engine_cannot_reach_a_human_only_entry_point() {
+    let sources = [
+        ("read/src/lib.rs", include_str!("../../../read/src/lib.rs")),
+        (
+            "read/src/args.rs",
+            include_str!("../../../read/src/args.rs"),
+        ),
+        (
+            "read/src/kinds.rs",
+            include_str!("../../../read/src/kinds.rs"),
+        ),
+        (
+            "read/src/tools.rs",
+            include_str!("../../../read/src/tools.rs"),
+        ),
+        (
+            "read/src/conflicts.rs",
+            include_str!("../../../read/src/conflicts.rs"),
+        ),
+        (
+            "python/src/lib.rs",
+            include_str!("../../../python/src/lib.rs"),
+        ),
+        (
+            "python/src/engine.rs",
+            include_str!("../../../python/src/engine.rs"),
+        ),
+    ];
+    // The guard really reads these files: it sees the read of the conflicts constants.
+    let (resolved, _) = resolved_paths(sources[4].1);
+    assert!(
+        resolved
+            .iter()
+            .any(|(_, r)| contains_run(r, &["conflicts", "DISPUTES"])),
+        "read/src/conflicts.rs was not read"
+    );
+    for (name, src) in sources {
+        let found = violations(src);
+        assert!(
+            found.is_empty(),
+            "human-only paths reachable from {name}: {found:#?}"
+        );
+    }
 }
 
 /// A rename must fail here rather than leave the guard matching a name nothing has any more.

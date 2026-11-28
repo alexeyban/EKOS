@@ -9,7 +9,7 @@
 use super::store::open_store_read_only;
 use anyhow::{Context, Result};
 use ekos_compiler_core::EkosConfig;
-use ekos_kir::{ObjectKind, RelationshipKind};
+use ekos_kir::RelationshipKind;
 use ekos_runtime::{ExportLevel, GraphExportOptions, GroupBy};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -62,38 +62,7 @@ pub fn parse_group_by(s: &str, path_prefix_depth: usize) -> Result<GroupBy> {
     }
 }
 
-/// Parses an [`ObjectKind`] name case-insensitively against the built-in variants, falling back to
-/// [`ObjectKind::Custom`] for anything else — the same escape-hatch posture
-/// [`RelationshipKind::from_str`] takes. Shared with the R3 MCP tool.
-pub fn parse_object_kind(s: &str) -> ObjectKind {
-    macro_rules! ci {
-        ($($variant:ident),+ $(,)?) => {
-            $(if s.eq_ignore_ascii_case(stringify!($variant)) {
-                return ObjectKind::$variant;
-            })+
-        };
-    }
-    ci!(
-        File,
-        Directory,
-        Table,
-        Entity,
-        Service,
-        Api,
-        BusinessRule,
-        BusinessConcept,
-        Dataset,
-        Column,
-        Pipeline,
-        Dashboard,
-        Person,
-        Model,
-        Prompt,
-        Agent,
-        Unknown,
-    );
-    ObjectKind::Custom(s.to_string())
-}
+pub use ekos_read::kinds::parse_object_kind;
 
 /// Fully-resolved arguments for [`export`], one field per CLI flag (`bin/ekos.rs` does the clap
 /// parsing, this module does the domain parsing).
@@ -233,6 +202,7 @@ fn write_ndjson(sink: &mut dyn Write, graph: &ekos_runtime::GraphExport) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ekos_kir::ObjectKind;
 
     #[test]
     fn parse_object_kind_builtin_vs_custom() {

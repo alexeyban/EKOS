@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 ekos-kir.workspace = true
 ekos-ledger.workspace = true
 ekos-runtime.workspace = true
+ekos-read.workspace = true
 ekos-compiler-core.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

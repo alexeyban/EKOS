@@ -99,6 +99,7 @@
     <a href="#worldengine">World Engine simulation</a>
     <a href="#clickhouse">ClickHouse connector</a>
     <a href="#migrate">EKOS Migrate</a>
+    <a href="#python">From Python</a>
     <a href="#evidence">Live evidence from this repo</a>
   </nav>
 
@@ -474,9 +475,24 @@ ekos migrate reconstruct --source close_period</pre>
     </div>
   </section>
 
+<!-- ═══════════════════════════════════════════════ PYTHON ═══ -->
+  <section class="cap" id="python">
+    <div class="cap-num">18</div>
+    <h2>From Python <span style="font-size:0.6em; color:var(--ink-soft); font-weight:500;">(provisional, not on PyPI yet)</span></h2>
+    <p class="lede" style="max-width:56rem;">The <code class="mono">ekos</code> Python package opens a compiled ledger read-only inside a Python process: <code class="mono">kb = ekos.open("~/work/shop")</code>, then <code class="mono">kb.search(..)</code>, <code class="mono">kb.get(id)</code>, <code class="mono">kb.impact(id)</code>, <code class="mono">kb.query(..)</code>. No server and no Rust toolchain; one abi3 wheel per platform, Python 3.10 or newer, no dependencies. Build it from a checkout with <code class="mono">uvx maturin build --release</code> in <code class="mono">python/</code>.<span class="rfc">RFC 0269</span></p>
+    <div class="feat-grid">
+      <div class="feat"><h3>The reads</h3><p><code class="mono">status</code>, <code class="mono">search</code>, <code class="mono">get</code>, <code class="mono">facts</code>, <code class="mono">history</code>, <code class="mono">audit_trail</code>, <code class="mono">dependents</code>, <code class="mono">dependencies</code>, <code class="mono">impact</code>, <code class="mono">neighborhood</code>, <code class="mono">ekl</code>, <code class="mono">query</code>, <code class="mono">retrieve</code>, <code class="mono">diff</code>, <code class="mono">at(time)</code> and <code class="mono">graph</code>, as frozen dataclasses. <code class="mono">ekos.aio</code> has the same reads for asyncio.</p></div>
+      <div class="feat"><h3>Evidence in the types</h3><p>An object comes with its evidence records (path, line, fragment, confidence); a claim of a compiled answer has an <code class="mono">evidence</code> list that is always present, and <code class="mono">disputed</code> when sources disagree about its attribute.</p></div>
+      <div class="feat"><h3>The same answers as MCP</h3><p>Each read is the Rust function the MCP tool of the same name runs (crate <code class="mono">ekos-read</code>); a test compares the two on one ledger.</p></div>
+      <div class="feat"><h3>Read-only by construction</h3><p>An open never creates a store, a handle is a snapshot until <code class="mono">refresh()</code>, and the engine has no write path and no review action: a test scans its source. The ledger directory is byte-identical after the whole test suite.</p></div>
+      <div class="feat"><h3>Read scope</h3><p><code class="mono">ekos.open(path, read_scope={..})</code> filters every read by an RFC 0181 scope; the reads that cannot be filtered are refused for a restricted reader.</p></div>
+      <div class="feat"><h3>Not yet</h3><p>Running the pipeline from Python and connecting to a remote EKOS (phase 2); contributing facts from an application (its own RFC, as a compiled source).</p></div>
+    </div>
+  </section>
+
 <!-- ═══════════════════════════════════════════════ EVIDENCE ═══ -->
   <section class="cap" id="evidence">
-    <div class="cap-num">18</div>
+    <div class="cap-num">19</div>
     <h2>Live, generated evidence: this repo, compiled by itself</h2>
     <p class="lede">Everything below this line is rendered straight from <code class="mono">ekos docs generate --layout curated</code> and <code class="mono">--layout solution-architect</code>'s own output, run against EKOS's real, currently-committed ledger — the same commands and output shape any other project gets. Nothing here is hand-typed.</p>
 

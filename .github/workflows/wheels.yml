@@ -1,0 +1,158 @@
+name: Python wheels
+
+# RFC 0269 — the `ekos` Python package: one abi3 wheel per platform, built for a tagged version
+# and published to PyPI. `workflow_dispatch` builds and tests the wheels without publishing.
+#
+# Publishing needs two things the repository owner sets up once: a PyPI trusted publisher for
+# this workflow (environment `pypi`), and the repository variable PYPI_PUBLISH=true. Until both
+# exist a tag builds and tests the wheels and stops there.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  MATURIN_VERSION: "1.16.0"
+
+permissions:
+  contents: read
+
+jobs:
+  wheel:
+    name: Wheel ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux wheels are linked against an old glibc through zig, whatever the runner has:
+          # a wheel built against the runner's own glibc is tagged with it and does not install
+          # on an older distribution (devlog_357).
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+            build: --zig --compatibility manylinux_2_28
+            smoke: native
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+            build: --zig --compatibility manylinux_2_28
+            smoke: native
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            build: --zig --compatibility musllinux_1_2
+            smoke: alpine
+          - target: aarch64-apple-darwin
+            runner: macos-15
+            build: ""
+            smoke: native
+          # Built on Apple silicon; nothing here can run it, so it is built and not imported.
+          - target: x86_64-apple-darwin
+            runner: macos-15
+            build: ""
+            smoke: none
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            build: ""
+            smoke: native
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+
+      - name: Install the pinned toolchain and add the target to it
+        run: |
+          rustup show active-toolchain
+          rustup target add ${{ matrix.target }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: false
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ekos/target
+          key: wheel-${{ matrix.target }}-${{ hashFiles('ekos/Cargo.lock') }}
+          restore-keys: wheel-${{ matrix.target }}-
+
+      - name: Build the wheel
+        working-directory: python
+        shell: bash
+        env:
+          UV_PYTHON: "3.10"
+        run: |
+          uvx --with ziglang "maturin@${MATURIN_VERSION}" build --release --locked \
+            --target ${{ matrix.target }} ${{ matrix.build }} -o dist
+          ls -l dist
+
+      # The lowest and the highest supported Python, each in a fresh environment with nothing
+      # but the wheel and pytest. The tests that need a compiled ledger are skipped here; they
+      # run in CI (scripts/python-package-test.sh).
+      - name: Install and import (lowest and highest Python)
+        if: matrix.smoke == 'native'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for python in 3.10 3.14; do
+            env="$RUNNER_TEMP/venv-$python"
+            uv venv -q -p "$python" "$env"
+            py="$env/bin/python"
+            if [[ ! -x "$py" ]]; then
+              py="$env/Scripts/python.exe"
+            fi
+            uv pip install -q --python "$py" python/dist/*.whl pytest==8.4.2
+            (
+              cd "$RUNNER_TEMP"
+              "$py" -c "import ekos; print('ekos', ekos.__version__)"
+              "$py" -m pytest -q -c "$GITHUB_WORKSPACE/python/pyproject.toml" \
+                --rootdir="$GITHUB_WORKSPACE/python" "$GITHUB_WORKSPACE/python/tests"
+            )
+          done
+
+      - name: Install and import (Alpine, musl)
+        if: matrix.smoke == 'alpine'
+        run: |
+          docker run --rm -v "$PWD/python/dist:/dist:ro" python:3.13-alpine sh -c '
+            pip install --quiet /dist/*.whl &&
+            python -c "import ekos; print(\"ekos\", ekos.__version__)"'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wheel-${{ matrix.target }}
+          path: python/dist/*.whl
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: wheel
+    if: github.ref_type == 'tag' && vars.PYPI_PUBLISH == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      # Trusted publishing: PyPI accepts this workflow's identity, no stored token.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: false
+
+      - name: Publish
+        run: uv publish --trusted-publishing always dist/*.whl

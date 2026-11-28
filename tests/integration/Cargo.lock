@@ -1004,6 +1004,7 @@ dependencies = [
  "ekos-plugin-sqlserver",
  "ekos-plugin-talend",
  "ekos-plugin-treasury",
+ "ekos-read",
  "ekos-recovery",
  "ekos-runtime",
  "ekos-segment-backend",
@@ -1898,6 +1899,21 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "ekos-read"
+version = "1.6.1"
+dependencies = [
+ "chrono",
+ "ekos-compiler-core",
+ "ekos-ekl",
+ "ekos-kir",
+ "ekos-ledger",
+ "ekos-runtime",
+ "ekos-semantic",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

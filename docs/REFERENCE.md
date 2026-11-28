@@ -2226,6 +2226,32 @@ verified against a placeholder key (routing, boot check, rate limiting, static s
 correct), but live-question answer quality is unverified pending a real API key and a rehearsed run
 — see `devlog_45.md` and `TODO.md`.
 
+### From Python (RFC 0269, provisional)
+
+`python/` is the `ekos` Python package: it opens a compiled ledger read-only inside a Python
+process, with no server. It is not on PyPI yet — build it from a checkout with
+`cd python && uvx maturin build --release`.
+
+```python
+import ekos
+
+kb = ekos.open("~/work/shop")              # or ekos.open(project="shop")
+hits = kb.search("payment status")
+state = kb.get(hits[0].id)                 # object, relationships, evidence
+kb.impact(hits[0].id, hops=3)
+kb.query("which tables reference customers?").claims
+```
+
+- Reads: `status`, `search` (lexical; vector and hybrid with a caller-supplied query vector),
+  `get`, `facts`, `history`, `audit_trail`, `dependents`, `dependencies`, `impact`,
+  `neighborhood`, `ekl`, `query`, `retrieve`, `diff`, `at(time)`, `graph`; `ekos.aio` for asyncio.
+- Each read is the same function the MCP tool of that name runs (crate `ekos-read`).
+- A handle is a snapshot until `refresh()`. An open never creates a store. Nothing in the
+  package writes or reviews.
+- SQLite ledgers and distributed projects are refused with `NotSupported`.
+
+The guide is [`docs/python.md`](python.md).
+
 ### AI agent access (MCP)
 
 `ekos mcp serve --workspace <dir>` exposes the read-only Runtime as a Model Context Protocol

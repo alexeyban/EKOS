@@ -64,6 +64,7 @@ sqlparser.workspace = true
 ekos-clickhouse-query.workspace = true
 ekos-identity.workspace = true
 ekos-ekl.workspace = true
+ekos-read.workspace = true
 ekos-marketing.workspace = true
 ekos-docs-gen.workspace = true
 ekos-evals.workspace = true
@@ -134,6 +135,8 @@ reqwest.workspace = true
 tempfile = "3"
 
 [dev-dependencies]
+# RFC 0269: the Python package's engine (no PyO3) — its answers are compared with the MCP tools'.
+ekos-python = { path = "../python" }
 # RFC 0245: `tests/ossie_e2e.rs` validates exports against the official Ossie JSON Schema.
 jsonschema = { workspace = true }
 # Issue #14: `commands/review_guard.rs` parses `mcp.rs` to resolve imports.

@@ -30,28 +30,30 @@ mod _native {
     );
     create_exception!(
         _native,
+        NotFound,
+        QueryError,
+        "The id is well-formed and names nothing in the ledger."
+    );
+    create_exception!(
+        _native,
         NotSupported,
         EkosError,
         "This access mode cannot serve the call."
     );
 
     #[pymodule_export]
+    use super::_native::QueryError as QueryErrorT;
+    #[pymodule_export]
     use super::_native::{EkosError as EkosErrorT, LedgerError as LedgerErrorT};
     #[pymodule_export]
-    use super::_native::{NotSupported as NotSupportedT, QueryError as QueryErrorT};
+    use super::_native::{NotFound as NotFoundT, NotSupported as NotSupportedT};
 
     fn raise(e: EngineError) -> PyErr {
         match e {
             EngineError::Ledger(m) => LedgerError::new_err(m),
             EngineError::NotSupported(m) => NotSupported::new_err(m),
             EngineError::Query(m) => QueryError::new_err(m),
-        }
-    }
-
-    fn text(value: Result<serde_json::Value, EngineError>) -> PyResult<String> {
-        match value {
-            Ok(v) => Ok(v.to_string()),
-            Err(e) => Err(raise(e)),
+            EngineError::NotFound(m) => NotFound::new_err(m),
         }
     }
 
@@ -61,33 +63,46 @@ mod _native {
 
     #[pymethods]
     impl Ledger {
-        fn status(&self, py: Python<'_>) -> PyResult<String> {
-            py.detach(|| text(self.0.status()))
-        }
-
-        fn search(
+        /// Run the read `name` with JSON `arguments`; the answer is JSON text.
+        #[pyo3(signature = (name, arguments, embedding=None))]
+        fn call(
             &self,
             py: Python<'_>,
-            query: &str,
-            mode: &str,
-            limit: usize,
+            name: &str,
+            arguments: &str,
+            embedding: Option<Vec<f32>>,
         ) -> PyResult<String> {
-            py.detach(|| text(self.0.search(query, mode, limit)))
+            py.detach(|| {
+                let args: serde_json::Value = serde_json::from_str(arguments)
+                    .map_err(|e| EngineError::Query(format!("arguments are not JSON: {e}")))?;
+                Ok(self.0.call(name, &args, embedding)?.to_string())
+            })
+            .map_err(raise)
+        }
+
+        /// What the caller should know about this store, in words.
+        fn warnings(&self) -> Vec<String> {
+            self.0.warnings().to_vec()
         }
 
         fn refresh(&self, py: Python<'_>) -> PyResult<bool> {
             py.detach(|| self.0.refresh()).map_err(raise)
         }
-
-        fn get(&self, py: Python<'_>, object_id: &str) -> PyResult<String> {
-            py.detach(|| text(self.0.get(object_id)))
-        }
     }
 
-    /// Open the ledger at `path` read-only.
+    /// Open the ledger at `path` read-only. `read_scope` is an RFC 0181 scope as JSON.
     #[pyfunction]
-    fn open(py: Python<'_>, path: PathBuf) -> PyResult<Ledger> {
-        py.detach(|| Engine::open(&path)).map(Ledger).map_err(raise)
+    #[pyo3(signature = (path, read_scope=None))]
+    fn open(py: Python<'_>, path: PathBuf, read_scope: Option<String>) -> PyResult<Ledger> {
+        py.detach(|| Engine::open(&path, read_scope.as_deref()))
+            .map(Ledger)
+            .map_err(raise)
+    }
+
+    /// The reads this engine serves, by name.
+    #[pyfunction]
+    fn reads() -> Vec<&'static str> {
+        crate::engine::READS.iter().map(|r| r.name).collect()
     }
 
     /// The engine version this wheel embeds.

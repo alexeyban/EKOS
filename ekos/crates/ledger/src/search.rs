@@ -121,8 +121,17 @@ fn terr(e: impl std::fmt::Display) -> LedgerError {
 ///
 /// - `2` — RFC 0177: a symbol's `description`, `signature` and `fields`.
 /// - `3` — RFC 0245: `synonyms` (Apache Ossie datasets, fields' owners and metrics).
-const CONTENT_VERSION: &str = "3";
+pub const CONTENT_VERSION: &str = "3";
 const CONTENT_VERSION_FILE: &str = "content_version";
+
+/// The content version the index in `dir` was written under, when it records one. A read-only
+/// reader compares it with [`CONTENT_VERSION`] to tell its caller that search may miss content
+/// (RFC 0269); it never rewrites the index, which only a writable open does.
+pub fn recorded_content_version(dir: &Path) -> Option<String> {
+    std::fs::read_to_string(dir.join(CONTENT_VERSION_FILE))
+        .ok()
+        .map(|v| v.trim().to_string())
+}
 
 /// Wipes `dir`'s on-disk contents so a subsequent `Index::open_or_create` starts genuinely fresh
 /// — the self-heal path for a stale on-disk tantivy schema (RFC 0103: e.g. RFC 0101 added a new

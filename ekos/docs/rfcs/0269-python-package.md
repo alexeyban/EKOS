@@ -1,10 +1,11 @@
 # RFC 0269 — EKOS for Python: the `ekos` package
 
-**Status:** Proposed (2026-11-28) — phase 0 (spike) done, results below; phases 1–2 wait for acceptance
+**Status:** Accepted (2026-11-28) — phases 0 and 1 done (results below); phase 2 not started
 **Builds on:** RFC 0097 (read-only open), RFC 0104 (snapshot refresh), RFC 0115 / 0143 / 0182 (MCP over TCP,
 HTTP, the console gateway), RFC 0151 (session memory is hidden from reads), RFC 0181 (read scope),
 RFC 0153 (release matrix).
-**Code:** new crate `ekos/crates/python` (`ekos-python`), new directory `python/` (the package).
+**Code:** new crates `ekos/crates/python` (`ekos-python`) and `ekos/crates/read` (`ekos-read`, phase 1), new
+directory `python/` (the package), `ekos_runtime::store` (phase 1).
 **Not in this RFC:** writes from Python ("contribute") — its own RFC, phase 3 of the plan.
 
 ## Problem
@@ -206,6 +207,71 @@ relationships.
 | Workspace builds without Python | `cargo test -p ekos-python` passes with PyO3 not compiled | Feature `python`, off by default |
 | manylinux | a plain local build is tagged `manylinux_2_34` (the host's glibc); `maturin build --zig --compatibility manylinux_2_28` builds the tantivy + zstd + bundled-SQLite stack in 2 min and gives a 3.76 MB `manylinux_2_28` wheel | Release wheels are built in manylinux containers, never on a runner's own glibc |
 
+## Phase 1 design (2026-11-28)
+
+Two things in the design above changed when phase 1 was built.
+
+### One implementation of the reads: `ekos-read`
+
+The design said the engine would shape its own JSON and a parity test would hold it to the MCP
+tools. Written out, that was the bodies of eleven MCP tools a second time. Instead the bodies moved,
+unchanged, out of `crates/cli/src/commands/mcp.rs` into a new library crate, `ekos-read`:
+
+| Module | Content |
+|---|---|
+| `tools` | `status`, `search`, `query`, `retrieve`, `ekl`, `neighborhood`, `state`, `dependents`, `impact`, `diff`, `graph_export`, `audit` — JSON arguments in, JSON out, the tools' names and shapes |
+| `args` | `required_str`, `required_id`, `bounded_arg` and the neighbourhood / impact bounds |
+| `conflicts` | the read side of RFC 0172 / 0173: which conflicts are current, `open_for`, `flag_disputed`, `brief` |
+| `kinds` | `parse_object_kind` |
+
+`mcp.rs` calls these (`"ekos_impact" => Ok(tools::impact(&runtime, args)?)`) and so does the engine.
+`ReadError` has three cases — `Argument`, `NotFound`, `Store` — with the messages the tools always
+gave; they become `QueryError`, `NotFound` and `LedgerError` in Python.
+
+`ekos-read` opens no store and makes no network call. `search` therefore takes the query vector as
+an argument: the MCP server computes it from the project's embedding provider
+(`tools::search_needs_embedding`), the Python package takes it from its caller.
+
+The parity test stayed, as a check of the wiring rather than of two implementations:
+`mcp::tests::the_python_engine_answers_as_the_mcp_tools_do` runs every read that names an MCP tool
+through the whole MCP path and through `Engine::call`, on one ledger, and compares the JSON. It also
+holds the engine's scope decisions equal to `SCOPED_TOOLS`.
+
+### The engine has one entry point
+
+`Engine::call(name, args, query_embedding)` dispatches over `engine::READS`, a table of
+`(name, MCP tool, allowed under a restricting scope)`. Two reads have no MCP tool: `facts`
+(`Runtime::facts_of`) and `history` (`Runtime::object_history`). The PyO3 glue is `open`, `call`,
+`refresh`, `warnings`, `reads`.
+
+### Smaller points
+
+- **A search hit is `Hit(id, name)`.** The MCP tool never returned a kind or a score, and the
+  package returns what the tool does.
+- **`kb.at(time)`** serves `get` and `graph`, the two reads the ledger answers for a past moment;
+  for anything else an EKL query takes `AS OF`.
+- **`ekos.open(project=, tenant=, home=)`** resolves a home project the way `--project` does.
+- **Content version.** `ekos_ledger::search::recorded_content_version` lets the engine see that a
+  search index was written under another `CONTENT_VERSION`; the open then carries a warning, which
+  Python raises as a `UserWarning`. Nothing is rebuilt.
+- **Wheels are their own workflow**, `.github/workflows/wheels.yml`, not a job of `release.yml`: it
+  can be run by hand to test the six targets without building installers. Linux wheels are linked
+  through zig (`manylinux_2_28`, `musllinux_1_2`) on the runners, with no container. Publishing waits
+  for a PyPI trusted publisher and the repository variable `PYPI_PUBLISH=true`.
+- **Wheels only, no source distribution**: an sdist would have to carry the whole workspace.
+
+### Result (phase 1, 2026-11-28, devlog_358)
+
+- 14 reads served; every one compared with its MCP tool where there is one (12).
+- Rust: 10 engine tests (snapshot beside a writer, session memory never returned, read scope,
+  refused stores, no write path in the engine or `ekos-read`, content-version warning).
+- `review_guard` scans `ekos-read` and `ekos-python` for a path to a human-only entry point.
+- Python: 17 tests against the installed wheel on a workspace the binary compiles, 100% line
+  coverage of the package, `mypy --strict` clean; passes on Python 3.10 and 3.14. The workspace
+  directory is byte-identical after the suite.
+- Not done in phase 1: the wheels workflow has not built macOS, Windows, aarch64 or musl wheels
+  until its first run; a quickstart notebook; `to_pandas` (phase 4).
+
 ## Decisions
 
 | # | Decision | Taken |
@@ -226,7 +292,7 @@ relationships.
 | Phase | Content | Exit |
 |---|---|---|
 | 0 | Spike, this RFC | Done: measurements above, two engine tests |
-| 1 | Full read surface, types, errors, `ekos.aio`, `detect` moved, parity + read-only + guard tests, CI `python` job, wheels in `release.yml`, `docs/python.md` | Every row of the API section served or `NotSupported` with a reason; parity suite green; wheel installs on the six targets |
+| 1 | Full read surface, types, errors, `ekos.aio`, `detect` moved, parity + read-only + guard tests, CI `python` job, the wheels workflow, `docs/python.md` | Done 2026-11-28 (see "Phase 1 design"); the six-target wheel build is checked by the workflow's first run |
 | 2 | `ekos-bin`, `ekos.Project`, `ekos.connect`, the console imports the package's client, embedded-vs-remote parity | A project compiled and read from Python end to end with no shell |
 | 3 | Contribute (own RFC) | — |
 | 4 | pandas / Arrow results, notebook display, LangChain / LlamaIndex retrievers that keep citations | incremental |

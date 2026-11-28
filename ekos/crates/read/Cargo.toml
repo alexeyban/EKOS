@@ -1,0 +1,23 @@
+[package]
+name = "ekos-read"
+description = "The read tools of the EKOS knowledge ledger as library functions — one implementation behind the MCP server and the Python package (RFC 0269)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ekos-kir.workspace = true
+ekos-ledger.workspace = true
+ekos-runtime.workspace = true
+ekos-ekl.workspace = true
+ekos-compiler-core.workspace = true
+ekos-semantic.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"

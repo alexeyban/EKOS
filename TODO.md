@@ -7325,9 +7325,13 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
       never creates, `status` / `search` / `get` / `refresh`), package skeleton `python/`, CI job; measured: wheel
       3.8 MB, search 0.09 ms, ledger byte-identical after reads, `manylinux_2_28` builds; RFC written with ten
       decisions (2026-11-28, devlog_357)
-- [ ] RFC 0269 phase 1: full read surface over `Runtime` (facts, neighborhood, impact, history, `at()`, diff, EKL,
-      query), `ekos_runtime::store::detect` shared with the CLI, partitioned read-only, read scope, types + stubs +
-      `ekos.aio`, parity with the MCP tools, guard scans, wheels for six targets in `release.yml`, `docs/python.md`
+- [x] RFC 0269 phase 1: the read tools moved from `mcp.rs` to the shared crate `ekos-read` (MCP and Python run one
+      implementation; parity test on one ledger); `ekos_runtime::store::detect` shared with the CLI; engine with 14
+      reads, read scope, partitioned read-only, content-version warning; Python `Knowledge` / `KnowledgeAt` /
+      `ekos.aio`, frozen dataclasses, `open(project=)`; 17 package tests, 100% coverage, Python 3.10 and 3.14;
+      `wheels.yml` (six targets, zig manylinux, publish gated); `docs/python.md` (2026-11-28, devlog_358)
+- [ ] RFC 0269 phase 1 follow-up: run `wheels.yml` once by hand and fix what the macOS / Windows / aarch64 / musl
+      rows show; a quickstart notebook on the LedgerSMB demo ledger
 - [ ] RFC 0269 phase 2: `ekos-bin` wheel, `ekos.Project` (pipeline over the binary), `ekos.connect` (TCP + gateway;
       the console imports the package's client), embedded-vs-remote parity
 - [ ] RFC 0269 before a release: register `ekos` and `ekos-bin` on PyPI (owner's account), trusted publishing

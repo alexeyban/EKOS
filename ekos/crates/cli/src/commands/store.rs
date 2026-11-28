@@ -12,17 +12,12 @@
 use anyhow::Result;
 use ekos_compiler_core::EkosConfig;
 use ekos_ledger::scope::{ReadScope, ScopedStore};
-use ekos_ledger::{
-    FactLedger, KnowledgeStore, Ledger, PartitionDimension, PartitionKey, PartitionedLedger,
-    TimeBucket,
+use ekos_ledger::{FactLedger, KnowledgeStore, Ledger, PartitionedLedger};
+pub use ekos_runtime::store::{
+    Backend, detect, facts_dir, partitioned_root, uses_distributed, uses_fact_engine,
+    uses_partitioned,
 };
-use std::path::{Path, PathBuf};
-
-/// True when `[storage.distributed]` points reads at a Distributed-mode cluster (RFC 0113 B4).
-/// Takes precedence over every local backend — the workspace holds no data of its own.
-pub fn uses_distributed(config: &EkosConfig) -> bool {
-    config.storage.distributed.is_enabled()
-}
+use std::path::Path;
 
 /// Build the [`DistributedLedger`] gateway from `[storage.distributed]`.
 fn build_distributed(config: &EkosConfig) -> Result<ekos_distributed::DistributedLedger> {
@@ -38,83 +33,19 @@ fn build_distributed(config: &EkosConfig) -> Result<ekos_distributed::Distribute
         .map_err(|e| anyhow::anyhow!("cannot reach the distributed cluster: {e}"))
 }
 
-/// Where a fact-engine-backed workspace's store lives (migrated or newly created).
-pub fn facts_dir(config: &EkosConfig, cwd: &Path) -> PathBuf {
-    config.ledger_dir(cwd).join("facts")
-}
-
-/// Where a partitioned workspace's catalog + index + partitions live (RFC 0111 Phase A).
-pub fn partitioned_root(config: &EkosConfig, cwd: &Path) -> PathBuf {
-    config.ledger_dir(cwd).join("partitioned")
-}
-
-/// True when this workspace already has a real fact store on disk — either migrated via
-/// `ekos ledger migrate --v3`, or previously auto-created as a fresh workspace's default. Doesn't
-/// distinguish *how* it got there, only that it's the active backend now.
-pub fn uses_fact_engine(config: &EkosConfig, cwd: &Path) -> bool {
-    facts_dir(config, cwd).join("manifest.json").exists()
-}
-
-/// True when this workspace is served by [`PartitionedLedger`] — either it already has a
-/// `partitioned/catalog.json`, or `[storage.partition]` is enabled **and** neither of the other
-/// two backends has ever been written to (a genuinely fresh workspace opting in, mirroring the
-/// fact-engine default-switch rule — an existing SQLite/fact workspace is never implicitly
-/// switched).
-pub fn uses_partitioned(config: &EkosConfig, cwd: &Path) -> bool {
-    if partitioned_root(config, cwd).join("catalog.json").exists() {
-        return true;
-    }
-    config.storage.partition.is_enabled()
-        && !uses_fact_engine(config, cwd)
-        && !config.ledger_path(cwd).exists()
-}
-
-/// The default on-disk layout for a partition: `<partitioned>/p/<dimension_value>/<time_bucket>`,
-/// with `:` and the unit separator (which appear in `"rel:*"` and `Composite` values) sanitized.
-fn default_root_for(root: PathBuf) -> impl Fn(&PartitionKey) -> PathBuf + Send + Sync + 'static {
-    move |key: &PartitionKey| {
-        root.join("p")
-            .join(key.dimension_value.replace([':', '\u{1f}'], "_"))
-            .join(&key.time_bucket)
-    }
-}
-
-/// Build a [`PartitionedLedger`] from `[storage.partition]` config. `compiler-core` holds the
-/// dimension/bucket as strings (it can't depend on `ekos-ledger`); the string→enum translation is
-/// this layer's job (the split CLAUDE.md documents for `ArchitectureConfidence`).
+/// Build a [`PartitionedLedger`] from `[storage.partition]` config: the shared
+/// [`ekos_runtime::store::open_partitioned`], plus the object-storage segment backend, which only
+/// a CLI built with `--features distributed` has.
 pub(crate) fn build_partitioned(
     config: &EkosConfig,
     cwd: &Path,
     read_only: bool,
 ) -> Result<PartitionedLedger> {
-    let root = partitioned_root(config, cwd);
-    let p = &config.storage.partition;
-    let dim_str = p.dimension.as_deref().unwrap_or("entity-kind");
-    let dimension = PartitionDimension::parse(dim_str)
-        .ok_or_else(|| anyhow::anyhow!("unknown [storage.partition] dimension: {dim_str:?}"))?;
-    if dimension != PartitionDimension::EntityKind {
-        anyhow::bail!(
-            "[storage.partition] dimension {dim_str:?} needs a source resolver that open_store \
-             cannot provide yet (KirObject has no source field) — use \"entity-kind\""
-        );
-    }
-    let bucket_str = p.default_time_bucket();
-    let time_bucket = TimeBucket::parse(bucket_str).ok_or_else(|| {
-        anyhow::anyhow!("unknown [storage.partition] time-bucket: {bucket_str:?}")
-    })?;
-
-    let mut ledger = PartitionedLedger::new(
-        &root,
-        dimension,
-        time_bucket,
-        default_root_for(root.clone()),
-    )
-    .map_err(|e| anyhow::anyhow!("cannot open partitioned ledger at {}: {e}", root.display()))?;
-
-    if let Some(url) = p.segment_backend_url.clone() {
+    let mut ledger =
+        ekos_runtime::store::open_partitioned(config, cwd).map_err(|e| anyhow::anyhow!(e))?;
+    if let Some(url) = config.storage.partition.segment_backend_url.clone() {
         ledger = with_segment_backend_url(ledger, url)?;
     }
-
     Ok(if read_only {
         ledger.read_only()
     } else {
@@ -193,34 +124,25 @@ fn scoped(config: &EkosConfig, store: Box<dyn KnowledgeStore>) -> Result<Box<dyn
 }
 
 fn open_store_unscoped(config: &EkosConfig, cwd: &Path) -> Result<Box<dyn KnowledgeStore>> {
-    if uses_distributed(config) {
-        return Ok(Box::new(build_distributed(config)?));
-    }
-    if uses_partitioned(config, cwd) {
-        return Ok(Box::new(build_partitioned(config, cwd, false)?));
-    }
-    if uses_fact_engine(config, cwd) {
-        let dir = facts_dir(config, cwd);
-        return Ok(Box::new(FactLedger::open(&dir).map_err(|e| {
+    match detect(config, cwd) {
+        Backend::Distributed => Ok(Box::new(build_distributed(config)?)),
+        Backend::Partitioned(_) => Ok(Box::new(build_partitioned(config, cwd, false)?)),
+        Backend::Facts(dir) => Ok(Box::new(FactLedger::open(&dir).map_err(|e| {
             anyhow::anyhow!("cannot open fact ledger at {}: {e}", dir.display())
-        })?));
-    }
-
-    let sqlite_path = config.ledger_path(cwd);
-    if sqlite_path.exists() {
+        })?)),
         // Pre-existing, never-migrated SQLite workspace — keep serving it exactly as before.
-        return Ok(Box::new(Ledger::open(&sqlite_path).map_err(|e| {
-            anyhow::anyhow!("cannot open ledger at {}: {e}", sqlite_path.display())
-        })?));
+        Backend::Sqlite(path) => {
+            Ok(Box::new(Ledger::open(&path).map_err(|e| {
+                anyhow::anyhow!("cannot open ledger at {}: {e}", path.display())
+            })?))
+        }
+        // Neither backend has ever been written to — a genuinely fresh workspace.
+        // `FactLedger::open` creates a new store the same way `Ledger::open` does for SQLite, so
+        // this is the one place the fact-engine default takes effect.
+        Backend::Fresh(dir) => Ok(Box::new(FactLedger::open(&dir).map_err(|e| {
+            anyhow::anyhow!("cannot create fact ledger at {}: {e}", dir.display())
+        })?)),
     }
-
-    // Neither backend has ever been written to — a genuinely fresh workspace. `FactLedger::open`
-    // creates a new store the same way `Ledger::open` does for SQLite, so this is the one place
-    // the new default takes effect.
-    let dir = facts_dir(config, cwd);
-    Ok(Box::new(FactLedger::open(&dir).map_err(|e| {
-        anyhow::anyhow!("cannot create fact ledger at {}: {e}", dir.display())
-    })?))
 }
 
 /// Open the workspace's knowledge store for reads only (RFC 0097).
@@ -255,44 +177,36 @@ fn open_store_read_only_unscoped(
     config: &EkosConfig,
     cwd: &Path,
 ) -> Result<Box<dyn KnowledgeStore>> {
-    if uses_distributed(config) {
-        return Ok(Box::new(build_distributed(config)?));
-    }
-    if uses_partitioned(config, cwd) {
+    let open_facts = |dir: &Path| -> Result<Box<dyn KnowledgeStore>> {
+        Ok(Box::new(FactLedger::open_read_only(dir).map_err(|e| {
+            anyhow::anyhow!("cannot open fact ledger at {}: {e}", dir.display())
+        })?))
+    };
+    match detect(config, cwd) {
+        Backend::Distributed => Ok(Box::new(build_distributed(config)?)),
         // `PartitionedLedger::new` is safe on a fresh dir (empty catalog → empty reads); the
         // `.read_only()` handle then opens every partition via `FactLedger::open_read_only`.
-        return Ok(Box::new(build_partitioned(config, cwd, true)?));
+        Backend::Partitioned(_) => Ok(Box::new(build_partitioned(config, cwd, true)?)),
+        Backend::Facts(dir) => open_facts(&dir),
+        Backend::Sqlite(path) => {
+            Ok(Box::new(Ledger::open(&path).map_err(|e| {
+                anyhow::anyhow!("cannot open ledger at {}: {e}", path.display())
+            })?))
+        }
+        Backend::Fresh(dir) => {
+            drop(FactLedger::open(&dir).map_err(|e| {
+                anyhow::anyhow!("cannot create fact ledger at {}: {e}", dir.display())
+            })?);
+            open_facts(&dir)
+        }
     }
-    if uses_fact_engine(config, cwd) {
-        let dir = facts_dir(config, cwd);
-        return Ok(Box::new(FactLedger::open_read_only(&dir).map_err(|e| {
-            anyhow::anyhow!("cannot open fact ledger at {}: {e}", dir.display())
-        })?));
-    }
-
-    let sqlite_path = config.ledger_path(cwd);
-    if sqlite_path.exists() {
-        return Ok(Box::new(Ledger::open(&sqlite_path).map_err(|e| {
-            anyhow::anyhow!("cannot open ledger at {}: {e}", sqlite_path.display())
-        })?));
-    }
-
-    let dir = facts_dir(config, cwd);
-    drop(
-        FactLedger::open(&dir)
-            .map_err(|e| anyhow::anyhow!("cannot create fact ledger at {}: {e}", dir.display()))?,
-    );
-    Ok(Box::new(FactLedger::open_read_only(&dir).map_err(|e| {
-        anyhow::anyhow!("cannot open fact ledger at {}: {e}", dir.display())
-    })?))
 }
 
-/// Human-readable location of whatever backend [`open_store`] would open right now — mirrors its
-/// exact three-way logic so this stays accurate even before a fresh workspace's first
-/// `open_store` call has run.
+/// Human-readable location of whatever backend [`open_store`] would open right now — the same
+/// [`detect`], so it stays accurate even before a fresh workspace's first `open_store` call.
 pub fn store_display(config: &EkosConfig, cwd: &Path) -> String {
-    if uses_distributed(config) {
-        return format!(
+    match detect(config, cwd) {
+        Backend::Distributed => format!(
             "distributed cluster @ {}",
             config
                 .storage
@@ -300,14 +214,11 @@ pub fn store_display(config: &EkosConfig, cwd: &Path) -> String {
                 .coordinator
                 .as_deref()
                 .unwrap_or("?")
-        );
-    }
-    if uses_partitioned(config, cwd) {
-        partitioned_root(config, cwd).display().to_string()
-    } else if uses_fact_engine(config, cwd) || !config.ledger_path(cwd).exists() {
-        facts_dir(config, cwd).display().to_string()
-    } else {
-        config.ledger_path(cwd).display().to_string()
+        ),
+        Backend::Partitioned(dir) | Backend::Facts(dir) | Backend::Fresh(dir) => {
+            dir.display().to_string()
+        }
+        Backend::Sqlite(path) => path.display().to_string(),
     }
 }
 

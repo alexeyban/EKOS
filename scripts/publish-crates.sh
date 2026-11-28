@@ -61,6 +61,7 @@ ekos-dbt-gen
 ekos-distributed
 ekos-docs-gen
 ekos-ekl
+ekos-read
 ekos-evals
 ekos-marketing
 ekos-observation-sdk
