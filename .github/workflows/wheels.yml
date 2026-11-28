@@ -1,7 +1,9 @@
 name: Python wheels
 
 # RFC 0269 — the `ekos` Python package: one abi3 wheel per platform, built for a tagged version
-# and published to PyPI. `workflow_dispatch` builds and tests the wheels without publishing.
+# and published to PyPI. `workflow_dispatch` builds and tests the wheels; it publishes them only
+# when run from `main` with `publish` ticked (the first upload, or a re-run of a failed one —
+# PyPI refuses a version it already has).
 #
 # Publishing needs two things the repository owner sets up once: a PyPI trusted publisher for
 # this workflow (environment `pypi`), and the repository variable PYPI_PUBLISH=true. Until both
@@ -10,7 +12,12 @@ name: Python wheels
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the wheels to PyPI (main only; the version is the workspace's)"
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -135,7 +142,10 @@ jobs:
   publish:
     name: Publish to PyPI
     needs: wheel
-    if: github.ref_type == 'tag' && vars.PYPI_PUBLISH == 'true'
+    if: >-
+      vars.PYPI_PUBLISH == 'true' &&
+      (github.ref_type == 'tag' ||
+       (github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
