@@ -269,8 +269,11 @@ holds the engine's scope decisions equal to `SCOPED_TOOLS`.
 - Python: 17 tests against the installed wheel on a workspace the binary compiles, 100% line
   coverage of the package, `mypy --strict` clean; passes on Python 3.10 and 3.14. The workspace
   directory is byte-identical after the suite.
-- Not done in phase 1: the wheels workflow has not built macOS, Windows, aarch64 or musl wheels
-  until its first run; a quickstart notebook; `to_pandas` (phase 4).
+- The wheels workflow, run by hand on `f8e46c7c`: all six wheels built. Installed and imported on
+  Python 3.10 and 3.14 on Linux x86_64 and aarch64, macOS arm64 and Windows, and in Alpine for the
+  musl wheel. The macOS x86_64 wheel is built on Apple silicon and was not run.
+- Not done in phase 1: a quickstart notebook; `to_pandas` (phase 4). Nothing has been published to
+  PyPI.
 
 ## Decisions
 
@@ -292,7 +295,7 @@ holds the engine's scope decisions equal to `SCOPED_TOOLS`.
 | Phase | Content | Exit |
 |---|---|---|
 | 0 | Spike, this RFC | Done: measurements above, two engine tests |
-| 1 | Full read surface, types, errors, `ekos.aio`, `detect` moved, parity + read-only + guard tests, CI `python` job, the wheels workflow, `docs/python.md` | Done 2026-11-28 (see "Phase 1 design"); the six-target wheel build is checked by the workflow's first run |
+| 1 | Full read surface, types, errors, `ekos.aio`, `detect` moved, parity + read-only + guard tests, CI `python` job, the wheels workflow, `docs/python.md` | Done 2026-11-28 (see "Phase 1 design"); six wheels built by the workflow |
 | 2 | `ekos-bin`, `ekos.Project`, `ekos.connect`, the console imports the package's client, embedded-vs-remote parity | A project compiled and read from Python end to end with no shell |
 | 3 | Contribute (own RFC) | — |
 | 4 | pandas / Arrow results, notebook display, LangChain / LlamaIndex retrievers that keep citations | incremental |
@@ -312,4 +315,3 @@ holds the engine's scope decisions equal to `SCOPED_TOOLS`.
 
 - The PyPI names `ekos` and `ekos-bin` are free (2026-11-28) and not yet registered. Registration
   needs the owner's PyPI account.
-- Windows and macOS wheels are untested until the CI job exists.

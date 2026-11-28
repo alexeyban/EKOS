@@ -7330,8 +7330,10 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
       reads, read scope, partitioned read-only, content-version warning; Python `Knowledge` / `KnowledgeAt` /
       `ekos.aio`, frozen dataclasses, `open(project=)`; 17 package tests, 100% coverage, Python 3.10 and 3.14;
       `wheels.yml` (six targets, zig manylinux, publish gated); `docs/python.md` (2026-11-28, devlog_358)
-- [ ] RFC 0269 phase 1 follow-up: run `wheels.yml` once by hand and fix what the macOS / Windows / aarch64 / musl
-      rows show; a quickstart notebook on the LedgerSMB demo ledger
+- [x] RFC 0269 phase 1: `wheels.yml` run by hand on f8e46c7c — all six wheels built; installed and imported on
+      Python 3.10 and 3.14 (Linux x86_64 and aarch64, macOS arm64, Windows) and in Alpine (musl); macOS x86_64 built,
+      not run (2026-11-28, run 46166384553)
+- [ ] RFC 0269 later: a quickstart notebook on the LedgerSMB demo ledger
 - [ ] RFC 0269 phase 2: `ekos-bin` wheel, `ekos.Project` (pipeline over the binary), `ekos.connect` (TCP + gateway;
       the console imports the package's client), embedded-vs-remote parity
 - [ ] RFC 0269 before a release: register `ekos` and `ekos-bin` on PyPI (owner's account), trusted publishing
