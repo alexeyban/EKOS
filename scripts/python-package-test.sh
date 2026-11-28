@@ -2,7 +2,8 @@
 # RFC 0269: the Python package, checked the way a user gets it.
 #
 # Builds the wheel, installs it in a fresh environment, compiles a two-table workspace with the
-# `ekos` binary, then runs ruff, mypy --strict and pytest against the *installed* package. Writes
+# `ekos` binary, then runs ruff, mypy --strict, pytest and the example scripts against the
+# *installed* package. Writes
 # python/coverage.xml (paths mapped back to python/ekos) for SonarCloud.
 #
 #   EKOS_BIN       the ekos binary that compiles the fixture (default: ekos/target/release/ekos,
@@ -71,7 +72,7 @@ SQL
 echo "── ruff, mypy"
 "$py" -m ruff check .
 "$py" -m ruff format --check .
-"$py" -m mypy --strict ekos tests
+"$py" -m mypy --strict ekos tests examples
 
 echo "── pytest (installed wheel)"
 # Run from outside the source tree: with python/ as the working directory `import ekos` would
@@ -84,6 +85,23 @@ rc="$repo/python/pyproject.toml"
   "$py" -m coverage run --rcfile="$rc" -p --source=ekos \
     -m pytest -v -c "$rc" --rootdir="$repo/python" "$repo/python/tests"
 )
+echo "── examples (installed wheel)"
+# Under coverage too, so the report covers the scripts people copy from.
+example() {
+  local script="$1" expect="$2"
+  shift 2
+  "$py" -m coverage run --rcfile="$rc" -p "$repo/python/examples/$script" "$@" | grep -q -- "$expect"
+}
+(
+  cd "$work"
+  example quickstart.py "schema.sql" "$fixture" orders
+  example quickstart.py "nothing matches" "$fixture" zzzznothing
+  example impact_report.py "via ForeignKey" "$fixture" customers 3
+  example impact_report.py "itself depends on" "$fixture" orders
+  example schema_overview.py "<- orders" "$fixture"
+  example grounded_context.py "^\[1\]" "$fixture" "which tables reference customers?"
+)
+
 cd "$repo"
 "$py" -m coverage combine --rcfile="$rc" -q
 "$py" -m coverage xml --rcfile="$rc" -q -o python/coverage.xml

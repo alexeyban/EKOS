@@ -272,8 +272,7 @@ holds the engine's scope decisions equal to `SCOPED_TOOLS`.
 - The wheels workflow, run by hand on `f8e46c7c`: all six wheels built. Installed and imported on
   Python 3.10 and 3.14 on Linux x86_64 and aarch64, macOS arm64 and Windows, and in Alpine for the
   musl wheel. The macOS x86_64 wheel is built on Apple silicon and was not run.
-- Not done in phase 1: a quickstart notebook; `to_pandas` (phase 4). Nothing has been published to
-  PyPI.
+- Not done in phase 1: a quickstart notebook; `to_pandas` (phase 4).
 
 ## Decisions
 
@@ -313,5 +312,10 @@ holds the engine's scope decisions equal to `SCOPED_TOOLS`.
 
 ## Open
 
-- The PyPI names `ekos` and `ekos-bin` are free (2026-11-28) and not yet registered. Registration
-  needs the owner's PyPI account.
+- `ekos-bin` is not registered on PyPI; it gets a publisher when phase 2 adds its workflow.
+
+## Published (2026-11-28)
+
+`ekos` 1.6.1 is on PyPI: six abi3 wheels, uploaded by `wheels.yml` with trusted publishing, run by
+hand from `main` (`publish` input). `pip install ekos` was checked in a fresh Python 3.12
+environment against a compiled workspace.

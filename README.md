@@ -89,6 +89,18 @@ To connect an agent by hand:
 claude mcp add ekos -- ekos mcp serve --workspace /path/to/your/repo
 ```
 
+**From Python.** The same compiled graph, read in-process
+([guide](https://ekos.dev/docs/usage/python.html), [examples](python/examples)):
+
+```python
+import ekos                                  # pip install ekos
+
+kb = ekos.open("/path/to/your/repo")         # read-only, in your process, no server
+hit = kb.search("orders")[0]
+print(kb.get(hit.id).evidence)               # the file and line each fact was read from
+print(kb.impact(hit.id, hops=3))             # what a change to it would reach
+```
+
 ## What you can ask
 
 | Question | What answers it |

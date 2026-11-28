@@ -79,6 +79,18 @@ ekos ekl "FIND Object WHERE kind = 'Table'"
 claude mcp add ekos -- ekos mcp serve --workspace /path/to/your/repo
 ```
 
+**Python から。** 同じコンパイル済みグラフをプロセス内で読み取ります
+（[ガイド](https://ekos.dev/docs/usage/python.html)、[サンプル](python/examples)）：
+
+```python
+import ekos                                  # pip install ekos
+
+kb = ekos.open("/path/to/your/repo")         # 読み取り専用、プロセス内、サーバー不要
+hit = kb.search("orders")[0]
+print(kb.get(hit.id).evidence)               # 各事実の出典（ファイルと行）
+print(kb.impact(hit.id, hops=3))             # 変更の影響が及ぶ範囲
+```
+
 ## 聞けること
 
 | 質問 | 答えるもの |

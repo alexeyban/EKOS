@@ -4,7 +4,11 @@ An embedded knowledge engine for Python: open a compiled, evidence-backed
 [EKOS](https://github.com/alexeyban/EKOS) knowledge ledger and query it in-process. No server,
 no Rust toolchain.
 
-**Status: provisional (RFC 0269).** Not on PyPI yet; the API may change.
+```bash
+pip install ekos
+```
+
+Python 3.10+, no dependencies. **Status: provisional (RFC 0269)** — names may still change.
 
 ```python
 import ekos
@@ -22,4 +26,5 @@ answer = kb.query("which tables reference customers?")   # claims with evidence,
 The package reads. Knowledge enters a ledger by compiling sources with the `ekos` command.
 
 Full guide: [docs/python.md](https://github.com/alexeyban/EKOS/blob/main/docs/python.md).
+Examples: [python/examples](https://github.com/alexeyban/EKOS/tree/main/python/examples).
 Build from a checkout: `uvx maturin build --release` in this directory.

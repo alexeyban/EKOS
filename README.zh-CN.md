@@ -79,6 +79,18 @@ ekos ekl "FIND Object WHERE kind = 'Table'"
 claude mcp add ekos -- ekos mcp serve --workspace /path/to/your/repo
 ```
 
+**在 Python 中使用。** 同一张编译好的图，在进程内读取
+（[指南](https://ekos.dev/docs/usage/python.html)，[示例](python/examples)）：
+
+```python
+import ekos                                  # pip install ekos
+
+kb = ekos.open("/path/to/your/repo")         # 只读，在你的进程内，无需服务器
+hit = kb.search("orders")[0]
+print(kb.get(hit.id).evidence)               # 每条事实来自哪个文件、哪一行
+print(kb.impact(hit.id, hops=3))             # 修改它会影响到什么
+```
+
 ## 你可以问什么
 
 | 问题 | 由什么来回答 |

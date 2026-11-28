@@ -2228,9 +2228,9 @@ correct), but live-question answer quality is unverified pending a real API key 
 
 ### From Python (RFC 0269, provisional)
 
-`python/` is the `ekos` Python package: it opens a compiled ledger read-only inside a Python
-process, with no server. It is not on PyPI yet — build it from a checkout with
-`cd python && uvx maturin build --release`.
+`pip install ekos` — the `ekos` Python package opens a compiled ledger read-only inside a Python
+process, with no server. Python 3.10+, no dependencies; wheels for Linux (glibc and musl), macOS
+and Windows. On PyPI since 1.6.1 (2026-11-28).
 
 ```python
 import ekos
@@ -2250,7 +2250,8 @@ kb.query("which tables reference customers?").claims
   package writes or reviews.
 - SQLite ledgers and distributed projects are refused with `NotSupported`.
 
-The guide is [`docs/python.md`](python.md).
+The guide is [`docs/python.md`](python.md); runnable examples are in
+[`python/examples`](../python/examples).
 
 ### AI agent access (MCP)
 

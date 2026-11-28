@@ -4,24 +4,49 @@
 knowledge ledger and reads it inside your process. There is no server to start and no Rust
 toolchain to install.
 
-**Status: provisional (RFC 0269).** The package is not on PyPI yet; build it from a checkout
-(below). The API may change until the pipeline and remote modes land (phase 2).
+```bash
+pip install ekos
+```
+
+Python 3.10 or newer, on Linux (x86_64 and aarch64, glibc 2.28+ or musl), macOS (Apple silicon
+and Intel) and Windows x86_64. The wheel has no dependencies.
+
+**Status: provisional (RFC 0269).** The reads below are stable enough to use; names may still
+change until the pipeline and remote modes land (phase 2).
 
 The package **reads**. Knowledge enters a ledger by compiling sources with the `ekos` command
 (`ekos build`, `recover`, `resolve`, `compile`, `commit`); nothing in this package can add to,
 change or delete from a ledger, and there is no review action in it (approving, confirming and
 resolving stay with people, in the CLI and the console).
 
-## Install from a checkout
+## From nothing to a first answer
 
 ```bash
-cd python
-uvx maturin build --release          # needs Rust (the version in rust-toolchain.toml)
-pip install ../ekos/target/wheels/ekos-*.whl
+# 1. the compiler (one binary) — see the README for Windows and installers
+curl -fsSL https://raw.githubusercontent.com/alexeyban/EKOS/main/install.sh | sh
+
+# 2. compile a repository into a ledger
+cd your-repo
+ekos init --detect && ekos build && ekos recover && ekos resolve && ekos compile && ekos commit
+
+# 3. read it from Python
+pip install ekos
 ```
 
-Python 3.10 or newer. The wheel has no dependencies. A wheel built this way is tied to your
-machine's C library; release wheels are built by `.github/workflows/wheels.yml`.
+```python
+import ekos
+
+kb = ekos.open(".")
+for hit in kb.search("orders", limit=5):
+    state = kb.get(hit.id)
+    print(hit.name, state.object.kind, [e.path for e in state.evidence])
+```
+
+Runnable scripts are in [`python/examples`](../python/examples): a quickstart, an impact report,
+a cited context block for a language model, and a schema overview with asyncio.
+
+To build the package from a checkout instead: `cd python && uvx maturin build --release` (needs
+Rust), then install the wheel from `ekos/target/wheels/`.
 
 ## Open a ledger
 
@@ -117,6 +142,54 @@ status, hits = await asyncio.gather(kb.status(), kb.search("orders"))
 
 Each call runs on a worker thread, so the event loop is not blocked. `kb.sync` is the blocking
 handle underneath.
+
+## Recipes
+
+**What breaks if I change this?**
+
+```python
+target = kb.search("customers")[0]
+for step in kb.impact(target.id, hops=3):
+    print(step.hop, step.kind, step.name, "via", step.via)
+```
+
+**Ground a model's prompt in cited facts.** `kb.query` calls no model; it returns claims with the
+evidence each rests on. Number them and let the model cite the numbers:
+
+```python
+answer = kb.query("which tables reference customers?")
+facts = [c for c in answer.claims if not c.weak]
+context = "\n".join(
+    f"[{n}] {c.text} (source: {c.evidence[0].location if c.evidence else 'none'})"
+    + (" [DISPUTED]" if c.disputed else "")
+    for n, c in enumerate(facts, 1)
+)
+```
+
+**Every table with its columns.**
+
+```python
+for row in kb.ekl("FIND Object WHERE kind = 'Table' ORDER BY name"):
+    table = kb.get(row["id"])
+    print(table.object.name, [c["name"] for c in table.object.properties.get("columns", [])])
+```
+
+**What changed since last week, and what an object looked like before.**
+
+```python
+diff = kb.diff("2026-11-21")
+print(diff.changed_total, [c.name for c in diff.changed if c.entity == "Object"][:10])
+before = kb.at("2026-11-21").get(object_id)      # None if it did not exist yet
+```
+
+**A long-running service.** Open once, keep the handle, and refresh when you want new commits:
+
+```python
+kb = ekos.open(project="shop")
+...
+if kb.refresh():           # another process ran `ekos commit`
+    log.info("ledger updated: %s objects", kb.status().objects)
+```
 
 ## Errors
 

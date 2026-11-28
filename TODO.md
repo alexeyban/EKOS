@@ -7336,5 +7336,7 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
 - [ ] RFC 0269 later: a quickstart notebook on the LedgerSMB demo ledger
 - [ ] RFC 0269 phase 2: `ekos-bin` wheel, `ekos.Project` (pipeline over the binary), `ekos.connect` (TCP + gateway;
       the console imports the package's client), embedded-vs-remote parity
-- [ ] RFC 0269 before a release: register `ekos` and `ekos-bin` on PyPI (owner's account), trusted publishing
+- [x] `ekos` 1.6.1 published to PyPI by `wheels.yml` (trusted publishing; six wheels), `pip install ekos` checked in a
+      fresh environment; examples in `python/examples`, docs on ekos.dev (2026-11-28, devlog_359)
+- [ ] RFC 0269 phase 2: register `ekos-bin` on PyPI when its workflow exists
 - [ ] Python contribute ("Python as a source"): own RFC — a facts inbox compiled like any source, never direct appends
