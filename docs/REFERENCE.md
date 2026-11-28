@@ -2955,18 +2955,25 @@ the devlogs, not this table.
 
 ## Team
 
-### Alexey Banaev — Co-Founder & Lead Developer
+### Alexey Banaev — Founder & Chief Architect
+
+**Data Architect · Systems Engineer · AI Infrastructure Innovator**
 
 <img src="assets/team-alexey-banaev.jpg" alt="Portrait of Alexey Banaev" width="140" align="left" hspace="16" vspace="4">
 
-Alexey is a Data Engineer and Solution Architect with extensive experience designing data
-platforms, analytics solutions, and distributed systems. He co-founded EKOS to address a fundamental
-challenge in modern data environments: making complex, fragmented data ecosystems understandable,
-traceable, and usable.
+Founder and original creator of EKOS, responsible for its vision, core architecture, and
+technological direction.
 
-As EKOS's co-founder and main developer, Alexey leads the product architecture and engineering,
-combining data engineering, software development, and AI-driven approaches to build a practical
-solution for modern data teams.
+Alexey conceived and built EKOS to address a fundamental challenge in modern enterprise
+engineering: transforming complex, fragmented technical environments into structured, traceable
+knowledge that AI agents can reliably understand and act upon.
+
+He defines the project's long-term vision and leads its architectural evolution, combining deep
+expertise in enterprise data platforms, distributed systems, compiler design, and AI-native
+engineering.
+
+As the principal architect behind EKOS, he drives the development of its core technology and
+shapes the foundation of an emerging ecosystem for AI-driven software engineering.
 
 <br clear="left">
 
