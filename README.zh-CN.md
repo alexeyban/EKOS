@@ -108,6 +108,7 @@ claude mcp add ekos -- ekos mcp serve --workspace /path/to/your/repo
 | 测试 | 结果 |
 |---|---|
 | [BIRD Mini-Dev](https://alexeyban.github.io/EKOS/presentations/bird-mini-dev-benchmark.html) text-to-SQL，302 道保留题，同一模型（Claude Haiku 5.5） | 只给原始表结构 **53.3%** → 使用 EKOS 的知识与检查 **76.2%** |
+| [BIRD dev](https://github.com/alexeyban/ekos-text2sql-bird) text-to-SQL，全部 1,534 道题，每题只生成一个答案，不做微调 | 使用 Claude Haiku 5.5 **66.2%**，花费 $3.20；使用 Claude Sonnet 5.5 在 300 道题的抽样上 **74.3%** |
 | 在一个 2,022 个文件的仓库（[plausible/analytics](https://github.com/plausible/analytics)）上的 [token 用量](https://alexeyban.github.io/EKOS/presentations/token-benchmark.html)，与基于 grep 的搜索相比 | 每个问题**少用 67–93% 的 token** |
 | 首次完整编译该仓库 | **34 秒** |
 | 一个 903 张表的 Oracle ERP（iDempiere），端到端分析（[视频](https://youtu.be/pnGLymT6JH0)） | 编译过程 **0 次模型调用** |

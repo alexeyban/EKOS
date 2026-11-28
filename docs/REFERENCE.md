@@ -1213,6 +1213,13 @@ questions, Claude Haiku 5.5), the EKOS cell (pack + column profiles + value look
 scored 63.9% execution accuracy against 53.3% for the same model with raw DDL: +10.6 points, 95%
 CI +4.3 to +16.9, for $0.30 a run. See `evals/README.md`.
 
+On the whole BIRD dev set (New Dev 2025-11-06, 1,534 questions) the agent cell K2 with Claude
+Haiku 5.5 scored 66.23% execution accuracy (95% CI 63.89–68.64) for $3.20, one answer per question
+and no fine-tuning. On a fixed sample of 300 of those questions the same cell with Claude Sonnet
+5.5 scored 74.33% against 66.00% for Haiku on the same questions, at 23 times the cost per
+question. The package that repeats both runs, with a Docker image and the predictions, is
+[alexeyban/ekos-text2sql-bird](https://github.com/alexeyban/ekos-text2sql-bird).
+
 RFC 0242 added cells that *check* each answer:
 
 - `strategy = "loop"` sends gold-free findings back;

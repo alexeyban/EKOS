@@ -108,6 +108,7 @@ claude mcp add ekos -- ekos mcp serve --workspace /path/to/your/repo
 | テスト | 結果 |
 |---|---|
 | [BIRD Mini-Dev](https://alexeyban.github.io/EKOS/presentations/bird-mini-dev-benchmark.html) text-to-SQL、ホールドアウト 302 問、同一モデル（Claude Haiku 5.5） | 生のスキーマのみ **53.3%** → EKOS の知識とチェックあり **76.2%** |
+| [BIRD dev](https://github.com/alexeyban/ekos-text2sql-bird) text-to-SQL、全 1,534 問、1 問につき回答 1 つ、ファインチューニングなし | Claude Haiku 5.5 で **66.2%**（費用 $3.20）、Claude Sonnet 5.5 では 300 問のサンプルで **74.3%** |
 | 2,022 ファイルのリポジトリ（[plausible/analytics](https://github.com/plausible/analytics)）での[トークン使用量](https://alexeyban.github.io/EKOS/presentations/token-benchmark.html)、grep ベースの検索との比較 | 1 問あたり**トークン 67〜93% 削減** |
 | 同じリポジトリの初回コンパイル | **34 秒** |
 | 903 テーブルの Oracle ERP（iDempiere）をエンドツーエンドで分析（[動画](https://youtu.be/pnGLymT6JH0)） | コンパイル時の**モデル呼び出し 0 回** |

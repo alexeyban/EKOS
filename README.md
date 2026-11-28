@@ -123,6 +123,7 @@ conflict or approving a migration is a CLI or console action; an agent cannot do
 | Test | Result |
 |---|---|
 | [BIRD Mini-Dev](https://alexeyban.github.io/EKOS/presentations/bird-mini-dev-benchmark.html) text-to-SQL, 302 hold-out questions, same model (Claude Haiku 5.5) | **53.3%** on the raw schema → **76.2%** with EKOS knowledge and checks |
+| [BIRD dev](https://github.com/alexeyban/ekos-text2sql-bird) text-to-SQL, all 1,534 questions, one answer per question, no fine-tuning | **66.2%** with Claude Haiku 5.5, for $3.20; **74.3%** with Claude Sonnet 5.5 on a 300-question sample |
 | [Token use](https://alexeyban.github.io/EKOS/presentations/token-benchmark.html) on a 2,022-file repository ([plausible/analytics](https://github.com/plausible/analytics)), against grep-based search | **67–93% fewer tokens** per question |
 | Cold compile of that repository | **34 seconds** |
 | A 903-table Oracle ERP (iDempiere), analysed end to end ([video](https://youtu.be/pnGLymT6JH0)) | **0 model calls** to compile |
