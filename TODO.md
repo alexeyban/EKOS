@@ -7321,3 +7321,14 @@ translation in the extension (D1); fixtures fetched by commit hash, never vendor
 - [ ] RFC 0268 later: `FACT_MOV_COST` (a delete of a computed key). C–E stay not verified by execution (decided
       2026-11-23: no built jobs, no headless build in Talend Open Studio, E is all Snowflake, C/D's runnable jobs
       write files, which have no model)
+- [x] RFC 0269 phase 0 (EKOS for Python): spike crate `ekos-python` (PyO3 0.30, abi3, floor 3.10; read-only open that
+      never creates, `status` / `search` / `get` / `refresh`), package skeleton `python/`, CI job; measured: wheel
+      3.8 MB, search 0.09 ms, ledger byte-identical after reads, `manylinux_2_28` builds; RFC written with ten
+      decisions (2026-11-28, devlog_357)
+- [ ] RFC 0269 phase 1: full read surface over `Runtime` (facts, neighborhood, impact, history, `at()`, diff, EKL,
+      query), `ekos_runtime::store::detect` shared with the CLI, partitioned read-only, read scope, types + stubs +
+      `ekos.aio`, parity with the MCP tools, guard scans, wheels for six targets in `release.yml`, `docs/python.md`
+- [ ] RFC 0269 phase 2: `ekos-bin` wheel, `ekos.Project` (pipeline over the binary), `ekos.connect` (TCP + gateway;
+      the console imports the package's client), embedded-vs-remote parity
+- [ ] RFC 0269 before a release: register `ekos` and `ekos-bin` on PyPI (owner's account), trusted publishing
+- [ ] Python contribute ("Python as a source"): own RFC — a facts inbox compiled like any source, never direct appends

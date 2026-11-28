@@ -94,6 +94,13 @@ jobs:
         with:
           enable-cache: true
 
+      # RFC 0269: the Python package, tested as an installed wheel against a workspace the ekos
+      # binary compiles. Writes python/coverage.xml (its own file; the API's is web/api/coverage.xml).
+      - name: Python package coverage
+        run: |
+          (cd ekos && cargo build -p ekos --locked)
+          scripts/python-package-test.sh
+
       # Last: every pytest run rewrites coverage.xml, so nothing may run pytest after it.
       - name: API coverage
         working-directory: web/api
@@ -107,7 +114,7 @@ jobs:
 
       - name: Coverage reports exist
         run: |
-          for f in ekos/lcov.info web/ui/coverage/lcov.info web/api/coverage.xml; do
+          for f in ekos/lcov.info web/ui/coverage/lcov.info web/api/coverage.xml python/coverage.xml; do
             test -s "$f" || { echo "missing coverage report: $f"; exit 1; }
           done
 

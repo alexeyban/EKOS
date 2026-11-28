@@ -1,0 +1,29 @@
+[package]
+name = "ekos-python"
+description = "RFC 0269: the native read engine of the `ekos` Python package (PyO3, abi3)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "ekos_python"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+ekos-kir.workspace = true
+ekos-ledger.workspace = true
+ekos-runtime.workspace = true
+ekos-compiler-core.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+pyo3 = { version = "0.30", features = ["abi3-py310"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+default = []
+# The PyO3 glue. Off by default so `cargo build/test --workspace` never needs a Python
+# interpreter or libpython; maturin turns it on (python/pyproject.toml).
+python = ["dep:pyo3"]

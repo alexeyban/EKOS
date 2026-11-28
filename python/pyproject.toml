@@ -1,0 +1,51 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "ekos"
+description = "EKOS — an embedded knowledge engine for Python: open a compiled, evidence-backed knowledge ledger and query it in-process"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+dynamic = ["version"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: 3",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://ekos.dev"
+Repository = "https://github.com/alexeyban/EKOS"
+
+[tool.maturin]
+manifest-path = "../ekos/crates/python/Cargo.toml"
+module-name = "ekos._native"
+python-source = "."
+features = ["python"]
+strip = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "A", "ASYNC", "RUF"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# The tests import the installed wheel; these map its paths back to the source tree, so the
+# coverage report names python/ekos/… (what SonarCloud analyses). `coverage combine` runs from the
+# repository root (scripts/python-package-test.sh).
+[tool.coverage.run]
+relative_files = true
+
+[tool.coverage.paths]
+source = ["python/ekos", "*/site-packages/ekos"]

@@ -165,6 +165,50 @@ jobs:
         working-directory: tests/integration
         run: cargo fmt --check
 
+  python:
+    name: Python package (RFC 0269)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # The package's floor. The wheel is abi3, so the lowest supported Python is the one to test.
+    env:
+      UV_PYTHON: "3.10"
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ekos/target
+          key: ${{ runner.os }}-cargo-python-${{ hashFiles('ekos/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-python-
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          enable-cache: false
+
+      - name: Clippy (the PyO3 glue, which --workspace does not compile)
+        working-directory: ekos
+        run: cargo clippy -p ekos-python --features python --all-targets -- -D warnings
+
+      - name: Build ekos (it compiles the test workspace)
+        working-directory: ekos
+        run: cargo build -p ekos --locked
+
+      - name: Wheel, fresh install, ruff, mypy --strict, pytest
+        # The dev profile: this job checks that the package builds, installs and behaves, not
+        # how fast it is. Release wheels are built by release.yml.
+        run: scripts/python-package-test.sh
+
   web:
     name: Web console
     runs-on: ubuntu-latest

@@ -56,3 +56,10 @@ scripts/cogc/target/
 
 # Third-party Talend projects fetched by scripts/talend-fixtures.sh (RFC 0262): never vendored
 .local/talend-fixtures/
+
+# Python package (RFC 0269) — build artifacts, not source
+python/.venv/
+python/dist/
+python/ekos/*.so
+python/ekos/*.pyd
+python/coverage.xml
