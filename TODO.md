@@ -5506,7 +5506,7 @@ are excluded — see the full exclusion list in the planning history if needed.
   - [ ] **Run `RealTreasuryClient` against a live explorer** — parsing is unit-tested against the documented shapes only; rate limits (3 back-to-back calls, no backoff), chain quirks, casing differences and a string-valued `result` error are unverified. Needs `EKOS_TREASURY_API_KEY` (one Etherscan key, V2 multichain, chain picked by `EKOS_TREASURY_CHAIN_ID`) and a real treasury address. **Deferred 2026-09-23** — only needed when the treasury feature is actually used.
   - [ ] `SnapshotClient` live coverage is read-path only — hub rate limiting under a long crawl and the `max_pages` × 100 ceiling on a >5,000-proposal space are still untested.
   - [ ] **Tune weights and the 0.3 floor on real DAO ground truth** — RFC 0029's values were reused unvalidated.
-  - [ ] A Solana connector (EKOS's own token lives there) and a Discourse governance connector — both deliberately out of v1.
+  - [ ] A Solana connector and a Discourse governance connector — both deliberately out of v1.
   - [ ] A first-class "payments with no approval" MCP tool, if the `ekos_state` / `ekos treasury scan` watchlist proves insufficient (EKL has no negation).
 
 - [x] Compiled .NET app -> EKOS -> Python rewrite demo with per-step screenshots (`demo/binary-demo`, devlog_195); Java version needs a JVM statement decoder (future RFC)

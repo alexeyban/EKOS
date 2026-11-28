@@ -242,7 +242,7 @@ given so it can be revisited.
 - [x] **Which chain/explorer first** — **EVM, via the Etherscan-family `module=account` API** (default
       endpoint: Etherscan's multichain v2, which takes a `chainid`). Reason: it is the one explorer
       API whose response shape also decodes ERC-20 transfers and internal transactions, which is what
-      a Safe multi-send needs. Solana (where EKOS's own token lives) has a materially different asset
+      a Safe multi-send needs. Solana has a materially different asset
       and account model and is left to a follow-up connector; nothing here precludes it — the
       `TreasuryClient` trait is the seam.
 - [x] **Which governance platform first** — **Snapshot** (public GraphQL hub, no key). Reason: a

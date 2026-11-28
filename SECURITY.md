@@ -85,7 +85,7 @@ the following are treated as security issues:
 
 ### Out of scope
 
-- **Anything outside this codebase**, including the community token, which is a separate system.
+- **Anything outside this codebase.**
   This repository's security policy covers the Rust codebase and its runtime behavior only; for
   anything else, reach out via [@ekosproject](https://x.com/ekosproject).
 - **Denial of service via resource exhaustion on self-hosted instances** you control (e.g.,

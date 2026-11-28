@@ -22,7 +22,7 @@ Investigated directly against the current source before writing this roadmap:
   Factory.** Exhaustively grepped `crates/recovery/` and `plugins/`. The only near-misses: a
   `dependency_analyzer.rs` pattern-table literal (`"kafka-python"`), `sqlparser`'s built-in
   `DatabricksDialect` selection for parsing Databricks *SQL text* (not a workspace connector), and
-  aspirational one-line mentions in `VISION.md` (Phase 4/7 product narrative). `TODO.md`'s only
+  aspirational one-line mentions in the former vision document (Phase 4/7 product narrative). `TODO.md`'s only
   relevant line (1436) is an unspecified backlog bucket: "Databricks, dbt, etc."
 - **Real analyzer inventory today** (`ekos/crates/recovery/`): `sql_analyzer.rs` (DDL → `Entity` +
   `ForeignKey`, LLM-enriched), `sql_transform_analyzer.rs` (SELECT/VIEW/proc bodies →
